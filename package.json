@@ -61,7 +61,8 @@
       {
         "provider": "github",
         "owner": "therexdev",
-        "repo": "kaiapp"
+        "repo": "kaiapp",
+        "releaseType": "prerelease"
       }
     ]
   },
