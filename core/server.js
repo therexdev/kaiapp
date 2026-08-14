@@ -1,0 +1,102 @@
+"use strict";
+
+/*
+ * Koinos AI Core (spec §4) — the persistent service everything else talks to.
+ * The desktop UI is a client; the headless Koinos AI Server (§9) reuses this
+ * entrypoint unchanged. M1 modules: hardware detection, model manager,
+ * llama.cpp runtime manager, local OpenAI-compatible gateway.
+ *
+ * Environment:
+ *   KAI_CORE_DATA   data directory   (default ~/.koinos-ai)
+ *   KAI_CORE_PORT   gateway port     (default 41100, always 127.0.0.1)
+ *   KAI_LLAMA_BIN   path to llama-server (default <data>/runtimes/llamacpp/llama-server)
+ */
+
+const os = require("os");
+const path = require("path");
+
+const { JsonStore } = require("./lib/store");
+const hardware = require("./lib/hardware");
+const { ApiKeys } = require("./lib/keys");
+const { ModelManager } = require("./lib/model-manager");
+const { LlamaCppRuntime } = require("./lib/runtimes/llamacpp");
+const { RuntimeManager } = require("./lib/runtime-manager");
+const { Gateway } = require("./lib/gateway");
+
+const VERSION = require("./package.json").version;
+
+async function createCore({ dataDir, port, llamaBin, onEvent } = {}) {
+  const events = onEvent || ((e) => console.log(`[core] ${e.type}`, e.message ?? ""));
+  dataDir = dataDir || process.env.KAI_CORE_DATA || path.join(os.homedir(), ".koinos-ai");
+
+  const settings = new JsonStore(path.join(dataDir, "settings.json"), {});
+  const state = new JsonStore(path.join(dataDir, "state.json"), {});
+  const hw = await hardware.detect({ dataDir });
+
+  const keys = new ApiKeys(settings);
+  const models = new ModelManager({
+    catalogPath: path.join(__dirname, "models", "catalog.json"),
+    modelsDir: path.join(dataDir, "models"),
+    state,
+    onEvent: events,
+  });
+
+  const bin =
+    llamaBin ||
+    process.env.KAI_LLAMA_BIN ||
+    path.join(dataDir, "runtimes", "llamacpp", process.platform === "win32" ? "llama-server.exe" : "llama-server");
+
+  const runtime = new RuntimeManager({
+    models,
+    hardware: hw,
+    onEvent: events,
+    makeRuntime: () => new LlamaCppRuntime({ binPath: bin, onEvent: events }),
+  });
+
+  const gateway = new Gateway({
+    port: port ?? Number(process.env.KAI_CORE_PORT || 41100),
+    runtime,
+    models,
+    keys,
+    onEvent: events,
+    coreInfo: () => ({ version: VERSION, dataDir, hardware: hw }),
+  });
+
+  return {
+    settings,
+    state,
+    hardware: hw,
+    keys,
+    models,
+    runtime,
+    gateway,
+    async start() {
+      const p = await gateway.listen();
+      events({ type: "core:ready", message: `gateway on http://127.0.0.1:${p}` });
+      return p;
+    },
+    async stop() {
+      runtime.stop();
+      await gateway.close();
+    },
+  };
+}
+
+module.exports = { createCore, VERSION };
+
+if (require.main === module) {
+  createCore()
+    .then(async (core) => {
+      const stop = async () => {
+        await core.stop();
+        process.exit(0);
+      };
+      process.on("SIGINT", stop);
+      process.on("SIGTERM", stop);
+      await core.start();
+    })
+    .catch((e) => {
+      console.error("core failed to start:", e);
+      process.exit(1);
+    });
+}

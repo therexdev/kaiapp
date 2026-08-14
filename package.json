@@ -1,0 +1,20 @@
+{
+  "name": "koinos-ai",
+  "productName": "Koinos AI",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Koinos AI Core — local-first AI with a self-hosted OpenAI-compatible API",
+  "license": "MIT",
+  "author": "therexdev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/therexdev/kaiapp.git"
+  },
+  "workspaces": [
+    "core"
+  ],
+  "scripts": {
+    "core": "node core/server.js",
+    "test": "node --test \"core/test/*.test.js\""
+  }
+}

@@ -1,9 +1,10 @@
 # Koinos AI Core (kaiapp) — V1 Plan
 
-> **Status: PROPOSAL** (2026-08-14) — pending owner sign-off on the three open decisions at the
-> bottom. Governed by *Koinos AI — Master Source of Truth* Part I (the `.docx` is authoritative);
-> section references (§) below point there. Where this plan chooses an implementation detail the
-> spec leaves open, it is marked **[working choice]** and stays subordinate to Part I.
+> **Status: ACCEPTED** (2026-08-14) — owner signed off on the three open decisions:
+> **M1 = local-first slice · Electron · llama.cpp (llama-server)**. Governed by *Koinos AI —
+> Master Source of Truth* Part I (the `.docx` is authoritative); section references (§) below
+> point there. Where this plan chooses an implementation detail the spec leaves open, it is
+> marked **[working choice]** and stays subordinate to Part I.
 
 ## 1. What V1 must prove (§46, LOCKED)
 
@@ -177,11 +178,28 @@ economics track, not decided in code).
 - **Positioning** (§50): all UI copy follows the guardrails — "Earn with your computer", never
   "crypto mining"; no privacy overclaims for Verified Network (host can access plaintext, §29).
 
-## 8. Open decisions (owner)
+## 8. M1 progress (2026-08-14)
 
-1. **M1 scope** — local-first slice only (recommended: fastest path to a demoable §46.1/2/6-local,
-   zero chain dependencies), or fold the M2 earning alpha into the first push?
-2. **Desktop stack** — Electron (recommended: direct reuse of everything in §5's table, proven
-   updater/CI/test pipeline), or an alternative shell?
-3. **V1 runtime working choice** — llama.cpp `llama-server` (recommended), Ollama-managed, or an
-   M1 bake-off behind the runtime abstraction?
+**Built and tested** (16 passing tests, zero runtime dependencies): Core service entrypoint
+(`core/server.js`), hardware detection with graceful GPU-absent fallback, model manager
+(sha256-pinned catalog, resumable Range downloads, fail-closed on unpinned hashes),
+llama.cpp runtime adapter (child-process supervision, health-wait, crash reporting),
+runtime manager (single-flight model loads, GPU offload only when detection approves),
+OpenAI-compatible gateway (models + streaming chat/completions raw-proxy, `/core/*` control
+plane, keys-optional-then-required auth), scoped API keys hashed at rest. Integration test
+drives the full chain through a real spawned fake-`llama-server` child.
+
+**Deliberately not done here:** real-binary end-to-end (this dev container's egress policy
+blocks GitHub release assets and Hugging Face). First task on a networked machine:
+`pin-model.js --write` for the dev model, drop in a `llama-server` build, and run the same
+chain against it. Desktop UI (Electron client), installer, and the §5 onboarding flow are the
+next M1 work items.
+
+## 9. Decisions (resolved 2026-08-14)
+
+1. **M1 scope: local-first slice only.** Installer → local chat → local OpenAI-compatible API;
+   earning follows in M2 against the project-hosted scheduler.
+2. **Desktop stack: Electron.** Direct reuse of the Koinos-Node modules, shell patterns,
+   updater channels, CI, and test approach.
+3. **V1 runtime: llama.cpp (`llama-server`)** supervised by Core as a child process, behind the
+   §6 runtime abstraction (selection stays VALIDATION — benchmarks recorded as we go).

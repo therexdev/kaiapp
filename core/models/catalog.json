@@ -1,0 +1,22 @@
+{
+  "catalogVersion": 1,
+  "comment": "Model packages are versioned + immutable (spec §27): identity is the SHA-256. Launch aliases (Koinos Fast/Smart/Code) ship after the §51 model-selection validation; dev-tiny exists so the pipeline is testable end-to-end today.",
+  "aliases": {
+    "dev-tiny": {
+      "label": "Dev Tiny (pipeline testing only — not a launch model)",
+      "package": "smollm2-135m-instruct-q8_0@1"
+    }
+  },
+  "packages": {
+    "smollm2-135m-instruct-q8_0@1": {
+      "filename": "smollm2-135m-instruct-q8_0.gguf",
+      "url": "https://huggingface.co/HuggingFaceTB/SmolLM2-135M-Instruct-GGUF/resolve/main/smollm2-135m-instruct-q8_0.gguf",
+      "sha256": "PENDING_FIRST_FETCH",
+      "sizeBytes": null,
+      "contextSize": 4096,
+      "license": "apache-2.0",
+      "creator": "HuggingFaceTB",
+      "runtime": "llamacpp"
+    }
+  }
+}
