@@ -71,6 +71,8 @@ const server = http.createServer((req, res) => {
           model,
           choices: [{ index: 0, message: { role: "assistant", content: "Hello from fake llama" }, finish_reason: "stop" }],
           usage: { prompt_tokens: 1, completion_tokens: 4, total_tokens: 5 },
+          // Shape matches llama-server's timing block, used by the benchmark.
+          timings: { prompt_n: 1, prompt_per_second: 500, predicted_n: 4, predicted_per_second: 42 },
         })
       );
     });

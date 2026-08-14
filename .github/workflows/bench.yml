@@ -1,0 +1,58 @@
+name: Benchmark
+
+# §51 model benchmarks on the CPU tier (windows-latest has no GPU; GPU-tier
+# numbers come from real hardware using the same harness). Pins candidate
+# hashes, runs the harness against real weights, uploads the report as an
+# artifact, and commits it under docs/benchmarks/.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main", "claude/**"]
+
+jobs:
+  bench:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[bench]')
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+
+      - name: Pin candidate models
+        run: |
+          node core/scripts/pin-model.js --all --catalog core/bench/candidates.json --write || {
+            echo "::error::Candidate pin failed — files in the candidate repos:"
+            for r in bartowski/Qwen2.5-0.5B-Instruct-GGUF bartowski/Llama-3.2-1B-Instruct-GGUF bartowski/SmolLM2-1.7B-Instruct-GGUF; do
+              echo "== $r =="
+              curl -s "https://huggingface.co/api/models/$r" | grep -o '"rfilename": *"[^"]*Q4_K_M[^"]*"' || true
+            done
+            exit 1
+          }
+
+      - name: Run benchmark
+        run: node core/scripts/bench.js --out docs/benchmarks
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-report
+          path: docs/benchmarks/
+          if-no-files-found: error
+
+      - name: Commit report + pinned candidates
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/benchmarks core/bench/candidates.json
+          git diff --cached --quiet && { echo "Nothing new to commit."; exit 0; }
+          git commit -m "Add CPU-tier benchmark report (CI bench run)"
+          git push
