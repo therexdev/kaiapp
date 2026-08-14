@@ -228,9 +228,15 @@ Fast" on the CPU tier** (quality per token clearly ahead of the sub-1B models at
 speed); "Smart"/"Code" aliases need the GPU tier — run the same harness on real GPU hardware
 before deciding. Candidate hashes are pinned in `core/bench/candidates.json`.
 
-**Remaining M1 items:** auto-update wiring (electron-updater channels), app icons/branding,
-first-run polish, GPU-tier benchmarks on real hardware, and a `v0.1.0` tag to produce the
-first Windows installer artifact.
+**Installers building in CI (2026-08-14):** app icon (brand-mark K, generated), electron-updater
+wired (stable channel, silent download, install on quit, packaged builds only), and the CI
+build jobs produce the Windows NSIS installer + portable exe and Linux AppImage as artifacts
+on any `[dist]` commit — first artifacts built green from `3ea158b`. **Releasing is one owner
+command:** `git tag v0.1.0 && git push origin v0.1.0` → CI publishes the installers and the
+auto-update feed to a GitHub Release; every later tag auto-updates installed apps.
+
+**Remaining M1 items:** owner smoke-test of the Windows installer artifact on real hardware,
+GPU-tier benchmarks (same harness, real GPU), first-run UX polish from that smoke test.
 
 ## 9. Decisions (resolved 2026-08-14)
 
