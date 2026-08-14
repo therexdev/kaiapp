@@ -43,7 +43,7 @@ async function main() {
   const catIdx = args.indexOf("--catalog");
   const catalogPath =
     catIdx >= 0 ? path.resolve(args[catIdx + 1]) : path.join(__dirname, "..", "models", "catalog.json");
-  const targets = args.filter((a, i) => !a.startsWith("--") && i !== catIdx + 1);
+  const targets = args.filter((a, i) => !a.startsWith("--") && (catIdx < 0 || i !== catIdx + 1));
   const all = args.includes("--all");
   if (!all && targets.length === 0) {
     console.error("Usage: node core/scripts/pin-model.js <packageId>|--all [--catalog <path>] [--write]");
