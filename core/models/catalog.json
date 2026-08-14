@@ -11,8 +11,8 @@
     "smollm2-135m-instruct-q8_0@1": {
       "filename": "smollm2-135m-instruct-q8_0.gguf",
       "url": "https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct-Q8_0.gguf",
-      "sha256": "PENDING_FIRST_FETCH",
-      "sizeBytes": null,
+      "sha256": "5a1395716f7913741cc51d98581b9b1228d80987a9f7d3664106742eb06bba83",
+      "sizeBytes": 144811360,
       "contextSize": 4096,
       "license": "apache-2.0",
       "creator": "HuggingFaceTB (quantized by bartowski)",
