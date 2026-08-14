@@ -1,5 +1,5 @@
 {
-  "comment": "Inference-engine builds, versioned + sha256-pinned like model packages (§27). PENDING hashes fail closed until pinned on a networked machine: node core/scripts/pin-runtime.js <kind> <buildKey> --write. binPath is the server binary's path inside the extracted archive.",
+  "comment": "Inference-engine builds, versioned + sha256-pinned like model packages (§27). PENDING hashes fail closed until pinned: the Pin & Verify workflow (or pin-runtime.js on a networked machine) fills them and CI commits them back after the real E2E passes. binPath is the server binary inside the extracted archive; extras are companion archives extracted into the same directory (CUDA needs the cudart runtime). llama.cpp publishes no Linux release binaries — Linux dev machines build from source and point KAI_LLAMA_BIN at it; the §9 server edition will carry its own packaging.",
   "llamacpp": {
     "version": "b10423",
     "builds": {
@@ -13,13 +13,14 @@
         "url": "https://github.com/ggml-org/llama.cpp/releases/download/b10423/llama-b10423-bin-win-cuda-12.4-x64.zip",
         "sha256": "PENDING_FIRST_FETCH",
         "sizeBytes": null,
-        "binPath": "llama-server.exe"
-      },
-      "linux-x64-cpu": {
-        "url": "https://github.com/ggml-org/llama.cpp/releases/download/b10423/llama-b10423-bin-ubuntu-x64.zip",
-        "sha256": "PENDING_FIRST_FETCH",
-        "sizeBytes": null,
-        "binPath": "build/bin/llama-server"
+        "binPath": "llama-server.exe",
+        "extras": [
+          {
+            "url": "https://github.com/ggml-org/llama.cpp/releases/download/b10423/cudart-llama-bin-win-cuda-12.4-x64.zip",
+            "sha256": "PENDING_FIRST_FETCH",
+            "sizeBytes": null
+          }
+        ]
       }
     }
   }

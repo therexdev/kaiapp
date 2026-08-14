@@ -16,9 +16,14 @@ jobs:
     # (dispatch always runs). The pin commit the job itself pushes uses
     # GITHUB_TOKEN, which never re-triggers workflows — no loop.
     if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[pin-verify]')
-    runs-on: ubuntu-latest
+    # Windows: llama.cpp publishes no Linux release binaries, and Windows is
+    # the M1 shipping platform — so the real E2E runs on the shipping OS.
+    runs-on: windows-latest
     permissions:
       contents: write
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

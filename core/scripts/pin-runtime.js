@@ -19,22 +19,31 @@ const crypto = require("crypto");
 
 const CATALOG = path.join(__dirname, "..", "runtimes", "catalog.json");
 
-async function pinOne(builds, key) {
-  const b = builds[key];
-  console.error(`Fetching ${b.url} …`);
-  const resp = await fetch(b.url, { redirect: "follow" });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status} for ${key} — check the asset URL for this tag`);
+async function hashUrl(label, url) {
+  console.error(`Fetching ${url} …`);
+  const resp = await fetch(url, { redirect: "follow" });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status} for ${label} — check the asset URL for this tag`);
   const hash = crypto.createHash("sha256");
   let bytes = 0;
+  let lastLogged = 0;
   for await (const chunk of resp.body) {
     hash.update(chunk);
     bytes += chunk.length;
-    process.stderr.write(`\r${key}: ${(bytes / 1e6).toFixed(1)} MB`);
+    if (bytes - lastLogged > 25e6) {
+      lastLogged = bytes;
+      console.error(`${label}: ${(bytes / 1e6).toFixed(0)} MB…`);
+    }
   }
-  process.stderr.write("\n");
-  b.sha256 = hash.digest("hex");
-  b.sizeBytes = bytes;
-  console.log(JSON.stringify({ key, sha256: b.sha256, sizeBytes: bytes }));
+  return { sha256: hash.digest("hex"), sizeBytes: bytes };
+}
+
+async function pinOne(builds, key) {
+  const b = builds[key];
+  Object.assign(b, await hashUrl(key, b.url));
+  for (let i = 0; i < (b.extras || []).length; i++) {
+    Object.assign(b.extras[i], await hashUrl(`${key} extra ${i + 1}`, b.extras[i].url));
+  }
+  console.log(JSON.stringify({ key, sha256: b.sha256, sizeBytes: b.sizeBytes, extras: b.extras?.length ?? 0 }));
 }
 
 async function main() {

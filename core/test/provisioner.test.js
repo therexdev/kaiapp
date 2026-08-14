@@ -51,8 +51,13 @@ test("zip: refuses traversal entries and non-zip files", () => {
 
 // ---------- provisioner ----------
 
-function serveOnce(body) {
+function serveMap(bodies) {
   const server = http.createServer((req, res) => {
+    const body = bodies[req.url];
+    if (!body) {
+      res.writeHead(404);
+      return res.end();
+    }
     res.writeHead(200, { "content-length": body.length });
     res.end(body);
   });
@@ -60,8 +65,9 @@ function serveOnce(body) {
     server.listen(0, "127.0.0.1", () => resolve({ server, port: server.address().port }));
   });
 }
+const serveOnce = (body) => serveMap({ "/rt.zip": body });
 
-function writeCatalog(dir, { url, sha256 }) {
+function writeCatalog(dir, { url, sha256, extras }) {
   const p = path.join(dir, "rt-catalog.json");
   const key = `${process.platform}-${process.arch}-cpu`;
   fs.writeFileSync(
@@ -69,25 +75,30 @@ function writeCatalog(dir, { url, sha256 }) {
     JSON.stringify({
       llamacpp: {
         version: "test1",
-        builds: { [key]: { url, sha256, sizeBytes: null, binPath: "build/bin/llama-server" } },
+        builds: { [key]: { url, sha256, sizeBytes: null, binPath: "build/bin/llama-server", extras } },
       },
     })
   );
   return p;
 }
 
-test("provisioner: downloads, verifies, extracts, returns executable bin; caches after", async () => {
+test("provisioner: downloads main + extras, verifies, extracts, caches", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-prov-"));
   const zipBody = makeZip([
     { name: "build/", mode: 0o755 },
     { name: "build/bin/", mode: 0o755 },
     { name: "build/bin/llama-server", data: "#!/bin/sh\nexit 0\n", mode: 0o755, deflate: true },
   ]);
-  const sha = crypto.createHash("sha256").update(zipBody).digest("hex");
-  const { server, port } = await serveOnce(zipBody);
+  const extraBody = makeZip([{ name: "build/bin/cudart.dll", data: "runtime-dll", deflate: true }]);
+  const sha = (b) => crypto.createHash("sha256").update(b).digest("hex");
+  const { server, port } = await serveMap({ "/rt.zip": zipBody, "/extra.zip": extraBody });
   try {
     const prov = new RuntimeProvisioner({
-      catalogPath: writeCatalog(dir, { url: `http://127.0.0.1:${port}/rt.zip`, sha256: sha }),
+      catalogPath: writeCatalog(dir, {
+        url: `http://127.0.0.1:${port}/rt.zip`,
+        sha256: sha(zipBody),
+        extras: [{ url: `http://127.0.0.1:${port}/extra.zip`, sha256: sha(extraBody), sizeBytes: null }],
+      }),
       runtimesDir: path.join(dir, "runtimes"),
       hardware: { capabilities: { cudaEligible: false } },
       onEvent: () => {},
@@ -95,6 +106,8 @@ test("provisioner: downloads, verifies, extracts, returns executable bin; caches
     const bin = await prov.ensure("llamacpp");
     assert.ok(fs.existsSync(bin));
     if (process.platform !== "win32") assert.ok(fs.statSync(bin).mode & 0o100);
+    // Companion archive landed in the same install dir.
+    assert.equal(fs.readFileSync(path.join(path.dirname(bin), "cudart.dll"), "utf8"), "runtime-dll");
 
     // Cached: works with the server gone.
     server.close();
