@@ -68,12 +68,22 @@ async function createCore({ dataDir, port, llamaBin, onEvent } = {}) {
         onEvent: events,
       });
 
+  const { OllamaRuntime } = require("./lib/runtimes/ollama");
+  const ollamaAddr = {
+    host: process.env.KAI_OLLAMA_HOST || "127.0.0.1",
+    port: Number(process.env.KAI_OLLAMA_PORT || 11434),
+  };
   const runtime = new RuntimeManager({
     models,
     hardware: hw,
     provisioner,
     onEvent: events,
     makeRuntime: (binPath) => new LlamaCppRuntime({ binPath: binPath || forcedBin, onEvent: events }),
+    // A running local Ollama is a ready-made fallback engine (§6): used when
+    // the managed llama.cpp build can't run here, or forced via KAI_RUNTIME.
+    makeFallback: async () =>
+      (await OllamaRuntime.detect(ollamaAddr)) ? new OllamaRuntime({ ...ollamaAddr, onEvent: events }) : null,
+    preferFallback: process.env.KAI_RUNTIME === "ollama",
   });
 
   // The desktop UI is plain web content served by the gateway itself — the

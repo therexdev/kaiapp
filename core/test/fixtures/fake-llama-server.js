@@ -14,6 +14,11 @@ function argValue(flag) {
   return i >= 0 ? process.argv[i + 1] : undefined;
 }
 
+if (process.argv.includes("--version")) {
+  console.log("fake-llama-server version 0 (test fixture)");
+  process.exit(0);
+}
+
 const port = Number(argValue("--port") || 0);
 const host = argValue("--host") || "127.0.0.1";
 const model = argValue("--model") || "unknown";

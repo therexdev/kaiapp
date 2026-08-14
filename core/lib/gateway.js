@@ -195,7 +195,7 @@ class Gateway {
   }
 
   async _chat(req, res) {
-    const raw = await this._readBody(req);
+    let raw = await this._readBody(req);
     let body;
     try {
       body = JSON.parse(raw.toString("utf8"));
@@ -208,6 +208,13 @@ class Gateway {
       endpoint = await this.runtime.ensure(alias);
     } catch (e) {
       return this._json(res, 400, { error: { message: String(e.message), type: "invalid_request_error" } });
+    }
+    // Some runtimes (Ollama) serve the model under their own registered name
+    // — rewrite the body so callers keep using the Koinos alias.
+    const served = this.runtime.servedModelName?.();
+    if (served && body.model !== served) {
+      body.model = served;
+      raw = Buffer.from(JSON.stringify(body));
     }
     return this._proxy(endpoint, "/v1/chat/completions", raw, req, res);
   }

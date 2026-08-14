@@ -17,6 +17,41 @@ const path = require("path");
 const HEALTH_TIMEOUT_MS = 120000; // model load can be slow on first start
 const HEALTH_POLL_MS = 500;
 
+/**
+ * Engine self-test (no model involved): a binary that can't even print its
+ * version can't serve — catch machine incompatibility at provision time,
+ * not at first chat. Throws with the decoded exit code on failure.
+ */
+function selfTest(binPath) {
+  const { spawnSync } = require("child_process");
+  const env = { ...process.env };
+  if (process.platform === "win32") {
+    env.PATH = `${path.dirname(process.execPath)};${env.PATH || ""}`;
+  }
+  const r = spawnSync(binPath, ["--version"], {
+    timeout: 15000,
+    windowsHide: true,
+    cwd: path.dirname(binPath),
+    env,
+    encoding: "utf8",
+  });
+  // llama-server prints its version and exits 0 (some builds exit 1 after
+  // printing usage); a loader crash gives a big NTSTATUS code and no output.
+  const printed = `${r.stdout || ""}${r.stderr || ""}`.trim().length > 0;
+  if (r.error || (!printed && r.status !== 0)) {
+    const code = r.status;
+    const hint =
+      code === 3221225781
+        ? " (0xC0000135: required DLL not found)"
+        : code === 3221225477
+          ? " (0xC0000005: access violation — build incompatible with this machine)"
+          : code != null
+            ? ` (exit code ${code})`
+            : ` (${r.error?.message || "no output"})`;
+    throw new Error(`Engine self-test failed for ${path.basename(binPath)}${hint}`);
+  }
+}
+
 class LlamaCppRuntime {
   constructor({ binPath, host = "127.0.0.1", port = 41101, onEvent }) {
     this.binPath = binPath;
@@ -143,4 +178,4 @@ class LlamaCppRuntime {
   }
 }
 
-module.exports = { LlamaCppRuntime };
+module.exports = { LlamaCppRuntime, selfTest };

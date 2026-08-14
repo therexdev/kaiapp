@@ -8,15 +8,23 @@
  */
 
 class RuntimeManager {
-  constructor({ models, makeRuntime, hardware, provisioner, onEvent }) {
+  constructor({ models, makeRuntime, hardware, provisioner, makeFallback, preferFallback, onEvent }) {
     this.models = models; // ModelManager
     this.makeRuntime = makeRuntime; // (binPath|null) => runtime adapter instance
     this.hardware = hardware; // detection snapshot (may be null in tests)
     this.provisioner = provisioner || null; // RuntimeProvisioner (null when a bin is forced)
+    this.makeFallback = makeFallback || null; // async () => alt runtime (e.g. Ollama) or null
+    this.preferFallback = !!preferFallback; // KAI_RUNTIME override: skip llama.cpp entirely
     this.onEvent = onEvent || (() => {});
     this.runtime = null;
     this.activeAlias = null;
     this._loading = null; // in-flight ensure() promise
+    this._testedBins = new Set(); // self-test once per binary per session
+  }
+
+  /** Name the active runtime serves the model under (null = passthrough). */
+  servedModelName() {
+    return this.runtime?.servedName?.() ?? null;
   }
 
   status() {
@@ -62,28 +70,53 @@ class RuntimeManager {
       this.activeAlias = null;
     }
 
-    // GPU path first when eligible, but a GPU failure must never strand the
-    // user (§5): any provisioning or startup error falls back to the CPU
-    // build automatically. Without a provisioner (forced KAI_LLAMA_BIN) the
-    // single configured binary is all there is.
+    // Escalation ladder (§5: never strand the user): CUDA build when
+    // eligible -> CPU build -> external fallback runtime (Ollama) when one
+    // is present. Every provisioned binary passes a self-test before boot,
+    // so a build this machine can't run fails fast and quietly moves on.
+    const { selfTest } = require("./runtimes/llamacpp");
     const boot = async (binPath, gpuLayers) => {
+      if (binPath && !this._testedBins.has(binPath)) {
+        selfTest(binPath);
+        this._testedBins.add(binPath);
+      }
       const runtime = this.makeRuntime(binPath);
       await runtime.start({ modelPath, contextSize: resolved.contextSize || 4096, gpuLayers });
       return runtime;
     };
 
-    let runtime;
-    if (this.provisioner && wantGpu) {
-      try {
-        runtime = await boot(await this.provisioner.ensure(kind, { cap: "cuda" }), 999);
-      } catch (e) {
-        this.onEvent({ type: "runtime:fallback", from: "cuda", to: "cpu", reason: String(e.message) });
-        runtime = await boot(await this.provisioner.ensure(kind, { cap: "cpu" }), 0);
+    const bootLlama = async () => {
+      if (!this.provisioner) return boot(null, wantGpu ? 999 : 0);
+      if (wantGpu) {
+        try {
+          return await boot(await this.provisioner.ensure(kind, { cap: "cuda" }), 999);
+        } catch (e) {
+          this.onEvent({ type: "runtime:fallback", from: "cuda", to: "cpu", reason: String(e.message) });
+        }
       }
-    } else if (this.provisioner) {
-      runtime = await boot(await this.provisioner.ensure(kind, { cap: "cpu" }), 0);
+      return boot(await this.provisioner.ensure(kind, { cap: "cpu" }), 0);
+    };
+
+    const bootFallback = async (why) => {
+      const fb = this.makeFallback ? await this.makeFallback() : null;
+      if (!fb) return null;
+      if (why) this.onEvent({ type: "runtime:fallback", from: "llamacpp", to: fb.status().kind, reason: why });
+      const modelName = `koinos-${alias}`.toLowerCase().replace(/[^a-z0-9._-]/g, "-");
+      await fb.start({ modelPath, sha256: resolved.sha256, modelName });
+      return fb;
+    };
+
+    let runtime;
+    if (this.preferFallback) {
+      runtime = await bootFallback(null);
+      if (!runtime) throw new Error("KAI_RUNTIME requested the fallback runtime, but none is available");
     } else {
-      runtime = await boot(null, wantGpu ? 999 : 0);
+      try {
+        runtime = await bootLlama();
+      } catch (e) {
+        runtime = await bootFallback(String(e.message));
+        if (!runtime) throw e;
+      }
     }
 
     this.runtime = runtime;
