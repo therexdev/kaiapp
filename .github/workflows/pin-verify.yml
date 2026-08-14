@@ -7,9 +7,15 @@ name: Pin & Verify
 
 on:
   workflow_dispatch:
+  push:
+    branches: ["main", "claude/**"]
 
 jobs:
   pin-verify:
+    # Push-triggered only when the commit message opts in with [pin-verify]
+    # (dispatch always runs). The pin commit the job itself pushes uses
+    # GITHUB_TOKEN, which never re-triggers workflows — no loop.
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[pin-verify]')
     runs-on: ubuntu-latest
     permissions:
       contents: write
