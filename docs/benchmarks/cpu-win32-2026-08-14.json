@@ -1,0 +1,104 @@
+{
+  "schema": 1,
+  "startedAt": "2026-08-14T17:49:14.923Z",
+  "hardware": {
+    "platform": "win32",
+    "arch": "x64",
+    "cpu": {
+      "model": "AMD EPYC 9V74 80-Core Processor                ",
+      "cores": 4
+    },
+    "ramBytes": 17174360064,
+    "gpus": [],
+    "disk": {
+      "freeBytes": 35941847040,
+      "totalBytes": 160467759104
+    },
+    "capabilities": {
+      "cudaEligible": false,
+      "cpuFallback": true
+    }
+  },
+  "results": [
+    {
+      "id": "smollm2-135m-q8@1",
+      "label": "SmolLM2 135M Q8 (baseline tiny)",
+      "fileBytes": 144811360,
+      "loadMs": 520,
+      "promptTps": 144.3418013856813,
+      "genTps": 128.00714661175977,
+      "samples": [
+        {
+          "name": "chat",
+          "prompt": "In one sentence, what are you?",
+          "output": "I'm a helpful AI assistant designed to assist users in their daily lives, providing concise and informative responses."
+        },
+        {
+          "name": "code",
+          "prompt": "Write a JavaScript function that reverses a string. Code only.",
+          "output": "Here is a JavaScript function that reverses a string:\n\n```javascript\nfunction reverseString(str) {\n    return str.split('').reverse().join('');\n}\n```\n\nThis function works by splitting the input string into an array of characters, reversing the array using the `reverse()` method, and then joining the array back into a string using the `join()` method.\n\nYou can use this function like this:"
+        }
+      ]
+    },
+    {
+      "id": "qwen2.5-0.5b-q4km@1",
+      "label": "Qwen2.5 0.5B Instruct Q4_K_M",
+      "fileBytes": 397808192,
+      "loadMs": 1536,
+      "promptTps": 46.988065031482,
+      "genTps": 43.52480543485911,
+      "samples": [
+        {
+          "name": "chat",
+          "prompt": "In one sentence, what are you?",
+          "output": "I am a large language model created by Alibaba Cloud, capable of generating human-like text and performing various tasks such as language translation, summarization, and creative writing."
+        },
+        {
+          "name": "code",
+          "prompt": "Write a JavaScript function that reverses a string. Code only.",
+          "output": "Certainly! Below is a JavaScript function that reverses a string:\n\n```javascript\nfunction reverseString(str) {\n    return str.split('').reverse().join('');\n}\n\n// Example usage:\nconst originalString = \"Hello, World!\";\nconst reversedString = reverseString(originalString);\nconsole.log(reversedString); // Output: \"!dlroW ,olleH\"\n```\n\n### Explanation:\n1. **Split the String**: The `split('')` method splits the string into an array"
+        }
+      ]
+    },
+    {
+      "id": "llama3.2-1b-q4km@1",
+      "label": "Llama 3.2 1B Instruct Q4_K_M",
+      "fileBytes": 807694464,
+      "loadMs": 2034,
+      "promptTps": 37.40415186085656,
+      "genTps": 33.07252946445723,
+      "samples": [
+        {
+          "name": "chat",
+          "prompt": "In one sentence, what are you?",
+          "output": "I am an artificial intelligence model designed to assist and communicate with users, providing information and answering questions to the best of my knowledge based on my training data."
+        },
+        {
+          "name": "code",
+          "prompt": "Write a JavaScript function that reverses a string. Code only.",
+          "output": "```javascript\nfunction reverseString(s) {\n    return s.split(\"\").reverse().join(\"\");\n}\n\nconsole.log(reverseString(\"Hello World\"));\n```"
+        }
+      ]
+    },
+    {
+      "id": "smollm2-1.7b-q4km@1",
+      "label": "SmolLM2 1.7B Instruct Q4_K_M",
+      "fileBytes": 1055609824,
+      "loadMs": 1532,
+      "promptTps": 28.196813760045114,
+      "genTps": 23.46633753880059,
+      "samples": [
+        {
+          "name": "chat",
+          "prompt": "In one sentence, what are you?",
+          "output": "I am a conversational AI model, designed to assist and engage in multi-round conversations, providing information and answering questions to the best of my knowledge and abilities."
+        },
+        {
+          "name": "code",
+          "prompt": "Write a JavaScript function that reverses a string. Code only.",
+          "output": "function reverseString(str) {\n    return str.split('').reverse().join('');\n}"
+        }
+      ]
+    }
+  ]
+}

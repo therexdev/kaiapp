@@ -15,8 +15,8 @@
       "label": "Qwen2.5 0.5B Instruct Q4_K_M",
       "filename": "bench-qwen2.5-0.5b-q4km.gguf",
       "url": "https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf",
-      "sha256": "PENDING_FIRST_FETCH",
-      "sizeBytes": null,
+      "sha256": "6eb923e7d26e9cea28811e1a8e852009b21242fb157b26149d3b188f3a8c8653",
+      "sizeBytes": 397808192,
       "contextSize": 4096,
       "runtime": "llamacpp"
     },
@@ -24,8 +24,8 @@
       "label": "Llama 3.2 1B Instruct Q4_K_M",
       "filename": "bench-llama3.2-1b-q4km.gguf",
       "url": "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
-      "sha256": "PENDING_FIRST_FETCH",
-      "sizeBytes": null,
+      "sha256": "6f85a640a97cf2bf5b8e764087b1e83da0fdb51d7c9fab7d0fece9385611df83",
+      "sizeBytes": 807694464,
       "contextSize": 4096,
       "runtime": "llamacpp"
     },
@@ -33,8 +33,8 @@
       "label": "SmolLM2 1.7B Instruct Q4_K_M",
       "filename": "bench-smollm2-1.7b-q4km.gguf",
       "url": "https://huggingface.co/bartowski/SmolLM2-1.7B-Instruct-GGUF/resolve/main/SmolLM2-1.7B-Instruct-Q4_K_M.gguf",
-      "sha256": "PENDING_FIRST_FETCH",
-      "sizeBytes": null,
+      "sha256": "77665ea4815999596525c636fbeb56ba8b080b46ae85efef4f0d986a139834d7",
+      "sizeBytes": 1055609824,
       "contextSize": 4096,
       "runtime": "llamacpp"
     }
