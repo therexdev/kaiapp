@@ -1,0 +1,57 @@
+name: Pin & Verify
+
+# Runs where the network is open: pins the real sha256 of the dev model and
+# every llama.cpp build into the catalogs, proves the whole product loop
+# against real weights (verify-e2e), and only then commits the pins back to
+# the branch it was dispatched on.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  pin-verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+
+      - name: Pin runtime builds (all platforms)
+        run: |
+          node core/scripts/pin-runtime.js llamacpp --all --write || {
+            echo "::error::Pinning failed — actual release assets for this tag are:"
+            TAG=$(node -p "require('./core/runtimes/catalog.json').llamacpp.version")
+            curl -s "https://api.github.com/repos/ggml-org/llama.cpp/releases/tags/$TAG" \
+              | grep -o '"name": *"[^"]*\.zip"' | sort -u
+            exit 1
+          }
+
+      - name: Pin dev model
+        run: |
+          node core/scripts/pin-model.js smollm2-135m-instruct-q8_0@1 --write || {
+            echo "::error::Model pin failed — files in the HF repo are:"
+            curl -s "https://huggingface.co/api/models/HuggingFaceTB/SmolLM2-135M-Instruct-GGUF" \
+              | grep -o '"rfilename": *"[^"]*"'
+            exit 1
+          }
+
+      - name: Real end-to-end (provision engine + model, stream a completion)
+        run: node core/scripts/verify-e2e.js dev-tiny
+
+      - name: Commit verified pins back to this branch
+        run: |
+          if git diff --quiet; then
+            echo "Catalogs already pinned — nothing to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add core/models/catalog.json core/runtimes/catalog.json
+          git commit -m "Pin model and llama.cpp build hashes (CI pin-verify, E2E passed)"
+          git push

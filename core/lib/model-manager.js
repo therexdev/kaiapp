@@ -68,6 +68,10 @@ class ModelManager {
   async ensurePackage(packageId) {
     const pkg = this.catalog.packages[packageId];
     if (!pkg) throw new Error(`Unknown package: ${packageId}`);
+    // An existing file was verified at download time (or placed deliberately
+    // by a developer) — usable even while its catalog pin is still pending.
+    const file = this.packagePath(packageId);
+    if (fs.existsSync(file)) return file;
     // Fail closed (§27): a package without a pinned hash is not downloadable —
     // we never run weights we can't verify. Pin with: node scripts/pin-model.js
     if (!/^[0-9a-f]{64}$/i.test(String(pkg.sha256 || ""))) {
@@ -76,8 +80,6 @@ class ModelManager {
           `Run "node core/scripts/pin-model.js ${packageId} --write" on a networked machine first.`
       );
     }
-    const file = this.packagePath(packageId);
-    if (fs.existsSync(file)) return file;
     if (this._active) throw new Error(`Another download is in progress (${this._active.alias})`);
 
     fs.mkdirSync(this.modelsDir, { recursive: true });
