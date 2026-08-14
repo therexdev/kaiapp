@@ -78,12 +78,18 @@ class RuntimeProvisioner {
     for (let i = 0; i < archives.length; i++) {
       const a = archives[i];
       const zipPath = path.join(os.tmpdir(), `kai-runtime-${kind}-${build.version}-${build.key}-${i}.zip`);
+      let lastPct = -1;
       await downloadFile(a.url, zipPath, {
         sha256: a.sha256,
         sizeBytes: a.sizeBytes,
         onProgress: (p) => {
           this._progress = { kind, archive: i + 1, archives: archives.length, ...p };
-          this.onEvent({ type: "runtime:download", kind, ...p });
+          // Emit (and therefore log) only on whole-percent changes — the raw
+          // callback fires per network chunk and would flood core.log.
+          if (p.pct !== null && p.pct !== lastPct) {
+            lastPct = p.pct;
+            this.onEvent({ type: "runtime:download", kind, ...p });
+          }
         },
       });
       extractZip(zipPath, installDir);
