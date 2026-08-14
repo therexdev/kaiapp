@@ -38,6 +38,51 @@ class OllamaRuntime {
     }
   }
 
+  /** Where an installed Ollama binary lives, or null. */
+  static locate() {
+    const { spawnSync } = require("child_process");
+    const path = require("path");
+    const probe = spawnSync(process.platform === "win32" ? "where" : "which", ["ollama"], {
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: 5000,
+    });
+    const found = (probe.stdout || "").split("\n")[0].trim();
+    if (probe.status === 0 && found) return found;
+    if (process.platform === "win32" && process.env.LOCALAPPDATA) {
+      const p = path.join(process.env.LOCALAPPDATA, "Programs", "Ollama", "ollama.exe");
+      if (fs.existsSync(p)) return p;
+    }
+    return null;
+  }
+
+  /**
+   * Detect a running Ollama; if none but one is installed, start the daemon
+   * ourselves ("ollama serve") and wait for it — the user should never have
+   * to launch it by hand. Returns the version string or null.
+   */
+  static async ensureRunning({ host = "127.0.0.1", port = 11434, onEvent } = {}) {
+    const up = await OllamaRuntime.detect({ host, port });
+    if (up) return up;
+    const bin = OllamaRuntime.locate();
+    if (!bin) return null;
+    (onEvent || (() => {}))({ type: "runtime:ollama-starting", bin });
+    const { spawn } = require("child_process");
+    try {
+      // Detached daemon: it outlives us, exactly like a user-launched Ollama.
+      spawn(bin, ["serve"], { detached: true, stdio: "ignore", windowsHide: true }).unref();
+    } catch {
+      return null;
+    }
+    const deadline = Date.now() + 12000;
+    while (Date.now() < deadline) {
+      const v = await OllamaRuntime.detect({ host, port });
+      if (v) return v;
+      await new Promise((r) => setTimeout(r, 400));
+    }
+    return null;
+  }
+
   status() {
     return {
       kind: "ollama",

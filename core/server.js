@@ -79,10 +79,13 @@ async function createCore({ dataDir, port, llamaBin, onEvent } = {}) {
     provisioner,
     onEvent: events,
     makeRuntime: (binPath) => new LlamaCppRuntime({ binPath: binPath || forcedBin, onEvent: events }),
-    // A running local Ollama is a ready-made fallback engine (§6): used when
+    // A local Ollama install is a ready-made fallback engine (§6): used when
     // the managed llama.cpp build can't run here, or forced via KAI_RUNTIME.
+    // If the daemon isn't running, Core starts it — no manual step.
     makeFallback: async () =>
-      (await OllamaRuntime.detect(ollamaAddr)) ? new OllamaRuntime({ ...ollamaAddr, onEvent: events }) : null,
+      (await OllamaRuntime.ensureRunning({ ...ollamaAddr, onEvent: events }))
+        ? new OllamaRuntime({ ...ollamaAddr, onEvent: events })
+        : null,
     preferFallback: process.env.KAI_RUNTIME === "ollama",
   });
 
@@ -110,6 +113,13 @@ async function createCore({ dataDir, port, llamaBin, onEvent } = {}) {
     async start() {
       const p = await gateway.listen();
       events({ type: "core:ready", message: `gateway on http://127.0.0.1:${p}` });
+      // Warm start (fire-and-forget): if the model is already on disk, bring
+      // the whole engine ladder up now so the first message answers instantly
+      // instead of paying engine startup at send time.
+      const ready = models.aliases().filter((a) => a.status === "ready");
+      if (ready.length === 1) {
+        runtime.ensure(ready[0].alias).catch((e) => events({ type: "runtime:warmstart-failed", message: String(e.message) }));
+      }
       return p;
     },
     async stop() {

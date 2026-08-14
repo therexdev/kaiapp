@@ -87,14 +87,25 @@ class RuntimeManager {
 
     const bootLlama = async () => {
       if (!this.provisioner) return boot(null, wantGpu ? 999 : 0);
-      if (wantGpu) {
+      // Engine ladder by capability: CUDA (NVIDIA), Vulkan (any real GPU —
+      // Intel Arc, AMD, NVIDIA), then CPU. Each rung self-tests before boot.
+      const caps = [];
+      if (wantGpu) caps.push("cuda");
+      if (this.hardware?.capabilities?.vulkanEligible) caps.push("vulkan");
+      caps.push("cpu");
+      let lastErr;
+      for (let i = 0; i < caps.length; i++) {
+        const cap = caps[i];
         try {
-          return await boot(await this.provisioner.ensure(kind, { cap: "cuda" }), 999);
+          return await boot(await this.provisioner.ensure(kind, { cap }), cap === "cpu" ? 0 : 999);
         } catch (e) {
-          this.onEvent({ type: "runtime:fallback", from: "cuda", to: "cpu", reason: String(e.message) });
+          lastErr = e;
+          if (i < caps.length - 1) {
+            this.onEvent({ type: "runtime:fallback", from: cap, to: caps[i + 1], reason: String(e.message) });
+          }
         }
       }
-      return boot(await this.provisioner.ensure(kind, { cap: "cpu" }), 0);
+      throw lastErr;
     };
 
     const bootFallback = async (why) => {

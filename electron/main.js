@@ -63,6 +63,16 @@ async function start() {
 
   await win.loadURL(`http://127.0.0.1:${port}/`);
 
+  // Launch at login so the local API + model are always available without a
+  // manual start (owner-requested; a Settings toggle arrives with M1 polish).
+  if (app.isPackaged) {
+    try {
+      app.setLoginItemSettings({ openAtLogin: true });
+    } catch {
+      /* not fatal */
+    }
+  }
+
   // Auto-update (§34; M1 ships the stable channel only): silent download,
   // install on quit — no interruptions mid-chat. Packaged builds only.
   if (app.isPackaged) {

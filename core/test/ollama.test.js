@@ -130,3 +130,16 @@ test("llama.cpp self-test failure falls through to Ollama; gateway rewrites the 
     cdn.close();
   }
 });
+
+test("ensureRunning returns the version when a daemon is up, null when absent", async () => {
+  const { server, port } = await startFakeOllama();
+  try {
+    assert.equal(await OllamaRuntime.ensureRunning({ port }), "0.0.0-fake");
+  } finally {
+    server.close();
+  }
+  // Nothing listening and (in this container) no ollama binary to spawn.
+  if (!OllamaRuntime.locate()) {
+    assert.equal(await OllamaRuntime.ensureRunning({ port: 1 }), null);
+  }
+});

@@ -34,8 +34,36 @@ async function detectNvidia() {
   return gpus.length > 0 ? gpus : null;
 }
 
+// Non-NVIDIA GPUs (Intel Arc, AMD) matter too: they run the Vulkan engine.
+async function detectWindowsGpus() {
+  if (process.platform !== "win32") return [];
+  const r = await exec("powershell", [
+    "-NoProfile", "-Command",
+    "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name",
+  ], 10000);
+  if (!r.ok) return [];
+  return r.stdout
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((name) => {
+      const n = name.toLowerCase();
+      const vendor = n.includes("nvidia")
+        ? "nvidia"
+        : n.includes("amd") || n.includes("radeon")
+          ? "amd"
+          : n.includes("intel")
+            ? "intel"
+            : "other";
+      return { vendor, name, vramMb: null, driver: null };
+    });
+}
+
 async function detect({ dataDir } = {}) {
-  const gpus = (await detectNvidia()) || [];
+  let gpus = (await detectNvidia()) || [];
+  if (gpus.length === 0) {
+    gpus = await detectWindowsGpus();
+  }
   let disk = null;
   try {
     const { statfs } = require("fs").promises;
@@ -57,9 +85,12 @@ async function detect({ dataDir } = {}) {
     // Conservative capability summary the runtime manager keys off.
     capabilities: {
       cudaEligible: gpus.some((g) => g.vendor === "nvidia" && (g.vramMb ?? 0) >= 4096),
+      // Vulkan runs on any real GPU vendor (Intel Arc, AMD, NVIDIA) — basic
+      // display adapters (VMs, CI runners) classify as "other" and skip it.
+      vulkanEligible: gpus.some((g) => ["nvidia", "amd", "intel"].includes(g.vendor)),
       cpuFallback: true,
     },
   };
 }
 
-module.exports = { detect, detectNvidia };
+module.exports = { detect, detectNvidia, detectWindowsGpus };
