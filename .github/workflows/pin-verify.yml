@@ -67,4 +67,6 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add core/models/catalog.json core/runtimes/catalog.json
           git commit -m "Pin model and llama.cpp build hashes (CI pin-verify, E2E passed)"
+          # The branch may have advanced while this job ran — replay on top.
+          git pull --rebase origin "${GITHUB_REF_NAME}"
           git push

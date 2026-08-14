@@ -55,4 +55,6 @@ jobs:
           git add docs/benchmarks core/bench/candidates.json
           git diff --cached --quiet && { echo "Nothing new to commit."; exit 0; }
           git commit -m "Add CPU-tier benchmark report (CI bench run)"
+          # The branch may have advanced while this job ran — replay on top.
+          git pull --rebase origin "${GITHUB_REF_NAME}"
           git push
