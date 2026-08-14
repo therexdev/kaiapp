@@ -45,7 +45,19 @@ class LlamaCppRuntime {
   async _waitHealthy() {
     const deadline = Date.now() + HEALTH_TIMEOUT_MS;
     while (Date.now() < deadline) {
-      if (!this.child) throw new Error("llama-server exited during startup");
+      if (!this.child) {
+        const code = this._lastExit?.code;
+        // Decode the two classic Windows loader deaths — they print nothing.
+        const hint =
+          code === 3221225781
+            ? " (0xC0000135: a required DLL was not found — Visual C++ runtime or CUDA libraries missing)"
+            : code === 3221225595
+              ? " (0xC000007B: bad image — 32/64-bit or dependency mismatch)"
+              : code != null
+                ? ` (exit code ${code})`
+                : "";
+        throw new Error(`llama-server exited during startup${hint}`);
+      }
       try {
         const r = await fetch(`${this.endpoint}/health`, { signal: AbortSignal.timeout(2000) });
         if (r.ok) return;
@@ -70,9 +82,17 @@ class LlamaCppRuntime {
       ...extraArgs,
     ];
 
+    // Windows: llama-server needs the MSVC runtime DLLs. Electron ships them
+    // beside its own exe, so prepend that directory to PATH — a clean machine
+    // without the VC++ redistributable still loads. Harmless elsewhere.
+    const env = { ...process.env };
+    if (process.platform === "win32") {
+      env.PATH = `${path.dirname(process.execPath)};${env.PATH || ""}`;
+    }
     const child = spawn(this.binPath, args, {
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
+      env,
       // llama.cpp release archives keep shared libs beside the binary.
       cwd: path.dirname(this.binPath),
     });
@@ -85,6 +105,7 @@ class LlamaCppRuntime {
     });
     child.on("exit", (code, signal) => {
       const wasStopping = this._stopping;
+      this._lastExit = { code, signal };
       this.child = null;
       this.model = null;
       if (!wasStopping) {

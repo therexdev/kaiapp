@@ -36,7 +36,7 @@ async function createCore({ dataDir, port, llamaBin, onEvent } = {}) {
   const sink = onEvent || ((e) => console.log(`[core] ${e.type}`, e.message ?? ""));
   const events = (e) => {
     try {
-      const detail = e.message ?? e.reason ?? e.error ?? e.endpoint ?? e.pct ?? "";
+      const detail = e.message ?? e.reason ?? e.error ?? e.endpoint ?? e.code ?? e.pct ?? "";
       fsl.appendFileSync(logFile, `${new Date().toISOString()} ${e.type} ${detail}\n`);
     } catch {
       /* logging must never break the app */
