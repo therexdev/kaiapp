@@ -19,6 +19,12 @@ class ModelManager {
     this.onEvent = onEvent || (() => {});
     this.catalog = JSON.parse(fs.readFileSync(catalogPath, "utf8"));
     this._active = null; // in-flight download {alias, controller}
+    this._progress = null; // last emitted progress for the UI
+  }
+
+  /** Progress of the in-flight download, or null. */
+  downloadProgress() {
+    return this._active ? this._progress : null;
   }
 
   aliases() {
@@ -114,6 +120,7 @@ class ModelManager {
         out.write(chunk);
         done += chunk.length;
         const pct = total ? Math.floor((done / total) * 100) : null;
+        this._progress = { packageId, pct, done, total };
         if (pct !== null && pct !== lastPct) {
           lastPct = pct;
           this.onEvent({ type: "model:download", packageId, pct, done, total });

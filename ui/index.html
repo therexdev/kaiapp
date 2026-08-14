@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data:" />
+  <title>Koinos AI</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true"></div>
+        <div class="brand-name">Koinos&nbsp;AI</div>
+      </div>
+      <nav id="nav">
+        <button class="nav-item active" data-view="chat">Chat</button>
+        <button class="nav-item" data-view="api">Local API</button>
+        <button class="nav-item" data-view="earn" disabled title="Arrives with the earning alpha (M2)">Earn <span class="soon">soon</span></button>
+      </nav>
+      <div id="status-pane">
+        <div class="status-row"><span id="status-dot" class="dot"></span><span id="status-text">Connecting…</span></div>
+        <div class="status-sub" id="status-model"></div>
+      </div>
+      <footer class="local-note">Runs on your hardware.<br />Nothing leaves this machine.</footer>
+    </aside>
+
+    <main id="main">
+      <!-- Onboarding: shown until a model is ready (spec §5 flow) -->
+      <section id="view-onboarding" class="view" hidden>
+        <div class="onboard-card">
+          <h1>Welcome to Koinos&nbsp;AI</h1>
+          <p class="lede">Private AI that runs entirely on this computer. One step to go: get you a model.</p>
+          <div class="hw-summary" id="hw-summary"></div>
+          <div class="model-offer">
+            <div>
+              <div class="model-name" id="offer-name">—</div>
+              <div class="model-sub" id="offer-sub"></div>
+            </div>
+            <button id="btn-download" class="primary">Download &amp; start</button>
+          </div>
+          <div id="download-progress" hidden>
+            <div class="bar"><div id="bar-fill"></div></div>
+            <div class="bar-label" id="bar-label">Starting…</div>
+          </div>
+          <p class="error" id="onboard-error" hidden></p>
+        </div>
+      </section>
+
+      <!-- Chat -->
+      <section id="view-chat" class="view" hidden>
+        <div id="messages" aria-live="polite"></div>
+        <form id="composer">
+          <textarea id="input" rows="1" placeholder="Message your local AI…" autocomplete="off"></textarea>
+          <button id="btn-send" class="primary" type="submit">Send</button>
+          <button id="btn-stop" type="button" hidden>Stop</button>
+        </form>
+      </section>
+
+      <!-- Local API -->
+      <section id="view-api" class="view" hidden>
+        <div class="api-card">
+          <h1>Your local OpenAI-compatible API</h1>
+          <p class="lede">Point any OpenAI SDK or tool at this machine. No cloud, no per-token bill.</p>
+          <pre id="api-snippet" class="snippet"></pre>
+          <div class="keys-head">
+            <h2>API keys</h2>
+            <button id="btn-new-key" class="primary small">Create key</button>
+          </div>
+          <p class="hint">Without keys, apps on this computer connect freely. Creating the first key requires every API call to present one — the built-in chat keeps working either way.</p>
+          <div id="new-key-reveal" hidden>
+            <p class="hint strong">Copy it now — it is shown only once:</p>
+            <pre class="snippet" id="new-key-value"></pre>
+          </div>
+          <ul id="key-list"></ul>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

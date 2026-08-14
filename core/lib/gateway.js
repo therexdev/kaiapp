@@ -1,6 +1,17 @@
 "use strict";
 
 const http = require("http");
+const fs = require("fs");
+const nodePath = require("path");
+
+const MIME = {
+  ".html": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".ico": "image/x-icon",
+};
 
 /*
  * Local OpenAI-compatible API gateway (spec §8, MAJOR SELLING POINT).
@@ -21,15 +32,17 @@ const http = require("http");
 const MAX_BODY_BYTES = 10 * 1024 * 1024;
 
 class Gateway {
-  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, onEvent }) {
+  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, onEvent }) {
     this.host = host;
     this.port = port;
     this.runtime = runtime; // RuntimeManager
     this.models = models; // ModelManager
     this.keys = keys; // ApiKeys
     this.coreInfo = coreInfo || (() => ({}));
+    this.uiDir = uiDir || null; // when set, serves the desktop UI at /
     this.onEvent = onEvent || (() => {});
     this.server = null;
+    this._ensureJob = null; // background model-load kicked off by the UI
   }
 
   listen() {
@@ -102,7 +115,34 @@ class Gateway {
         aliases: this.models.aliases(),
         storage: this.models.storageUsage(),
         runtime: this.runtime.status(),
+        download: this.models.downloadProgress(),
+        ensure: this._ensureJob
+          ? { alias: this._ensureJob.alias, state: this._ensureJob.state, error: this._ensureJob.error }
+          : null,
       });
+    }
+    // UI onboarding: download + load a model in the background; poll /core/models.
+    if (path === "/core/models/ensure" && req.method === "POST") {
+      const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+      const alias = String(body.alias || "");
+      try {
+        this.models.resolveAlias(alias); // validate before going async
+      } catch (e) {
+        return this._json(res, 400, { ok: false, error: String(e.message) });
+      }
+      if (this._ensureJob?.state === "working") {
+        return this._json(res, 409, { ok: false, error: `Already loading ${this._ensureJob.alias}` });
+      }
+      const job = { alias, state: "working", error: null };
+      this._ensureJob = job;
+      this.runtime
+        .ensure(alias)
+        .then(() => (job.state = "ready"))
+        .catch((e) => {
+          job.state = "error";
+          job.error = String(e.message);
+        });
+      return this._json(res, 200, { ok: true, started: true, alias });
     }
     if (path === "/core/keys" && req.method === "GET") {
       return this._json(res, 200, { ok: true, required: this.keys.required(), keys: this.keys.list() });
@@ -113,6 +153,12 @@ class Gateway {
     }
     if (path.startsWith("/core/keys/") && req.method === "DELETE") {
       return this._json(res, 200, { ok: true, ...this.keys.revoke(path.split("/")[3]) });
+    }
+    // The desktop UI's own chat lane. Same proxy as /v1/chat/completions but
+    // on the control plane: creating an external API key must never lock the
+    // app's built-in chat out (localhost control plane is the UI's surface).
+    if (path === "/core/chat/completions" && req.method === "POST") {
+      return this._chat(req, res);
     }
 
     // ----- OpenAI-compatible surface -----
@@ -130,21 +176,7 @@ class Gateway {
 
     if (path === "/v1/chat/completions" && req.method === "POST") {
       if (!this._authed(req, res)) return;
-      const raw = await this._readBody(req);
-      let body;
-      try {
-        body = JSON.parse(raw.toString("utf8"));
-      } catch {
-        return this._json(res, 400, { error: { message: "Body must be JSON", type: "invalid_request_error" } });
-      }
-      const alias = String(body.model || "");
-      let endpoint;
-      try {
-        endpoint = await this.runtime.ensure(alias);
-      } catch (e) {
-        return this._json(res, 400, { error: { message: String(e.message), type: "invalid_request_error" } });
-      }
-      return this._proxy(endpoint, "/v1/chat/completions", raw, req, res);
+      return this._chat(req, res);
     }
 
     if (path.startsWith("/v1/")) {
@@ -154,7 +186,47 @@ class Gateway {
       });
     }
 
+    if (this.uiDir && req.method === "GET" && !path.startsWith("/core/")) {
+      return this._static(path, res);
+    }
+
     return this._json(res, 404, { error: { message: "Not found", type: "invalid_request_error" } });
+  }
+
+  async _chat(req, res) {
+    const raw = await this._readBody(req);
+    let body;
+    try {
+      body = JSON.parse(raw.toString("utf8"));
+    } catch {
+      return this._json(res, 400, { error: { message: "Body must be JSON", type: "invalid_request_error" } });
+    }
+    const alias = String(body.model || "");
+    let endpoint;
+    try {
+      endpoint = await this.runtime.ensure(alias);
+    } catch (e) {
+      return this._json(res, 400, { error: { message: String(e.message), type: "invalid_request_error" } });
+    }
+    return this._proxy(endpoint, "/v1/chat/completions", raw, req, res);
+  }
+
+  /** Serve the bundled desktop UI (localhost only; no traversal, no listing). */
+  _static(urlPath, res) {
+    const rel = urlPath === "/" ? "index.html" : urlPath.replace(/^\/+/, "");
+    const file = nodePath.normalize(nodePath.join(this.uiDir, rel));
+    if (!file.startsWith(nodePath.normalize(this.uiDir + nodePath.sep))) {
+      return this._json(res, 404, { error: { message: "Not found", type: "invalid_request_error" } });
+    }
+    fs.readFile(file, (err, data) => {
+      if (err) return this._json(res, 404, { error: { message: "Not found", type: "invalid_request_error" } });
+      res.writeHead(200, {
+        "content-type": MIME[nodePath.extname(file)] || "application/octet-stream",
+        "content-length": data.length,
+        "cache-control": "no-store",
+      });
+      res.end(data);
+    });
   }
 
   /**

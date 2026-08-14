@@ -15,6 +15,12 @@
   ],
   "scripts": {
     "core": "node core/server.js",
-    "test": "node --test \"core/test/*.test.js\""
-  }
+    "test": "node --test \"core/test/*.test.js\"",
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^43.4.0",
+    "playwright-core": "^1.62.1"
+  },
+  "main": "electron/main.js"
 }

@@ -189,11 +189,22 @@ OpenAI-compatible gateway (models + streaming chat/completions raw-proxy, `/core
 plane, keys-optional-then-required auth), scoped API keys hashed at rest. Integration test
 drives the full chain through a real spawned fake-`llama-server` child.
 
+**Desktop shell + UI shipped** (second increment, 17 passing tests): the gateway now serves
+the UI itself (`ui/` — plain web app, no framework), so the Electron shell (`electron/main.js`)
+is a thin sandboxed window onto `http://127.0.0.1:<port>` and the same UI runs in any browser
+for dev/headless (§9). Screens: §5 onboarding (hardware summary → one-click verified model
+download with live progress → chat), streaming chat with stop/abort, Local API panel (SDK
+snippet, key create/revoke with show-once secrets), Earn tab stubbed "soon" (M2). The UI chats
+over a control-plane lane (`/core/chat/completions`) so creating an external API key locks
+`/v1` without ever locking the app's own chat out. Verified end-to-end in real Chromium via
+`playwright-core`: onboarding → download (progress observed) → streamed reply → key lockdown.
+
 **Deliberately not done here:** real-binary end-to-end (this dev container's egress policy
 blocks GitHub release assets and Hugging Face). First task on a networked machine:
 `pin-model.js --write` for the dev model, drop in a `llama-server` build, and run the same
-chain against it. Desktop UI (Electron client), installer, and the §5 onboarding flow are the
-next M1 work items.
+chain against it. Remaining M1 items: runtime auto-provisioning (download llama.cpp build
+per-platform like a model package), Windows installer + auto-update channels via the
+Koinos-Node electron-builder/CI pipeline, first-run polish.
 
 ## 9. Decisions (resolved 2026-08-14)
 

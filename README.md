@@ -22,11 +22,21 @@ core/                 Koinos AI Core service (zero runtime dependencies, Node �
                       llama-server child process (16 tests)
 ```
 
+```
+ui/                   desktop UI — plain web app served by the gateway itself;
+                      runs identically in the Electron shell or a browser tab
+electron/main.js      thin sandboxed shell: boots Core in-process, opens a window
+                      onto the gateway (window state persisted, external links
+                      to system browser)
+```
+
 Run it:
 
 ```bash
-npm test          # no install needed — zero dependencies
-npm run core      # starts Core on http://127.0.0.1:41100
+npm test          # core tests need no dependencies; the browser test uses
+                  # playwright-core + Chromium and skips itself when absent
+npm run core      # headless: Core + UI on http://127.0.0.1:41100
+npm start         # desktop shell (requires `npm install` for electron)
 ```
 
 First run on a networked machine: `node core/scripts/pin-model.js smollm2-135m-instruct-q8_0@1 --write`

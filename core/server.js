@@ -53,12 +53,16 @@ async function createCore({ dataDir, port, llamaBin, onEvent } = {}) {
     makeRuntime: () => new LlamaCppRuntime({ binPath: bin, onEvent: events }),
   });
 
+  // The desktop UI is plain web content served by the gateway itself — the
+  // Electron shell just opens a window onto it, and a browser works too.
+  const uiDir = path.join(__dirname, "..", "ui");
   const gateway = new Gateway({
     port: port ?? Number(process.env.KAI_CORE_PORT || 41100),
     runtime,
     models,
     keys,
     onEvent: events,
+    uiDir: require("fs").existsSync(uiDir) ? uiDir : null,
     coreInfo: () => ({ version: VERSION, dataDir, hardware: hw }),
   });
 
