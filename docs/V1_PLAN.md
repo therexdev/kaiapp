@@ -235,6 +235,13 @@ on any `[dist]` commit — first artifacts built green from `3ea158b`. **Releasi
 command:** `git tag v0.1.0 && git push origin v0.1.0` → CI publishes the installers and the
 auto-update feed to a GitHub Release; every later tag auto-updates installed apps.
 
+**v0.1.0 RELEASED (2026-08-14):** https://github.com/therexdev/kaiapp/releases/tag/v0.1.0 —
+published by CI (a `[release]` commit makes the build jobs publish; tag pushes are branch-scoped
+in the dev environment). Shaken down on real hardware (Lenovo, Core Ultra 7 255H + Intel Arc
+140T): the field session produced the engine self-test, the CUDA→Vulkan→CPU→Ollama ladder,
+Ollama auto-start, MSVC-DLL PATH bridging, decoded NTSTATUS errors, core.log, warm start, and
+launch-at-login — all now shipped. Auto-update is live from this release forward.
+
 **Remaining M1 items:** owner smoke-test of the Windows installer artifact on real hardware,
 GPU-tier benchmarks (same harness, real GPU), first-run UX polish from that smoke test.
 
