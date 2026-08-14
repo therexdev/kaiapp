@@ -219,9 +219,18 @@ anytime with a `[pin-verify]` commit or workflow dispatch. Two upstream facts le
 encoded: llama.cpp publishes no Linux release binaries (Linux devs use `KAI_LLAMA_BIN`), and
 CUDA builds need the cudart companion archive (now an `extras` entry).
 
+**First §51 benchmarks recorded** (`docs/benchmarks/cpu-win32-2026-08-14.md`, CI Benchmark
+workflow — re-run anytime with a `[bench]` commit or dispatch): on a 4-thread CPU runner,
+SmolLM2-135M Q8 hit 128 tok/s, Qwen2.5-0.5B Q4 43.5, **Llama-3.2-1B Q4 33.1**, SmolLM2-1.7B
+Q4 23.5 — all above comfortable reading speed, with Llama-3.2-1B producing clean correct code
+and coherent chat. Working recommendation for owner review: **Llama-3.2-1B-class as "Koinos
+Fast" on the CPU tier** (quality per token clearly ahead of the sub-1B models at a still-fluid
+speed); "Smart"/"Code" aliases need the GPU tier — run the same harness on real GPU hardware
+before deciding. Candidate hashes are pinned in `core/bench/candidates.json`.
+
 **Remaining M1 items:** auto-update wiring (electron-updater channels), app icons/branding,
-first-run polish, the §51 model/runtime benchmarks (the Pin & Verify pattern extends naturally
-to a benchmark job), and a `v0.1.0` tag to produce the first Windows installer artifact.
+first-run polish, GPU-tier benchmarks on real hardware, and a `v0.1.0` tag to produce the
+first Windows installer artifact.
 
 ## 9. Decisions (resolved 2026-08-14)
 
