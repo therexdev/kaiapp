@@ -30,10 +30,10 @@ class RuntimeProvisioner {
   }
 
   /** Which build entry this machine gets, or throw with a clear reason. */
-  selectBuild(kind) {
+  selectBuild(kind, { cap } = {}) {
     const rt = this.catalog[kind];
     if (!rt) throw new Error(`Unknown runtime kind: ${kind}`);
-    const cap = this.hardware?.capabilities?.cudaEligible ? "cuda" : "cpu";
+    cap = cap || (this.hardware?.capabilities?.cudaEligible ? "cuda" : "cpu");
     const keys = [`${process.platform}-${process.arch}-${cap}`, `${process.platform}-${process.arch}-cpu`];
     for (const key of keys) {
       if (rt.builds[key]) return { key, version: rt.version, ...rt.builds[key] };
@@ -44,15 +44,15 @@ class RuntimeProvisioner {
     );
   }
 
-  installedBinPath(kind) {
-    const b = this.selectBuild(kind);
+  installedBinPath(kind, opts) {
+    const b = this.selectBuild(kind, opts);
     return path.join(this.runtimesDir, kind, b.version, b.key, ...b.binPath.split("/"));
   }
 
   /** Ensure the runtime binary exists locally; download + extract if not. */
-  async ensure(kind) {
+  async ensure(kind, opts = {}) {
     if (this._active) return this._active;
-    const run = this._ensure(kind);
+    const run = this._ensure(kind, opts);
     this._active = run;
     try {
       return await run;
@@ -61,9 +61,9 @@ class RuntimeProvisioner {
     }
   }
 
-  async _ensure(kind) {
-    const build = this.selectBuild(kind);
-    const bin = this.installedBinPath(kind);
+  async _ensure(kind, opts) {
+    const build = this.selectBuild(kind, opts);
+    const bin = path.join(this.runtimesDir, kind, build.version, build.key, ...build.binPath.split("/"));
     if (fs.existsSync(bin)) return bin;
 
     const installDir = path.dirname(path.join(this.runtimesDir, kind, build.version, build.key, "x"));

@@ -52,11 +52,8 @@ class RuntimeManager {
   async _load(alias) {
     const resolved = this.models.resolveAlias(alias);
     const modelPath = await this.models.ensurePackage(resolved.packageId);
-    // Engine is provisioned like a model: downloaded + hash-verified on first
-    // need, cached under the data dir after that.
-    const binPath = this.provisioner
-      ? await this.provisioner.ensure(resolved.runtime || "llamacpp")
-      : null;
+    const kind = resolved.runtime || "llamacpp";
+    const wantGpu = !!this.hardware?.capabilities?.cudaEligible;
 
     if (this.runtime) {
       this.onEvent({ type: "runtime:switching", from: this.activeAlias, to: alias });
@@ -65,15 +62,30 @@ class RuntimeManager {
       this.activeAlias = null;
     }
 
-    const runtime = this.makeRuntime(binPath);
-    // GPU offload only when detection said the machine is CUDA-eligible (§5:
-    // safe automatic defaults; Advanced overrides arrive with the desktop UI).
-    const gpuLayers = this.hardware?.capabilities?.cudaEligible ? 999 : 0;
-    await runtime.start({
-      modelPath,
-      contextSize: resolved.contextSize || 4096,
-      gpuLayers,
-    });
+    // GPU path first when eligible, but a GPU failure must never strand the
+    // user (§5): any provisioning or startup error falls back to the CPU
+    // build automatically. Without a provisioner (forced KAI_LLAMA_BIN) the
+    // single configured binary is all there is.
+    const boot = async (binPath, gpuLayers) => {
+      const runtime = this.makeRuntime(binPath);
+      await runtime.start({ modelPath, contextSize: resolved.contextSize || 4096, gpuLayers });
+      return runtime;
+    };
+
+    let runtime;
+    if (this.provisioner && wantGpu) {
+      try {
+        runtime = await boot(await this.provisioner.ensure(kind, { cap: "cuda" }), 999);
+      } catch (e) {
+        this.onEvent({ type: "runtime:fallback", from: "cuda", to: "cpu", reason: String(e.message) });
+        runtime = await boot(await this.provisioner.ensure(kind, { cap: "cpu" }), 0);
+      }
+    } else if (this.provisioner) {
+      runtime = await boot(await this.provisioner.ensure(kind, { cap: "cpu" }), 0);
+    } else {
+      runtime = await boot(null, wantGpu ? 999 : 0);
+    }
+
     this.runtime = runtime;
     this.activeAlias = alias;
     return runtime.endpoint;

@@ -150,3 +150,69 @@ test("provisioner: no matching build gives an actionable error", () => {
   assert.throws(() => prov.selectBuild("llamacpp"), /No llamacpp build for this machine/);
   assert.throws(() => prov.selectBuild("vllm"), /Unknown runtime kind/);
 });
+
+test("runtime manager falls back to CPU when the CUDA path fails", async () => {
+  const { RuntimeManager } = require("../lib/runtime-manager");
+  const { LlamaCppRuntime } = require("../lib/runtimes/llamacpp");
+  const { ModelManager } = require("../lib/model-manager");
+  const { JsonStore } = require("../lib/store");
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-fb-"));
+  const fakeJs = path.join(__dirname, "fixtures", "fake-llama-server.js");
+  // CPU zip contains a working fake llama-server; CUDA build URL is dead.
+  const cpuZip = makeZip([
+    { name: "llama-server", data: `#!/bin/sh\nexec node "${fakeJs}" "$@"\n`, mode: 0o755, deflate: true },
+  ]);
+  const sha = crypto.createHash("sha256").update(cpuZip).digest("hex");
+  const { server, port } = await serveMap({ "/cpu.zip": cpuZip });
+  const key = (cap) => `${process.platform}-${process.arch}-${cap}`;
+  const catalogPath = path.join(dir, "rt.json");
+  fs.writeFileSync(
+    catalogPath,
+    JSON.stringify({
+      llamacpp: {
+        version: "fb1",
+        builds: {
+          [key("cuda")]: { url: "http://127.0.0.1:1/dead.zip", sha256: "0".repeat(64), binPath: "llama-server" },
+          [key("cpu")]: { url: `http://127.0.0.1:${port}/cpu.zip`, sha256: sha, binPath: "llama-server" },
+        },
+      },
+    })
+  );
+
+  const mcat = path.join(dir, "models.json");
+  fs.writeFileSync(
+    mcat,
+    JSON.stringify({
+      aliases: { t: { label: "T", package: "t@1" } },
+      packages: { "t@1": { filename: "t.gguf", url: "http://127.0.0.1:1/x", sha256: "0".repeat(64) } },
+    })
+  );
+  fs.mkdirSync(path.join(dir, "models"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "models", "t.gguf"), "weights");
+
+  const events = [];
+  const prov = new RuntimeProvisioner({
+    catalogPath,
+    runtimesDir: path.join(dir, "runtimes"),
+    hardware: { capabilities: { cudaEligible: true } },
+    onEvent: () => {},
+  });
+  const rtPort = 41234;
+  const rm = new RuntimeManager({
+    models: new ModelManager({ catalogPath: mcat, modelsDir: path.join(dir, "models"), state: new JsonStore(path.join(dir, "s.json"), {}), onEvent: () => {} }),
+    hardware: { capabilities: { cudaEligible: true } },
+    provisioner: prov,
+    onEvent: (e) => events.push(e.type),
+    makeRuntime: (bin) => new LlamaCppRuntime({ binPath: bin, port: rtPort, onEvent: () => {} }),
+  });
+  try {
+    const endpoint = await rm.ensure("t");
+    assert.ok(endpoint.includes(String(rtPort)));
+    assert.ok(events.includes("runtime:fallback"), "fallback event emitted");
+    assert.equal(rm.status().runtime.running, true);
+  } finally {
+    rm.stop();
+    server.close();
+  }
+});

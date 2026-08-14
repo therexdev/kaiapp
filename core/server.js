@@ -27,8 +27,22 @@ const { Gateway } = require("./lib/gateway");
 const VERSION = require("./package.json").version;
 
 async function createCore({ dataDir, port, llamaBin, onEvent } = {}) {
-  const events = onEvent || ((e) => console.log(`[core] ${e.type}`, e.message ?? ""));
   dataDir = dataDir || process.env.KAI_CORE_DATA || path.join(os.homedir(), ".koinos-ai");
+  // Every event also lands in <dataDir>/core.log so packaged-app failures
+  // in the field are diagnosable ("Model load failed" has a paper trail).
+  const fsl = require("fs");
+  fsl.mkdirSync(dataDir, { recursive: true });
+  const logFile = path.join(dataDir, "core.log");
+  const sink = onEvent || ((e) => console.log(`[core] ${e.type}`, e.message ?? ""));
+  const events = (e) => {
+    try {
+      const detail = e.message ?? e.reason ?? e.error ?? e.endpoint ?? e.pct ?? "";
+      fsl.appendFileSync(logFile, `${new Date().toISOString()} ${e.type} ${detail}\n`);
+    } catch {
+      /* logging must never break the app */
+    }
+    sink(e);
+  };
 
   const settings = new JsonStore(path.join(dataDir, "settings.json"), {});
   const state = new JsonStore(path.join(dataDir, "state.json"), {});
