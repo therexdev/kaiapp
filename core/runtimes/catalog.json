@@ -11,8 +11,8 @@
       },
       "win32-x64-vulkan": {
         "url": "https://github.com/ggml-org/llama.cpp/releases/download/b10423/llama-b10423-bin-win-vulkan-x64.zip",
-        "sha256": "PENDING_FIRST_FETCH",
-        "sizeBytes": null,
+        "sha256": "510447fb021c80a264b2181c885b5f2ce9cc5b66c65d447cd1f9ce7ba81dc222",
+        "sizeBytes": 34563676,
         "binPath": "llama-server.exe"
       },
       "win32-x64-cuda": {
