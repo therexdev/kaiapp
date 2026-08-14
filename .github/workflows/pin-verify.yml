@@ -43,14 +43,16 @@ jobs:
             exit 1
           }
 
-      - name: Pin dev model
+      - name: List candidate model repos (diagnostic, always runs)
         run: |
-          node core/scripts/pin-model.js smollm2-135m-instruct-q8_0@1 --write || {
-            echo "::error::Model pin failed — files in the HF repo are:"
-            curl -s "https://huggingface.co/api/models/HuggingFaceTB/SmolLM2-135M-Instruct-GGUF" \
-              | grep -o '"rfilename": *"[^"]*"'
-            exit 1
-          }
+          for r in bartowski/SmolLM2-135M-Instruct-GGUF HuggingFaceTB/SmolLM2-135M-Instruct-GGUF Qwen/Qwen2.5-0.5B-Instruct-GGUF; do
+            echo "== $r =="
+            resp=$(curl -s "https://huggingface.co/api/models/$r")
+            echo "$resp" | grep -o '"rfilename": *"[^"]*gguf"' || echo "  raw: $(echo "$resp" | head -c 300)"
+          done
+
+      - name: Pin dev model
+        run: node core/scripts/pin-model.js smollm2-135m-instruct-q8_0@1 --write
 
       - name: Real end-to-end (provision engine + model, stream a completion)
         run: node core/scripts/verify-e2e.js dev-tiny

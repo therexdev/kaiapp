@@ -10,12 +10,12 @@
   "packages": {
     "smollm2-135m-instruct-q8_0@1": {
       "filename": "smollm2-135m-instruct-q8_0.gguf",
-      "url": "https://huggingface.co/HuggingFaceTB/SmolLM2-135M-Instruct-GGUF/resolve/main/smollm2-135m-instruct-q8_0.gguf",
+      "url": "https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct-Q8_0.gguf",
       "sha256": "PENDING_FIRST_FETCH",
       "sizeBytes": null,
       "contextSize": 4096,
       "license": "apache-2.0",
-      "creator": "HuggingFaceTB",
+      "creator": "HuggingFaceTB (quantized by bartowski)",
       "runtime": "llamacpp"
     }
   }
