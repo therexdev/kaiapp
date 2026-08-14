@@ -31,7 +31,7 @@ jobs:
     # Installer builds are heavy: run on release tags (published to a GitHub
     # Release), on demand, or when a commit message opts in with [dist]
     # (artifacts only, nothing published).
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[dist]')
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[dist]') || contains(github.event.head_commit.message, '[release]')
     needs: test
     runs-on: windows-latest
     permissions:
@@ -43,7 +43,7 @@ jobs:
           node-version: 22
       - run: npm ci
       - name: Build NSIS installer + portable exe
-        run: npm run dist -- --win --publish ${{ startsWith(github.ref, 'refs/tags/v') && 'always' || 'never' }}
+        run: npm run dist -- --win --publish ${{ (startsWith(github.ref, 'refs/tags/v') || contains(github.event.head_commit.message, '[release]')) && 'always' || 'never' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/upload-artifact@v4
@@ -55,7 +55,7 @@ jobs:
           if-no-files-found: error
 
   build-linux:
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[dist]')
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[dist]') || contains(github.event.head_commit.message, '[release]')
     needs: test
     runs-on: ubuntu-latest
     permissions:
@@ -67,7 +67,7 @@ jobs:
           node-version: 22
       - run: npm ci
       - name: Build AppImage
-        run: npm run dist -- --linux --publish ${{ startsWith(github.ref, 'refs/tags/v') && 'always' || 'never' }}
+        run: npm run dist -- --linux --publish ${{ (startsWith(github.ref, 'refs/tags/v') || contains(github.event.head_commit.message, '[release]')) && 'always' || 'never' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/upload-artifact@v4
