@@ -62,6 +62,21 @@ async function start() {
   });
 
   await win.loadURL(`http://127.0.0.1:${port}/`);
+
+  // Auto-update (§34; M1 ships the stable channel only): silent download,
+  // install on quit — no interruptions mid-chat. Packaged builds only.
+  if (app.isPackaged) {
+    try {
+      const { autoUpdater } = require("electron-updater");
+      autoUpdater.autoDownload = true;
+      autoUpdater.autoInstallOnAppQuit = true;
+      const check = () => autoUpdater.checkForUpdates().catch(() => {});
+      check();
+      setInterval(check, 4 * 3600 * 1000);
+    } catch {
+      /* updater unavailable (e.g. unpacked build) — never block the app */
+    }
+  }
 }
 
 app.on("window-all-closed", () => app.quit());

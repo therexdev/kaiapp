@@ -17,7 +17,7 @@
     "core": "node core/server.js",
     "test": "node --test \"core/test/*.test.js\"",
     "start": "electron .",
-    "dist": "electron-builder --publish never"
+    "dist": "electron-builder"
   },
   "devDependencies": {
     "electron": "^43.4.0",
@@ -42,7 +42,8 @@
       "target": [
         "nsis",
         "portable"
-      ]
+      ],
+      "icon": "build/icon.ico"
     },
     "nsis": {
       "oneClick": true,
@@ -53,7 +54,18 @@
       "target": [
         "AppImage"
       ],
-      "category": "Utility"
-    }
+      "category": "Utility",
+      "icon": "build/icon.png"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "therexdev",
+        "repo": "kaiapp"
+      }
+    ]
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   }
 }
