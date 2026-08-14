@@ -2,7 +2,8 @@
 
 const fs = require("fs");
 const path = require("path");
-const crypto = require("crypto");
+
+const { downloadFile } = require("./download");
 
 /*
  * Model manager (spec §6/§27): capability aliases over versioned, immutable,
@@ -60,18 +61,6 @@ class ModelManager {
     return { status: "absent" };
   }
 
-  /** Verify a fully downloaded file against the catalog hash. */
-  async _verify(file, expectedSha256) {
-    const hash = crypto.createHash("sha256");
-    await new Promise((resolve, reject) => {
-      fs.createReadStream(file)
-        .on("data", (c) => hash.update(c))
-        .on("end", resolve)
-        .on("error", reject);
-    });
-    return hash.digest("hex") === String(expectedSha256).toLowerCase();
-  }
-
   /**
    * Ensure a package is present and verified; downloads (with resume) when
    * absent. Returns the on-disk path. Single-flight per Core instance.
@@ -92,51 +81,24 @@ class ModelManager {
     if (this._active) throw new Error(`Another download is in progress (${this._active.alias})`);
 
     fs.mkdirSync(this.modelsDir, { recursive: true });
-    const part = file + ".part";
     const controller = new AbortController();
     this._active = { alias: packageId, controller };
     this.state.set("modelDownload", { packageId, startedAt: new Date().toISOString() });
 
     try {
-      let from = 0;
-      if (fs.existsSync(part)) from = fs.statSync(part).size;
-      const headers = {};
-      if (from > 0) headers.range = `bytes=${from}-`;
-
-      const resp = await fetch(pkg.url, { headers, signal: controller.signal, redirect: "follow" });
-      // A server that ignores Range restarts the file — start the .part over.
-      const resumed = resp.status === 206;
-      if (!resp.ok && resp.status !== 206) throw new Error(`Download failed: HTTP ${resp.status}`);
-      if (!resumed && from > 0) {
-        fs.rmSync(part, { force: true });
-        from = 0;
-      }
-
-      const total = pkg.sizeBytes || Number(resp.headers.get("content-length") || 0) + from;
-      const out = fs.createWriteStream(part, { flags: resumed ? "a" : "w" });
-      let done = from;
       let lastPct = -1;
-      for await (const chunk of resp.body) {
-        out.write(chunk);
-        done += chunk.length;
-        const pct = total ? Math.floor((done / total) * 100) : null;
-        this._progress = { packageId, pct, done, total };
-        if (pct !== null && pct !== lastPct) {
-          lastPct = pct;
-          this.onEvent({ type: "model:download", packageId, pct, done, total });
-        }
-      }
-      await new Promise((resolve, reject) => out.end((e) => (e ? reject(e) : resolve())));
-
-      // §27: identity is the hash. Wrong hash = not this package; discard.
-      if (!(await this._verify(part, pkg.sha256))) {
-        fs.rmSync(part, { force: true });
-        throw new Error(
-          `Downloaded file failed SHA-256 verification for ${packageId} — discarded. ` +
-            "Retry; if it persists the catalog or mirror is wrong."
-        );
-      }
-      fs.renameSync(part, file);
+      await downloadFile(pkg.url, file, {
+        sha256: pkg.sha256,
+        sizeBytes: pkg.sizeBytes,
+        signal: controller.signal,
+        onProgress: ({ pct, done, total }) => {
+          this._progress = { packageId, pct, done, total };
+          if (pct !== null && pct !== lastPct) {
+            lastPct = pct;
+            this.onEvent({ type: "model:download", packageId, pct, done, total });
+          }
+        },
+      });
       this.onEvent({ type: "model:ready", packageId, path: file });
       return file;
     } finally {

@@ -8,10 +8,11 @@
  */
 
 class RuntimeManager {
-  constructor({ models, makeRuntime, hardware, onEvent }) {
+  constructor({ models, makeRuntime, hardware, provisioner, onEvent }) {
     this.models = models; // ModelManager
-    this.makeRuntime = makeRuntime; // () => runtime adapter instance
+    this.makeRuntime = makeRuntime; // (binPath|null) => runtime adapter instance
     this.hardware = hardware; // detection snapshot (may be null in tests)
+    this.provisioner = provisioner || null; // RuntimeProvisioner (null when a bin is forced)
     this.onEvent = onEvent || (() => {});
     this.runtime = null;
     this.activeAlias = null;
@@ -51,6 +52,11 @@ class RuntimeManager {
   async _load(alias) {
     const resolved = this.models.resolveAlias(alias);
     const modelPath = await this.models.ensurePackage(resolved.packageId);
+    // Engine is provisioned like a model: downloaded + hash-verified on first
+    // need, cached under the data dir after that.
+    const binPath = this.provisioner
+      ? await this.provisioner.ensure(resolved.runtime || "llamacpp")
+      : null;
 
     if (this.runtime) {
       this.onEvent({ type: "runtime:switching", from: this.activeAlias, to: alias });
@@ -59,7 +65,7 @@ class RuntimeManager {
       this.activeAlias = null;
     }
 
-    const runtime = this.makeRuntime();
+    const runtime = this.makeRuntime(binPath);
     // GPU offload only when detection said the machine is CUDA-eligible (§5:
     // safe automatic defaults; Advanced overrides arrive with the desktop UI).
     const gpuLayers = this.hardware?.capabilities?.cudaEligible ? 999 : 0;

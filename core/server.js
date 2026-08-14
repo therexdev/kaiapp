@@ -19,6 +19,7 @@ const { JsonStore } = require("./lib/store");
 const hardware = require("./lib/hardware");
 const { ApiKeys } = require("./lib/keys");
 const { ModelManager } = require("./lib/model-manager");
+const { RuntimeProvisioner } = require("./lib/runtime-provisioner");
 const { LlamaCppRuntime } = require("./lib/runtimes/llamacpp");
 const { RuntimeManager } = require("./lib/runtime-manager");
 const { Gateway } = require("./lib/gateway");
@@ -41,16 +42,24 @@ async function createCore({ dataDir, port, llamaBin, onEvent } = {}) {
     onEvent: events,
   });
 
-  const bin =
-    llamaBin ||
-    process.env.KAI_LLAMA_BIN ||
-    path.join(dataDir, "runtimes", "llamacpp", process.platform === "win32" ? "llama-server.exe" : "llama-server");
+  // KAI_LLAMA_BIN (or the llamaBin option) forces a specific binary and skips
+  // provisioning; otherwise the right build is fetched on first need.
+  const forcedBin = llamaBin || process.env.KAI_LLAMA_BIN || null;
+  const provisioner = forcedBin
+    ? null
+    : new RuntimeProvisioner({
+        catalogPath: path.join(__dirname, "runtimes", "catalog.json"),
+        runtimesDir: path.join(dataDir, "runtimes"),
+        hardware: hw,
+        onEvent: events,
+      });
 
   const runtime = new RuntimeManager({
     models,
     hardware: hw,
+    provisioner,
     onEvent: events,
-    makeRuntime: () => new LlamaCppRuntime({ binPath: bin, onEvent: events }),
+    makeRuntime: (binPath) => new LlamaCppRuntime({ binPath: binPath || forcedBin, onEvent: events }),
   });
 
   // The desktop UI is plain web content served by the gateway itself — the

@@ -53,6 +53,10 @@ async function refresh() {
     const { pct, done, total } = models.download;
     showProgress(pct, done, total);
     setStatus("busy", `Downloading model… ${pct ?? "?"}%`);
+  } else if (models.runtimeDownload) {
+    const { pct, done, total } = models.runtimeDownload;
+    showProgress(pct, done, total);
+    setStatus("busy", `Downloading engine… ${pct ?? "?"}%`);
   } else if (models.ensure?.state === "working") {
     showProgress(null);
     setStatus("busy", "Loading model…");

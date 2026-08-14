@@ -116,6 +116,7 @@ class Gateway {
         storage: this.models.storageUsage(),
         runtime: this.runtime.status(),
         download: this.models.downloadProgress(),
+        runtimeDownload: this.runtime.provisioner?.downloadProgress() ?? null,
         ensure: this._ensureJob
           ? { alias: this._ensureJob.alias, state: this._ensureJob.state, error: this._ensureJob.error }
           : null,

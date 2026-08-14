@@ -199,12 +199,21 @@ over a control-plane lane (`/core/chat/completions`) so creating an external API
 `/v1` without ever locking the app's own chat out. Verified end-to-end in real Chromium via
 `playwright-core`: onboarding → download (progress observed) → streamed reply → key lockdown.
 
-**Deliberately not done here:** real-binary end-to-end (this dev container's egress policy
-blocks GitHub release assets and Hugging Face). First task on a networked machine:
-`pin-model.js --write` for the dev model, drop in a `llama-server` build, and run the same
-chain against it. Remaining M1 items: runtime auto-provisioning (download llama.cpp build
-per-platform like a model package), Windows installer + auto-update channels via the
-Koinos-Node electron-builder/CI pipeline, first-run polish.
+**Runtime auto-provisioning + CI shipped** (third increment, 22 passing tests): the llama.cpp
+engine is now fetched per-platform exactly like a model package — versioned catalog
+(`core/runtimes/catalog.json`), sha256-pinned, fail-closed, resumable — via a shared
+`lib/download.js` and a zero-dependency zip extractor (`lib/zip.js`: store+deflate, unix modes
+preserved, zip-slip refused, zip64/encryption fail loudly). Onboarding's one click now covers
+model **and** engine ("Downloading engine…" progress in the UI); `KAI_LLAMA_BIN` still forces a
+local binary and skips provisioning. GitHub Actions CI runs the full suite (browser test
+included) on every push and builds the NSIS installer + portable exe (Windows) and AppImage
+(Linux) on tags/dispatch via electron-builder.
+
+**Needs a networked machine (once):** pin the dev model and the runtime builds —
+`pin-model.js … --write` and `pin-runtime.js llamacpp --all --write` (a 404 there means the
+release-asset name for that llama.cpp tag differs; fix the catalog URL and re-run) — then the
+real end-to-end. Remaining M1 items after that: auto-update wiring (electron-updater channels),
+app icons/branding, first-run polish, and the §51 model benchmarks.
 
 ## 9. Decisions (resolved 2026-08-14)
 

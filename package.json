@@ -16,11 +16,44 @@
   "scripts": {
     "core": "node core/server.js",
     "test": "node --test \"core/test/*.test.js\"",
-    "start": "electron ."
+    "start": "electron .",
+    "dist": "electron-builder --publish never"
   },
   "devDependencies": {
     "electron": "^43.4.0",
+    "electron-builder": "^26.15.3",
     "playwright-core": "^1.62.1"
   },
-  "main": "electron/main.js"
+  "main": "electron/main.js",
+  "build": {
+    "appId": "io.koinosai.desktop",
+    "productName": "Koinos AI",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "electron/**",
+      "core/**",
+      "ui/**",
+      "!core/test/**",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "deleteAppDataOnUninstall": false
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Utility"
+    }
+  }
 }
