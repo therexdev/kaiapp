@@ -209,11 +209,19 @@ local binary and skips provisioning. GitHub Actions CI runs the full suite (brow
 included) on every push and builds the NSIS installer + portable exe (Windows) and AppImage
 (Linux) on tags/dispatch via electron-builder.
 
-**Needs a networked machine (once):** pin the dev model and the runtime builds —
-`pin-model.js … --write` and `pin-runtime.js llamacpp --all --write` (a 404 there means the
-release-asset name for that llama.cpp tag differs; fix the catalog URL and re-run) — then the
-real end-to-end. Remaining M1 items after that: auto-update wiring (electron-updater channels),
-app icons/branding, first-run polish, and the §51 model benchmarks.
+**Real end-to-end PASSED on Windows (2026-08-14, CI run 3 of Pin & Verify):** the workflow
+pinned every artifact (llama.cpp b10423 win-cpu 18.5 MB, win-cuda 250.8 MB + cudart 391.4 MB,
+SmolLM2-135M-Instruct Q8 144.8 MB from bartowski's GGUF repo) and then, from a bare runner,
+the shipping code path provisioned engine + model, booted llama-server, and streamed a real
+completion through the gateway — the model answered: *"I'm a helpful AI assistant named
+SmolLM, trained by Hugging Face."* CI committed the verified pins back (`82439cc`). Trigger
+anytime with a `[pin-verify]` commit or workflow dispatch. Two upstream facts learned and
+encoded: llama.cpp publishes no Linux release binaries (Linux devs use `KAI_LLAMA_BIN`), and
+CUDA builds need the cudart companion archive (now an `extras` entry).
+
+**Remaining M1 items:** auto-update wiring (electron-updater channels), app icons/branding,
+first-run polish, the §51 model/runtime benchmarks (the Pin & Verify pattern extends naturally
+to a benchmark job), and a `v0.1.0` tag to produce the first Windows installer artifact.
 
 ## 9. Decisions (resolved 2026-08-14)
 
