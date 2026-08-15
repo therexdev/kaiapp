@@ -292,3 +292,50 @@ test("overflow failure tells both truths: the local reason AND the network reaso
     srv.close();
   }
 });
+
+test("multi-class network: overflow asks for the exact missing model; explicit network picks route auto", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-route-"));
+  const seen = [];
+  const srv = http.createServer((req, res) => {
+    let raw = "";
+    req.on("data", (c) => (raw += c));
+    req.on("end", () => {
+      res.writeHead(200, { "content-type": "application/json" });
+      if (req.url.startsWith("/consume/")) {
+        const b = JSON.parse(raw);
+        seen.push(b.model);
+        return res.end(
+          JSON.stringify({
+            object: "chat.completion",
+            model: "koinos-network",
+            servedModel: b.model === "auto" ? "gemma3-12b" : b.model,
+            choices: [{ index: 0, message: { role: "assistant", content: "net" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 },
+          })
+        );
+      }
+      res.end("{}");
+    });
+  });
+  const port = await new Promise((r) => srv.listen(0, "127.0.0.1", function () { r(this.address().port); }));
+  const { core, post } = await bootCore(dir);
+  try {
+    await post("/core/earn/wallet", { password: "correct horse" });
+    await post("/core/earn/config", { schedulerUrl: `http://127.0.0.1:${port}` });
+    await post("/core/network/config", { privacyMode: "local-first" });
+
+    // §7 overflow of a specific missing model asks the network for THAT model.
+    const over = await post("/v1/chat/completions", { model: "koinos-ultra", messages: [{ role: "user", content: "hi" }] });
+    assert.strictEqual(over.status, 200);
+    assert.strictEqual(seen[0], "koinos-ultra", "overflow carries the exact requested class");
+
+    // An explicit network pick routes "auto" and relays which class served.
+    const auto = await post("/v1/chat/completions", { model: "koinos-network", messages: [{ role: "user", content: "hi" }] });
+    assert.strictEqual(auto.status, 200);
+    assert.strictEqual(seen[1], "auto", "network picker requests auto routing");
+    assert.strictEqual(auto.json.servedModel, "gemma3-12b", "the serving class is disclosed");
+  } finally {
+    await core.stop();
+    srv.close();
+  }
+});

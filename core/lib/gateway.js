@@ -565,9 +565,14 @@ class Gateway {
     if (!schedulerUrl) {
       return fail(400, "No scheduler URL configured for network requests", "invalid_request_error");
     }
+    // Multi-class serving: an explicit network pick routes "auto" (the
+    // best class online); a §7 overflow asks for exactly the model that
+    // couldn't serve locally — same quality, different machine, honestly
+    // refused if no provider holds it.
+    const netModel = overflowFrom || (body.model && body.model !== "koinos-network" ? String(body.model) : "auto");
     // §7 context: refuse an oversized prompt BEFORE buying tokens — the
     // provider would fail on it and the failure would still be billed.
-    const netCtx = (await this._networkRates(schedulerUrl)).ctxTokens;
+    const netCtx = (await this._networkRates(schedulerUrl, netModel)).ctxTokens;
     const estTok = estimateMessageTokens(body.messages);
     if (estTok > netCtx - CTX_HEADROOM_TOKENS) {
       return fail(400, `Prompt is ~${estTok} tokens — larger than the network's ${netCtx}-token class. Shorten the prompt.`, "invalid_request_error");
@@ -589,7 +594,7 @@ class Gateway {
       upstream = await fetch(`${schedulerUrl.replace(/\/$/, "")}/consume/chat/completions`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ messages: body.messages, ...ident }),
+        body: JSON.stringify({ messages: body.messages, model: netModel, ...ident }),
         signal: AbortSignal.timeout(95000),
       });
     } catch (e) {
@@ -606,7 +611,7 @@ class Gateway {
     if (meterKey && j.usage) {
       // Estimated at published network rates regardless of any free
       // allowance — the budget is the developer's conservative guardrail.
-      const rates = await this._networkRates(schedulerUrl);
+      const rates = await this._networkRates(schedulerUrl, j.servedModel || netModel);
       const inTok = Number(j.usage.prompt_tokens || 0);
       const outTok = Number(j.usage.completion_tokens || 0);
       this.keys.recordUsage(meterKey.id, {
@@ -622,7 +627,7 @@ class Gateway {
       // SSE shim so streaming clients (the app UI) work unchanged.
       res.writeHead(200, { "content-type": "text/event-stream" });
       const content = j.choices?.[0]?.message?.content ?? "";
-      res.write(`data: ${JSON.stringify({ object: "chat.completion.chunk", model: "koinos-network", choices: [{ index: 0, delta: { content } }] })}\n\n`);
+      res.write(`data: ${JSON.stringify({ object: "chat.completion.chunk", model: "koinos-network", servedModel: j.servedModel || null, choices: [{ index: 0, delta: { content } }] })}\n\n`);
       res.write("data: [DONE]\n\n");
       return res.end();
     }
@@ -631,25 +636,31 @@ class Gateway {
 
   /** Published network token rates + class context, cached for an hour;
    *  safe defaults. */
-  async _networkRates(schedulerUrl) {
+  async _networkRates(schedulerUrl, model) {
     // Keyed by URL: switching schedulers must not serve the old one's rates.
-    if (this._rates && this._rates.url === schedulerUrl && Date.now() - this._rates.at < 3600000) return this._rates.v;
-    let v = { inMicroPerM: 100000, outMicroPerM: 400000, ctxTokens: 4096 }; // Koinos Fast defaults
-    try {
-      const r = await fetch(`${schedulerUrl.replace(/\/$/, "")}/pricing`, { signal: AbortSignal.timeout(4000) });
-      const j = await r.json();
-      const m = j?.models && Object.values(j.models)[0];
-      if (m?.usdPerMInputTokens != null) {
-        v = {
-          inMicroPerM: Math.round(m.usdPerMInputTokens * 1e6),
-          outMicroPerM: Math.round(m.usdPerMOutputTokens * 1e6),
-          ctxTokens: Number(m.ctxTokens) || 4096,
-        };
+    // The full per-class table is cached; the caller picks a class ("auto"
+    // and unknown classes estimate at the first/Fast class).
+    if (!(this._rates && this._rates.url === schedulerUrl && Date.now() - this._rates.at < 3600000)) {
+      let models = null;
+      try {
+        const r = await fetch(`${schedulerUrl.replace(/\/$/, "")}/pricing`, { signal: AbortSignal.timeout(4000) });
+        const j = await r.json();
+        if (j?.models) models = j.models;
+      } catch {
+        /* defaults hold */
       }
-    } catch {
-      /* defaults hold */
+      this._rates = { url: schedulerUrl, at: Date.now(), models };
     }
-    this._rates = { at: Date.now(), url: schedulerUrl, v };
+    let v = { inMicroPerM: 100000, outMicroPerM: 400000, ctxTokens: 4096 }; // Koinos Fast defaults
+    const table = this._rates.models;
+    const m = table && ((model && table[model]) || Object.values(table)[0]);
+    if (m?.usdPerMInputTokens != null) {
+      v = {
+        inMicroPerM: Math.round(m.usdPerMInputTokens * 1e6),
+        outMicroPerM: Math.round(m.usdPerMOutputTokens * 1e6),
+        ctxTokens: Number(m.ctxTokens) || 4096,
+      };
+    }
     return v;
   }
 

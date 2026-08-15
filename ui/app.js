@@ -149,7 +149,7 @@ async function updateModelPick(aliases) {
     // The network serves the Fast class today regardless of what any
     // provider runs locally — the label says so, so nobody expects their
     // local Gemma pick to travel (field confusion).
-    ...(networkEligible ? [{ v: "koinos-network", label: "Koinos Network · Fast" }] : []),
+    ...(networkEligible ? [{ v: "koinos-network", label: "Koinos Network · Auto" }] : []),
   ];
   pickable = want;
   const sig = want.map((w) => w.v).join(",");
@@ -378,9 +378,11 @@ async function send(replayText) {
     }
     let acc = "";
     let servedBy = null;
+    let servedModel = null;
     let lastPaint = 0;
-    for await (const { content, model } of sseDeltas(resp.body)) {
+    for await (const { content, model, served } of sseDeltas(resp.body)) {
       if (model) servedBy = model;
+      if (served) servedModel = served;
       if (content) {
         acc += content;
         // Markdown live during the stream, throttled so re-rendering
@@ -399,11 +401,19 @@ async function send(replayText) {
     // §29 transparency: a Local-First answer that overflowed to the network
     // says so on the message itself — silence would hide that the prompt
     // left the machine.
-    if (servedBy === "koinos-network" && chatModel !== "koinos-network") {
+    if (servedBy === "koinos-network") {
+      // §29 both directions: overflow discloses leaving the machine, and an
+      // explicit network chat names which class actually answered.
+      const cls = servedModel ? cmpLabelOf(servedModel) : null;
       const tag = document.createElement("div");
       tag.className = "route-tag";
-      tag.textContent = "answered via Koinos Network — local model was unavailable";
-      bubble.appendChild(tag);
+      tag.textContent =
+        chatModel !== "koinos-network"
+          ? `answered via Koinos Network${cls ? ` (${cls})` : ""} — local model was unavailable`
+          : cls
+            ? `served by the network's ${cls}`
+            : "";
+      if (tag.textContent) bubble.appendChild(tag);
     }
     state.history.push({ role: "assistant", content: acc });
     saveCurrentChat();
@@ -443,7 +453,7 @@ async function* sseDeltas(body) {
         if (data === "[DONE]") return;
         try {
           const j = JSON.parse(data);
-          yield { content: j.choices?.[0]?.delta?.content || "", model: j.model || null };
+          yield { content: j.choices?.[0]?.delta?.content || "", model: j.model || null, served: j.servedModel || null };
         } catch {
           /* keep-alive or non-JSON frame */
         }
