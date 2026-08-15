@@ -67,6 +67,7 @@
     ]
   },
   "dependencies": {
-    "electron-updater": "^6.8.9"
+    "electron-updater": "^6.8.9",
+    "koilib": "^9.3.0"
   }
 }
