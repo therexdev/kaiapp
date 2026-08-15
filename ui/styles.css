@@ -169,3 +169,8 @@ h2 { font-size: 1.05em; }
   border: 1px solid var(--border); border-radius: 8px; padding: 9px 12px; font: inherit;
 }
 .form-row input:focus { outline: 1px solid var(--violet); }
+
+#model-pick, #privacy-pick {
+  background: var(--bg-input); color: var(--text); border: 1px solid var(--border);
+  border-radius: 8px; padding: 9px 10px; font: inherit; max-width: 200px;
+}

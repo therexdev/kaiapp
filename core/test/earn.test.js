@@ -63,7 +63,7 @@ test("earn loop: register -> job -> local inference -> signed receipt -> epoch r
   const runtime = { ensure: async () => `http://127.0.0.1:${llmPort}`, servedModelName: () => null };
 
   const events = [];
-  const sched = new Scheduler({ dataDir: path.join(dir, "sched"), onEvent: (e) => events.push(e.type) });
+  const sched = new Scheduler({ dataDir: path.join(dir, "sched"), epoch: 1, onEvent: (e) => events.push(e.type) });
   const schedPort = await sched.listen();
 
   const worker = new Worker({

@@ -22,8 +22,9 @@ const LONG_POLL_MS = 20000;
 const CHALLENGE_RATE = 0.2; // §17 sampling
 
 class Scheduler {
-  constructor({ dataDir, operatorSecret, chain, onEvent } = {}) {
+  constructor({ dataDir, operatorSecret, chain, epoch, onEvent } = {}) {
     this.chain = chain || null; // ChainClient — when set, epoch roots anchor on-chain (§20)
+    this._consumers = new Map(); // consume jobId -> resolve(output) (§46.5 relay)
     this.dataDir = dataDir || path.join(process.cwd(), "scheduler-data");
     this.operatorSecret = operatorSecret || null;
     this.onEvent = onEvent || (() => {});
@@ -32,7 +33,9 @@ class Scheduler {
     this.pending = new Map(); // jobId -> job (dispatched, awaiting result)
     this.waiters = []; // long-poll resolvers
     this.receipts = []; // current epoch receipts
-    this.epoch = 1;
+    // Unix-minute epochs: unique + monotonic across restarts so on-chain
+    // submit_root can never collide. Tests may pin an explicit epoch.
+    this.epoch = epoch ?? Math.floor(Date.now() / 60000);
     this.server = null;
   }
 
@@ -43,6 +46,7 @@ class Scheduler {
       type: job.type || "inference-eval",
       model: job.model || "dev-tiny",
       prompt: String(job.prompt || ""),
+      messages: Array.isArray(job.messages) ? job.messages : null,
       // Hidden challenge (§17): expected output known only to the scheduler.
       challenge: job.expected ? { expected: job.expected } : null,
       createdAt: new Date().toISOString(),
@@ -142,8 +146,40 @@ class Scheduler {
       };
       this.receipts.push(receipt);
       this._persist();
+      const waiter = this._consumers.get(b.jobId);
+      if (waiter) {
+        this._consumers.delete(b.jobId);
+        waiter(String(b.output ?? ""));
+      }
       this.onEvent({ type: honest ? "scheduler:receipt" : "scheduler:challenge-failed", worker: w.address });
       return this._json(res, 200, { ok: true, accepted: honest });
+    }
+
+    // §46.5 network consume: relay an OpenAI-shaped chat request to a
+    // provider (V1 §13: traffic proxies through project infrastructure).
+    // The provider earns a verified receipt for serving it (§16 real demand).
+    if (url.pathname === "/consume/chat/completions" && req.method === "POST") {
+      const b = await this._body(req);
+      if (!Array.isArray(b.messages) || b.messages.length === 0) {
+        return this._json(res, 400, { error: { message: "messages required", type: "invalid_request_error" } });
+      }
+      const job = this.enqueue({ type: "chat", messages: b.messages });
+      const output = await new Promise((resolve) => {
+        this._consumers.set(job.id, resolve);
+        const t = setTimeout(() => {
+          this._consumers.delete(job.id);
+          resolve(null);
+        }, 90000);
+        t.unref?.();
+      });
+      if (output === null) {
+        return this._json(res, 504, { error: { message: "no provider answered in time", type: "server_error" } });
+      }
+      return this._json(res, 200, {
+        object: "chat.completion",
+        model: "koinos-network",
+        choices: [{ index: 0, message: { role: "assistant", content: output }, finish_reason: "stop" }],
+      });
     }
 
     if (url.pathname === "/operator/enqueue" && req.method === "POST") {
@@ -167,6 +203,21 @@ class Scheduler {
         }
       }
       return this._json(res, 200, { ok: true, ...summary });
+    }
+
+    if (url.pathname === "/operator/epochs" && req.method === "GET") {
+      if (this.operatorSecret && req.headers["x-operator-secret"] !== this.operatorSecret) {
+        return this._json(res, 401, { ok: false, error: "operator secret required" });
+      }
+      const out = [];
+      try {
+        for (const f of fs.readdirSync(this.dataDir)) {
+          if (!f.startsWith("epoch-")) continue;
+          const j = JSON.parse(fs.readFileSync(path.join(this.dataDir, f), "utf8"));
+          if (j.summary) out.push(j.summary);
+        }
+      } catch { /* no data yet */ }
+      return this._json(res, 200, { ok: true, epochs: out });
     }
 
     if (url.pathname === "/epoch/current" && req.method === "GET") {
@@ -205,7 +256,7 @@ class Scheduler {
     const root = merkleRoot(leaves).toString("hex");
     const summary = { epoch: this.epoch, root, totals, claims, receipts: this.receipts.length };
     this._persist(summary);
-    this.epoch += 1;
+    this.epoch = Math.max(this.epoch + 1, Math.floor(Date.now() / 60000));
     this.receipts = [];
     this.onEvent({ type: "scheduler:epoch-closed", ...summary });
     return summary;
@@ -283,7 +334,32 @@ function merkleProof(leaves, index) {
   return proof;
 }
 
-module.exports = { Scheduler, merkleRoot, merkleProof };
+/** Protocol-funded eval jobs (§16): the scheduler feeds itself so connected
+ *  workers always have work; some carry hidden known-answer challenges. */
+const SEED_PROMPTS = [
+  { prompt: "What is 2+2? Reply with just the number." },
+  { prompt: "Name the capital of France in one word." },
+  { prompt: "Write one short sentence about local AI." },
+  { prompt: "What is 2+2? Reply with just the number.", expected: "4" },
+  { prompt: "Name the capital of France in one word.", expected: "Paris" },
+];
+
+function startAutoOps(sched, { seedMs = 45000, epochMs = 15 * 60 * 1000 } = {}) {
+  const seed = setInterval(() => {
+    const active = [...sched.workers.values()].filter((w) => Date.now() - w.lastSeen < 90000);
+    if (active.length === 0) return;
+    if (sched.queue.length + sched.pending.size >= 3) return;
+    sched.enqueue(SEED_PROMPTS[Math.floor(Math.random() * SEED_PROMPTS.length)]);
+  }, seedMs);
+  const close = setInterval(() => {
+    if (sched.receipts.length > 0) sched.closeEpoch();
+  }, epochMs);
+  seed.unref?.();
+  close.unref?.();
+  return { seed, close };
+}
+
+module.exports = { Scheduler, merkleRoot, merkleProof, startAutoOps };
 
 if (require.main === module) {
   const s = new Scheduler({

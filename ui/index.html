@@ -53,6 +53,7 @@
       <section id="view-chat" class="view" hidden>
         <div id="messages" aria-live="polite"></div>
         <form id="composer">
+          <select id="model-pick" title="Where this chat runs"></select>
           <textarea id="input" rows="1" placeholder="Message your local AI…" autocomplete="off"></textarea>
           <button id="btn-send" class="primary" type="submit">Send</button>
           <button id="btn-stop" type="button" hidden>Stop</button>
@@ -106,6 +107,16 @@
           <h1>Your local OpenAI-compatible API</h1>
           <p class="lede">Point any OpenAI SDK or tool at this machine. No cloud, no per-token bill.</p>
           <pre id="api-snippet" class="snippet"></pre>
+          <h2>Network &amp; privacy</h2>
+          <p class="hint">Local-Only is the default: requests can never leave this machine. Local-First and Network unlock the “Koinos Network” model — requests overflow to network providers through the scheduler.</p>
+          <div class="form-row">
+            <select id="privacy-pick">
+              <option value="local-only">Local-Only (nothing leaves this machine)</option>
+              <option value="local-first">Local-First (network allowed when chosen)</option>
+              <option value="network">Network</option>
+            </select>
+          </div>
+
           <div class="keys-head">
             <h2>API keys</h2>
             <button id="btn-new-key" class="primary small">Create key</button>

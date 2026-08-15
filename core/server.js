@@ -124,6 +124,23 @@ async function createCore({ dataDir, port, llamaBin, onEvent } = {}) {
     },
   };
 
+  // §7 routing policy (M3): privacy mode gates all network consumption.
+  // local-only is the default — nothing leaves the machine unless chosen.
+  const network = {
+    status: () => ({
+      privacyMode: settings.get("network.privacyMode", "local-only"),
+      schedulerUrl: settings.get("earn.schedulerUrl", process.env.KAI_SCHEDULER_URL || ""),
+    }),
+    configure: ({ privacyMode }) => {
+      const m = String(privacyMode || "");
+      if (!["local-only", "local-first", "network"].includes(m)) {
+        throw new Error("privacyMode must be local-only, local-first, or network");
+      }
+      settings.set("network.privacyMode", m);
+      return network.status();
+    },
+  };
+
   // The desktop UI is plain web content served by the gateway itself — the
   // Electron shell just opens a window onto it, and a browser works too.
   const uiDir = path.join(__dirname, "..", "ui");
@@ -135,6 +152,7 @@ async function createCore({ dataDir, port, llamaBin, onEvent } = {}) {
     onEvent: events,
     uiDir: require("fs").existsSync(uiDir) ? uiDir : null,
     earn,
+    network,
     coreInfo: () => ({ version: VERSION, dataDir, hardware: hw }),
   });
 

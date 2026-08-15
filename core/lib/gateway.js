@@ -32,8 +32,9 @@ const MIME = {
 const MAX_BODY_BYTES = 10 * 1024 * 1024;
 
 class Gateway {
-  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, earn, onEvent }) {
+  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, earn, network, onEvent }) {
     this.earn = earn || null; // earn controller (M2); null in minimal tests
+    this.network = network || null; // §7 routing policy controller (M3)
     this.host = host;
     this.port = port;
     this.runtime = runtime; // RuntimeManager
@@ -156,6 +157,19 @@ class Gateway {
     if (path.startsWith("/core/keys/") && req.method === "DELETE") {
       return this._json(res, 200, { ok: true, ...this.keys.revoke(path.split("/")[3]) });
     }
+    // ----- network policy control plane (M3 §7) -----
+    if (this.network && path === "/core/network" && req.method === "GET") {
+      return this._json(res, 200, { ok: true, ...this.network.status() });
+    }
+    if (this.network && path === "/core/network/config" && req.method === "POST") {
+      try {
+        const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+        return this._json(res, 200, { ok: true, ...this.network.configure(body) });
+      } catch (e) {
+        return this._json(res, 400, { ok: false, error: String(e.message) });
+      }
+    }
+
     // ----- earn control plane (M2 §5.7) -----
     if (this.earn && path.startsWith("/core/earn")) {
       try {
@@ -195,14 +209,14 @@ class Gateway {
     // ----- OpenAI-compatible surface -----
     if (path === "/v1/models" && req.method === "GET") {
       if (!this._authed(req, res)) return;
-      return this._json(res, 200, {
-        object: "list",
-        data: this.models.aliases().map((a) => ({
-          id: a.alias,
-          object: "model",
-          owned_by: "koinos-ai",
-        })),
-      });
+      const data = this.models.aliases().map((a) => ({ id: a.alias, object: "model", owned_by: "koinos-ai" }));
+      if (this.network) {
+        const { privacyMode, schedulerUrl } = this.network.status();
+        if (privacyMode !== "local-only" && schedulerUrl) {
+          data.push({ id: "koinos-network", object: "model", owned_by: "koinos-network" });
+        }
+      }
+      return this._json(res, 200, { object: "list", data });
     }
 
     if (path === "/v1/chat/completions" && req.method === "POST") {
@@ -233,6 +247,47 @@ class Gateway {
       return this._json(res, 400, { error: { message: "Body must be JSON", type: "invalid_request_error" } });
     }
     const alias = String(body.model || "");
+
+    // §46.5 network consume. Privacy policy is checked FIRST (§7): in
+    // Local-Only mode this request never leaves the machine — the refusal
+    // happens before any network code path is reached.
+    if (alias === "koinos-network") {
+      if (!this.network) {
+        return this._json(res, 400, { error: { message: "Network models are not configured", type: "invalid_request_error" } });
+      }
+      const { privacyMode, schedulerUrl } = this.network.status();
+      if (privacyMode === "local-only") {
+        return this._json(res, 400, {
+          error: { message: "Privacy mode is Local-Only: network requests are disabled on this machine", type: "invalid_request_error" },
+        });
+      }
+      if (!schedulerUrl) {
+        return this._json(res, 400, { error: { message: "No scheduler URL configured for network requests", type: "invalid_request_error" } });
+      }
+      let upstream;
+      try {
+        upstream = await fetch(`${schedulerUrl.replace(/\/$/, "")}/consume/chat/completions`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ messages: body.messages }),
+          signal: AbortSignal.timeout(95000),
+        });
+      } catch (e) {
+        return this._json(res, 502, { error: { message: `Network request failed: ${e.message}`, type: "server_error" } });
+      }
+      const j = await upstream.json().catch(() => null);
+      if (!upstream.ok || !j) return this._json(res, upstream.status || 502, j || { error: { message: "bad upstream reply", type: "server_error" } });
+      if (body.stream) {
+        // SSE shim so streaming clients (the app UI) work unchanged.
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        const content = j.choices?.[0]?.message?.content ?? "";
+        res.write(`data: ${JSON.stringify({ object: "chat.completion.chunk", model: alias, choices: [{ index: 0, delta: { content } }] })}\n\n`);
+        res.write("data: [DONE]\n\n");
+        return res.end();
+      }
+      return this._json(res, 200, j);
+    }
+
     let endpoint;
     try {
       endpoint = await this.runtime.ensure(alias);

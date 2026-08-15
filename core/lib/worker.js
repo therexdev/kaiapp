@@ -20,6 +20,7 @@ class Worker {
     this.token = null;
     this.stats = { jobsDone: 0, receiptsAccepted: 0, since: null };
     this._loop = null;
+    this._pollAbort = null; // aborts the idle long-poll so stop is immediate (§10)
   }
 
   status() {
@@ -49,6 +50,7 @@ class Worker {
 
   async stop() {
     this.running = false;
+    this._pollAbort?.abort();
     this.onEvent({ type: "worker:stopped" });
     await this._loop?.catch(() => {});
     this._loop = null;
@@ -58,12 +60,15 @@ class Worker {
     while (this.running) {
       let job = null;
       try {
+        this._pollAbort = new AbortController();
         const r = await fetch(`${this.schedulerUrl}/worker/next-job?token=${this.token}`, {
-          signal: AbortSignal.timeout(30000),
+          signal: AbortSignal.any([AbortSignal.timeout(30000), this._pollAbort.signal]),
         });
         if (r.status === 200) job = (await r.json()).job;
       } catch {
-        // Scheduler unreachable: back off, keep trying while enabled.
+        // Stop aborts the idle poll; anything else is the scheduler being
+        // unreachable — back off, keep trying while enabled.
+        if (!this.running) break;
         await new Promise((res) => setTimeout(res, 3000));
         continue;
       }
@@ -90,17 +95,23 @@ class Worker {
 
   /** §31: only approved profiles execute — anything else is refused. */
   async _execute(job) {
-    if (job.type !== "inference-eval") throw new Error(`Unapproved job type: ${job.type}`);
+    if (job.type !== "inference-eval" && job.type !== "chat") {
+      throw new Error(`Unapproved job type: ${job.type}`);
+    }
     const endpoint = await this.runtime.ensure(job.model);
     const served = this.runtime.servedModelName?.() ?? job.model;
+    // chat = a relayed consumer request (§46.5); eval = protocol-funded (§16).
+    const messages = job.type === "chat" && Array.isArray(job.messages)
+      ? job.messages
+      : [{ role: "user", content: job.prompt }];
     const r = await fetch(`${endpoint}/v1/chat/completions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         model: served,
-        temperature: 0,
-        max_tokens: 128,
-        messages: [{ role: "user", content: job.prompt }],
+        temperature: job.type === "chat" ? 0.7 : 0,
+        max_tokens: job.type === "chat" ? 512 : 128,
+        messages,
       }),
     });
     if (!r.ok) throw new Error(`inference failed: HTTP ${r.status}`);

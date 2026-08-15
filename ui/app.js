@@ -71,6 +71,7 @@ async function refresh() {
     setStatus("busy", "Setup needed");
   }
   $("status-model").textContent = entry ? entry.label : "No models in catalog";
+  updateModelPick(models.aliases);
 
   // Route: onboarding until the model file is on disk.
   showView(state.ready ? state.view : "onboarding", { navOnly: state.ready });
@@ -78,6 +79,34 @@ async function refresh() {
 
   const busy = models.download || models.ensure?.state === "working";
   schedule(busy ? 500 : 4000);
+}
+
+let networkEligible = false;
+async function updateModelPick(aliases) {
+  try {
+    const n = await coreGet("/core/network");
+    networkEligible = n.privacyMode !== "local-only" && !!n.schedulerUrl;
+    if (document.getElementById("privacy-pick") && document.activeElement?.id !== "privacy-pick") {
+      $("privacy-pick").value = n.privacyMode;
+    }
+  } catch { networkEligible = false; }
+  const pick = $("model-pick");
+  const want = [
+    ...aliases.map((al) => ({ v: al.alias, label: "Local · " + al.label.split(" (")[0] })),
+    ...(networkEligible ? [{ v: "koinos-network", label: "Koinos Network" }] : []),
+  ];
+  const sig = want.map((w) => w.v).join(",");
+  if (pick.dataset.sig !== sig) {
+    const prev = pick.value;
+    pick.innerHTML = "";
+    for (const w of want) {
+      const o = document.createElement("option");
+      o.value = w.v; o.textContent = w.label;
+      pick.appendChild(o);
+    }
+    pick.dataset.sig = sig;
+    if ([...pick.options].some((o) => o.value === prev)) pick.value = prev;
+  }
 }
 
 function setStatus(kind, text) {
@@ -191,6 +220,7 @@ function addMsg(role, text) {
 async function send() {
   const text = $("input").value.trim();
   if (!text || state.chatting || !state.alias) return;
+  const chatModel = $("model-pick").value || state.alias;
   $("input").value = "";
   state.history.push({ role: "user", content: text });
   addMsg("user", text);
@@ -207,7 +237,7 @@ async function send() {
       method: "POST",
       headers: { "content-type": "application/json" },
       signal: state.abort.signal,
-      body: JSON.stringify({ model: state.alias, stream: true, messages: state.history }),
+      body: JSON.stringify({ model: chatModel, stream: true, messages: state.history }),
     });
     if (!resp.ok) {
       const j = await resp.json().catch(() => null);
@@ -407,4 +437,14 @@ $("btn-earn-toggle").addEventListener("click", async () => {
     }
     renderEarn();
   } catch { /* error shown */ }
+});
+
+
+$("privacy-pick").addEventListener("change", async () => {
+  await fetch("/core/network/config", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ privacyMode: $("privacy-pick").value }),
+  });
+  refresh();
 });
