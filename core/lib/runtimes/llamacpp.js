@@ -70,6 +70,62 @@ function ensureCrtBeside(binPath, srcDirOverride) {
   }
 }
 
+/*
+ * llama.cpp CPU-variant strip (field finding, Arrow Lake): official builds
+ * bundle ggml-cpu ISA variants (haswell, icelake, sapphirerapids, …) and
+ * probe them at startup. On very new hybrid CPUs a mis-scored probe can
+ * access-violate inside a variant DLL — in the CPU AND Vulkan builds alike,
+ * while CI's older server CPUs never see it. The registry only probes DLLs
+ * that exist, so deleting the exotic variants and keeping a conservative
+ * baseline turns a crashing engine into a working (slightly slower) one.
+ */
+const SAFE_CPU_VARIANTS = /^ggml-cpu(-(x64|sse42|haswell))?\.dll$/i;
+function stripCpuVariants(binPath) {
+  const fs = require("fs");
+  const dir = path.dirname(binPath);
+  let removed = 0;
+  let kept = 0;
+  try {
+    for (const f of fs.readdirSync(dir)) {
+      if (!/^ggml-cpu.*\.dll$/i.test(f)) continue;
+      if (SAFE_CPU_VARIANTS.test(f)) {
+        kept++;
+        continue;
+      }
+      try {
+        fs.rmSync(path.join(dir, f));
+        removed++;
+      } catch { /* locked — self-test will tell */ }
+    }
+  } catch {
+    /* dir unreadable — nothing to strip */
+  }
+  // Only claim a strip happened if a baseline remains to serve — deleting
+  // every variant would turn a crash into a missing-backend error.
+  return removed > 0 && kept > 0;
+}
+
+/** What actually sits beside the engine binary — decisive when remote
+ *  debugging an extraction or dispatch failure. Names+KB, capped. */
+function dirSnapshot(binPath) {
+  const fs = require("fs");
+  try {
+    return fs
+      .readdirSync(path.dirname(binPath))
+      .map((f) => {
+        try {
+          return `${f}:${Math.round(fs.statSync(path.join(path.dirname(binPath), f)).size / 1024)}k`;
+        } catch {
+          return f;
+        }
+      })
+      .join(" ")
+      .slice(0, 500);
+  } catch {
+    return "(unreadable)";
+  }
+}
+
 function removeCrtBeside(binPath) {
   if (process.platform !== "win32") return false;
   const fs = require("fs");
@@ -252,4 +308,4 @@ class LlamaCppRuntime {
   }
 }
 
-module.exports = { LlamaCppRuntime, selfTest, ensureCrtBeside, removeCrtBeside };
+module.exports = { LlamaCppRuntime, selfTest, ensureCrtBeside, removeCrtBeside, stripCpuVariants, dirSnapshot };

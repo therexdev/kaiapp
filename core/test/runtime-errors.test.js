@@ -141,3 +141,70 @@ test("a build that crashes self-test is remembered and skipped — not re-crashe
   mgr2.stop();
   mgr3.stop();
 });
+
+test("heal ladder: a crashing self-test triggers one fresh re-extract, then serves", async () => {
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-heal-"));
+  const bin = path.join(dir, "llama-server");
+  // A binary that dies with no output — the field crash, portably.
+  fs.writeFileSync(bin, "#!/bin/sh\nexit 139\n");
+  fs.chmodSync(bin, 0o755);
+
+  const events = [];
+  const started = [];
+  const mgr = new RuntimeManager({
+    models: {
+      resolveAlias: () => ({ packageId: "p@1", contextSize: 4096, sizeBytes: 1e9 }),
+      ensurePackage: async () => "/fake/model.gguf",
+    },
+    hardware: null,
+    provisioner: {
+      ensure: async () => bin,
+      // The "fresh extract" replaces the broken binary with a working one.
+      reprovision: async () => {
+        fs.writeFileSync(bin, "#!/bin/sh\necho b10423\n");
+        fs.chmodSync(bin, 0o755);
+        return bin;
+      },
+      selectBuild: () => ({}),
+    },
+    makeRuntime: () => ({
+      start: async () => (started.push(1), { endpoint: "http://127.0.0.1:1" }),
+      stop() {},
+      status: () => ({ running: true }),
+    }),
+    onEvent: (e) => events.push(e),
+    state: null,
+  });
+  // hardware null but provisioner set → ladder runs with caps [cpu]
+  await mgr.ensure("koinos-fast");
+  assert.strictEqual(started.length, 1, "model serves after the heal");
+  assert.ok(events.some((e) => e.type === "runtime:heal" && e.step === "reprovision"), "the heal is announced");
+  assert.strictEqual(mgr.status().lastLoadError, null);
+  mgr.stop();
+});
+
+test("ggml-cpu variant strip keeps the conservative baseline and drops the exotic ones", () => {
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+  const { stripCpuVariants } = require("../lib/runtimes/llamacpp");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-strip-"));
+  const bin = path.join(dir, "llama-server.exe");
+  for (const f of [
+    "llama-server.exe", "ggml.dll", "ggml-base.dll", "llama.dll",
+    "ggml-cpu.dll", "ggml-cpu-haswell.dll", "ggml-cpu-icelake.dll",
+    "ggml-cpu-skylakex.dll", "ggml-cpu-sapphirerapids.dll", "ggml-cpu-alderlake.dll",
+  ]) fs.writeFileSync(path.join(dir, f), "x");
+
+  assert.strictEqual(stripCpuVariants(bin), true, "strip reports work done");
+  const left = fs.readdirSync(dir).sort();
+  assert.deepStrictEqual(
+    left,
+    ["ggml-base.dll", "ggml-cpu-haswell.dll", "ggml-cpu.dll", "ggml.dll", "llama-server.exe", "llama.dll"].sort(),
+    "baseline variants and non-variant DLLs survive; exotic ISA variants are gone"
+  );
+  assert.strictEqual(stripCpuVariants(bin), false, "nothing left to strip → no false claim of healing");
+});

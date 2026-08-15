@@ -112,6 +112,16 @@ class RuntimeProvisioner {
     this.onEvent({ type: "runtime:provisioned", kind, bin });
     return bin;
   }
+
+  /** Blow away an installed build and download+extract it fresh. The heal
+   *  path for a corrupted extraction (§5: never strand the user). */
+  async reprovision(kind, opts = {}) {
+    const build = this.selectBuild(kind, opts);
+    const installDir = path.dirname(path.join(this.runtimesDir, kind, build.version, build.key, "x"));
+    fs.rmSync(installDir, { recursive: true, force: true });
+    this.onEvent({ type: "runtime:reprovision", kind, build: build.key, version: build.version });
+    return this.ensure(kind, opts);
+  }
 }
 
 module.exports = { RuntimeProvisioner };

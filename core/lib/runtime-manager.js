@@ -116,10 +116,41 @@ class RuntimeManager {
     // eligible -> CPU build -> external fallback runtime (Ollama) when one
     // is present. Every provisioned binary passes a self-test before boot,
     // so a build this machine can't run fails fast and quietly moves on.
-    const { selfTest } = require("./runtimes/llamacpp");
-    const boot = async (binPath, gpuLayers) => {
+    const { selfTest, stripCpuVariants, dirSnapshot } = require("./runtimes/llamacpp");
+    // Self-test with an escalating heal ladder: the plain test (which
+    // internally heals a stale CRT), then a fresh re-extract of the build
+    // (corrupted extraction), then stripping exotic ggml-cpu variant DLLs
+    // (dispatch crashes on very new CPUs). Whatever still fails reports
+    // with a directory snapshot — remote debugging needs to see the disk.
+    this._healed = this._healed || new Set();
+    const testHard = async (binPath, cap) => {
+      try {
+        return selfTest(binPath);
+      } catch (e1) {
+        if (typeof this.provisioner?.reprovision !== "function" || this._healed.has(binPath)) {
+          throw new Error(`${e1.message} [beside: ${dirSnapshot(binPath)}]`);
+        }
+        this._healed.add(binPath);
+        this.onEvent({ type: "runtime:heal", step: "reprovision", binPath, reason: String(e1.message) });
+        await this.provisioner.reprovision(kind, { cap });
+        try {
+          return selfTest(binPath);
+        } catch (e2) {
+          if (stripCpuVariants(binPath)) {
+            this.onEvent({ type: "runtime:heal", step: "strip-cpu-variants", binPath });
+            try {
+              return selfTest(binPath);
+            } catch (e3) {
+              throw new Error(`${e3.message} [after reprovision + variant strip; beside: ${dirSnapshot(binPath)}]`);
+            }
+          }
+          throw new Error(`${e2.message} [after reprovision; beside: ${dirSnapshot(binPath)}]`);
+        }
+      }
+    };
+    const boot = async (binPath, gpuLayers, cap) => {
       if (binPath && !this._testedBins.has(binPath)) {
-        selfTest(binPath);
+        await testHard(binPath, cap);
         this._testedBins.add(binPath);
       }
       const runtime = this.makeRuntime(binPath);
@@ -152,7 +183,7 @@ class RuntimeManager {
             rungErrors.push(`[${cap}] skipped — crashed self-test on this machine before (${badReason})`);
             continue;
           }
-          return await boot(binPath, cap === "cpu" ? 0 : 999);
+          return await boot(binPath, cap === "cpu" ? 0 : 999, cap);
         } catch (e) {
           rungErrors.push(`[${cap}] ${String(e.message)}`);
           if (this.state && /self-test failed/i.test(String(e.message)) && cap !== "cpu") {
