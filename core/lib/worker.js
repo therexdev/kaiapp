@@ -115,7 +115,26 @@ class Worker {
       }, 25000);
       try {
         const t0 = Date.now();
-        const { output, usage } = await this._execute(job);
+        // Post generation deltas as they're produced — the consumer's
+        // words appear live instead of arriving as one block. Batched
+        // (~4/s) so a fast model doesn't turn into HTTP spam.
+        let deltaBuf = "";
+        let lastPost = 0;
+        const postDelta = (text, force) => {
+          deltaBuf += text;
+          const now = Date.now();
+          if (!deltaBuf || (!force && now - lastPost < 250)) return;
+          const chunk = deltaBuf;
+          deltaBuf = "";
+          lastPost = now;
+          fetch(`${this.schedulerUrl}/worker/chunk?token=${this.token}`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ jobId: job.id, delta: chunk }),
+          }).catch(() => {});
+        };
+        const { output, usage } = await this._execute(job, (d) => postDelta(d, false));
+        postDelta("", true); // flush the tail
         // §51 CU groundwork: generation speed is the capability signal —
         // completion tokens over wall time (prefill is folded in; the
         // scheduler treats it as provider-reported, like usage).
@@ -143,7 +162,7 @@ class Worker {
   }
 
   /** §31: only approved profiles execute — anything else is refused. */
-  async _execute(job) {
+  async _execute(job, onDelta) {
     if (job.type !== "inference-eval" && job.type !== "chat") {
       throw new Error(`Unapproved job type: ${job.type}`);
     }
@@ -161,17 +180,61 @@ class Worker {
         temperature: job.type === "chat" ? 0.7 : 0,
         max_tokens: job.type === "chat" ? 512 : 128,
         messages,
+        // Stream from the engine so deltas can flow to the consumer live;
+        // usage arrives in the final chunk (llama.cpp and Ollama both send
+        // it) with a character-estimate fallback.
+        stream: true,
       }),
     });
     if (!r.ok) throw new Error(`inference failed: HTTP ${r.status}`);
-    const j = await r.json();
-    // Usage travels with the result — the network meters AI tokens (§14),
-    // exactly the counts an OpenAI-style runtime already reports.
+    // Engines that ignore stream:true answer plain JSON — take it whole.
+    if (!(r.headers.get("content-type") || "").includes("text/event-stream")) {
+      const j = await r.json();
+      const whole = j.choices?.[0]?.message?.content ?? "";
+      if (whole) onDelta?.(whole);
+      return {
+        output: whole,
+        usage: {
+          prompt_tokens: Number(j.usage?.prompt_tokens ?? 0),
+          completion_tokens: Number(j.usage?.completion_tokens ?? 0),
+        },
+      };
+    }
+    let output = "";
+    let usage = null;
+    let buf = "";
+    const decoder = new TextDecoder();
+    for await (const chunk of r.body) {
+      buf += decoder.decode(chunk, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf("\n\n")) >= 0) {
+        const frame = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        for (const line of frame.split("\n")) {
+          if (!line.startsWith("data: ")) continue;
+          const data = line.slice(6).trim();
+          if (data === "[DONE]") continue;
+          try {
+            const j = JSON.parse(data);
+            const d = j.choices?.[0]?.delta?.content || "";
+            if (d) {
+              output += d;
+              onDelta?.(d);
+            }
+            if (j.usage) usage = j.usage;
+          } catch {
+            /* keep-alive frame */
+          }
+        }
+      }
+    }
+    // Usage travels with the result — the network meters AI tokens (§14).
+    // Engines that omit stream usage get a conservative char/4 estimate.
     return {
-      output: j.choices?.[0]?.message?.content ?? "",
+      output,
       usage: {
-        prompt_tokens: Number(j.usage?.prompt_tokens ?? 0),
-        completion_tokens: Number(j.usage?.completion_tokens ?? 0),
+        prompt_tokens: Number(usage?.prompt_tokens ?? Math.ceil(JSON.stringify(messages).length / 4)),
+        completion_tokens: Number(usage?.completion_tokens ?? Math.ceil(output.length / 4)),
       },
     };
   }

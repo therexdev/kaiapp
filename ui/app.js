@@ -138,25 +138,41 @@ async function updateModelPick(aliases) {
     }
   } catch { networkEligible = false; }
   const pick = $("model-pick");
-  // The picker offers only models that are ON THIS MACHINE (plus the
-  // network) — selecting a catalog model that isn't downloaded would
-  // silently pull gigabytes mid-send. Downloads live in the Models view.
-  // Dev pipeline models stay hidden unless actually in use.
+  // Source + model, two boxes (field request): pick WHERE it runs, then
+  // WHICH model. Local lists only models on this machine; Network lists
+  // what live providers actually serve right now, plus Auto.
+  state.localModels = aliases
+    .filter((al) => al.status === "ready" && (!al.dev || al.alias === state.alias))
+    .map((al) => ({ v: al.alias, label: al.label.split(" (")[0] }));
+  state.aliasLabels = Object.fromEntries(aliases.map((al) => [al.alias, al.label.split(" (")[0]]));
+  const src = $("src-pick");
+  const srcSig = `local${networkEligible ? ",network" : ""}`;
+  if (src.dataset.sig !== srcSig) {
+    const prevSrc = src.value;
+    src.innerHTML = "";
+    for (const [v, label] of [["local", "This machine"], ...(networkEligible ? [["network", "Koinos Network"]] : [])]) {
+      const o = document.createElement("option");
+      o.value = v; o.textContent = label;
+      src.appendChild(o);
+    }
+    if ([...src.options].some((o) => o.value === prevSrc)) src.value = prevSrc;
+    src.dataset.sig = srcSig;
+  }
+  // pickable keeps the flat shape Compare/Tasks/Docs already use.
   const want = [
-    ...aliases
-      .filter((al) => al.status === "ready" && (!al.dev || al.alias === state.alias))
-      .map((al) => ({ v: al.alias, label: "Local · " + al.label.split(" (")[0] })),
-    // The network serves the Fast class today regardless of what any
-    // provider runs locally — the label says so, so nobody expects their
-    // local Gemma pick to travel (field confusion).
+    ...state.localModels.map((m) => ({ v: m.v, label: "Local · " + m.label })),
     ...(networkEligible ? [{ v: "koinos-network", label: "Koinos Network · Auto" }] : []),
   ];
   pickable = want;
-  const sig = want.map((w) => w.v).join(",");
+  if (src.value === "network") {
+    await fillNetworkModelPick();
+    return;
+  }
+  const sig = "local:" + state.localModels.map((w) => w.v).join(",");
   if (pick.dataset.sig !== sig) {
     const prev = pick.value;
     pick.innerHTML = "";
-    for (const w of want) {
+    for (const w of state.localModels) {
       const o = document.createElement("option");
       o.value = w.v; o.textContent = w.label;
       pick.appendChild(o);
@@ -168,6 +184,48 @@ async function updateModelPick(aliases) {
     if ([...pick.options].some((o) => o.value === prev)) pick.value = prev;
     else if (state.alias && [...pick.options].some((o) => o.value === state.alias)) pick.value = state.alias;
   }
+}
+
+/** Network source: the model box lists what live providers serve NOW. */
+async function fillNetworkModelPick() {
+  const pick = $("model-pick");
+  let net = { workersOnline: 0, models: [] };
+  try {
+    net = await coreGet("/core/network/models");
+  } catch { /* offline — Auto only */ }
+  const options = [
+    { v: "auto", label: `Auto — best online${net.workersOnline ? ` (${net.workersOnline} computer${net.workersOnline === 1 ? "" : "s"})` : ""}` },
+    ...net.models.map((m) => ({
+      v: m.model,
+      label: `${state.aliasLabels?.[m.model] || m.model} · ×${m.providers}`,
+    })),
+  ];
+  const sig = "net:" + options.map((o) => o.v).join(",");
+  if (pick.dataset.sig !== sig) {
+    const prev = pick.value;
+    pick.innerHTML = "";
+    for (const w of options) {
+      const o = document.createElement("option");
+      o.value = w.v; o.textContent = w.label;
+      pick.appendChild(o);
+    }
+    pick.dataset.sig = sig;
+    if ([...pick.options].some((o) => o.value === prev)) pick.value = prev;
+  }
+}
+
+$("src-pick").addEventListener("change", () => {
+  $("model-pick").dataset.sig = ""; // force refill for the new source
+  coreGet("/core/models").then((m) => updateModelPick(m.aliases)).catch(() => {});
+});
+
+/** What send() should request, composed from the two boxes. */
+function composedChatModel() {
+  if ($("src-pick").value === "network") {
+    const m = $("model-pick").value;
+    return m === "auto" || !m ? "koinos-network" : `koinos-network:${m}`;
+  }
+  return $("model-pick").value || state.alias;
 }
 
 function setStatus(kind, text) {
@@ -339,7 +397,7 @@ $("messages").addEventListener("click", async (e) => {
 async function send(replayText) {
   const text = replayText ?? $("input").value.trim();
   if (!text || state.chatting || !state.alias) return;
-  const chatModel = $("model-pick").value || state.alias;
+  const chatModel = composedChatModel();
   if (!replayText) $("input").value = "";
   // An attached file becomes its own user turn right before the question,
   // so it round-trips through history and re-renders faithfully.
@@ -404,15 +462,14 @@ async function send(replayText) {
     if (servedBy === "koinos-network") {
       // §29 both directions: overflow discloses leaving the machine, and an
       // explicit network chat names which class actually answered.
-      const cls = servedModel ? cmpLabelOf(servedModel) : null;
+      const cls = servedModel ? state.aliasLabels?.[servedModel] || servedModel : null;
       const tag = document.createElement("div");
       tag.className = "route-tag";
-      tag.textContent =
-        chatModel !== "koinos-network"
-          ? `answered via Koinos Network${cls ? ` (${cls})` : ""} — local model was unavailable`
-          : cls
-            ? `served by the network's ${cls}`
-            : "";
+      tag.textContent = !chatModel.startsWith("koinos-network")
+        ? `answered via Koinos Network${cls ? ` (${cls})` : ""} — local model was unavailable`
+        : cls
+          ? `served by the network's ${cls}`
+          : "";
       if (tag.textContent) bubble.appendChild(tag);
     }
     state.history.push({ role: "assistant", content: acc });

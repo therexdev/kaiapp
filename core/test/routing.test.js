@@ -339,3 +339,49 @@ test("multi-class network: overflow asks for the exact missing model; explicit n
     srv.close();
   }
 });
+
+test("live network streaming: scheduler SSE relays through the gateway as it arrives, class pinned", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-route-"));
+  const seen = [];
+  const srv = http.createServer((req, res) => {
+    let raw = "";
+    req.on("data", (c) => (raw += c));
+    req.on("end", () => {
+      if (!req.url.startsWith("/consume/")) {
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end("{}");
+      }
+      const b = JSON.parse(raw);
+      seen.push({ model: b.model, stream: b.stream });
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.write(`data: ${JSON.stringify({ accepted: true, model: b.model })}\n\n`);
+      res.write(`data: ${JSON.stringify({ delta: "streamed " })}\n\n`);
+      res.write(`data: ${JSON.stringify({ delta: "words" })}\n\n`);
+      res.write(`data: ${JSON.stringify({ done: true, servedModel: b.model, usage: { prompt_tokens: 2, completion_tokens: 2 } })}\n\n`);
+      res.write("data: [DONE]\n\n");
+      res.end();
+    });
+  });
+  const port = await new Promise((r) => srv.listen(0, "127.0.0.1", function () { r(this.address().port); }));
+  const { core, base, post } = await bootCore(dir);
+  try {
+    await post("/core/earn/wallet", { password: "correct horse" });
+    await post("/core/earn/config", { schedulerUrl: `http://127.0.0.1:${port}` });
+    await post("/core/network/config", { privacyMode: "local-first" });
+
+    const resp = await fetch(`${base}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: "koinos-network:gemma3-12b", stream: true, messages: [{ role: "user", content: "hi" }] }),
+    });
+    assert.ok((resp.headers.get("content-type") || "").includes("text/event-stream"), "gateway answers SSE");
+    const body = await resp.text();
+    assert.match(body, /"content":"streamed "/, "first delta relayed");
+    assert.match(body, /"content":"words"/, "second delta relayed");
+    assert.match(body, /"servedModel":"gemma3-12b"/, "serving class disclosed in chunks");
+    assert.ok(seen.every((s) => s.model === "gemma3-12b" && s.stream === true), "explicit class + stream reach the scheduler");
+  } finally {
+    await core.stop();
+    srv.close();
+  }
+});

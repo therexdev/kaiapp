@@ -63,6 +63,16 @@ const server = http.createServer((req, res) => {
             i += 1;
           } else {
             clearInterval(tick);
+            // Real llama-server sends usage in the final streamed chunk —
+            // the worker's metering reads it from here.
+            res.write(
+              `data: ${JSON.stringify({
+                object: "chat.completion.chunk",
+                model,
+                choices: [{ index: 0, delta: {} }],
+                usage: { prompt_tokens: 1, completion_tokens: 4, total_tokens: 5 },
+              })}\n\n`
+            );
             res.write("data: [DONE]\n\n");
             res.end();
           }

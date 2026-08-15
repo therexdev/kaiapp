@@ -322,6 +322,23 @@ class Gateway {
       }
     }
 
+    // What the network can serve right now — feeds the chat picker's
+    // network model list. Cached briefly; empty when unreachable.
+    if (this.network && path === "/core/network/models" && req.method === "GET") {
+      const { schedulerUrl } = this.network.status();
+      if (!schedulerUrl) return this._json(res, 200, { ok: true, workersOnline: 0, models: [] });
+      if (!this._netModels || Date.now() - this._netModels.at > 20000) {
+        let v = { workersOnline: 0, models: [] };
+        try {
+          const r = await fetch(`${schedulerUrl.replace(/\/$/, "")}/network/models`, { signal: AbortSignal.timeout(4000) });
+          const j = await r.json();
+          if (j?.ok) v = { workersOnline: j.workersOnline, models: j.models || [] };
+        } catch { /* offline — empty list */ }
+        this._netModels = { at: Date.now(), v };
+      }
+      return this._json(res, 200, { ok: true, ...this._netModels.v });
+    }
+
     if (this.network && path === "/core/network" && req.method === "GET") {
       return this._json(res, 200, { ok: true, ...this.network.status() });
     }
@@ -454,7 +471,7 @@ class Gateway {
     // §46.5 network consume. Privacy policy is checked FIRST (§7): in
     // Local-Only mode this request never leaves the machine — the refusal
     // happens before any network code path is reached.
-    if (alias === "koinos-network") {
+    if (alias === "koinos-network" || alias.startsWith("koinos-network:")) {
       if (!this.network) {
         return this._json(res, 400, { error: { message: "Network models are not configured", type: "invalid_request_error" } });
       }
@@ -565,11 +582,14 @@ class Gateway {
     if (!schedulerUrl) {
       return fail(400, "No scheduler URL configured for network requests", "invalid_request_error");
     }
-    // Multi-class serving: an explicit network pick routes "auto" (the
-    // best class online); a §7 overflow asks for exactly the model that
-    // couldn't serve locally — same quality, different machine, honestly
-    // refused if no provider holds it.
-    const netModel = overflowFrom || (body.model && body.model !== "koinos-network" ? String(body.model) : "auto");
+    // Multi-class serving: "koinos-network" routes "auto" (the best class
+    // online), "koinos-network:CLASS" pins an explicit class, and a §7
+    // overflow asks for exactly the model that couldn't serve locally —
+    // same quality, different machine, honestly refused if nobody holds it.
+    const picked = String(body.model || "");
+    const netModel =
+      overflowFrom ||
+      (picked.startsWith("koinos-network:") ? picked.slice("koinos-network:".length) : picked && picked !== "koinos-network" ? picked : "auto");
     // §7 context: refuse an oversized prompt BEFORE buying tokens — the
     // provider would fail on it and the failure would still be billed.
     const netCtx = (await this._networkRates(schedulerUrl, netModel)).ctxTokens;
@@ -594,11 +614,62 @@ class Gateway {
       upstream = await fetch(`${schedulerUrl.replace(/\/$/, "")}/consume/chat/completions`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ messages: body.messages, model: netModel, ...ident }),
-        signal: AbortSignal.timeout(95000),
+        body: JSON.stringify({ messages: body.messages, model: netModel, stream: !!body.stream, ...ident }),
+        signal: AbortSignal.timeout(190000), // streamed big-class answers run minutes
       });
     } catch (e) {
       return fail(502, `Network request failed: ${e.message}`, "server_error");
+    }
+    // Live network stream: relay scheduler SSE frames as OpenAI-style
+    // chunks so the UI paints words as the provider generates them.
+    if (body.stream && (upstream.headers.get("content-type") || "").includes("text/event-stream") && upstream.ok) {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      let servedModel = null;
+      let finalUsage = null;
+      let buf = "";
+      const decoder = new TextDecoder();
+      const emit = (payload) => res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      for await (const chunk of upstream.body) {
+        buf += decoder.decode(chunk, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf("\n\n")) >= 0) {
+          const frame = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          for (const line of frame.split("\n")) {
+            if (!line.startsWith("data: ")) continue;
+            const data = line.slice(6).trim();
+            if (data === "[DONE]") continue;
+            let f;
+            try {
+              f = JSON.parse(data);
+            } catch {
+              continue;
+            }
+            if (f.model && !servedModel) servedModel = f.model;
+            if (f.servedModel) servedModel = f.servedModel;
+            if (f.delta) {
+              emit({ object: "chat.completion.chunk", model: "koinos-network", servedModel, choices: [{ index: 0, delta: { content: f.delta } }] });
+            }
+            if (f.error) {
+              emit({ object: "chat.completion.chunk", model: "koinos-network", choices: [{ index: 0, delta: { content: `\n[network: ${f.error}]` } }] });
+            }
+            if (f.done) finalUsage = f.usage || null;
+          }
+        }
+      }
+      if (meterKey && finalUsage) {
+        const rates = await this._networkRates(schedulerUrl, servedModel || netModel);
+        const inTok = Number(finalUsage.prompt_tokens || 0);
+        const outTok = Number(finalUsage.completion_tokens || 0);
+        this.keys.recordUsage(meterKey.id, {
+          inTok,
+          outTok,
+          costMicro: Math.ceil((inTok * rates.inMicroPerM + outTok * rates.outMicroPerM) / 1e6),
+        });
+      }
+      emit({ object: "chat.completion.chunk", model: "koinos-network", servedModel, choices: [{ index: 0, delta: {} }] });
+      res.write("data: [DONE]\n\n");
+      return res.end();
     }
     const j = await upstream.json().catch(() => null);
     // Scheduler-side failures ("no providers online") go through fail() too —
