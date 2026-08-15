@@ -106,6 +106,13 @@ class Worker {
       }
       if (!job || !this.running) continue;
 
+      // Heartbeat while executing: generation and model switching take
+      // minutes, no polls happen meanwhile, and a silent worker used to
+      // fall off the scheduler's live roster mid-job — consumers saw
+      // "no providers" precisely when the provider was working hardest.
+      const beat = setInterval(() => {
+        fetch(`${this.schedulerUrl}/worker/heartbeat?token=${this.token}`, { method: "POST" }).catch(() => {});
+      }, 25000);
       try {
         const t0 = Date.now();
         const { output, usage } = await this._execute(job);
@@ -129,6 +136,8 @@ class Worker {
       } catch (e) {
         this.stats.lastError = `last job failed: ${String(e.message)}`;
         this.onEvent({ type: "worker:job-failed", jobId: job.id, message: String(e.message) });
+      } finally {
+        clearInterval(beat);
       }
     }
   }
