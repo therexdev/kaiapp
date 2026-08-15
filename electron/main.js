@@ -8,7 +8,7 @@
  */
 
 const path = require("path");
-const { app, BrowserWindow, shell } = require("electron");
+const { app, BrowserWindow, dialog, shell } = require("electron");
 
 const { createCore } = require("../core/server");
 const { JsonStore } = require("../core/lib/store");
@@ -73,8 +73,9 @@ async function start() {
     }
   }
 
-  // Auto-update (§34; M1 ships the stable channel only): silent download,
-  // install on quit — no interruptions mid-chat. Packaged builds only.
+  // Auto-update (§34; M1 ships the stable channel only): download in the
+  // background, then ask — one dialog when the update is ready to apply,
+  // with "Later" falling back to install-on-quit. Packaged builds only.
   if (app.isPackaged) {
     try {
       const { autoUpdater } = require("electron-updater");
@@ -83,6 +84,21 @@ async function start() {
       autoUpdater.allowPrerelease = true;
       autoUpdater.autoDownload = true;
       autoUpdater.autoInstallOnAppQuit = true;
+      autoUpdater.on("update-downloaded", async (info) => {
+        if (!win) return;
+        const { response } = await dialog.showMessageBox(win, {
+          type: "info",
+          title: "Update ready",
+          message: `Koinos AI ${info.version} is ready to install`,
+          detail: `You're on ${app.getVersion()}. Restart now to update, or keep working — it installs when you close the app.`,
+          buttons: ["Restart now", "Later"],
+          defaultId: 0,
+          cancelId: 1,
+          noLink: true,
+        });
+        // Silent install + relaunch: the app closes, updates, and reopens.
+        if (response === 0) autoUpdater.quitAndInstall(true, true);
+      });
       const check = () => autoUpdater.checkForUpdates().catch(() => {});
       check();
       setInterval(check, 4 * 3600 * 1000);

@@ -81,11 +81,34 @@ async function refresh() {
   schedule(busy ? 500 : 4000);
 }
 
+// Version tag in the sidebar footer: fetched once, retried until Core answers.
+async function loadVersion() {
+  try {
+    const h = await coreGet("/core/health");
+    if (h.version) $("app-version").textContent = `Koinos AI v${h.version}`;
+  } catch {
+    setTimeout(loadVersion, 3000);
+  }
+}
+loadVersion();
+
+/** The footer promise must match the chosen §7 mode — never overstate privacy. */
+function updatePrivacyNote(mode) {
+  const el = document.getElementById("privacy-note");
+  if (!el || el.dataset.mode === mode) return;
+  el.dataset.mode = mode;
+  el.innerHTML =
+    mode === "local-only"
+      ? "Runs on your hardware.<br />Nothing leaves this machine."
+      : "Network mode on — chats sent to<br />Koinos Network leave this machine.";
+}
+
 let networkEligible = false;
 async function updateModelPick(aliases) {
   try {
     const n = await coreGet("/core/network");
     networkEligible = n.privacyMode !== "local-only" && !!n.schedulerUrl;
+    updatePrivacyNote(n.privacyMode);
     if (document.getElementById("privacy-pick") && document.activeElement?.id !== "privacy-pick") {
       $("privacy-pick").value = n.privacyMode;
     }
