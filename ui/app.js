@@ -406,6 +406,12 @@ async function renderEarn() {
       ["Receipts accepted", String(s.worker.receiptsAccepted ?? 0)],
       ["KAI balance", s.earnings ? `${s.earnings.kai} KAI` : "—"],
       ["This epoch", s.earnings ? `${s.earnings.pendingReceipts} receipts pending` : "—"],
+      [
+        "Network chats used",
+        s.earnings && s.earnings.freeRemaining != null
+          ? `${s.earnings.consumedThisEpoch} (${s.earnings.freeRemaining} free left, then 1 receipt each)`
+          : "—",
+      ],
     ];
     $("earn-stats").innerHTML = rows.map(([k, v]) => `<span class="k">${k}</span><span>${esc(v)}</span>`).join("");
     $("btn-earn-toggle").textContent = s.worker.running ? "Stop Earning" : "Start Earning";

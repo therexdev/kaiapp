@@ -117,7 +117,14 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
         signal: AbortSignal.timeout(4000),
       });
       const j = await r.json();
-      if (j.ok) data = { kai: j.kai, pendingReceipts: j.pendingReceipts ?? 0 };
+      if (j.ok) {
+        data = {
+          kai: j.kai,
+          pendingReceipts: j.pendingReceipts ?? 0,
+          consumedThisEpoch: j.consumedThisEpoch ?? 0,
+          freeRemaining: j.freeRemaining ?? null,
+        };
+      }
     } catch {
       /* scheduler unreachable or chain read down — the row just shows a dash */
     }
@@ -197,7 +204,21 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     status: () => ({
       privacyMode: settings.get("network.privacyMode", "local-only"),
       schedulerUrl: settings.get("earn.schedulerUrl", process.env.KAI_SCHEDULER_URL || ""),
+      walletUnlocked: wallet.status().unlocked,
     }),
+    // §23: network requests are signed by the earning account — identity and
+    // metering in one. Null when there's no unlocked wallet to sign with.
+    signConsume: async (messages) => {
+      const s = wallet.status();
+      if (!s.unlocked || !s.address) return null;
+      const ts = Date.now();
+      const cryptoNode = require("crypto");
+      const hash = cryptoNode
+        .createHash("sha256")
+        .update(`consume|${s.address}|${ts}|${JSON.stringify(messages)}`)
+        .digest();
+      return { address: s.address, ts, signature: await wallet.signHash(hash) };
+    },
     configure: ({ privacyMode }) => {
       const m = String(privacyMode || "");
       if (!["local-only", "local-first", "network"].includes(m)) {

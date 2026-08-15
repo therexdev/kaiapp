@@ -7,8 +7,20 @@ const path = require("path");
 const os = require("os");
 const http = require("http");
 
+const crypto = require("crypto");
 const { createCore } = require("../server");
 const { Scheduler } = require("../../server/scheduler");
+const { WalletService } = require("../lib/wallet");
+
+/** §23 consumer signature, exactly as the app's core builds it. */
+async function consumeIdent(wallet, messages) {
+  const ts = Date.now();
+  const hash = crypto
+    .createHash("sha256")
+    .update(`consume|${wallet.address}|${ts}|${JSON.stringify(messages)}`)
+    .digest();
+  return { address: wallet.address, ts, signature: await wallet.signHash(hash) };
+}
 
 /*
  * M3 network consume (§46.5) against the §7 routing policy: privacy first.
@@ -116,6 +128,9 @@ test("network mode: chat relays gateway -> scheduler -> provider -> back, with a
     assert.equal(sched.receipts[0].worker, earn.wallet.address);
     assert.ok(sched.receipts[0].honest);
 
+    // §23: the relay was signed by the app wallet and metered per-address.
+    assert.equal(sched.consumed[earn.wallet.address], 1, "consume debited to the signing account");
+
     // stream:true gets the SSE shim so the app UI works unchanged.
     const sr = await fetch(base + "/v1/chat/completions", {
       method: "POST",
@@ -127,6 +142,42 @@ test("network mode: chat relays gateway -> scheduler -> provider -> back, with a
     assert.ok(sse.includes("Hello from fake llama"), `content chunk present (got: ${sse})`);
     assert.ok(sse.trimEnd().endsWith("data: [DONE]"), "stream terminates with [DONE]");
     assert.equal(sched.receipts.length, 2, "second relay produced a second receipt");
+
+    // §23 auth: unsigned and forged requests never reach a provider.
+    const noSig = await fetch(`http://127.0.0.1:${schedPort}/consume/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ messages: [{ role: "user", content: "free ride?" }] }),
+    });
+    assert.equal(noSig.status, 401);
+    const imposter = new WalletService(path.join(dir, "imposter"));
+    imposter.create({ password: "correct horse" });
+    const forged = await consumeIdent(imposter, [{ role: "user", content: "x" }]);
+    forged.address = earn.wallet.address; // claim someone else's account
+    const bad = await fetch(`http://127.0.0.1:${schedPort}/consume/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ messages: [{ role: "user", content: "x" }], ...forged }),
+    });
+    assert.equal(bad.status, 401, "signature must match the claimed address");
+
+    // §23 metering: a pure consumer (serves nothing) runs out after the free
+    // allowance; the serving machine never does (each receipt buys one more).
+    const consumer = new WalletService(path.join(dir, "consumer"));
+    consumer.create({ password: "correct horse" });
+    let lastStatus = 0;
+    for (let i = 0; i < 6; i++) {
+      const ident = await consumeIdent(consumer, [{ role: "user", content: `q${i}` }]);
+      const r = await fetch(`http://127.0.0.1:${schedPort}/consume/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ messages: [{ role: "user", content: `q${i}` }], ...ident }),
+      });
+      lastStatus = r.status;
+      await r.text();
+    }
+    assert.equal(lastStatus, 402, "6th request beyond the 5 free is refused");
+    assert.equal(sched.consumed[consumer.address], 5, "exactly the allowance was served");
   } finally {
     await post("/core/earn/stop").catch(() => {});
     await core.stop();

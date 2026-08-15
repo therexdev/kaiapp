@@ -274,12 +274,23 @@ class Gateway {
       if (!schedulerUrl) {
         return this._json(res, 400, { error: { message: "No scheduler URL configured for network requests", type: "invalid_request_error" } });
       }
+      // §23: sign the request with the earning account — the network meters
+      // per-address, so anonymous requests would be someone else's bill.
+      const ident = this.network.signConsume ? await this.network.signConsume(body.messages) : null;
+      if (!ident) {
+        return this._json(res, 400, {
+          error: {
+            message: "Koinos Network requests are signed by your earning account — create or unlock it in the Earn tab first",
+            type: "invalid_request_error",
+          },
+        });
+      }
       let upstream;
       try {
         upstream = await fetch(`${schedulerUrl.replace(/\/$/, "")}/consume/chat/completions`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ messages: body.messages }),
+          body: JSON.stringify({ messages: body.messages, ...ident }),
           signal: AbortSignal.timeout(95000),
         });
       } catch (e) {

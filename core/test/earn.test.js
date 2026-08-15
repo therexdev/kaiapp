@@ -338,6 +338,27 @@ test("a job taken by a worker that vanishes is requeued after its lease", async 
   }
 });
 
+test("epoch close nets consumption against earnings (§23): free allowance, spend-down, debts", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-earn-"));
+  const sched = new Scheduler({ dataDir: path.join(dir, "sched"), epoch: 9 });
+  // W served 6; consumed 8 -> 5 free + 3 billable -> net claim 3.
+  for (let i = 0; i < 6; i++) sched.receipts.push({ worker: "W", honest: true });
+  sched.consumed.W = 8;
+  // C served nothing; consumed 7 -> 2 billable -> no claim, debt 2.
+  sched.consumed.C = 7;
+  // F stayed within the free allowance -> untouched.
+  sched.consumed.F = 5;
+
+  const s = sched.closeEpoch();
+  assert.equal(s.totals.W, 3, "claimable = served 6 - billable 3");
+  assert.equal(s.served.W, 6);
+  assert.equal(s.totals.C, undefined, "pure consumer claims nothing");
+  assert.deepEqual(s.debts, { C: 2 }, "over-consumption recorded, not silently forgiven");
+  assert.equal(s.totals.F, undefined);
+  assert.equal(s.claims.W.count, 3, "on-chain claim carries the net count");
+  assert.equal(sched.consumed.W, undefined, "meter resets with the epoch");
+});
+
 test("closed epochs settle on-chain and /balance serves KAI + pending receipts", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-earn-"));
   const settled = [];
