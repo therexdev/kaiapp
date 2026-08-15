@@ -745,6 +745,131 @@ export namespace kai {
     }
   }
 
+  export class claim_value_arguments {
+    static encode(message: claim_value_arguments, writer: Writer): void {
+      if (message.epoch != 0) {
+        writer.uint32(8);
+        writer.uint64(message.epoch);
+      }
+
+      const unique_name_worker = message.worker;
+      if (unique_name_worker !== null) {
+        writer.uint32(18);
+        writer.string(unique_name_worker);
+      }
+
+      if (message.amount != 0) {
+        writer.uint32(24);
+        writer.uint64(message.amount);
+      }
+
+      if (message.index != 0) {
+        writer.uint32(32);
+        writer.uint64(message.index);
+      }
+
+      const unique_name_proof = message.proof;
+      if (unique_name_proof.length !== 0) {
+        for (let i = 0; i < unique_name_proof.length; ++i) {
+          writer.uint32(42);
+          writer.bytes(unique_name_proof[i]);
+        }
+      }
+    }
+
+    static decode(reader: Reader, length: i32): claim_value_arguments {
+      const end: usize = length < 0 ? reader.end : reader.ptr + length;
+      const message = new claim_value_arguments();
+
+      while (reader.ptr < end) {
+        const tag = reader.uint32();
+        switch (tag >>> 3) {
+          case 1:
+            message.epoch = reader.uint64();
+            break;
+
+          case 2:
+            message.worker = reader.string();
+            break;
+
+          case 3:
+            message.amount = reader.uint64();
+            break;
+
+          case 4:
+            message.index = reader.uint64();
+            break;
+
+          case 5:
+            message.proof.push(reader.bytes());
+            break;
+
+          default:
+            reader.skipType(tag & 7);
+            break;
+        }
+      }
+
+      return message;
+    }
+
+    epoch: u64;
+    worker: string | null;
+    amount: u64;
+    index: u64;
+    proof: Array<Uint8Array>;
+
+    constructor(
+      epoch: u64 = 0,
+      worker: string | null = null,
+      amount: u64 = 0,
+      index: u64 = 0,
+      proof: Array<Uint8Array> = []
+    ) {
+      this.epoch = epoch;
+      this.worker = worker;
+      this.amount = amount;
+      this.index = index;
+      this.proof = proof;
+    }
+  }
+
+  @unmanaged
+  export class claim_value_result {
+    static encode(message: claim_value_result, writer: Writer): void {
+      if (message.minted != 0) {
+        writer.uint32(8);
+        writer.uint64(message.minted);
+      }
+    }
+
+    static decode(reader: Reader, length: i32): claim_value_result {
+      const end: usize = length < 0 ? reader.end : reader.ptr + length;
+      const message = new claim_value_result();
+
+      while (reader.ptr < end) {
+        const tag = reader.uint32();
+        switch (tag >>> 3) {
+          case 1:
+            message.minted = reader.uint64();
+            break;
+
+          default:
+            reader.skipType(tag & 7);
+            break;
+        }
+      }
+
+      return message;
+    }
+
+    minted: u64;
+
+    constructor(minted: u64 = 0) {
+      this.minted = minted;
+    }
+  }
+
   export class deposit_arguments {
     static encode(message: deposit_arguments, writer: Writer): void {
       const unique_name_from = message.from;

@@ -177,6 +177,45 @@ export class Kai {
     return new kai.claim_result(minted);
   }
 
+  // Amendment A1: value-based claims. The leaf commits the worker's earned
+  // KAI amount in satoshis — sha256("epoch|worker|amountSat") — and exactly
+  // that amount mints. Work value flows tokens -> CU -> USD -> KAI off-chain;
+  // the chain verifies the committed net result. One claim per (epoch,worker)
+  // shared with the legacy count-based path.
+  claim_value(args: kai.claim_value_arguments): kai.claim_value_result {
+    const worker = args.worker!;
+    const stored = this.roots.get(this.epochKey(args.epoch))!;
+    System.require(stored.value != null && stored.value!.length == 32, "unknown epoch");
+
+    const claimKey = StringBytes.stringToBytes(args.epoch.toString() + "|" + worker);
+    System.require(!this.claims.get(claimKey)!.value, "already claimed");
+
+    let h = sha256(
+      StringBytes.stringToBytes(args.epoch.toString() + "|" + worker + "|" + args.amount.toString())
+    );
+    let idx = args.index;
+    for (let i = 0; i < args.proof.length; i++) {
+      const sib = args.proof[i];
+      System.require(sib.length == 32, "bad proof element");
+      h = idx % 2 == 0 ? sha256(concat(h, sib)) : sha256(concat(sib, h));
+      idx = idx / 2;
+    }
+    System.require(bytesEqual(h, stored.value!), "invalid Merkle proof");
+
+    this.claims.put(claimKey, new kai.claimed_result(true));
+
+    const minted = args.amount;
+    const to = Base58.decode(worker);
+    const bal = this.balances.get(to)!;
+    bal.value += minted;
+    this.balances.put(to, bal);
+    const s = this.supply.get(SUPPLY_KEY)!;
+    s.value += minted;
+    this.supply.put(SUPPLY_KEY, s);
+
+    return new kai.claim_value_result(minted);
+  }
+
   claimed(args: kai.claimed_arguments): kai.claimed_result {
     const key = StringBytes.stringToBytes(args.epoch.toString() + "|" + args.worker!);
     return this.claims.get(key)!;

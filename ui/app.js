@@ -406,7 +406,12 @@ async function renderEarn() {
       ["Receipts accepted", String(s.worker.receiptsAccepted ?? 0)],
       ["KAI balance", s.earnings ? `${s.earnings.kai} KAI` : "—"],
       ["Prepaid balance", s.earnings?.balanceUsd != null ? `$${Number(s.earnings.balanceUsd).toFixed(4)}` : "—"],
-      ["This epoch", s.earnings ? `${s.earnings.pendingReceipts} receipts pending` : "—"],
+      [
+        "This epoch",
+        s.earnings
+          ? `${s.earnings.pendingReceipts} jobs${s.earnings.tokensProcessed != null ? ` · ${s.earnings.tokensProcessed.toLocaleString()} tokens processed` : ""}${s.earnings.pendingKai != null ? ` · ≈${Number(s.earnings.pendingKai).toFixed(4)} KAI pending` : ""}`
+          : "—",
+      ],
       [
         "Network usage",
         s.earnings?.usage

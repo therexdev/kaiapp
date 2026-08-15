@@ -110,6 +110,21 @@ export class Kai {
     return res;
   }
 
+  claim_value(args: kai.claim_value_arguments): kai.claim_value_result {
+    // const epoch = args.epoch;
+    // const worker = args.worker;
+    // const amount = args.amount;
+    // const index = args.index;
+    // const proof = args.proof;
+
+    // YOUR CODE HERE
+
+    const res = new kai.claim_value_result();
+    // res.minted = ;
+
+    return res;
+  }
+
   deposit(args: kai.deposit_arguments): kai.deposit_result {
     // const from = args.from;
     // const value = args.value;

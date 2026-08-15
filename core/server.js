@@ -121,6 +121,8 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
         data = {
           kai: j.kai,
           pendingReceipts: j.pendingReceipts ?? 0,
+          tokensProcessed: j.tokensProcessed ?? null,
+          pendingKai: j.pendingKai ?? null,
           usage: j.usage ?? null, // { inputTokens, outputTokens, costUsd }
           freeTokensRemaining: j.freeTokensRemaining ?? null,
           balanceUsd: j.balanceUsd ?? null,

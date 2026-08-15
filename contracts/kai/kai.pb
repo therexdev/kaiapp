@@ -1,5 +1,6 @@
 
-ò	
+⁄
+
 assembly/proto/kai.protokaikoinos/options.proto"
 name_arguments"#
 name_result
@@ -42,7 +43,15 @@
 epoch (Repoch
 worker (	Rworker"&
 claimed_result
-value (Rvalue"G
+value (Rvalue"ç
+claim_value_arguments
+epoch (Repoch
+worker (	Rworker
+amount (B0Ramount
+index (Rindex
+proof (Rproof"0
+claim_value_result
+minted (B0Rminted"G
 deposit_arguments
 from (BÄµRfrom
 value (B0Rvalue"

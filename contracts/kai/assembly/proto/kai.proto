@@ -70,6 +70,17 @@ message claimed_arguments {
 }
 message claimed_result { bool value = 1; }
 
+// @description Claim epoch rewards by VALUE with a Merkle proof; mints 'amount' satoshis to the worker (Amendment A1)
+// @read-only false
+message claim_value_arguments {
+  uint64 epoch = 1;
+  string worker = 2;          // base58 address string (matches scheduler leaf format)
+  uint64 amount = 3 [jstype = JS_STRING]; // KAI satoshis earned in the epoch
+  uint64 index = 4;           // leaf index in the sorted leaf list
+  repeated bytes proof = 5;   // sibling hashes, leaf level upward
+}
+message claim_value_result { uint64 minted = 1 [jstype = JS_STRING]; }
+
 // @description Deposit (burn) KAI to fund network credits; requires 'from' authority (§23 phase A)
 // @read-only false
 message deposit_arguments {

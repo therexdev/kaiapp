@@ -164,7 +164,7 @@ test("earn loop: register -> job -> local inference -> signed receipt -> epoch r
     assert.ok(sched.receipts.every((r) => r.worker === address && r.honest), "signed + honest");
 
     const summary = sched.closeEpoch();
-    assert.equal(summary.totals[address], 2);
+    assert.equal(summary.totals[address], "200000000", "2 eval receipts = 2 KAI bootstrap subsidy, in satoshis");
     assert.match(summary.root, /^[0-9a-f]{64}$/);
     assert.ok(fs.existsSync(path.join(dir, "sched", "epoch-1.json")), "epoch persisted");
     assert.equal(worker.status().receiptsAccepted, 2);
@@ -338,25 +338,33 @@ test("a job taken by a worker that vanishes is requeued after its lease", async 
   }
 });
 
-test("epoch close nets VALUED consumption against earnings (§15/§23): spend in KAI, claim the rest", () => {
+test("epoch close (A1): value-based rewards net EXACTLY against consumer spend, in satoshis", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-earn-"));
   const sched = new Scheduler({ dataDir: path.join(dir, "sched"), epoch: 9 });
-  // W served 6 receipts; spent 0.9 KAI of earnings on network chats ->
-  // rounds up to 1 receipt -> net claim 5.
-  for (let i = 0; i < 6; i++) sched.receipts.push({ worker: "W", honest: true });
+  // W: 2 protocol-funded evals (1 KAI bootstrap subsidy each) + one big chat
+  // job — 60k in + 10k out = $0.010 of work = 1 KAI at the $0.01 reference.
+  sched.receipts.push({ worker: "W", honest: true, jobType: "inference-eval", usage: { prompt_tokens: 20, completion_tokens: 5 } });
+  sched.receipts.push({ worker: "W", honest: true, jobType: "inference-eval", usage: { prompt_tokens: 20, completion_tokens: 5 } });
+  sched.receipts.push({ worker: "W", honest: true, jobType: "chat", usage: { prompt_tokens: 60000, completion_tokens: 10000 } });
+  // W also spent 0.9 KAI of earnings consuming -> net = 3.0 - 0.9 = 2.1 KAI, exact.
   sched.spentSat.W = "90000000";
-  // C served nothing but somehow spent 2.5 KAI (anomaly) -> debt of 3 receipts.
+  // C served nothing but spent 2.5 KAI (anomaly) -> recorded satoshi debt.
   sched.spentSat.C = "250000000";
 
   const s = sched.closeEpoch();
-  assert.equal(s.totals.W, 5, "claim = served 6 - ceil(0.9 KAI / 1 KAI)");
-  assert.equal(s.served.W, 6);
-  assert.equal(s.spentKai.W, "0.9", "spend recorded in the epoch summary");
+  assert.equal(s.earnedKai.W, "3", "2 KAI subsidy + 1 KAI chat value");
+  assert.equal(s.totals.W, "210000000", "net claim is exact satoshis (2.1 KAI)");
+  assert.equal(s.claims.W.amount, "210000000", "claim packet carries the amount");
+  assert.equal(s.served.W, 3);
+  assert.equal(s.spentKai.W, "0.9");
   assert.equal(s.totals.C, undefined, "no earnings, no claim");
-  assert.deepEqual(s.debts, { C: 3 }, "anomalous spend recorded, not forgiven");
-  assert.equal(s.claims.W.count, 5, "on-chain claim carries the net count");
+  assert.deepEqual(s.debts, { C: "250000000" }, "anomalous spend recorded in satoshis");
   assert.ok(s.pricing.freeTokensPerEpoch > 0, "pricing snapshot travels with the epoch");
   assert.equal(Object.keys(sched.spentSat).length, 0, "spend meter resets with the epoch");
+
+  // The value leaf verifies exactly the way the contract's claim_value does.
+  const leaf = crypto.createHash("sha256").update(`9|W|210000000`).digest();
+  assert.equal(s.root, leaf.toString("hex"), "single-leaf root = sha256(epoch|worker|amountSat)");
 });
 
 test("token-metered billing (amendment A1): free tokens -> prepaid USD -> epoch earnings", async () => {
