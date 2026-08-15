@@ -123,8 +123,10 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
           pendingReceipts: j.pendingReceipts ?? 0,
           consumedThisEpoch: j.consumedThisEpoch ?? 0,
           freeRemaining: j.freeRemaining ?? null,
-          creditsKai: j.creditsKai ?? null,
-          priceKaiPerRequest: j.priceKaiPerRequest ?? null,
+          credits: j.credits ?? null,
+          creditsPerRequest: j.creditsPerRequest ?? null,
+          creditsPerKai: j.creditsPerKai ?? null,
+          usdPerCredit: j.usdPerCredit ?? null,
           spentThisEpochKai: j.spentThisEpochKai ?? null,
         };
       }

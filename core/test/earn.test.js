@@ -366,32 +366,38 @@ test("consume charge order (§23): free allowance -> deposited KAI credits -> ep
   const sched = new Scheduler({ dataDir: path.join(dir, "sched"), settlement });
   const port = await sched.listen();
   try {
+    // 1 KAI deposited on-chain -> 10 AI Credits at the $0.01 reference
+    // ($0.001/credit) — converted at deposit time, stable thereafter (§23).
     await sched._syncDeposits("Addr", true);
-    assert.equal(sched.credits.Addr.creditSat, "100000000", "on-chain deposit credited once");
+    assert.equal(sched.credits.Addr.credits, "10", "on-chain KAI converted to credits once");
     await sched._syncDeposits("Addr", true);
-    assert.equal(sched.credits.Addr.creditSat, "100000000", "high-water mark prevents double credit");
+    assert.equal(sched.credits.Addr.credits, "10", "high-water mark prevents double credit");
 
     for (let i = 0; i < 5; i++) assert.equal(sched._chargeConsume("Addr"), "free");
-    // 1 KAI buys 3 requests at 0.3 KAI each…
+    // 10 credits buy 3 chats at 3 credits each…
     for (let i = 0; i < 3; i++) assert.equal(sched._chargeConsume("Addr"), "credits");
-    assert.equal(sched.credits.Addr.creditSat, "10000000", "0.1 KAI left");
-    // …the remainder can't cover a request, so the next one hits earnings.
+    assert.equal(sched.credits.Addr.credits, "1", "1 credit left");
+    // …the remainder can't cover a chat, so the next one hits earnings.
     assert.equal(sched._chargeConsume("Addr"), "earnings");
     assert.equal(sched.spentSat.Addr, "30000000");
 
     // With nothing served, nothing left free, and credits short: unauthorized.
     const cap = sched._consumeCapacity("Addr");
-    assert.ok(cap.freeLeft === 0 && cap.creditSat < cap.cost && cap.earningsLeft < cap.cost);
+    assert.ok(cap.freeLeft === 0 && cap.credits < cap.costCredits && cap.earningsLeft < cap.costKaiSat);
 
     // The ledger survives a restart.
     const sched2 = new Scheduler({ dataDir: path.join(dir, "sched"), settlement });
-    assert.equal(sched2.credits.Addr.creditSat, "10000000", "credits persisted to disk");
+    assert.equal(sched2._creditsOf("Addr"), 1, "credits persisted to disk");
 
-    // Published pricing is the §15 shape.
+    // A pre-credits ledger (KAI satoshis) migrates in place.
+    sched2.credits.Legacy = { creditSat: "200000000", depositHwmSat: "200000000" };
+    assert.equal(sched2._creditsOf("Legacy"), 20, "legacy KAI balance became credits");
+
+    // Published pricing carries both layers: §15 KAI settlement, §23 credits.
     const p = await (await fetch(`http://127.0.0.1:${port}/pricing`)).json();
     assert.deepEqual(
-      [p.ok, p.cuClass, p.kaiPerCu, p.freeCuPerEpoch, p.status],
-      [true, "LLM-CU", 0.3, 5, "PROVISIONAL"]
+      [p.ok, p.cuClass, p.kaiPerCu, p.creditsPerRequest, p.creditsPerKai, p.usdPerCredit, p.freeCuPerEpoch, p.status],
+      [true, "LLM-CU", 0.3, 3, 10, 0.001, 5, "PROVISIONAL"]
     );
   } finally {
     await sched.close();
