@@ -91,13 +91,13 @@ test("local-first: capable request stays local; capability miss overflows to the
     assert.strictEqual(spy.hits(), 0, "local-capable request must not touch the scheduler");
 
     // Alias with no local model: §7 capability miss → overflow.
-    const over = await post("/v1/chat/completions", { model: "koinos-smart", messages: [{ role: "user", content: "hi" }] });
+    const over = await post("/v1/chat/completions", { model: "koinos-ultra", messages: [{ role: "user", content: "hi" }] });
     assert.strictEqual(over.status, 200);
     assert.strictEqual(over.json.choices[0].message.content, "from-network");
     assert.strictEqual(over.json.model, "koinos-network", "overflowed answer must disclose it left the machine");
     assert.strictEqual(spy.hits(), 1);
     const ev = events.find((e) => e.type === "gateway:overflow");
-    assert.ok(ev && ev.from === "koinos-smart" && ev.reason, "overflow emits an event naming the alias and reason");
+    assert.ok(ev && ev.from === "koinos-ultra" && ev.reason, "overflow emits an event naming the alias and reason");
   } finally {
     await core.stop();
     spy.srv.close();
@@ -114,7 +114,7 @@ test("local-only: a capability miss fails closed — no overflow, zero bytes to 
     await post("/core/earn/config", { schedulerUrl: `http://127.0.0.1:${spyPort}` });
     await post("/core/network/config", { privacyMode: "local-only" });
 
-    const r = await post("/v1/chat/completions", { model: "koinos-smart", messages: [{ role: "user", content: "hi" }] });
+    const r = await post("/v1/chat/completions", { model: "koinos-ultra", messages: [{ role: "user", content: "hi" }] });
     assert.strictEqual(r.status, 400);
     assert.strictEqual(spy.hits(), 0, "local-only must never fail open to the network");
   } finally {
@@ -141,7 +141,7 @@ test("local-first: overflow respects §8 spending — exhausted key budget block
 
     const r = await post(
       "/v1/chat/completions",
-      { model: "koinos-smart", messages: [{ role: "user", content: "hi" }] },
+      { model: "koinos-ultra", messages: [{ role: "user", content: "hi" }] },
       { authorization: `Bearer ${key}` }
     );
     assert.strictEqual(r.status, 429);
@@ -233,7 +233,7 @@ test("local-first: locked wallet blocks overflow with a two-sided error; streami
     // with an error that names both the local miss and the wallet fix.
     await post("/core/earn/config", { schedulerUrl: `http://127.0.0.1:${spyPort}` });
     await post("/core/network/config", { privacyMode: "local-first" });
-    const blocked = await post("/v1/chat/completions", { model: "koinos-smart", messages: [{ role: "user", content: "hi" }] });
+    const blocked = await post("/v1/chat/completions", { model: "koinos-ultra", messages: [{ role: "user", content: "hi" }] });
     assert.strictEqual(blocked.status, 400);
     assert.match(blocked.json.error.message, /unavailable/);
     assert.match(blocked.json.error.message, /earning account/);
@@ -244,7 +244,7 @@ test("local-first: locked wallet blocks overflow with a two-sided error; streami
     const sr = await fetch(`${base}/v1/chat/completions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ model: "koinos-smart", stream: true, messages: [{ role: "user", content: "hi" }] }),
+      body: JSON.stringify({ model: "koinos-ultra", stream: true, messages: [{ role: "user", content: "hi" }] }),
     });
     assert.strictEqual(sr.headers.get("content-type"), "text/event-stream");
     const sse = await sr.text();

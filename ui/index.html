@@ -36,9 +36,18 @@
       </div>
       <nav id="nav">
         <button class="nav-item active" data-view="chat">Chat</button>
+        <button class="nav-item" data-view="models">Models</button>
         <button class="nav-item" data-view="api">Local API</button>
         <button class="nav-item" data-view="earn">Earn <span class="soon">alpha</span></button>
       </nav>
+      <div id="chats-pane">
+        <div class="chats-head">
+          <span class="chats-title">Chats</span>
+          <button id="btn-new-chat" class="linklike" title="Start a new chat">+ New</button>
+        </div>
+        <input id="chat-search" type="search" placeholder="Search chats…" />
+        <div id="chat-list"></div>
+      </div>
       <div id="status-pane">
         <div class="status-row"><span id="status-dot" class="dot"></span><span id="status-text">Connecting…</span></div>
         <div class="status-sub" id="status-model"></div>
@@ -86,6 +95,17 @@
           <button id="btn-send" class="primary" type="submit">Send</button>
           <button id="btn-stop" type="button" hidden>Stop</button>
         </form>
+      </section>
+
+      <!-- Models: the trusted catalog, downloadable and switchable -->
+      <section id="view-models" class="view" hidden>
+        <div class="api-card">
+          <h1>Models</h1>
+          <p class="lede">Trusted models, verified by checksum before first use. Chat picks any model that's on this machine; bigger models answer better and download once.</p>
+          <div id="models-list"></div>
+          <p class="hint" id="models-storage"></p>
+          <p class="hint">Want a model that isn't listed? Tell us with Send feedback — custom model import is coming in beta.</p>
+        </div>
       </section>
 
       <!-- Earn (M2 alpha) -->
@@ -141,6 +161,7 @@
           </div>
 
           <div id="earn-ready" hidden>
+            <div class="earn-status"><span id="earn-dot" class="dot"></span><span id="earn-state">Offline</span></div>
             <div class="hw-summary" id="earn-stats"></div>
             <div class="form-row">
               <input id="earn-sched" type="text" placeholder="Scheduler URL (from the project)" />

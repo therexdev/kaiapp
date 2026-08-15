@@ -310,3 +310,52 @@ button.primary:hover:not(:disabled) { box-shadow: 0 4px 16px rgba(109, 62, 240, 
   background: linear-gradient(135deg, var(--sky), var(--violet) 55%, var(--emerald));
   opacity: 0.85; box-shadow: 0 6px 24px rgba(139, 92, 246, 0.35);
 }
+
+/* ----- sidebar chat history ----- */
+#chats-pane { display: flex; flex-direction: column; gap: 8px; min-height: 0; flex: 1; }
+.chats-head { display: flex; align-items: baseline; justify-content: space-between; padding: 0 6px; }
+.chats-title { font-size: 0.72em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.09em; color: var(--text-dim); }
+#chat-search {
+  background: var(--bg-input); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 6px 10px; font: inherit; font-size: 0.85em;
+}
+#chat-list { overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 2px; }
+.chat-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 7px 10px; border-radius: 8px; cursor: pointer;
+  color: var(--text-dim); font-size: 0.88em;
+}
+.chat-row:hover { background: var(--bg-input); color: var(--text); }
+.chat-row.active { background: var(--bg-input); color: var(--text); }
+.chat-row-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-del {
+  border: 0; background: none; color: var(--text-dim); font: inherit;
+  font-size: 1.05em; line-height: 1; padding: 0 2px; cursor: pointer; opacity: 0;
+}
+.chat-row:hover .chat-del { opacity: 0.7; }
+.chat-del:hover { color: var(--danger); opacity: 1; }
+.chat-list-empty { padding: 8px 10px; font-size: 0.8em; color: var(--text-dim); }
+
+/* ----- earn status light ----- */
+.earn-status {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 16px; margin-bottom: 12px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-raised); font-weight: 600;
+}
+.dot.pulse { animation: pulse 1.8s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.45); } 50% { box-shadow: 0 0 0 7px rgba(52, 211, 153, 0); } }
+
+/* ----- models view ----- */
+.model-row { margin-bottom: 10px; }
+.model-badge {
+  font-size: 0.78em; font-weight: 700; letter-spacing: 0.04em;
+  padding: 4px 10px; border-radius: 999px;
+  border: 1px solid var(--border); color: var(--text-dim); white-space: nowrap;
+}
+.model-badge.ok { color: var(--emerald); border-color: #2a6f57; }
+.model-badge.danger { color: var(--danger); border-color: #7c3a3a; }
+
+/* earn + api cards sit centered, not hugging the left edge */
+.api-card { margin: 0 auto; width: 100%; }

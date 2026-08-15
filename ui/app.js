@@ -16,6 +16,8 @@ const state = {
   chatting: false,
   abort: null,
   history: [], // [{role, content}]
+  chatId: null, // persisted id of the open conversation
+  chatIndex: [], // [{id,title,updatedAt,searchText}] for the sidebar
 };
 
 // ---------- boot / status polling ----------
@@ -127,12 +129,13 @@ async function updateModelPick(aliases) {
     }
   } catch { networkEligible = false; }
   const pick = $("model-pick");
-  // Dev pipeline models stay out of the picker unless they're the model
-  // actually in use — a curious tester selecting one gets a silent
-  // download and toy answers.
+  // The picker offers only models that are ON THIS MACHINE (plus the
+  // network) — selecting a catalog model that isn't downloaded would
+  // silently pull gigabytes mid-send. Downloads live in the Models view.
+  // Dev pipeline models stay hidden unless actually in use.
   const want = [
     ...aliases
-      .filter((al) => !al.dev || al.alias === state.alias)
+      .filter((al) => al.status === "ready" && (!al.dev || al.alias === state.alias))
       .map((al) => ({ v: al.alias, label: "Local · " + al.label.split(" (")[0] })),
     ...(networkEligible ? [{ v: "koinos-network", label: "Koinos Network" }] : []),
   ];
@@ -176,6 +179,7 @@ for (const b of document.querySelectorAll(".nav-item[data-view]")) {
     showView(state.view);
     if (state.view === "api") renderApi();
     if (state.view === "earn") renderEarn();
+    if (state.view === "models") renderModels();
   });
 }
 
@@ -310,9 +314,11 @@ async function send() {
       bubble.appendChild(tag);
     }
     state.history.push({ role: "assistant", content: acc });
+    saveCurrentChat();
   } catch (e) {
     if (e.name === "AbortError") {
       state.history.push({ role: "assistant", content: bubble.textContent });
+      saveCurrentChat();
     } else {
       bubble.remove();
       state.history.pop(); // drop the failed user turn so retry is clean
@@ -455,20 +461,26 @@ async function renderEarn() {
     if (document.activeElement !== $("earn-sched") && !$("earn-sched").value) {
       $("earn-sched").value = s.schedulerUrl || "";
     }
-    // "Earning" alone can hide a dead connection — surface last contact
-    // and the last error so silence is never mistaken for health.
-    let statusText = s.worker.running ? "Earning" : "Stopped";
-    if (s.worker.running) {
-      if (s.worker.lastError) statusText = `Earning — ⚠ ${s.worker.lastError}`;
-      else if (s.worker.lastPollOkAt) {
-        const ago = Math.max(0, Math.round((Date.now() - new Date(s.worker.lastPollOkAt).getTime()) / 1000));
-        statusText = `Earning · last contact ${ago}s ago`;
-      }
+    // The light tells the truth at a glance (like a node): green pulsing =
+    // online and earning, amber = earning but struggling, red = offline.
+    const dot = $("earn-dot");
+    const stateEl = $("earn-state");
+    if (!s.worker.running) {
+      dot.className = "dot err";
+      stateEl.textContent = "Offline — not earning";
+    } else if (s.worker.lastError) {
+      dot.className = "dot busy";
+      stateEl.textContent = `Online — ${s.worker.lastError}`;
+    } else {
+      dot.className = "dot ok pulse";
+      const ago = s.worker.lastPollOkAt
+        ? Math.max(0, Math.round((Date.now() - new Date(s.worker.lastPollOkAt).getTime()) / 1000))
+        : null;
+      stateEl.textContent = `Online — earning${ago != null ? ` · last contact ${ago}s ago` : ""}`;
     }
     const earnErrMsg = s.earnings?.error || null;
     const rows = [
       ["Account", s.wallet.address ?? "—"],
-      ["Status", statusText],
       ["Jobs completed", String(s.worker.jobsDone ?? 0)],
       ["Receipts accepted", String(s.worker.receiptsAccepted ?? 0)],
       ["KAI balance", earnErrMsg ? earnErrMsg : s.earnings?.kai != null ? `${s.earnings.kai} KAI` : "—"],
@@ -737,5 +749,165 @@ $("btn-feedback-send").addEventListener("click", async () => {
   } finally {
     btn.disabled = false;
     btn.textContent = "Send";
+  }
+});
+
+// ---------- chat history (local-first, stored by Core) ----------
+
+function esc2(s) { const d = document.createElement("div"); d.textContent = String(s ?? ""); return d.innerHTML; }
+
+async function saveCurrentChat() {
+  if (!state.history.length) return;
+  try {
+    const r = await fetch("/core/chats", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: state.chatId, messages: state.history }),
+    });
+    const j = await r.json();
+    if (j.ok) state.chatId = j.id;
+    refreshChatList();
+  } catch { /* history is a convenience — never interrupt chatting over it */ }
+}
+
+async function refreshChatList() {
+  try {
+    const j = await coreGet("/core/chats");
+    state.chatIndex = j.chats || [];
+  } catch { state.chatIndex = []; }
+  renderChatList();
+}
+
+function renderChatList() {
+  const host = $("chat-list");
+  if (!host) return;
+  const q = ($("chat-search").value || "").trim().toLowerCase();
+  const rows = state.chatIndex.filter(
+    (c) => !q || c.title.toLowerCase().includes(q) || (c.searchText || "").toLowerCase().includes(q)
+  );
+  if (!rows.length) {
+    host.innerHTML = `<div class="chat-list-empty">${q ? "No chats match." : "Chats you start appear here."}</div>`;
+    return;
+  }
+  host.innerHTML = rows
+    .map(
+      (c) => `<div class="chat-row${c.id === state.chatId ? " active" : ""}" data-id="${esc2(c.id)}">
+        <span class="chat-row-title">${esc2(c.title)}</span>
+        <button class="chat-del" data-id="${esc2(c.id)}" title="Delete chat" aria-label="Delete chat">×</button>
+      </div>`
+    )
+    .join("");
+}
+
+function rebuildMessages() {
+  const box = $("messages");
+  box.innerHTML = "";
+  for (const m of state.history) addMsg(m.role === "user" ? "user" : "assistant", m.content);
+  if (!state.history.length) {
+    box.innerHTML = `<div id="chat-empty" class="chat-empty"><div class="chat-empty-mark" aria-hidden="true"></div><p>Ask anything. It runs on your machine —<br />private, free, even offline.</p></div>`;
+  }
+}
+
+function newChat() {
+  state.chatId = null;
+  state.history = [];
+  rebuildMessages();
+  renderChatList();
+  state.view = "chat";
+  showView("chat");
+  $("input").focus();
+}
+
+$("btn-new-chat").addEventListener("click", newChat);
+$("chat-search").addEventListener("input", renderChatList);
+
+$("chat-list").addEventListener("click", async (e) => {
+  const del = e.target.closest(".chat-del");
+  if (del) {
+    e.stopPropagation();
+    await fetch(`/core/chats/${del.dataset.id}`, { method: "DELETE" });
+    if (state.chatId === del.dataset.id) newChat();
+    refreshChatList();
+    return;
+  }
+  const row = e.target.closest(".chat-row");
+  if (!row) return;
+  try {
+    const j = await coreGet(`/core/chats/${row.dataset.id}`);
+    state.chatId = j.chat.id;
+    state.history = j.chat.messages || [];
+    rebuildMessages();
+    renderChatList();
+    state.view = "chat";
+    showView("chat");
+  } catch { /* deleted underneath us — list refresh will reconcile */ }
+});
+
+refreshChatList();
+
+// ---------- models view (trusted catalog) ----------
+
+let modelsTimer = null;
+async function renderModels() {
+  clearTimeout(modelsTimer);
+  let m;
+  try {
+    m = await coreGet("/core/models");
+  } catch { return; }
+  const host = $("models-list");
+  const dl = m.download; // {pct,...} while a package downloads
+  const ensuring = m.ensure?.state === "working" ? m.ensure.alias : null;
+  host.innerHTML = m.aliases
+    .filter((a) => !a.dev || a.alias === state.alias)
+    .map((a) => {
+      const gb = a.sizeBytes ? (a.sizeBytes / 1e9).toFixed(1) + " GB" : "";
+      const inUse = a.alias === state.alias;
+      let action;
+      if (a.status === "quarantined") action = `<span class="model-badge danger">quarantined</span>`;
+      else if (a.status === "ready") {
+        action = inUse
+          ? `<span class="model-badge ok">in use</span>`
+          : `<button class="primary small" data-use="${esc2(a.alias)}">Use</button>`;
+      } else if (ensuring === a.alias) {
+        action = `<span class="model-badge">downloading… ${dl?.pct != null ? dl.pct + "%" : ""}</span>`;
+      } else {
+        action = `<button class="primary small" data-get="${esc2(a.alias)}">Download</button>`;
+      }
+      return `<div class="model-offer model-row">
+        <div>
+          <div class="model-name">${esc2(a.label.split(" (")[0])}</div>
+          <div class="model-sub">${[a.blurb, a.license, !a.blurb && gb, a.status === "ready" && "on this machine"]
+            .filter(Boolean)
+            .map(esc2)
+            .join(" · ")}</div>
+        </div>
+        ${action}
+      </div>`;
+    })
+    .join("");
+  $("models-storage").textContent = m.storage?.usedBytes
+    ? `Models on disk: ${(m.storage.usedBytes / 1e9).toFixed(1)} GB${m.storage.capBytes ? ` of ${(m.storage.capBytes / 1e9).toFixed(0)} GB cap` : ""}`
+    : "";
+  if (!$("view-models").hidden) {
+    modelsTimer = setTimeout(renderModels, dl || ensuring ? 700 : 4000);
+  }
+}
+
+$("models-list").addEventListener("click", async (e) => {
+  const get = e.target.closest("[data-get]");
+  const use = e.target.closest("[data-use]");
+  if (get) {
+    await fetch("/core/models/ensure", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ alias: get.dataset.get }),
+    });
+    renderModels();
+  } else if (use) {
+    state.alias = use.dataset.use;
+    const pick = $("model-pick");
+    if ([...pick.options].some((o) => o.value === state.alias)) pick.value = state.alias;
+    renderModels();
+    refresh();
   }
 });

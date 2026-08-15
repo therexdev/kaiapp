@@ -4,7 +4,18 @@
   "aliases": {
     "koinos-fast": {
       "label": "Koinos Fast",
+      "blurb": "Quick answers on any machine · 1 GB",
       "package": "qwen2.5-1.5b-instruct-q4_k_m@1"
+    },
+    "koinos-balanced": {
+      "label": "Koinos Balanced",
+      "blurb": "Noticeably smarter, still CPU-friendly · 2 GB",
+      "package": "llama-3.2-3b-instruct-q4_k_m@1"
+    },
+    "koinos-smart": {
+      "label": "Koinos Smart",
+      "blurb": "Best local quality — wants a GPU or 16 GB RAM · 4.7 GB",
+      "package": "qwen2.5-7b-instruct-q4_k_m@1"
     },
     "dev-tiny": {
       "label": "Dev Tiny (pipeline testing only — not a launch model)",
@@ -13,6 +24,26 @@
     }
   },
   "packages": {
+    "llama-3.2-3b-instruct-q4_k_m@1": {
+      "filename": "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+      "url": "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+      "sha256": "6c1a2b41161032677be168d354123594c0e6e67d2b9227c84f296ad037c728ff",
+      "sizeBytes": 2019377696,
+      "contextSize": 4096,
+      "license": "llama3.2",
+      "creator": "Meta (quantized by bartowski)",
+      "runtime": "llamacpp"
+    },
+    "qwen2.5-7b-instruct-q4_k_m@1": {
+      "filename": "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+      "url": "https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+      "sha256": "65b8fcd92af6b4fefa935c625d1ac27ea29dcb6ee14589c55a8f115ceaaa1423",
+      "sizeBytes": 4683074240,
+      "contextSize": 4096,
+      "license": "apache-2.0",
+      "creator": "Qwen team, Alibaba Cloud (quantized by bartowski)",
+      "runtime": "llamacpp"
+    },
     "qwen2.5-1.5b-instruct-q4_k_m@1": {
       "filename": "Qwen2.5-1.5B-Instruct-Q4_K_M.gguf",
       "url": "https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf",

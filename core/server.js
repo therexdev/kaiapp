@@ -335,6 +335,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
   // The desktop UI is plain web content served by the gateway itself — the
   // Electron shell just opens a window onto it, and a browser works too.
   const uiDir = path.join(__dirname, "..", "ui");
+  const { ChatStore } = require("./lib/chats");
   const gateway = new Gateway({
     port: port ?? Number(process.env.KAI_CORE_PORT || 41100),
     runtime,
@@ -344,6 +345,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     uiDir: require("fs").existsSync(uiDir) ? uiDir : null,
     earn,
     network,
+    chats: new ChatStore(path.join(dataDir, "chats")),
     coreInfo: () => ({ version: VERSION, dataDir, hardware: hw }),
     // Feedback relay: one honest box in the app, straight to the project's
     // inbox. The diagnostic tail is core.log — events only, no chat

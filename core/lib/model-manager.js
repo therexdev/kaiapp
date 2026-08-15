@@ -31,10 +31,14 @@ class ModelManager {
   aliases() {
     return Object.entries(this.catalog.aliases).map(([alias, a]) => {
       const q = this.quarantineOf(a.package);
+      const pkg = this.catalog.packages[a.package] || {};
       return {
         alias,
         label: a.label,
+        blurb: a.blurb || "",
         package: a.package,
+        sizeBytes: pkg.sizeBytes ?? null,
+        license: pkg.license ?? null,
         status: q ? "quarantined" : this.packageStatus(a.package).status,
         ...(a.dev ? { dev: true } : {}),
         ...(q ? { quarantineReason: q.reason } : {}),

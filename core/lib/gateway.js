@@ -49,8 +49,9 @@ function estimateMessageTokens(messages) {
 }
 
 class Gateway {
-  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, earn, network, feedback, onEvent }) {
+  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, earn, network, feedback, chats, onEvent }) {
     this.feedback = feedback || null; // relay to the project's feedback inbox
+    this.chats = chats || null; // local chat history store
     this.earn = earn || null; // earn controller (M2); null in minimal tests
     this.network = network || null; // §7 routing policy controller (M3)
     this.host = host;
@@ -210,6 +211,28 @@ class Gateway {
       }
     }
     // ----- network policy control plane (M3 §7) -----
+    // Chat history (local-first; lives and dies on this machine).
+    if (this.chats && path === "/core/chats" && req.method === "GET") {
+      return this._json(res, 200, { ok: true, chats: this.chats.list() });
+    }
+    if (this.chats && path === "/core/chats" && req.method === "POST") {
+      const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+      try {
+        return this._json(res, 200, { ok: true, ...this.chats.save(body) });
+      } catch (e) {
+        return this._json(res, 400, { ok: false, error: String(e.message) });
+      }
+    }
+    if (this.chats && path.startsWith("/core/chats/")) {
+      const id = path.split("/")[3];
+      try {
+        if (req.method === "GET") return this._json(res, 200, { ok: true, chat: this.chats.get(id) });
+        if (req.method === "DELETE") return this._json(res, 200, { ok: true, ...this.chats.remove(id) });
+      } catch (e) {
+        return this._json(res, 404, { ok: false, error: String(e.message) });
+      }
+    }
+
     if (this.feedback && path === "/core/feedback" && req.method === "POST") {
       const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
       try {
