@@ -237,6 +237,34 @@ class Gateway {
       }
     }
 
+    // Scheduled tasks (local prompts on a clock; results land in chats).
+    if (this.tasks && path === "/core/tasks" && req.method === "GET") {
+      return this._json(res, 200, { ok: true, tasks: this.tasks.list() });
+    }
+    if (this.tasks && path === "/core/tasks" && req.method === "POST") {
+      try {
+        const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+        return this._json(res, 200, { ok: true, task: this.tasks.create(body) });
+      } catch (e) {
+        return this._json(res, 400, { ok: false, error: String(e.message) });
+      }
+    }
+    if (this.tasks && path.startsWith("/core/tasks/")) {
+      const [, , , id, sub] = path.split("/");
+      try {
+        if (sub === "run" && req.method === "POST") {
+          return this._json(res, 200, { ok: true, task: await this.tasks.runNow(id) });
+        }
+        if (req.method === "PATCH") {
+          const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+          return this._json(res, 200, { ok: true, task: this.tasks.update(id, body) });
+        }
+        if (req.method === "DELETE") return this._json(res, 200, { ok: true, ...this.tasks.remove(id) });
+      } catch (e) {
+        return this._json(res, 400, { ok: false, error: String(e.message) });
+      }
+    }
+
     if (this.feedback && path === "/core/feedback" && req.method === "POST") {
       const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
       try {

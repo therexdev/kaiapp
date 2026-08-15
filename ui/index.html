@@ -36,7 +36,9 @@
       </div>
       <nav id="nav">
         <button class="nav-item active" data-view="chat">Chat</button>
+        <button class="nav-item" data-view="compare">Compare</button>
         <button class="nav-item" data-view="models">Models</button>
+        <button class="nav-item" data-view="tasks">Tasks</button>
         <button class="nav-item" data-view="api">Local API</button>
         <button class="nav-item" data-view="earn">Earn <span class="soon">alpha</span></button>
       </nav>
@@ -99,11 +101,78 @@
             <option value="custom">Custom…</option>
           </select>
           <textarea id="input" rows="1" placeholder="Message your local AI…" autocomplete="off"></textarea>
+          <button id="btn-attach" type="button" title="Attach a text file as context">📎</button>
           <button id="btn-send" class="primary" type="submit">Send</button>
           <button id="btn-stop" type="button" hidden>Stop</button>
+          <input id="attach-input" type="file" hidden />
         </form>
+        <div id="attach-chip-row" hidden>
+          <span id="attach-chip"><span id="attach-name"></span> <button id="attach-remove" type="button" title="Remove attachment">×</button></span>
+        </div>
         <div id="persona-custom-row" hidden>
           <textarea id="persona-custom" rows="2" placeholder="Describe how the AI should behave, e.g. “You are a pirate. Answer everything in character.”"></textarea>
+        </div>
+      </section>
+
+      <!-- Compare: blind side-by-side of two models on one prompt -->
+      <section id="view-compare" class="view" hidden>
+        <div class="cmp-wrap">
+          <h1>Compare models</h1>
+          <p class="lede">One prompt, two models, blind. Answers stream one at a time (they share the machine), then you reveal which was which. Pick winners to learn which model earns its size.</p>
+          <div class="cmp-controls">
+            <select id="cmp-a"></select>
+            <span class="cmp-vs">vs</span>
+            <select id="cmp-b"></select>
+          </div>
+          <form id="cmp-form">
+            <textarea id="cmp-input" rows="2" placeholder="Ask both models the same thing…"></textarea>
+            <button id="cmp-run" class="primary" type="submit">Run both</button>
+            <button id="cmp-stop" type="button" hidden>Stop</button>
+          </form>
+          <div id="cmp-status" class="hint" hidden></div>
+          <div id="cmp-panes" hidden>
+            <div class="cmp-pane"><div class="cmp-pane-head"><span class="cmp-pane-label" id="cmp-label-0">Answer 1</span></div><div class="cmp-pane-body" id="cmp-body-0"></div></div>
+            <div class="cmp-pane"><div class="cmp-pane-head"><span class="cmp-pane-label" id="cmp-label-1">Answer 2</span></div><div class="cmp-pane-body" id="cmp-body-1"></div></div>
+          </div>
+          <div id="cmp-verdict" hidden>
+            <button id="cmp-reveal" class="primary small">Reveal models</button>
+            <div id="cmp-vote" hidden>
+              <span class="hint">Which answer was better?</span>
+              <button class="cmp-vote-btn" data-pick="0">Answer 1</button>
+              <button class="cmp-vote-btn" data-pick="1">Answer 2</button>
+              <button class="cmp-vote-btn" data-pick="tie">Tie</button>
+            </div>
+            <div id="cmp-tally" class="hint"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tasks: prompts on a clock; results land in chat history -->
+      <section id="view-tasks" class="view" hidden>
+        <div class="api-card">
+          <h1>Scheduled tasks</h1>
+          <p class="lede">A prompt that runs itself — hourly, daily, or weekly — and drops its answer into your chats. Tasks run while Koinos AI is open, on whichever model you choose, with the same privacy rules as typed chat.</p>
+          <form id="task-form" class="task-form">
+            <input id="task-name" placeholder="Name (e.g. Morning writing prompt)" maxlength="60" />
+            <textarea id="task-prompt" rows="2" placeholder="The prompt to run, e.g. “Give me one unusual writing prompt and a first line.”"></textarea>
+            <div class="task-form-row">
+              <select id="task-model"></select>
+              <select id="task-kind">
+                <option value="hourly">Every hour</option>
+                <option value="every6h">Every 6 hours</option>
+                <option value="daily" selected>Daily</option>
+                <option value="weekly">Weekly</option>
+              </select>
+              <select id="task-day" hidden>
+                <option value="1">Mon</option><option value="2">Tue</option><option value="3">Wed</option>
+                <option value="4">Thu</option><option value="5">Fri</option><option value="6">Sat</option><option value="0">Sun</option>
+              </select>
+              <select id="task-hour"></select>
+              <button class="primary small" type="submit">Add task</button>
+            </div>
+            <div id="task-error" class="error" hidden></div>
+          </form>
+          <div id="task-list"></div>
         </div>
       </section>
 
@@ -242,6 +311,7 @@
   </div>
   <script src="markdown.js"></script>
   <script src="app.js"></script>
+  <script src="app-extras.js"></script>
 
 </body>
 </html>

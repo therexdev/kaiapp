@@ -117,6 +117,7 @@ function updatePrivacyNote(mode) {
 }
 
 let networkEligible = false;
+let pickable = []; // latest [{v,label}] the chat picker offers — reused by Compare/Tasks
 async function updateModelPick(aliases) {
   try {
     const n = await coreGet("/core/network");
@@ -139,6 +140,7 @@ async function updateModelPick(aliases) {
       .map((al) => ({ v: al.alias, label: "Local · " + al.label.split(" (")[0] })),
     ...(networkEligible ? [{ v: "koinos-network", label: "Koinos Network" }] : []),
   ];
+  pickable = want;
   const sig = want.map((w) => w.v).join(",");
   if (pick.dataset.sig !== sig) {
     const prev = pick.value;
@@ -180,6 +182,8 @@ for (const b of document.querySelectorAll(".nav-item[data-view]")) {
     if (state.view === "api") renderApi();
     if (state.view === "earn") renderEarn();
     if (state.view === "models") renderModels();
+    if (state.view === "compare") renderCompare();
+    if (state.view === "tasks") renderTasks();
   });
 }
 
@@ -266,6 +270,13 @@ function addMsg(role, text) {
   // renderer); user text stays literal.
   if (role === "assistant") div.innerHTML = mdToHtml(text);
   else div.textContent = text;
+  // Attached-file turns render collapsed — the model saw all of it; the
+  // human only needs to know it's there.
+  if (role === "user" && text.startsWith("📎 ")) {
+    div.classList.add("msg-file");
+    div.title = "Attached file (sent to the model in full) — click to expand";
+    div.addEventListener("click", () => div.classList.toggle("expanded"));
+  }
   if (role === "assistant" && text) attachMsgActions(div);
   $("messages").appendChild(div);
   $("messages").scrollTop = $("messages").scrollHeight;
@@ -318,6 +329,15 @@ async function send(replayText) {
   if (!text || state.chatting || !state.alias) return;
   const chatModel = $("model-pick").value || state.alias;
   if (!replayText) $("input").value = "";
+  // An attached file becomes its own user turn right before the question,
+  // so it round-trips through history and re-renders faithfully.
+  if (!replayText && state.attachment) {
+    const a = state.attachment;
+    const fileMsg = `📎 ${a.name}${a.trimmed ? " (trimmed)" : ""}\n\n\`\`\`\n${a.text}\n\`\`\``;
+    state.history.push({ role: "user", content: fileMsg });
+    addMsg("user", fileMsg);
+    clearAttachment();
+  }
   state.history.push({ role: "user", content: text });
   addMsg("user", text);
 

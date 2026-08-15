@@ -393,6 +393,27 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     async start() {
       const p = await gateway.listen();
       events({ type: "core:ready", message: `gateway on http://127.0.0.1:${p}` });
+      // Scheduled tasks call chat through our own front door, so §7
+      // privacy routing, budgets, and the kill switch govern them exactly
+      // like a typed message.
+      const { TaskRunner } = require("./lib/tasks");
+      this.tasks = new TaskRunner({
+        file: path.join(dataDir, "tasks.json"),
+        chats: gateway.chats,
+        onEvent: events,
+        runChat: async ({ model, prompt }) => {
+          const r = await fetch(`http://127.0.0.1:${p}/v1/chat/completions`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }] }),
+          });
+          const j = await r.json();
+          if (!r.ok) throw new Error(j?.error?.message || `chat failed (${r.status})`);
+          return j.choices?.[0]?.message?.content ?? "";
+        },
+      });
+      gateway.tasks = this.tasks;
+      this.tasks.start();
       // Warm start (fire-and-forget): if the model is already on disk, bring
       // the whole engine ladder up now so the first message answers instantly
       // instead of paying engine startup at send time.
@@ -416,6 +437,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     },
     async stop() {
       if (this._policyTimer) clearInterval(this._policyTimer);
+      this.tasks?.stop();
       await earn.stop({ userIntent: false }).catch(() => {});
       runtime.stop();
       await gateway.close();
