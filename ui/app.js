@@ -405,18 +405,17 @@ async function renderEarn() {
       ["Jobs completed", String(s.worker.jobsDone ?? 0)],
       ["Receipts accepted", String(s.worker.receiptsAccepted ?? 0)],
       ["KAI balance", s.earnings ? `${s.earnings.kai} KAI` : "—"],
-      [
-        "AI Credits",
-        s.earnings?.credits != null
-          ? `${s.earnings.credits}${s.earnings.usdPerCredit ? ` (≈ $${(s.earnings.credits * s.earnings.usdPerCredit).toFixed(3)})` : ""}`
-          : "—",
-      ],
+      ["Prepaid balance", s.earnings?.balanceUsd != null ? `$${Number(s.earnings.balanceUsd).toFixed(4)}` : "—"],
       ["This epoch", s.earnings ? `${s.earnings.pendingReceipts} receipts pending` : "—"],
       [
-        "Network chats used",
-        s.earnings && s.earnings.freeRemaining != null
-          ? `${s.earnings.consumedThisEpoch} (${s.earnings.freeRemaining} free left${s.earnings.creditsPerRequest != null ? `, then ${s.earnings.creditsPerRequest} credits each` : ""})`
+        "Network usage",
+        s.earnings?.usage
+          ? `${s.earnings.usage.inputTokens.toLocaleString()} in / ${s.earnings.usage.outputTokens.toLocaleString()} out tokens · $${Number(s.earnings.usage.costUsd).toFixed(4)}`
           : "—",
+      ],
+      [
+        "Free allowance",
+        s.earnings?.freeTokensRemaining != null ? `${s.earnings.freeTokensRemaining.toLocaleString()} tokens left this epoch` : "—",
       ],
     ];
     $("earn-stats").innerHTML = rows.map(([k, v]) => `<span class="k">${k}</span><span>${esc(v)}</span>`).join("");
@@ -522,7 +521,7 @@ $("btn-earn-deposit").addEventListener("click", async () => {
     renderEarn();
   } catch { /* error shown */ } finally {
     btn.disabled = false;
-    btn.textContent = "Buy credits";
+    btn.textContent = "Add funds";
   }
 });
 

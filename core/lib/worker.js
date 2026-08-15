@@ -93,13 +93,13 @@ class Worker {
       if (!job || !this.running) continue;
 
       try {
-        const output = await this._execute(job);
+        const { output, usage } = await this._execute(job);
         const hash = crypto.createHash("sha256").update(`${job.id}|${output}`).digest();
         const signature = await this.wallet.signHash(hash);
         const res = await fetch(`${this.schedulerUrl}/worker/result?token=${this.token}`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ jobId: job.id, output, signature }),
+          body: JSON.stringify({ jobId: job.id, output, usage, signature }),
         });
         const jr = await res.json();
         this.stats.jobsDone += 1;
@@ -134,7 +134,15 @@ class Worker {
     });
     if (!r.ok) throw new Error(`inference failed: HTTP ${r.status}`);
     const j = await r.json();
-    return j.choices?.[0]?.message?.content ?? "";
+    // Usage travels with the result — the network meters AI tokens (§14),
+    // exactly the counts an OpenAI-style runtime already reports.
+    return {
+      output: j.choices?.[0]?.message?.content ?? "",
+      usage: {
+        prompt_tokens: Number(j.usage?.prompt_tokens ?? 0),
+        completion_tokens: Number(j.usage?.completion_tokens ?? 0),
+      },
+    };
   }
 }
 

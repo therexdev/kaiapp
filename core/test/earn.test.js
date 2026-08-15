@@ -355,50 +355,60 @@ test("epoch close nets VALUED consumption against earnings (§15/§23): spend in
   assert.equal(s.totals.C, undefined, "no earnings, no claim");
   assert.deepEqual(s.debts, { C: 3 }, "anomalous spend recorded, not forgiven");
   assert.equal(s.claims.W.count, 5, "on-chain claim carries the net count");
-  assert.ok(s.pricing.kaiPerCu > 0, "pricing snapshot travels with the epoch");
+  assert.ok(s.pricing.freeTokensPerEpoch > 0, "pricing snapshot travels with the epoch");
   assert.equal(Object.keys(sched.spentSat).length, 0, "spend meter resets with the epoch");
 });
 
-test("consume charge order (§23): free allowance -> deposited KAI credits -> epoch earnings", async () => {
+test("token-metered billing (amendment A1): free tokens -> prepaid USD -> epoch earnings", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-earn-"));
-  // Chain says this address has deposited 1 KAI in total.
+  // Chain says this address has deposited 1 KAI -> $0.01 prepaid at reference.
   const settlement = { depositsOf: async () => "100000000", settleEpoch: async () => ({}), kaiBalance: async () => "0" };
   const sched = new Scheduler({ dataDir: path.join(dir, "sched"), settlement });
   const port = await sched.listen();
+  const A = "Addr";
   try {
-    // 1 KAI deposited on-chain -> 10 AI Credits at the $0.01 reference
-    // ($0.001/credit) — converted at deposit time, stable thereafter (§23).
-    await sched._syncDeposits("Addr", true);
-    assert.equal(sched.credits.Addr.credits, "10", "on-chain KAI converted to credits once");
-    await sched._syncDeposits("Addr", true);
-    assert.equal(sched.credits.Addr.credits, "10", "high-water mark prevents double credit");
+    await sched._syncDeposits(A, true);
+    assert.equal(sched.balances[A].balanceMicro, "10000", "1 KAI became $0.010000 prepaid");
+    await sched._syncDeposits(A, true);
+    assert.equal(sched.balances[A].balanceMicro, "10000", "high-water mark prevents double funding");
 
-    for (let i = 0; i < 5; i++) assert.equal(sched._chargeConsume("Addr"), "free");
-    // 10 credits buy 3 chats at 3 credits each…
-    for (let i = 0; i < 3; i++) assert.equal(sched._chargeConsume("Addr"), "credits");
-    assert.equal(sched.credits.Addr.credits, "1", "1 credit left");
-    // …the remainder can't cover a chat, so the next one hits earnings.
-    assert.equal(sched._chargeConsume("Addr"), "earnings");
-    assert.equal(sched.spentSat.Addr, "30000000");
+    // A small chat fits entirely in the 25k-token free allowance.
+    let r = sched._chargeUsage(A, { prompt_tokens: 20000, completion_tokens: 5000 });
+    assert.deepEqual([r.paidWith, Number(r.costMicro)], ["free", 0]);
 
-    // With nothing served, nothing left free, and credits short: unauthorized.
-    const cap = sched._consumeCapacity("Addr");
-    assert.ok(cap.freeLeft === 0 && cap.credits < cap.costCredits && cap.earningsLeft < cap.costKaiSat);
+    // Free exhausted: 10k in + 5k out = $0.001 + $0.002 = $0.003 off prepaid.
+    r = sched._chargeUsage(A, { prompt_tokens: 10000, completion_tokens: 5000 });
+    assert.deepEqual([r.paidWith, Number(r.costMicro)], ["balance", 3000]);
+    assert.equal(sched.balances[A].balanceMicro, "7000", "$0.007 left");
 
-    // The ledger survives a restart.
+    // A big-document request overflows the balance into epoch earnings:
+    // 60k in + 10k out = $0.010 -> $0.007 prepaid + $0.003 of earnings
+    // = 0.3 KAI at the $0.01 reference.
+    r = sched._chargeUsage(A, { prompt_tokens: 60000, completion_tokens: 10000 });
+    assert.equal(r.paidWith, "balance+earnings");
+    assert.equal(sched.balances[A].balanceMicro, "0");
+    assert.equal(sched.spentSat[A], "30000000", "0.3 KAI charged to earnings");
+
+    // Usage meter accumulated the truth.
+    assert.deepEqual(sched.usage[A], { inTok: 90000, outTok: 20000, costMicro: 13000 });
+
+    // Everything empty and nothing served -> the authorization gate closes.
+    const cap = sched._consumeCapacity(A);
+    assert.ok(cap.freeTokensLeft === 0 && cap.balanceMicro === 0n && cap.earningsLeftSat <= 0n);
+
+    // The ledger survives a restart; older denominations migrate in place.
     const sched2 = new Scheduler({ dataDir: path.join(dir, "sched"), settlement });
-    assert.equal(sched2._creditsOf("Addr"), 1, "credits persisted to disk");
+    assert.equal(sched2._balanceMicroOf(A), 0n, "balance persisted");
+    sched2.balances.LegacyCredits = { credits: "10", depositHwmSat: "0" };
+    assert.equal(sched2._balanceMicroOf("LegacyCredits"), 10000n, "v0.5.1 credits -> µ$");
+    sched2.balances.LegacySat = { creditSat: "200000000", depositHwmSat: "0" };
+    assert.equal(sched2._balanceMicroOf("LegacySat"), 20000n, "v0.5.0 KAI sat -> µ$");
 
-    // A pre-credits ledger (KAI satoshis) migrates in place.
-    sched2.credits.Legacy = { creditSat: "200000000", depositHwmSat: "200000000" };
-    assert.equal(sched2._creditsOf("Legacy"), 20, "legacy KAI balance became credits");
-
-    // Published pricing carries both layers: §15 KAI settlement, §23 credits.
+    // Published pricing is per-model token rates (OpenAI-style).
     const p = await (await fetch(`http://127.0.0.1:${port}/pricing`)).json();
-    assert.deepEqual(
-      [p.ok, p.cuClass, p.kaiPerCu, p.creditsPerRequest, p.creditsPerKai, p.usdPerCredit, p.freeCuPerEpoch, p.status],
-      [true, "LLM-CU", 0.3, 3, 10, 0.001, 5, "PROVISIONAL"]
-    );
+    assert.equal(p.ok, true);
+    assert.deepEqual(p.models["koinos-fast"], { usdPerMInputTokens: 0.1, usdPerMOutputTokens: 0.4, cuClass: "LLM-CU" });
+    assert.deepEqual([p.freeTokensPerEpoch, p.kaiRefUsd, p.status], [25000, 0.01, "PROVISIONAL"]);
   } finally {
     await sched.close();
   }

@@ -128,8 +128,14 @@ test("network mode: chat relays gateway -> scheduler -> provider -> back, with a
     assert.equal(sched.receipts[0].worker, earn.wallet.address);
     assert.ok(sched.receipts[0].honest);
 
-    // §23: the relay was signed by the app wallet and metered per-address.
-    assert.equal(sched.consumed[earn.wallet.address], 1, "consume debited to the signing account");
+    // The relay was signed by the app wallet and metered in AI tokens.
+    assert.equal(sched.consumed[earn.wallet.address], 1, "request counted to the signing account");
+    assert.equal(j.usage.total_tokens, 5, "OpenAI-shape usage returned (1 in + 4 out from the fixture)");
+    assert.deepEqual(
+      sched.usage[earn.wallet.address],
+      { inTok: 1, outTok: 4, costMicro: 0 },
+      "token meter recorded actuals; free allowance absorbed the cost"
+    );
 
     // stream:true gets the SSE shim so the app UI works unchanged.
     const sr = await fetch(base + "/v1/chat/completions", {
@@ -161,23 +167,26 @@ test("network mode: chat relays gateway -> scheduler -> provider -> back, with a
     });
     assert.equal(bad.status, 401, "signature must match the claimed address");
 
-    // §23 metering: a pure consumer (serves nothing) runs out after the free
-    // allowance; the serving machine never does (each receipt buys one more).
+    // Metering: a pure consumer's first request rides the free token
+    // allowance; once free tokens, prepaid balance, and earnings are all
+    // exhausted, the authorization gate refuses BEFORE any provider runs.
     const consumer = new WalletService(path.join(dir, "consumer"));
     consumer.create({ password: "correct horse" });
-    let lastStatus = 0;
-    for (let i = 0; i < 6; i++) {
-      const ident = await consumeIdent(consumer, [{ role: "user", content: `q${i}` }]);
-      const r = await fetch(`http://127.0.0.1:${schedPort}/consume/chat/completions`, {
+    const askNet = async (content) => {
+      const ident = await consumeIdent(consumer, [{ role: "user", content }]);
+      return fetch(`http://127.0.0.1:${schedPort}/consume/chat/completions`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ messages: [{ role: "user", content: `q${i}` }], ...ident }),
+        body: JSON.stringify({ messages: [{ role: "user", content }], ...ident }),
       });
-      lastStatus = r.status;
-      await r.text();
-    }
-    assert.equal(lastStatus, 402, "6th request beyond the 5 free is refused");
-    assert.equal(sched.consumed[consumer.address], 5, "exactly the allowance was served");
+    };
+    const ok1 = await askNet("free ride within allowance");
+    assert.equal(ok1.status, 200, "free allowance covers a small request");
+    await ok1.text();
+    sched.freeUsed[consumer.address] = 25000; // allowance spent
+    const refused = await askNet("one more?");
+    assert.equal(refused.status, 402, "no free tokens, no balance, no earnings -> refused");
+    assert.match((await refused.json()).error.message, /billed per AI token/);
   } finally {
     await post("/core/earn/stop").catch(() => {});
     await core.stop();
