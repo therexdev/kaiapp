@@ -29,13 +29,32 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(start);
 }
 
+// Machine secret for wallet sessions: 32 random bytes, stored encrypted by
+// the OS credential store (safeStorage → DPAPI/Keychain). Lets the wallet
+// stay unlocked across restarts without ever writing a plaintext key.
+function machineSecret(dataDir) {
+  try {
+    const { safeStorage } = require("electron");
+    if (!safeStorage.isEncryptionAvailable()) return null;
+    const fs = require("fs");
+    const p = path.join(dataDir, "machine-secret.bin");
+    if (fs.existsSync(p)) return safeStorage.decryptString(fs.readFileSync(p));
+    const secret = require("crypto").randomBytes(32).toString("hex");
+    fs.mkdirSync(dataDir, { recursive: true });
+    fs.writeFileSync(p, safeStorage.encryptString(secret));
+    return secret;
+  } catch {
+    return null; // wallet still works, it just asks for the password again
+  }
+}
+
 async function start() {
   const dataDir = process.env.KAI_CORE_DATA || path.join(app.getPath("userData"), "core");
   const winState = new JsonStore(path.join(dataDir, "window.json"), {
     bounds: { width: 1100, height: 760 },
   });
 
-  core = await createCore({ dataDir });
+  core = await createCore({ dataDir, sessionSecret: machineSecret(dataDir) });
   const port = await core.start();
 
   win = new BrowserWindow({

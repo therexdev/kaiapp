@@ -19,6 +19,10 @@ test("wallet: create -> lock -> unlock roundtrip; wrong password fails; keys sta
   assert.ok(address.length >= 26 && wif.length > 40);
   assert.ok(!fs.readFileSync(w.keystorePath, "utf8").includes(wif), "no plaintext key on disk");
 
+  const wsDir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-w-"));
+  const ws = new WalletService(wsDir);
+  assert.throws(() => ws.create({ password: "trailing space " }), /space/, "whitespace caught at save time");
+
   w.lock();
   assert.throws(() => w.signer, /locked/);
   assert.equal(w.address, address, "address readable while locked");
@@ -58,6 +62,36 @@ test("wallet: restore from WIF replaces a lost-password keystore, same address",
     fs.readdirSync(dir).some((f) => f.startsWith("wallet.json.bak-")),
     "old keystore set aside, not destroyed"
   );
+});
+
+test("wallet session: survives a 'restart', refuses wrong secrets and swapped files, ends on lock", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-w-"));
+  const w1 = new WalletService(dir);
+  const { address } = w1.create({ password: "correct horse" });
+  assert.equal(w1.saveSession("machine-secret"), true);
+
+  // New instance = app restart. Session resumes without the password.
+  const w2 = new WalletService(dir);
+  assert.equal(w2.status().unlocked, false);
+  assert.equal(w2.tryResumeSession("wrong-secret"), false, "wrong machine secret stays locked");
+  assert.equal(w2.tryResumeSession("machine-secret"), true);
+  assert.equal(w2.address, address);
+  const hash = crypto.createHash("sha256").update("x").digest();
+  assert.equal(WalletService.recoverAddress(hash, await w2.signHash(hash)), address, "resumed key signs");
+
+  // A swapped wallet file must not be silently overridden by the session.
+  const other = new WalletService(fs.mkdtempSync(path.join(os.tmpdir(), "kai-w-")));
+  other.create({ password: "correct horse" });
+  const mine = fs.readFileSync(path.join(dir, "wallet.json"), "utf8");
+  fs.copyFileSync(other.keystorePath, path.join(dir, "wallet.json"));
+  const w3 = new WalletService(dir);
+  assert.equal(w3.tryResumeSession("machine-secret"), false, "session refuses a foreign keystore");
+  fs.writeFileSync(path.join(dir, "wallet.json"), mine);
+
+  // Lock ends the session for good.
+  w2.lock();
+  const w4 = new WalletService(dir);
+  assert.equal(w4.tryResumeSession("machine-secret"), false, "lock cleared the session");
 });
 
 test("merkleRoot is order-stable and pairs odd leaves", () => {
@@ -344,11 +378,16 @@ test("earn control plane: wallet -> config -> start -> jobs -> stop, via the app
     dataDir: dir,
     port: 0,
     llamaBin: path.join(__dirname, "fixtures", "fake-llama-server"),
+    sessionSecret: "machine-secret",
     onEvent: () => {},
   });
   const base = `http://127.0.0.1:${await core.start()}`;
   const sched = new Scheduler({
     dataDir: path.join(dir, "sched"),
+    // Short lease: if a dispatch lands on a silently-dead socket (no RST —
+    // the one unsignalled case), the requeue backstop kicks in fast enough
+    // for this test to see recovery instead of timing out.
+    leaseMs: 3000,
     settlement: { settleEpoch: async () => ({}), kaiBalance: async () => "800000000" },
   });
   const schedPort = await sched.listen();
@@ -380,6 +419,37 @@ test("earn control plane: wallet -> config -> start -> jobs -> stop, via the app
 
     const stopped = await post("/core/earn/stop");
     assert.equal(stopped.worker.running, false);
+
+    // Restart drill: leave earning ON, replace the whole core (= app restart)
+    // with the same machine secret — the wallet resumes unlocked and the
+    // worker re-registers and earns again without any password or clicks.
+    await post("/core/earn/start");
+    await core.stop();
+    const core2 = await createCore({
+      dataDir: dir,
+      port: 0,
+      llamaBin: path.join(__dirname, "fixtures", "fake-llama-server"),
+      sessionSecret: "machine-secret",
+      onEvent: () => {},
+    });
+    const base2 = `http://127.0.0.1:${await core2.start()}`;
+    try {
+      sched.enqueue({ prompt: "after restart" });
+      let s2 = null;
+      // Worst case by design: dead-socket dispatch + 3s lease + ≤20s poll
+      // cycle to the reaper — 30s covers the guarantee with margin.
+      const deadline2 = Date.now() + 30000;
+      while (Date.now() < deadline2) {
+        s2 = await (await fetch(base2 + "/core/earn")).json();
+        if (s2.wallet.unlocked && s2.worker.running && s2.worker.receiptsAccepted >= 1) break;
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      assert.equal(s2.wallet.unlocked, true, "wallet resumed without a password");
+      assert.equal(s2.worker.running, true, "earning auto-resumed");
+      assert.ok(s2.worker.receiptsAccepted >= 1, `worked after restart (${JSON.stringify(s2.worker)})`);
+    } finally {
+      await core2.stop();
+    }
   } finally {
     await core.stop();
     await sched.close();

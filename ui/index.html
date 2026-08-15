@@ -73,7 +73,11 @@
             <h2>Create your earning account</h2>
             <p class="hint">A wallet is created on this machine. Its key never leaves your computer and is never shared with apps or the network.</p>
             <div class="form-row">
-              <input id="earn-pass" type="password" placeholder="Choose a password (min 8 chars)" />
+              <input id="earn-pass" type="password" placeholder="Choose a password (min 8 chars)" autocomplete="new-password" />
+              <button class="linklike showpw" data-target="earn-pass">show</button>
+            </div>
+            <div class="form-row">
+              <input id="earn-pass2" type="password" placeholder="Confirm password" autocomplete="new-password" />
               <button id="btn-earn-create" class="primary small">Create</button>
             </div>
             <div id="earn-wif" hidden>
@@ -87,7 +91,8 @@
             <h2>Unlock your earning account</h2>
             <p class="hint" id="earn-unlock-hint"></p>
             <div class="form-row">
-              <input id="earn-unlock-pass" type="password" placeholder="Wallet password" />
+              <input id="earn-unlock-pass" type="password" placeholder="Wallet password" autocomplete="current-password" />
+              <button class="linklike showpw" data-target="earn-unlock-pass">show</button>
               <button id="btn-earn-unlock" class="primary small">Unlock</button>
             </div>
             <p class="hint"><button id="btn-earn-show-restore" class="linklike">Forgot your password? Restore with your backup code</button></p>
@@ -96,9 +101,14 @@
               <p class="hint">Enter the backup code you wrote down when the account was created, and choose a new password. Your address and balance stay the same.</p>
               <div class="form-row">
                 <input id="earn-restore-wif" type="password" placeholder="Backup code" autocomplete="off" />
+                <button class="linklike showpw" data-target="earn-restore-wif">show</button>
               </div>
               <div class="form-row">
-                <input id="earn-restore-pass" type="password" placeholder="New password (min 8 chars)" />
+                <input id="earn-restore-pass" type="password" placeholder="New password (min 8 chars)" autocomplete="new-password" />
+                <button class="linklike showpw" data-target="earn-restore-pass">show</button>
+              </div>
+              <div class="form-row">
+                <input id="earn-restore-pass2" type="password" placeholder="Confirm new password" autocomplete="new-password" />
                 <button id="btn-earn-restore" class="primary small">Restore</button>
               </div>
             </div>
@@ -111,6 +121,7 @@
               <button id="btn-earn-toggle" class="primary">Start Earning</button>
             </div>
             <p class="hint">Stopping is immediate — no job runs after you press Stop.</p>
+            <p class="hint">Your wallet stays unlocked on this computer. <button id="btn-earn-lock" class="linklike">Lock wallet</button></p>
           </div>
 
           <p class="error" id="earn-error" hidden></p>

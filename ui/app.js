@@ -436,10 +436,25 @@ async function earnPost(path, body) {
   return j;
 }
 
+// Show/hide toggles for wallet secret fields — an invisible stray space in a
+// password field is a delayed lockout; being able to look kills the mystery.
+document.addEventListener("click", (e) => {
+  const b = e.target.closest?.(".showpw");
+  if (!b) return;
+  const inp = document.getElementById(b.dataset.target);
+  if (!inp) return;
+  inp.type = inp.type === "password" ? "text" : "password";
+  b.textContent = inp.type === "password" ? "show" : "hide";
+});
+
 $("btn-earn-create").addEventListener("click", async () => {
+  if ($("earn-pass").value !== $("earn-pass2").value) {
+    return earnErr("Passwords don't match — type the same password in both fields");
+  }
   try {
     const j = await earnPost("/core/earn/wallet", { password: $("earn-pass").value });
     $("earn-pass").value = "";
+    $("earn-pass2").value = "";
     $("earn-wif-value").textContent = j.wif; // shown once, never stored by the UI
     $("earn-wif").hidden = false;
   } catch { /* error shown */ }
@@ -459,12 +474,22 @@ $("btn-earn-unlock").addEventListener("click", async () => {
   } catch { /* error shown */ }
 });
 
+$("btn-earn-lock").addEventListener("click", async () => {
+  try {
+    await earnPost("/core/earn/lock");
+    renderEarn();
+  } catch { /* error shown */ }
+});
+
 $("btn-earn-show-restore").addEventListener("click", () => {
   const box = $("earn-restore");
   box.hidden = !box.hidden;
 });
 
 $("btn-earn-restore").addEventListener("click", async () => {
+  if ($("earn-restore-pass").value !== $("earn-restore-pass2").value) {
+    return earnErr("New passwords don't match — type the same password in both fields");
+  }
   try {
     await earnPost("/core/earn/wallet/restore", {
       wif: $("earn-restore-wif").value,
@@ -472,6 +497,7 @@ $("btn-earn-restore").addEventListener("click", async () => {
     });
     $("earn-restore-wif").value = "";
     $("earn-restore-pass").value = "";
+    $("earn-restore-pass2").value = "";
     $("earn-restore").hidden = true;
     renderEarn();
   } catch { /* error shown */ }

@@ -57,6 +57,11 @@ class WalletService {
     if (typeof password !== "string" || password.length < MIN_PASSWORD_LENGTH) {
       throw new Error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`);
     }
+    // A pasted trailing space is invisible and becomes a delayed lockout —
+    // refuse it at save time, when the user can still fix it painlessly.
+    if (password !== password.trim()) {
+      throw new Error("Password can't start or end with a space — remove the stray whitespace and try again");
+    }
   }
 
   _persist(signer, password) {
@@ -164,7 +169,60 @@ class WalletService {
 
   lock() {
     this._signer = null;
+    this.clearSession();
     return { locked: true };
+  }
+
+  // ----- machine session (§8-compatible convenience) -----
+  // The unlocked key can be kept across app restarts, encrypted under a
+  // machine-local secret the OS guards (Electron safeStorage / DPAPI). The
+  // key still never leaves the machine; "Lock wallet" ends the session.
+
+  _sessionPath() {
+    return path.join(this.walletDir, "session.bin");
+  }
+
+  saveSession(secret) {
+    if (!secret || !this._signer) return false;
+    const key = crypto.createHash("sha256").update(String(secret)).digest();
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+    const data = Buffer.concat([
+      cipher.update(Buffer.from(this._signer.getPrivateKey("hex"), "hex")),
+      cipher.final(),
+    ]);
+    fs.mkdirSync(this.walletDir, { recursive: true });
+    fs.writeFileSync(this._sessionPath(), Buffer.concat([iv, cipher.getAuthTag(), data]), { mode: 0o600 });
+    return true;
+  }
+
+  tryResumeSession(secret) {
+    try {
+      if (!secret) return false;
+      const blob = fs.readFileSync(this._sessionPath());
+      const key = crypto.createHash("sha256").update(String(secret)).digest();
+      const decipher = crypto.createDecipheriv("aes-256-gcm", key, blob.subarray(0, 12));
+      decipher.setAuthTag(blob.subarray(12, 28));
+      const priv = Buffer.concat([decipher.update(blob.subarray(28)), decipher.final()]).toString("hex");
+      const ks = this.readKeystore();
+      const signer = new Signer({ privateKey: priv, compressed: ks?.compressed !== false });
+      // The session must agree with the keystore on disk: if the wallet file
+      // was replaced with a different account, stay locked instead of
+      // silently signing with a key the file no longer represents.
+      if (ks?.address && signer.getAddress() !== ks.address) return false;
+      this._signer = signer;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  clearSession() {
+    try {
+      fs.rmSync(this._sessionPath(), { force: true });
+    } catch {
+      /* best-effort */
+    }
   }
 
   revealWif(password) {
@@ -191,6 +249,7 @@ class WalletService {
     this._signerFromKeystore(password); // proves the caller could have backed up
     fs.rmSync(this.keystorePath, { force: true });
     this._signer = null;
+    this.clearSession();
     return { removed: true };
   }
 }

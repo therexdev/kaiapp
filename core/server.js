@@ -26,7 +26,7 @@ const { Gateway } = require("./lib/gateway");
 
 const VERSION = require("./package.json").version;
 
-async function createCore({ dataDir, port, llamaBin, onEvent } = {}) {
+async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = {}) {
   dataDir = dataDir || process.env.KAI_CORE_DATA || path.join(os.homedir(), ".koinos-ai");
   // Every event also lands in <dataDir>/core.log so packaged-app failures
   // in the field are diagnosable ("Model load failed" has a paper trail).
@@ -96,6 +96,13 @@ async function createCore({ dataDir, port, llamaBin, onEvent } = {}) {
   const { Worker } = require("./lib/worker");
   const wallet = new WalletService(path.join(dataDir, "wallet"));
   let worker = null;
+  // Machine session (§8-compatible): the Electron shell passes a secret held
+  // by the OS (safeStorage/DPAPI); with it, an unlocked wallet survives app
+  // restarts — no password re-typing — until the user presses Lock.
+  sessionSecret = sessionSecret || process.env.KAI_SESSION_SECRET || null;
+  if (sessionSecret && wallet.exists() && wallet.tryResumeSession(sessionSecret)) {
+    events({ type: "wallet:session-resumed", message: wallet.address });
+  }
   // On-chain KAI balance + open-epoch receipts, via the scheduler's /balance.
   // Cached 30s; only fetched while something asks (the Earn tab polls status).
   let earningsCache = { at: 0, data: null };
@@ -114,7 +121,9 @@ async function createCore({ dataDir, port, llamaBin, onEvent } = {}) {
     } catch {
       /* scheduler unreachable or chain read down — the row just shows a dash */
     }
-    earningsCache = { at: Date.now(), data };
+    // Successes cache for the full 30s; a failed read retries in ~3s so one
+    // slow moment doesn't blank the balance row for half a minute.
+    earningsCache = { at: data ? Date.now() : Date.now() - 27000, data };
     return data;
   };
   const earn = {
@@ -131,11 +140,13 @@ async function createCore({ dataDir, port, llamaBin, onEvent } = {}) {
     },
     createWallet: ({ password }) => {
       const r = wallet.create({ password });
+      if (sessionSecret) wallet.saveSession(sessionSecret);
       events({ type: "wallet:created", message: r.address });
       return r;
     },
     restoreWallet: ({ wif, password }) => {
       const r = wallet.restore({ wif, password });
+      if (sessionSecret) wallet.saveSession(sessionSecret);
       events({ type: "wallet:restored", message: r.address });
       return r;
     },
@@ -143,12 +154,20 @@ async function createCore({ dataDir, port, llamaBin, onEvent } = {}) {
       // Every attempt lands in core.log — locked-out users need a paper trail.
       try {
         const r = wallet.unlock(password);
+        if (sessionSecret) wallet.saveSession(sessionSecret);
         events({ type: "wallet:unlocked", message: r.address });
         return r;
       } catch (e) {
         events({ type: "wallet:unlock-failed", message: String(e.message) });
         throw e;
       }
+    },
+    lock: async () => {
+      if (worker) await worker.stop();
+      wallet.lock(); // also ends the machine session
+      settings.set("earn.autoStart", false);
+      events({ type: "wallet:locked" });
+      return earn.status();
     },
     start: async () => {
       const s = wallet.status();
@@ -158,10 +177,16 @@ async function createCore({ dataDir, port, llamaBin, onEvent } = {}) {
       if (!url) throw new Error("Set the scheduler URL first");
       if (worker?.running) return worker.status();
       worker = new Worker({ schedulerUrl: url, wallet, runtime, hardware: hw, onEvent: events });
-      return worker.start();
+      const st = await worker.start();
+      settings.set("earn.autoStart", true);
+      return st;
     },
-    stop: async () => {
+    // userIntent distinguishes the Stop button from process shutdown: only
+    // the user's own Stop turns auto-resume off — a quit or update keeps
+    // their "earning on" choice for the next launch.
+    stop: async ({ userIntent = true } = {}) => {
       if (worker) await worker.stop();
+      if (userIntent) settings.set("earn.autoStart", false);
       return earn.status();
     },
   };
@@ -216,10 +241,19 @@ async function createCore({ dataDir, port, llamaBin, onEvent } = {}) {
       if (ready.length === 1) {
         runtime.ensure(ready[0].alias).catch((e) => events({ type: "runtime:warmstart-failed", message: String(e.message) }));
       }
+      // Earning resumes by itself after a restart when the machine session
+      // unlocked the wallet and the user had left earning on (§10: their
+      // last explicit choice keeps ruling; Stop or Lock clears it).
+      if (wallet.status().unlocked && settings.get("earn.autoStart", false)) {
+        earn.start().then(
+          () => events({ type: "earn:auto-resumed" }),
+          (e) => events({ type: "earn:auto-resume-failed", message: String(e.message) })
+        );
+      }
       return p;
     },
     async stop() {
-      await earn.stop().catch(() => {});
+      await earn.stop({ userIntent: false }).catch(() => {});
       runtime.stop();
       await gateway.close();
     },
