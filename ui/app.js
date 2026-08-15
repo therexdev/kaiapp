@@ -146,7 +146,10 @@ async function updateModelPick(aliases) {
     ...aliases
       .filter((al) => al.status === "ready" && (!al.dev || al.alias === state.alias))
       .map((al) => ({ v: al.alias, label: "Local · " + al.label.split(" (")[0] })),
-    ...(networkEligible ? [{ v: "koinos-network", label: "Koinos Network" }] : []),
+    // The network serves the Fast class today regardless of what any
+    // provider runs locally — the label says so, so nobody expects their
+    // local Gemma pick to travel (field confusion).
+    ...(networkEligible ? [{ v: "koinos-network", label: "Koinos Network · Fast" }] : []),
   ];
   pickable = want;
   const sig = want.map((w) => w.v).join(",");

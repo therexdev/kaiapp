@@ -109,6 +109,31 @@ async function start() {
 
   await win.loadURL(`http://127.0.0.1:${port}/`);
 
+  // Earning machines must not doze off: a sleeping laptop was the whole
+  // network's "no providers" (field finding — the only provider walked
+  // away and the lid logic took the network down). While earning is on,
+  // hold a power-save blocker; release it the moment earning stops.
+  {
+    const { powerSaveBlocker } = require("electron");
+    let blockerId = null;
+    const syncKeepAwake = async () => {
+      try {
+        const r = await fetch(`http://127.0.0.1:${port}/core/earn`);
+        const j = await r.json();
+        const earning = !!(j.worker && j.worker.running);
+        if (earning && blockerId === null) {
+          blockerId = powerSaveBlocker.start("prevent-app-suspension");
+        } else if (!earning && blockerId !== null) {
+          powerSaveBlocker.stop(blockerId);
+          blockerId = null;
+        }
+      } catch { /* core briefly unreachable — retry next tick */ }
+    };
+    syncKeepAwake();
+    const keepAwakeTimer = setInterval(syncKeepAwake, 30000);
+    win.on("closed", () => clearInterval(keepAwakeTimer));
+  }
+
   // Auto-launch at login is opt-in, not default: silently installing into
   // the user's startup list is exactly the kind of behavior alpha testers
   // report as malware-adjacent. A Settings toggle ships it properly later;
