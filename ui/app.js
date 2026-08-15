@@ -466,10 +466,34 @@ $("btn-earn-wif-done").addEventListener("click", () => {
   renderEarn();
 });
 
+// Enter submits wallet forms (a second Enter when an input method is mid-
+// composition: the first one commits, e.isComposing guards the difference).
+for (const [field, btn] of Object.entries({
+  "earn-pass2": "btn-earn-create",
+  "earn-unlock-pass": "btn-earn-unlock",
+  "earn-restore-pass2": "btn-earn-restore",
+})) {
+  $(field).addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.isComposing) $(btn).click();
+  });
+}
+
+// Live count beside the unlock field: the user sees exactly what the app
+// sees — an empty or short value can't masquerade as a typed password.
+$("earn-unlock-pass").addEventListener("input", () => {
+  const n = [...$("earn-unlock-pass").value].length;
+  $("earn-unlock-count").textContent = n ? `${n} character${n === 1 ? "" : "s"} entered` : "";
+});
+
 $("btn-earn-unlock").addEventListener("click", async () => {
+  const pw = $("earn-unlock-pass").value;
+  if (!pw) {
+    return earnErr("The password field is empty — type your password, then press Enter or Unlock.");
+  }
   try {
-    await earnPost("/core/earn/unlock", { password: $("earn-unlock-pass").value });
+    await earnPost("/core/earn/unlock", { password: pw });
     $("earn-unlock-pass").value = "";
+    $("earn-unlock-count").textContent = "";
     renderEarn();
   } catch { /* error shown */ }
 });

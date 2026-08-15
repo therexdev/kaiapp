@@ -190,7 +190,10 @@ class Gateway {
           return this._json(res, 200, { ok: true, ...this.earn.restoreWallet(body) });
         }
         if (path === "/core/earn/unlock" && req.method === "POST") {
-          return this._json(res, 200, { ok: true, ...this.earn.unlock(body.password) });
+          // The controller takes {password} — passing body.password here once
+          // destructured a STRING into undefined and made every correct
+          // password "incorrect". Caught by the earn-ui browser test.
+          return this._json(res, 200, { ok: true, ...this.earn.unlock(body) });
         }
         if (path === "/core/earn/lock" && req.method === "POST") {
           return this._json(res, 200, { ok: true, ...(await this.earn.lock()) });
