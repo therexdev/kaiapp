@@ -367,6 +367,79 @@ test("epoch close (A1): value-based rewards net EXACTLY against consumer spend, 
   assert.equal(s.root, leaf.toString("hex"), "single-leaf root = sha256(epoch|worker|amountSat)");
 });
 
+test("§20 splits: role division is exact, treasury/royalty settle as claims, default stays pass-through", () => {
+  const { MODEL_RATES } = require("../../server/scheduler");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-earn-"));
+  // 60k in + 10k out at koinos-fast rates = $0.010 = exactly 1 KAI (1e8 sat).
+  const chat = { worker: "W", honest: true, jobType: "chat", usage: { prompt_tokens: 60000, completion_tokens: 10000 } };
+  const evalJob = { worker: "W", honest: true, jobType: "inference-eval", usage: { prompt_tokens: 20, completion_tokens: 5 } };
+
+  // No treasury configured -> bit-identical to the alpha full pass-through.
+  const plain = new Scheduler({ dataDir: path.join(dir, "plain"), epoch: 20 });
+  plain.receipts.push({ ...chat }, { ...evalJob });
+  const p = plain.closeEpoch();
+  assert.equal(p.totals.W, "200000000", "1 KAI chat value + 1 KAI subsidy, all to the worker");
+  assert.equal(p.splits.active, false);
+  assert.deepEqual(p.splits.totals, { compute: "100000000", royalty: "0", verification: "0", protocol: "0" });
+
+  // Treasury set -> verification 3% + protocol 7% divert; evals stay whole.
+  const split = new Scheduler({ dataDir: path.join(dir, "split"), epoch: 21, splits: { treasury: "T" } });
+  split.receipts.push({ ...chat }, { ...evalJob });
+  const s = split.closeEpoch();
+  assert.equal(s.totals.W, "190000000", "worker keeps 90% of chat value + full eval subsidy");
+  assert.equal(s.totals.T, "10000000", "treasury claims verification + protocol shares");
+  assert.deepEqual(s.splits.totals, { compute: "90000000", royalty: "0", verification: "3000000", protocol: "7000000" });
+  assert.ok(s.claims.T && s.claims.T.amount === "10000000", "treasury leaf is an ordinary claim_value claim");
+  // The treasury leaf verifies exactly the way the contract does.
+  let h = crypto.createHash("sha256").update(`21|T|10000000`).digest();
+  let idx = s.claims.T.index;
+  for (const sib of s.claims.T.proof.map((x) => Buffer.from(x, "hex"))) {
+    h = idx % 2 === 0
+      ? crypto.createHash("sha256").update(Buffer.concat([h, Buffer.from(sib)])).digest()
+      : crypto.createHash("sha256").update(Buffer.concat([Buffer.from(sib), h])).digest();
+    idx = Math.floor(idx / 2);
+  }
+  assert.equal(h.toString("hex"), s.root, "treasury claim proof verifies against the epoch root");
+
+  // Per-model royalty is honored but CLAMPED to the §28 bound (25% -> 10%).
+  MODEL_RATES["cc-royalty-test"] = { inMicroPerM: 100000, outMicroPerM: 400000, royaltyBps: 2500, royaltyAddr: "R" };
+  try {
+    const roy = new Scheduler({ dataDir: path.join(dir, "roy"), epoch: 22, splits: { treasury: "T" } });
+    roy.receipts.push({ ...chat, modelClass: "cc-royalty-test" });
+    const r = roy.closeEpoch();
+    assert.deepEqual(r.splits.totals, { compute: "80000000", royalty: "10000000", verification: "3000000", protocol: "7000000" });
+    assert.equal(r.totals.R, "10000000", "creator royalty settles as its own claim");
+    assert.equal(r.totals.W, "80000000");
+    assert.equal(r.totals.T, "10000000");
+  } finally {
+    delete MODEL_RATES["cc-royalty-test"];
+  }
+
+  // Rounding: at unit satoshi granularity the floor-divided shares under-fill
+  // and compute absorbs the remainder — the buckets still sum exactly.
+  const unit = new Scheduler({ dataDir: path.join(dir, "unit"), epoch: 23, splits: { treasury: "T" } });
+  unit.price = { ...unit.price, satPerMicro: 1n };
+  const odd = unit._splitChatValueSat({ jobType: "chat", usage: { prompt_tokens: 150, completion_tokens: 0 } });
+  assert.equal(odd.valueSat, 15n, "15 µ$ at 1 sat/µ$");
+  assert.equal(odd.verifySat, 0n, "3% of 15 floors to zero");
+  assert.equal(odd.protocolSat, 1n, "7% of 15 floors to one");
+  assert.equal(odd.computeSat, 14n, "compute takes the remainder");
+  assert.equal(odd.computeSat + odd.royaltySat + odd.verifySat + odd.protocolSat, odd.valueSat);
+
+  // Treasury spends like anyone else: its accrual nets against its spend.
+  const netted = new Scheduler({ dataDir: path.join(dir, "net"), epoch: 24, splits: { treasury: "T" } });
+  netted.receipts.push({ ...chat });
+  netted.spentSat.T = "4000000";
+  const n = netted.closeEpoch();
+  assert.equal(n.totals.T, "6000000", "treasury claim = 10% share minus its own spend");
+
+  // Misconfigured shares fail fast at startup, not at settlement time.
+  assert.throws(
+    () => new Scheduler({ dataDir: path.join(dir, "bad"), splits: { verifyBps: 6000, protocolBps: 4000, royaltyMaxBps: 1000 } }),
+    /exceed 100%/
+  );
+});
+
 test("token-metered billing (amendment A1): free tokens -> prepaid USD -> epoch earnings", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-earn-"));
   // Chain says this address has deposited 1 KAI -> $0.01 prepaid at reference.
