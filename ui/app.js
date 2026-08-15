@@ -71,9 +71,14 @@ async function refresh() {
   } else if (models.ensure?.state === "working") {
     showProgress(null);
     setStatus("busy", "Loading model…");
-  } else if (models.ensure?.state === "error") {
-    onboardError(models.ensure.error);
-    setStatus("err", "Model load failed");
+  } else if (models.ensure?.state === "error" || models.runtime?.lastLoadError) {
+    const reason = models.ensure?.error || models.runtime?.lastLoadError?.message || "";
+    onboardError(reason);
+    // The reason is actionable (engine stderr, missing file, quarantine) —
+    // a bare "load failed" left testers with nothing to report.
+    const short = reason.length > 120 ? `${reason.slice(0, 120)}…` : reason;
+    setStatus("err", `Model load failed${short ? ` — ${short}` : ""}`);
+    $("status-pane").title = reason;
   } else if (running) {
     setStatus("ok", "Model loaded");
   } else if (state.ready) {

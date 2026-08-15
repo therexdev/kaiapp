@@ -33,6 +33,9 @@ class RuntimeManager {
       activeAlias: this.activeAlias,
       loading: !!this._loading,
       runtime: this.runtime ? this.runtime.status() : null,
+      // Why the last load failed (null after a success) — the UI shows
+      // this instead of a bare "Model load failed" nobody can act on.
+      lastLoadError: this.lastLoadError || null,
     };
   }
 
@@ -155,16 +158,22 @@ class RuntimeManager {
     };
 
     let runtime;
-    if (this.preferFallback) {
-      runtime = await bootFallback(null);
-      if (!runtime) throw new Error("KAI_RUNTIME requested the fallback runtime, but none is available");
-    } else {
-      try {
-        runtime = await bootLlama();
-      } catch (e) {
-        runtime = await bootFallback(String(e.message));
-        if (!runtime) throw e;
+    try {
+      if (this.preferFallback) {
+        runtime = await bootFallback(null);
+        if (!runtime) throw new Error("KAI_RUNTIME requested the fallback runtime, but none is available");
+      } else {
+        try {
+          runtime = await bootLlama();
+        } catch (e) {
+          runtime = await bootFallback(String(e.message));
+          if (!runtime) throw e;
+        }
       }
+      this.lastLoadError = null;
+    } catch (e) {
+      this.lastLoadError = { alias, message: String(e.message), at: new Date().toISOString() };
+      throw e;
     }
 
     this.runtime = runtime;

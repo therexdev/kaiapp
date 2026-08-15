@@ -548,15 +548,19 @@ class Gateway {
     // On overflow, errors must say both truths: local couldn't serve, and
     // why the network fallback stopped — otherwise the user sees only half
     // the story and the fix (unlock wallet, raise budget) stays hidden.
-    const fail = (status, message, type) =>
-      this._json(res, status, {
+    const fail = (status, message, type) => {
+      // The local reason can carry an engine stderr tail — keep the chat
+      // error readable; the full text lives in the status pane and log.
+      const local = String(localError || "").length > 260 ? `${String(localError).slice(0, 260)}…` : localError;
+      return this._json(res, status, {
         error: {
           message: overflowFrom
-            ? `Local model "${overflowFrom}" is unavailable (${localError}) and network fallback failed: ${message}`
+            ? `Local model "${overflowFrom}" is unavailable (${local}) and network fallback failed: ${message}`
             : message,
           type,
         },
       });
+    };
     const { schedulerUrl } = this.network.status();
     if (!schedulerUrl) {
       return fail(400, "No scheduler URL configured for network requests", "invalid_request_error");
@@ -592,7 +596,13 @@ class Gateway {
       return fail(502, `Network request failed: ${e.message}`, "server_error");
     }
     const j = await upstream.json().catch(() => null);
-    if (!upstream.ok || !j) return this._json(res, upstream.status || 502, j || { error: { message: "bad upstream reply", type: "server_error" } });
+    // Scheduler-side failures ("no providers online") go through fail() too —
+    // relaying them raw dropped the local half of the story on overflow
+    // (field finding: users saw only 'no providers serving "koinos-fast"'
+    // when the actual trigger was their local model failing to load).
+    if (!upstream.ok || !j) {
+      return fail(upstream.status || 502, j?.error?.message || "bad upstream reply", j?.error?.type || "server_error");
+    }
     if (meterKey && j.usage) {
       // Estimated at published network rates regardless of any free
       // allowance — the budget is the developer's conservative guardrail.

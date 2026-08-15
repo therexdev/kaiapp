@@ -257,3 +257,38 @@ test("local-first: locked wallet blocks overflow with a two-sided error; streami
     spy.srv.close();
   }
 });
+
+test("overflow failure tells both truths: the local reason AND the network reason", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-route-"));
+  // A scheduler with no online providers — the exact field situation.
+  const srv = http.createServer((req, res) => {
+    let raw = "";
+    req.on("data", (c) => (raw += c));
+    req.on("end", () => {
+      if (!req.url.startsWith("/consume/")) {
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end("{}");
+      }
+      res.writeHead(503, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: { message: 'No providers are serving "koinos-fast" right now', type: "server_error" } }));
+    });
+  });
+  const port = await new Promise((r) => srv.listen(0, "127.0.0.1", function () { r(this.address().port); }));
+  const { core, post } = await bootCore(dir);
+  try {
+    await post("/core/earn/wallet", { password: "correct horse" });
+    await post("/core/earn/config", { schedulerUrl: `http://127.0.0.1:${port}` });
+    await post("/core/network/config", { privacyMode: "local-first" });
+
+    const r = await post("/v1/chat/completions", { model: "koinos-ultra", messages: [{ role: "user", content: "hi" }] });
+    assert.strictEqual(r.status, 503);
+    // Relaying the scheduler's error raw dropped the local half (field
+    // finding): the user saw 'no providers' with no hint their own model
+    // failed. Both truths, always.
+    assert.match(r.json.error.message, /Local model "koinos-ultra" is unavailable/);
+    assert.match(r.json.error.message, /No providers are serving/);
+  } finally {
+    await core.stop();
+    srv.close();
+  }
+});
