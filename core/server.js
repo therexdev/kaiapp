@@ -85,11 +85,17 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     appVersion: VERSION,
     onEvent: events,
     makeRuntime: (binPath) => new LlamaCppRuntime({ binPath: binPath || forcedBin, onEvent: events }),
-    // A local Ollama install is a ready-made fallback engine (§6): used when
-    // the managed llama.cpp build can't run here, or forced via KAI_RUNTIME.
-    // If the daemon isn't running, Core starts it — no manual step.
+    // Ollama is the deep-fallback engine (§6): a system install if present,
+    // otherwise Core provisions its own portable build (hash-pinned like
+    // every engine) — used when the managed llama.cpp build can't run here,
+    // or forced via KAI_RUNTIME. Nobody is ever sent to a website.
     makeFallback: async () =>
-      (await OllamaRuntime.ensureRunning({ ...ollamaAddr, onEvent: events }))
+      (await OllamaRuntime.ensureRunning({
+        ...ollamaAddr,
+        onEvent: events,
+        provision: () => provisioner.ensure("ollama", { cap: "cpu" }),
+        modelsDir: path.join(dataDir, "ollama-models"),
+      }))
         ? new OllamaRuntime({ ...ollamaAddr, onEvent: events })
         : null,
     preferFallback: process.env.KAI_RUNTIME === "ollama",

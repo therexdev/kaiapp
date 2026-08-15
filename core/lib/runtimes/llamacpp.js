@@ -147,12 +147,17 @@ function selfTest(binPath) {
   // NOTE: the Electron dir is deliberately NOT prepended to PATH — its
   // bundled CRT aging behind the engine toolchain was the v0.22.1 field
   // crash; the beside-copies above are the sanctioned channel.
+  // clang-built engine releases link LLVM OpenMP (libomp140), whose
+  // topology detection can access-violate at process load on very new
+  // hybrid CPUs (field machine: Arrow Lake Core Ultra). Disabling affinity
+  // skips the crashing path; ggml does its own thread placement anyway.
   const attempt = () =>
     spawnSync(binPath, ["--version"], {
       timeout: 15000,
       windowsHide: true,
       cwd: path.dirname(binPath),
       encoding: "utf8",
+      env: { ...process.env, KMP_AFFINITY: "disabled", KMP_DUPLICATE_LIB_OK: "TRUE" },
     });
   let r = attempt();
   // llama-server prints its version and exits 0 (some builds exit 1 after
@@ -251,9 +256,11 @@ class LlamaCppRuntime {
     // Windows CRT comes from the beside-copies above (System32-preferred);
     // Electron's dir is deliberately NOT on the child's PATH — its bundled
     // CRT aging behind the engine toolchain crashed the loader (v0.22.1).
+    // KMP guards: see selfTest — libomp topology crash on new hybrid CPUs.
     const child = spawn(this.binPath, args, {
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
+      env: { ...process.env, KMP_AFFINITY: "disabled", KMP_DUPLICATE_LIB_OK: "TRUE" },
       // llama.cpp release archives keep shared libs beside the binary.
       cwd: path.dirname(this.binPath),
     });

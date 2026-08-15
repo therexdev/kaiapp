@@ -165,3 +165,40 @@ test("ensureCrtBeside copies runtime DLLs without overwriting existing ones", ()
     assert.ok(!fs.existsSync(path.join(dst, "msvcp140.dll")));
   }
 });
+
+test("no system ollama + a provision hook: the fallback provisions itself and starts", async () => {
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+  const net = require("net");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-ollama-prov-"));
+  const port = await new Promise((r) => {
+    const s = net.createServer();
+    s.listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => r(p)); });
+  });
+  // The "portable ollama": a script that answers /api/version like the real
+  // daemon, honoring OLLAMA_HOST — proving env plumbing end to end.
+  const bin = path.join(dir, "ollama");
+  fs.writeFileSync(
+    bin,
+    `#!/usr/bin/env node
+const http = require("http");
+const [h, p] = process.env.OLLAMA_HOST.split(":");
+if (process.argv[2] !== "serve") process.exit(1);
+http.createServer((req, res) => { res.end(JSON.stringify({ version: "0.32.13-fake" })); }).listen(Number(p), h);
+setInterval(() => {}, 1000);
+`
+  );
+  fs.chmodSync(bin, 0o755);
+
+  let provisioned = 0;
+  const v = await OllamaRuntime.ensureRunning({
+    host: "127.0.0.1",
+    port,
+    provision: async () => (provisioned++, bin),
+    modelsDir: path.join(dir, "models"),
+    onEvent: () => {},
+  });
+  assert.strictEqual(provisioned, 1, "with nothing installed, the app provisions its own engine");
+  assert.ok(v && String(v).includes("0.32.13"), `daemon came up and answered: ${v}`);
+});

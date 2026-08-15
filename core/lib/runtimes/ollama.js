@@ -61,20 +61,36 @@ class OllamaRuntime {
    * ourselves ("ollama serve") and wait for it — the user should never have
    * to launch it by hand. Returns the version string or null.
    */
-  static async ensureRunning({ host = "127.0.0.1", port = 11434, onEvent } = {}) {
+  static async ensureRunning({ host = "127.0.0.1", port = 11434, onEvent, provision, modelsDir } = {}) {
+    const emit = onEvent || (() => {});
     const up = await OllamaRuntime.detect({ host, port });
     if (up) return up;
-    const bin = OllamaRuntime.locate();
+    let bin = OllamaRuntime.locate();
+    // Nothing installed: provision our own portable build — everything in
+    // the app, nobody gets sent to a website (field requirement). The zip
+    // is hash-pinned in the runtime catalog like every engine (§27) and
+    // downloaded lazily, only on machines that actually need the fallback.
+    if (!bin && provision) {
+      try {
+        bin = await provision();
+      } catch (e) {
+        emit({ type: "runtime:ollama-provision-failed", message: String(e.message) });
+        return null;
+      }
+    }
     if (!bin) return null;
-    (onEvent || (() => {}))({ type: "runtime:ollama-starting", bin });
+    emit({ type: "runtime:ollama-starting", bin });
     const { spawn } = require("child_process");
     try {
-      // Detached daemon: it outlives us, exactly like a user-launched Ollama.
-      spawn(bin, ["serve"], { detached: true, stdio: "ignore", windowsHide: true }).unref();
+      // Detached daemon: it outlives us, exactly like a user-launched
+      // Ollama. A provisioned copy keeps its models inside our data dir so
+      // storage stays governed and uninstall stays clean.
+      const env = { ...process.env, OLLAMA_HOST: `${host}:${port}`, ...(modelsDir ? { OLLAMA_MODELS: modelsDir } : {}) };
+      spawn(bin, ["serve"], { detached: true, stdio: "ignore", windowsHide: true, env }).unref();
     } catch {
       return null;
     }
-    const deadline = Date.now() + 12000;
+    const deadline = Date.now() + 30000; // first run unpacks runners — allow it
     while (Date.now() < deadline) {
       const v = await OllamaRuntime.detect({ host, port });
       if (v) return v;

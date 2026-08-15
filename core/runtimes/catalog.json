@@ -29,5 +29,17 @@
         ]
       }
     }
+  },
+  "ollama": {
+    "version": "v0.32.13",
+    "comment": "Portable fallback engine — provisioned lazily, only when the managed llama.cpp build cannot run on a machine. Official release zip, used in place; models live under the app data dir.",
+    "builds": {
+      "win32-x64-cpu": {
+        "url": "https://github.com/ollama/ollama/releases/download/v0.32.13/ollama-windows-amd64.zip",
+        "sha256": "20d61a8075038694f5b6db1e937551dbc79d470e85217003facf6ecaac394258",
+        "sizeBytes": 1459437863,
+        "binPath": "ollama.exe"
+      }
+    }
   }
 }
