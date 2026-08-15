@@ -22,7 +22,8 @@ const LONG_POLL_MS = 20000;
 const CHALLENGE_RATE = 0.2; // §17 sampling
 
 class Scheduler {
-  constructor({ dataDir, operatorSecret, onEvent } = {}) {
+  constructor({ dataDir, operatorSecret, chain, onEvent } = {}) {
+    this.chain = chain || null; // ChainClient — when set, epoch roots anchor on-chain (§20)
     this.dataDir = dataDir || path.join(process.cwd(), "scheduler-data");
     this.operatorSecret = operatorSecret || null;
     this.onEvent = onEvent || (() => {});
@@ -157,7 +158,15 @@ class Scheduler {
       if (this.operatorSecret && req.headers["x-operator-secret"] !== this.operatorSecret) {
         return this._json(res, 401, { ok: false, error: "operator secret required" });
       }
-      return this._json(res, 200, { ok: true, ...this.closeEpoch() });
+      const summary = this.closeEpoch();
+      if (this.chain) {
+        try {
+          summary.anchor = await this.chain.anchorRoot(summary.epoch, summary.root);
+        } catch (e) {
+          summary.anchorError = String(e.message);
+        }
+      }
+      return this._json(res, 200, { ok: true, ...summary });
     }
 
     if (url.pathname === "/epoch/current" && req.method === "GET") {

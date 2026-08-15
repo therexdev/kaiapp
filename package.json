@@ -69,5 +69,8 @@
   "dependencies": {
     "electron-updater": "^6.8.9",
     "koilib": "^9.3.0"
+  },
+  "overrides": {
+    "protobufjs": "7.4.0"
   }
 }
