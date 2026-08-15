@@ -42,10 +42,41 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
+      # Code signing via Azure Trusted Signing — activates itself the moment
+      # the AZURE_* secrets exist in the repo; absent secrets build exactly
+      # as before (unsigned). No workflow edit needed on the day the cert
+      # clears identity validation.
+      - name: Enable code signing (when configured)
+        shell: bash
+        env:
+          AZ_ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          AZ_PROFILE: ${{ secrets.AZURE_SIGNING_PROFILE }}
+          AZ_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          AZ_PUBLISHER: ${{ secrets.AZURE_PUBLISHER_NAME }}
+        run: |
+          if [ -n "$AZ_ACCOUNT" ] && [ -n "$AZ_PROFILE" ]; then
+            node -e "
+              const fs = require('fs');
+              const p = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+              p.build.win.azureSignOptions = {
+                codeSigningAccountName: process.env.AZ_ACCOUNT,
+                certificateProfileName: process.env.AZ_PROFILE,
+                endpoint: process.env.AZ_ENDPOINT || 'https://eus.codesigning.azure.net',
+                ...(process.env.AZ_PUBLISHER ? { publisherName: process.env.AZ_PUBLISHER } : {}),
+              };
+              fs.writeFileSync('package.json', JSON.stringify(p, null, 2));
+            "
+            echo "Code signing ENABLED (Azure Trusted Signing: $AZ_ACCOUNT/$AZ_PROFILE)"
+          else
+            echo "Code signing not configured — building unsigned"
+          fi
       - name: Build NSIS installer + portable exe
         run: npm run dist -- --win --publish ${{ (startsWith(github.ref, 'refs/tags/v') || contains(github.event.head_commit.message, '[release]')) && 'always' || 'never' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
       - uses: actions/upload-artifact@v4
         with:
           name: koinos-ai-windows
