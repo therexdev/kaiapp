@@ -37,46 +37,77 @@ function freePort(host) {
  * not at first chat. Throws with the decoded exit code on failure.
  */
 /*
- * Field finding: an old msvcp140.dll elsewhere on the DLL search path can
- * shadow the modern MSVC runtime and crash 2022-toolchain llama.cpp builds
- * at load (the std::mutex 0xC0000005). The exe's own directory always wins
- * the search order, so place Electron's bundled (correct-version) CRT DLLs
- * beside the engine binary. Copy-if-absent; never overwrite upstream files.
+ * Field finding, two generations of it. v0.1.1: an old msvcp140.dll on the
+ * DLL search path crashed modern llama.cpp builds at load (std::mutex
+ * 0xC0000005), so we placed Electron's CRT beside the engine — the exe's
+ * own directory wins the search order. v0.22.1: that cure became the
+ * disease — Electron's bundled CRT aged behind the engine toolchain, and
+ * copy-if-absent made the stale copy permanent, crashing BOTH engine
+ * builds on every packaged install (CI stayed green: headless node has no
+ * CRT beside it to copy). Now: prefer the OS-serviced System32 redist
+ * (newest on the machine), fall back to Electron's only when there is no
+ * redist at all, and overwrite a differing copy instead of keeping it.
  */
 const CRT_DLLS = ["msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll"];
-function ensureCrtBeside(binPath, srcDir = path.dirname(process.execPath)) {
+function ensureCrtBeside(binPath, srcDirOverride) {
   if (process.platform !== "win32") return;
   const fs = require("fs");
   const dstDir = path.dirname(binPath);
+  const sys32 = path.join(process.env.SystemRoot || "C:\\Windows", "System32");
+  const electronDir = srcDirOverride || path.dirname(process.execPath);
+  const srcDir = CRT_DLLS.every((dll) => fs.existsSync(path.join(sys32, dll))) ? sys32 : electronDir;
   for (const dll of CRT_DLLS) {
     const src = path.join(srcDir, dll);
     const dst = path.join(dstDir, dll);
     try {
-      if (fs.existsSync(src) && !fs.existsSync(dst)) fs.copyFileSync(src, dst);
+      if (!fs.existsSync(src)) continue;
+      const stale = fs.existsSync(dst) && fs.statSync(dst).size !== fs.statSync(src).size;
+      if (stale) fs.rmSync(dst);
+      if (!fs.existsSync(dst)) fs.copyFileSync(src, dst);
     } catch {
       /* best effort — self-test still reports the truth */
     }
   }
 }
 
+function removeCrtBeside(binPath) {
+  if (process.platform !== "win32") return false;
+  const fs = require("fs");
+  let removed = false;
+  for (const dll of CRT_DLLS) {
+    try {
+      fs.rmSync(path.join(path.dirname(binPath), dll));
+      removed = true;
+    } catch {
+      /* wasn't there */
+    }
+  }
+  return removed;
+}
+
 function selfTest(binPath) {
   const { spawnSync } = require("child_process");
   ensureCrtBeside(binPath);
-  const env = { ...process.env };
-  if (process.platform === "win32") {
-    env.PATH = `${path.dirname(process.execPath)};${env.PATH || ""}`;
-  }
-  const r = spawnSync(binPath, ["--version"], {
-    timeout: 15000,
-    windowsHide: true,
-    cwd: path.dirname(binPath),
-    env,
-    encoding: "utf8",
-  });
+  // NOTE: the Electron dir is deliberately NOT prepended to PATH — its
+  // bundled CRT aging behind the engine toolchain was the v0.22.1 field
+  // crash; the beside-copies above are the sanctioned channel.
+  const attempt = () =>
+    spawnSync(binPath, ["--version"], {
+      timeout: 15000,
+      windowsHide: true,
+      cwd: path.dirname(binPath),
+      encoding: "utf8",
+    });
+  let r = attempt();
   // llama-server prints its version and exits 0 (some builds exit 1 after
   // printing usage); a loader crash gives a big NTSTATUS code and no output.
-  const printed = `${r.stdout || ""}${r.stderr || ""}`.trim().length > 0;
-  if (r.error || (!printed && r.status !== 0)) {
+  const crashed = (x) => x.error || (`${x.stdout || ""}${x.stderr || ""}`.trim().length === 0 && x.status !== 0);
+  if (crashed(r) && removeCrtBeside(binPath)) {
+    // Self-heal: if OUR planted CRT is what kills the loader, the binary
+    // runs fine on the machine's own redist — try once without it.
+    r = attempt();
+  }
+  if (crashed(r)) {
     const code = r.status;
     const hint =
       code === 3221225781
@@ -161,17 +192,12 @@ class LlamaCppRuntime {
     ];
 
     ensureCrtBeside(this.binPath);
-    // Windows: llama-server needs the MSVC runtime DLLs. Electron ships them
-    // beside its own exe, so prepend that directory to PATH — a clean machine
-    // without the VC++ redistributable still loads. Harmless elsewhere.
-    const env = { ...process.env };
-    if (process.platform === "win32") {
-      env.PATH = `${path.dirname(process.execPath)};${env.PATH || ""}`;
-    }
+    // Windows CRT comes from the beside-copies above (System32-preferred);
+    // Electron's dir is deliberately NOT on the child's PATH — its bundled
+    // CRT aging behind the engine toolchain crashed the loader (v0.22.1).
     const child = spawn(this.binPath, args, {
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
-      env,
       // llama.cpp release archives keep shared libs beside the binary.
       cwd: path.dirname(this.binPath),
     });
@@ -226,4 +252,4 @@ class LlamaCppRuntime {
   }
 }
 
-module.exports = { LlamaCppRuntime, selfTest, ensureCrtBeside };
+module.exports = { LlamaCppRuntime, selfTest, ensureCrtBeside, removeCrtBeside };

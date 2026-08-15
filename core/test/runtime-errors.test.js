@@ -88,7 +88,8 @@ test("a build that crashes self-test is remembered and skipped — not re-crashe
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-badbuild-"));
   const state = new JsonStore(path.join(dir, "state.json"), {});
   const started = [];
-  const mk = () =>
+  const attempts = [];
+  const mk = (appVersion) =>
     new RuntimeManager({
       models: {
         resolveAlias: () => ({ packageId: "p@1", contextSize: 4096, sizeBytes: 1e9 }),
@@ -97,7 +98,7 @@ test("a build that crashes self-test is remembered and skipped — not re-crashe
       hardware: { capabilities: { cudaEligible: false, vulkanEligible: true } },
       // The vulkan "binary" doesn't exist → the REAL selfTest crashes on it,
       // exactly like an access-violation build; cpu is pre-marked tested.
-      provisioner: { ensure: async (_k, { cap }) => path.join(dir, cap, "llama-server") },
+      provisioner: { ensure: async (_k, { cap }) => (attempts.push(cap), path.join(dir, cap, "llama-server")) },
       makeRuntime: (binPath) => ({
         start: async () => {
           started.push(binPath);
@@ -108,22 +109,35 @@ test("a build that crashes self-test is remembered and skipped — not re-crashe
       }),
       onEvent: () => {},
       state,
+      appVersion,
     });
 
-  const mgr = mk();
+  const mgr = mk("0.22.1");
   mgr._testedBins.add(path.join(dir, "cpu", "llama-server")); // cpu build "passes"
   await mgr.ensure("gemma3-12b"); // vulkan self-test crashes → cpu serves
   assert.strictEqual(started.length, 1);
   assert.match(started[0], /cpu/, "load lands on the cpu rung");
-  const bad = state.get("badBuilds", {});
-  assert.match(Object.values(bad)[0] || "", /self-test failed/i, "the crash is remembered per binary");
+  const bad = Object.values(state.get("badBuilds", {}))[0];
+  assert.match(bad?.reason || "", /self-test failed/i, "the crash is remembered per binary");
+  assert.strictEqual(bad.appVersion, "0.22.1", "…scoped to the app version that saw it");
 
-  // A fresh manager (app restart) skips the bad build outright.
-  const mgr2 = mk();
+  // Same app version restarting: the bad build is skipped outright (the
+  // self-test never runs — no started entry for vulkan, no re-crash).
+  const mgr2 = mk("0.22.1");
   mgr2._testedBins.add(path.join(dir, "cpu", "llama-server"));
   await mgr2.ensure("gemma3-12b");
   assert.strictEqual(started.length, 2);
   assert.match(started[1], /cpu/, "restart goes straight to cpu — no re-crash");
+
+  // An app UPDATE retries the build once — loader fixes (the CRT heal) can
+  // revive a build without changing its bits. It still crashes here, so it
+  // lands on cpu and the memory is re-stamped with the new version.
+  const mgr3 = mk("0.23.0");
+  mgr3._testedBins.add(path.join(dir, "cpu", "llama-server"));
+  await mgr3.ensure("gemma3-12b");
+  assert.match(started[2], /cpu/);
+  assert.strictEqual(Object.values(state.get("badBuilds", {}))[0].appVersion, "0.23.0", "retried and re-remembered under the new version");
   mgr.stop();
   mgr2.stop();
+  mgr3.stop();
 });

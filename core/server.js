@@ -82,6 +82,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     hardware: hw,
     provisioner,
     state,
+    appVersion: VERSION,
     onEvent: events,
     makeRuntime: (binPath) => new LlamaCppRuntime({ binPath: binPath || forcedBin, onEvent: events }),
     // A local Ollama install is a ready-made fallback engine (§6): used when

@@ -17,6 +17,7 @@ class RuntimeManager {
     this.preferFallback = !!preferFallback; // KAI_RUNTIME override: skip llama.cpp entirely
     this.onEvent = onEvent || (() => {});
     this.state = state || null; // JsonStore: remembers builds that crash on THIS machine
+    this.appVersion = arguments[0]?.appVersion || null; // scopes that memory to one app version
     this.runtime = null;
     this.activeAlias = null;
     this._loading = null; // in-flight ensure() promise
@@ -141,11 +142,14 @@ class RuntimeManager {
         try {
           const binPath = await this.provisioner.ensure(kind, { cap });
           // A build that crashed its self-test on this machine stays
-          // skipped (an app update ships a new version dir, which retries
-          // naturally). Re-crashing it on every load wasted a rung and
-          // scared the status pane for nothing.
-          if (badBuilds[binPath]) {
-            rungErrors.push(`[${cap}] skipped — crashed self-test on this machine before (${badBuilds[binPath]})`);
+          // skipped for the rest of THIS app version — each app update
+          // retries once, because updates ship loader fixes (the v0.22.1
+          // CRT heal) that can revive a build without changing its bits.
+          const bad = badBuilds[binPath];
+          const badReason = typeof bad === "string" ? bad : bad?.reason; // pre-0.22.1 entries were plain strings
+          const badVersion = typeof bad === "string" ? null : bad?.appVersion;
+          if (badReason && badVersion === (this.appVersion || null)) {
+            rungErrors.push(`[${cap}] skipped — crashed self-test on this machine before (${badReason})`);
             continue;
           }
           return await boot(binPath, cap === "cpu" ? 0 : 999);
@@ -154,7 +158,10 @@ class RuntimeManager {
           if (this.state && /self-test failed/i.test(String(e.message)) && cap !== "cpu") {
             const bad = this.state.get("badBuilds", {});
             try {
-              bad[await this.provisioner.ensure(kind, { cap })] = String(e.message).slice(0, 160);
+              bad[await this.provisioner.ensure(kind, { cap })] = {
+                reason: String(e.message).slice(0, 160),
+                appVersion: this.appVersion || null,
+              };
               this.state.set("badBuilds", bad);
             } catch { /* provisioning itself failed — nothing to remember */ }
           }
