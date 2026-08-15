@@ -93,13 +93,19 @@ class Worker {
       if (!job || !this.running) continue;
 
       try {
+        const t0 = Date.now();
         const { output, usage } = await this._execute(job);
+        // §51 CU groundwork: generation speed is the capability signal —
+        // completion tokens over wall time (prefill is folded in; the
+        // scheduler treats it as provider-reported, like usage).
+        const ms = Math.max(1, Date.now() - t0);
+        const perf = { ms, tokPerSec: +((usage.completion_tokens / (ms / 1000)) || 0).toFixed(2) };
         const hash = crypto.createHash("sha256").update(`${job.id}|${output}`).digest();
         const signature = await this.wallet.signHash(hash);
         const res = await fetch(`${this.schedulerUrl}/worker/result?token=${this.token}`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ jobId: job.id, output, usage, signature }),
+          body: JSON.stringify({ jobId: job.id, output, usage, perf, signature }),
         });
         const jr = await res.json();
         this.stats.jobsDone += 1;

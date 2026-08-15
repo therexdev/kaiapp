@@ -128,6 +128,12 @@ test("network mode: chat relays gateway -> scheduler -> provider -> back, with a
     assert.equal(sched.receipts[0].worker, earn.wallet.address);
     assert.ok(sched.receipts[0].honest);
 
+    // §51 CU groundwork: the worker timed the job and the scheduler keeps a
+    // rolling capability rating (generation tok/s vs the CU baseline).
+    assert.ok(sched.receipts[0].perf?.tokPerSec > 0, "receipt carries provider perf");
+    const rating = sched.perf[earn.wallet.address];
+    assert.ok(rating?.jobs >= 1 && rating?.cuRating > 0, `provider CU rating tracked (${JSON.stringify(rating)})`);
+
     // The relay was signed by the app wallet and metered in AI tokens.
     assert.equal(sched.consumed[earn.wallet.address], 1, "request counted to the signing account");
     assert.equal(j.usage.total_tokens, 5, "OpenAI-shape usage returned (1 in + 4 out from the fixture)");
