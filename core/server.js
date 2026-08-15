@@ -129,9 +129,27 @@ async function createCore({ dataDir, port, llamaBin, onEvent } = {}) {
       earningsCache = { at: 0, data: null };
       return earn.status();
     },
-    createWallet: ({ password }) => wallet.create({ password }),
-    restoreWallet: ({ wif, password }) => wallet.restore({ wif, password }),
-    unlock: ({ password }) => wallet.unlock(password),
+    createWallet: ({ password }) => {
+      const r = wallet.create({ password });
+      events({ type: "wallet:created", message: r.address });
+      return r;
+    },
+    restoreWallet: ({ wif, password }) => {
+      const r = wallet.restore({ wif, password });
+      events({ type: "wallet:restored", message: r.address });
+      return r;
+    },
+    unlock: ({ password }) => {
+      // Every attempt lands in core.log — locked-out users need a paper trail.
+      try {
+        const r = wallet.unlock(password);
+        events({ type: "wallet:unlocked", message: r.address });
+        return r;
+      } catch (e) {
+        events({ type: "wallet:unlock-failed", message: String(e.message) });
+        throw e;
+      }
+    },
     start: async () => {
       const s = wallet.status();
       if (!s.exists) throw new Error("Create a wallet first");

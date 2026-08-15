@@ -42,8 +42,9 @@ test("wallet: restore from WIF replaces a lost-password keystore, same address",
   const { address, wif } = w.create({ password: "forgotten password" });
   w.lock();
 
-  // The password is gone — but the written-down backup code is not.
-  assert.throws(() => w.unlock("what i think it was"), /Incorrect password/);
+  // The password is gone — but the written-down backup code is not. The
+  // refusal names the exact file (address + creation time) that rejected it.
+  assert.throws(() => w.unlock("what i think it was"), new RegExp(`Incorrect password for wallet ${address}.*file created`));
   assert.throws(() => w.restore({ wif: "garbage", password: "new password 9" }), /Invalid backup code/);
 
   const r = w.restore({ wif, password: "new password 9" });

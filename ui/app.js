@@ -387,6 +387,13 @@ async function renderEarn() {
   $("earn-setup").hidden = s.wallet.exists && !wifShowing;
   $("earn-unlock").hidden = !s.wallet.exists || s.wallet.unlocked;
   $("earn-ready").hidden = !(s.wallet.exists && s.wallet.unlocked) || wifShowing;
+  if (!$("earn-unlock").hidden) {
+    // Which wallet file is this? If the creation time isn't when you made
+    // (or last restored) your wallet, the file is the problem, not the password.
+    $("earn-unlock-hint").textContent = s.wallet.address
+      ? `Account ${s.wallet.address} — wallet file created ${s.wallet.createdAt ? new Date(s.wallet.createdAt).toLocaleString() : "unknown"}`
+      : "";
+  }
 
   if (!$("earn-ready").hidden) {
     if (document.activeElement !== $("earn-sched") && !$("earn-sched").value) {

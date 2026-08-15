@@ -70,6 +70,11 @@ class WalletService {
     const tmp = `${this.keystorePath}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(keystore, null, 2), { mode: 0o600 });
     fs.renameSync(tmp, this.keystorePath);
+    // Prove the file we just wrote reopens with this password before reporting
+    // success — "saved but won't unlock later" must be impossible, not rare.
+    if (decryptKeystore(this.readKeystore(), password) !== signer.getPrivateKey("hex")) {
+      throw new Error("Keystore verification failed after write — the wallet was NOT saved correctly");
+    }
   }
 
   create({ password }) {
@@ -140,7 +145,20 @@ class WalletService {
   }
 
   unlock(password) {
-    this._signer = this._signerFromKeystore(password);
+    try {
+      this._signer = this._signerFromKeystore(password);
+    } catch (e) {
+      if (/Incorrect password/.test(String(e.message))) {
+        // Name the exact file that refused: if the creation time shown is not
+        // when the user (re)made their wallet, they're unlocking a stale or
+        // foreign keystore — a different problem than a mistyped password.
+        const ks = this.readKeystore();
+        throw new Error(
+          `Incorrect password for wallet ${ks?.address ?? "?"} (file created ${ks?.createdAt ?? "?"})`
+        );
+      }
+      throw e;
+    }
     return { address: this._signer.getAddress() };
   }
 
