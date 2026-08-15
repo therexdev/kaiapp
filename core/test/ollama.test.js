@@ -143,3 +143,25 @@ test("ensureRunning returns the version when a daemon is up, null when absent", 
     assert.equal(await OllamaRuntime.ensureRunning({ port: 1 }), null);
   }
 });
+
+test("ensureCrtBeside copies runtime DLLs without overwriting existing ones", () => {
+  const { ensureCrtBeside } = require("../lib/runtimes/llamacpp");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-crt-"));
+  const src = path.join(dir, "electron");
+  const dst = path.join(dir, "engine");
+  fs.mkdirSync(src);
+  fs.mkdirSync(dst);
+  fs.writeFileSync(path.join(src, "msvcp140.dll"), "new-runtime");
+  fs.writeFileSync(path.join(src, "vcruntime140.dll"), "new-runtime");
+  fs.writeFileSync(path.join(dst, "vcruntime140.dll"), "upstream-shipped");
+  const bin = path.join(dst, "llama-server.exe");
+  fs.writeFileSync(bin, "exe");
+  if (process.platform === "win32") {
+    ensureCrtBeside(bin, src);
+    assert.equal(fs.readFileSync(path.join(dst, "msvcp140.dll"), "utf8"), "new-runtime", "absent DLL copied");
+    assert.equal(fs.readFileSync(path.join(dst, "vcruntime140.dll"), "utf8"), "upstream-shipped", "existing DLL untouched");
+  } else {
+    ensureCrtBeside(bin, src); // no-op off Windows
+    assert.ok(!fs.existsSync(path.join(dst, "msvcp140.dll")));
+  }
+});

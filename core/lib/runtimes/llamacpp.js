@@ -22,8 +22,32 @@ const HEALTH_POLL_MS = 500;
  * version can't serve — catch machine incompatibility at provision time,
  * not at first chat. Throws with the decoded exit code on failure.
  */
+/*
+ * Field finding: an old msvcp140.dll elsewhere on the DLL search path can
+ * shadow the modern MSVC runtime and crash 2022-toolchain llama.cpp builds
+ * at load (the std::mutex 0xC0000005). The exe's own directory always wins
+ * the search order, so place Electron's bundled (correct-version) CRT DLLs
+ * beside the engine binary. Copy-if-absent; never overwrite upstream files.
+ */
+const CRT_DLLS = ["msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll"];
+function ensureCrtBeside(binPath, srcDir = path.dirname(process.execPath)) {
+  if (process.platform !== "win32") return;
+  const fs = require("fs");
+  const dstDir = path.dirname(binPath);
+  for (const dll of CRT_DLLS) {
+    const src = path.join(srcDir, dll);
+    const dst = path.join(dstDir, dll);
+    try {
+      if (fs.existsSync(src) && !fs.existsSync(dst)) fs.copyFileSync(src, dst);
+    } catch {
+      /* best effort — self-test still reports the truth */
+    }
+  }
+}
+
 function selfTest(binPath) {
   const { spawnSync } = require("child_process");
+  ensureCrtBeside(binPath);
   const env = { ...process.env };
   if (process.platform === "win32") {
     env.PATH = `${path.dirname(process.execPath)};${env.PATH || ""}`;
@@ -117,6 +141,7 @@ class LlamaCppRuntime {
       ...extraArgs,
     ];
 
+    ensureCrtBeside(this.binPath);
     // Windows: llama-server needs the MSVC runtime DLLs. Electron ships them
     // beside its own exe, so prepend that directory to PATH — a clean machine
     // without the VC++ redistributable still loads. Harmless elsewhere.
@@ -178,4 +203,4 @@ class LlamaCppRuntime {
   }
 }
 
-module.exports = { LlamaCppRuntime, selfTest };
+module.exports = { LlamaCppRuntime, selfTest, ensureCrtBeside };
