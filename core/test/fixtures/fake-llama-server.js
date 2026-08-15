@@ -84,6 +84,23 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (req.url === "/v1/embeddings" && req.method === "POST") {
+    let raw = "";
+    req.on("data", (c) => (raw += c));
+    req.on("end", () => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({
+          object: "list",
+          model,
+          data: [{ object: "embedding", index: 0, embedding: [0.1, 0.2, 0.3] }],
+          usage: { prompt_tokens: 3, total_tokens: 3 },
+        })
+      );
+    });
+    return;
+  }
+
   res.writeHead(404);
   res.end();
 });

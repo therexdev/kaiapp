@@ -187,6 +187,36 @@ test("network mode: chat relays gateway -> scheduler -> provider -> back, with a
     const refused = await askNet("one more?");
     assert.equal(refused.status, 402, "no free tokens, no balance, no earnings -> refused");
     assert.match((await refused.json()).error.message, /billed per AI token/);
+
+    // §8 key budgets: an API key with an exhausted monthly network budget is
+    // stopped by the GATEWAY, before the scheduler ever sees the request.
+    const created = await (
+      await fetch(base + "/core/keys", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "budgeted" }),
+      })
+    ).json();
+    await fetch(`${base}/core/keys/${created.id}/budget`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ budgetUsdMonthly: 0.000001 }), // one µ$ of runway
+    });
+    const bearer = { "content-type": "application/json", authorization: `Bearer ${created.secret}` };
+    const first = await fetch(base + "/v1/chat/completions", {
+      method: "POST",
+      headers: bearer,
+      body: JSON.stringify({ model: "koinos-network", messages: [{ role: "user", content: "within budget" }] }),
+    });
+    assert.equal(first.status, 200, "budget not yet exhausted: request flows");
+    await first.text();
+    const second = await fetch(base + "/v1/chat/completions", {
+      method: "POST",
+      headers: bearer,
+      body: JSON.stringify({ model: "koinos-network", messages: [{ role: "user", content: "over budget" }] }),
+    });
+    assert.equal(second.status, 429, "budget exhausted: gateway refuses");
+    assert.match((await second.json()).error.message, /monthly network budget/);
   } finally {
     await post("/core/earn/stop").catch(() => {});
     await core.stop();

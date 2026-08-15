@@ -152,3 +152,50 @@ test("creating a key locks /v1 down; bearer key opens it; control plane stays op
     await gateway.close();
   }
 });
+
+test("§8 developer platform: per-key usage metering, budgets, embeddings passthrough", async () => {
+  const { gateway, runtime, keys, base } = await makeStack();
+  try {
+    const { id, secret } = keys.create({ name: "app key" });
+    const H = { "content-type": "application/json", authorization: `Bearer ${secret}` };
+
+    // Local chat (non-stream): tokens metered against the key, cost $0.
+    const j = await (
+      await fetch(`${base}/v1/chat/completions`, {
+        method: "POST",
+        headers: H,
+        body: JSON.stringify({ model: "dev-tiny", messages: [{ role: "user", content: "hi" }] }),
+      })
+    ).json();
+    assert.equal(j.choices[0].message.content, "Hello from fake llama");
+    // The metering tee runs after the response ends — give it a beat.
+    await new Promise((r) => setTimeout(r, 200));
+    const k1 = keys.list().find((k) => k.id === id);
+    assert.deepEqual(
+      [k1.usage.requests, k1.usage.inTok, k1.usage.outTok, k1.usage.costUsd],
+      [1, 1, 4, "0.000000"],
+      "local usage recorded from the fixture's usage block, at zero cost"
+    );
+
+    // Budgets: set, read back, and the remaining-µ$ math.
+    keys.setBudget(id, 0.5);
+    assert.equal(keys.list().find((k) => k.id === id).budgetUsdMonthly, 0.5);
+    assert.equal(keys.budgetRemainingMicro(id), 500000);
+    keys.setBudget(id, null);
+    assert.equal(keys.budgetRemainingMicro(id), Infinity);
+
+    // Embeddings pass through to the engine.
+    const e = await (
+      await fetch(`${base}/v1/embeddings`, {
+        method: "POST",
+        headers: H,
+        body: JSON.stringify({ model: "dev-tiny", input: "hello world" }),
+      })
+    ).json();
+    assert.equal(e.object, "list");
+    assert.equal(e.data[0].embedding.length, 3, "embedding vector relayed from the engine");
+  } finally {
+    runtime.stop();
+    await gateway.close();
+  }
+});

@@ -81,7 +81,11 @@ class Gateway {
   _authed(req, res) {
     if (!this.keys.required()) return true; // no keys yet: local free access
     const m = /^Bearer\s+(.+)$/i.exec(String(req.headers.authorization || ""));
-    if (m && this.keys.verify(m[1].trim())) return true;
+    const info = m ? this.keys.verify(m[1].trim()) : null;
+    if (info) {
+      req._apiKey = info; // downstream metering attributes usage to this key
+      return true;
+    }
     this._json(res, 401, {
       error: {
         message: "Missing or invalid API key. Pass it as: Authorization: Bearer <key>",
@@ -156,6 +160,14 @@ class Gateway {
     }
     if (path.startsWith("/core/keys/") && req.method === "DELETE") {
       return this._json(res, 200, { ok: true, ...this.keys.revoke(path.split("/")[3]) });
+    }
+    if (path.startsWith("/core/keys/") && path.endsWith("/budget") && req.method === "POST") {
+      try {
+        const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+        return this._json(res, 200, { ok: true, ...this.keys.setBudget(path.split("/")[3], body.budgetUsdMonthly) });
+      } catch (e) {
+        return this._json(res, 400, { ok: false, error: String(e.message) });
+      }
     }
     // ----- network policy control plane (M3 §7) -----
     if (this.network && path === "/core/network" && req.method === "GET") {
@@ -237,6 +249,27 @@ class Gateway {
       return this._chat(req, res);
     }
 
+    // §8 expansion: embeddings pass straight through to the local engine.
+    // Engines built without embedding support answer with their own error —
+    // relayed honestly rather than pretending.
+    if (path === "/v1/embeddings" && req.method === "POST") {
+      if (!this._authed(req, res)) return;
+      const raw = await this._readBody(req);
+      let alias = "";
+      try {
+        alias = String(JSON.parse(raw.toString("utf8") || "{}").model || "");
+      } catch {
+        return this._json(res, 400, { error: { message: "Body must be JSON", type: "invalid_request_error" } });
+      }
+      let endpoint;
+      try {
+        endpoint = await this.runtime.ensure(alias);
+      } catch (e) {
+        return this._json(res, 400, { error: { message: String(e.message), type: "invalid_request_error" } });
+      }
+      return this._proxy(endpoint, "/v1/embeddings", raw, req, res);
+    }
+
     if (path.startsWith("/v1/")) {
       if (!this._authed(req, res)) return;
       return this._json(res, 404, {
@@ -277,6 +310,17 @@ class Gateway {
       if (!schedulerUrl) {
         return this._json(res, 400, { error: { message: "No scheduler URL configured for network requests", type: "invalid_request_error" } });
       }
+      // §8 budgets: a key whose monthly network budget is spent stops HERE,
+      // before any tokens are bought. Local inference is never gated.
+      const meterKey = req._apiKey || null;
+      if (meterKey && this.keys.budgetRemainingMicro(meterKey.id) <= 0) {
+        return this._json(res, 429, {
+          error: {
+            message: "This API key's monthly network budget is exhausted. Raise the budget in the Local API tab or wait for next month.",
+            type: "insufficient_quota",
+          },
+        });
+      }
       // §23: sign the request with the earning account — the network meters
       // per-address, so anonymous requests would be someone else's bill.
       const ident = this.network.signConsume ? await this.network.signConsume(body.messages) : null;
@@ -301,6 +345,18 @@ class Gateway {
       }
       const j = await upstream.json().catch(() => null);
       if (!upstream.ok || !j) return this._json(res, upstream.status || 502, j || { error: { message: "bad upstream reply", type: "server_error" } });
+      if (meterKey && j.usage) {
+        // Estimated at published network rates regardless of any free
+        // allowance — the budget is the developer's conservative guardrail.
+        const rates = await this._networkRates(schedulerUrl);
+        const inTok = Number(j.usage.prompt_tokens || 0);
+        const outTok = Number(j.usage.completion_tokens || 0);
+        this.keys.recordUsage(meterKey.id, {
+          inTok,
+          outTok,
+          costMicro: Math.ceil((inTok * rates.inMicroPerM + outTok * rates.outMicroPerM) / 1e6),
+        });
+      }
       if (body.stream) {
         // SSE shim so streaming clients (the app UI) work unchanged.
         res.writeHead(200, { "content-type": "text/event-stream" });
@@ -325,7 +381,36 @@ class Gateway {
       body.model = served;
       raw = Buffer.from(JSON.stringify(body));
     }
-    return this._proxy(endpoint, "/v1/chat/completions", raw, req, res);
+    // Local inference: tokens are metered per key, cost is zero (§24).
+    const localKey = req._apiKey || null;
+    return this._proxy(endpoint, "/v1/chat/completions", raw, req, res, {
+      meter: localKey
+        ? (usage) =>
+            this.keys.recordUsage(localKey.id, {
+              inTok: Number(usage.prompt_tokens || 0),
+              outTok: Number(usage.completion_tokens || 0),
+              costMicro: 0,
+            })
+        : null,
+    });
+  }
+
+  /** Published network token rates, cached for an hour; safe defaults. */
+  async _networkRates(schedulerUrl) {
+    if (this._rates && Date.now() - this._rates.at < 3600000) return this._rates.v;
+    let v = { inMicroPerM: 100000, outMicroPerM: 400000 }; // Koinos Fast defaults
+    try {
+      const r = await fetch(`${schedulerUrl.replace(/\/$/, "")}/pricing`, { signal: AbortSignal.timeout(4000) });
+      const j = await r.json();
+      const m = j?.models && Object.values(j.models)[0];
+      if (m?.usdPerMInputTokens != null) {
+        v = { inMicroPerM: Math.round(m.usdPerMInputTokens * 1e6), outMicroPerM: Math.round(m.usdPerMOutputTokens * 1e6) };
+      }
+    } catch {
+      /* defaults hold */
+    }
+    this._rates = { at: Date.now(), v };
+    return v;
   }
 
   /** Serve the bundled desktop UI (localhost only; no traversal, no listing). */
@@ -351,7 +436,7 @@ class Gateway {
    * pass through untouched, so OpenAI SDK clients behave identically against
    * llama-server's already-compatible responses.
    */
-  _proxy(endpoint, upstreamPath, bodyBuffer, req, res) {
+  _proxy(endpoint, upstreamPath, bodyBuffer, req, res, { meter = null } = {}) {
     return new Promise((resolve) => {
       const target = new URL(upstreamPath, endpoint);
       const up = http.request(
@@ -369,8 +454,42 @@ class Gateway {
             "content-type": upRes.headers["content-type"] || "application/json",
             ...(upRes.headers["transfer-encoding"] ? {} : {}),
           });
+          // §8 metering tee: collect a bounded copy of the response so token
+          // usage can be attributed to the API key — JSON bodies directly,
+          // SSE via the last chunk that carries a usage block. Best-effort;
+          // the byte stream to the client is untouched.
+          let tee = meter ? [] : null;
+          let teeBytes = 0;
+          if (meter) {
+            upRes.on("data", (c) => {
+              if (teeBytes > 4 * 1024 * 1024) return; // cap: pathological bodies
+              tee.push(c);
+              teeBytes += c.length;
+            });
+          }
           upRes.pipe(res);
-          upRes.on("end", resolve);
+          upRes.on("end", () => {
+            if (meter && (upRes.statusCode || 0) < 400) {
+              try {
+                const body = Buffer.concat(tee).toString("utf8");
+                let usage = null;
+                if (body.trimStart().startsWith("{")) {
+                  usage = JSON.parse(body).usage ?? null;
+                } else {
+                  for (const line of body.split("\n")) {
+                    if (line.startsWith("data: ") && line.includes('"usage"')) {
+                      const parsed = JSON.parse(line.slice(6));
+                      if (parsed.usage) usage = parsed.usage;
+                    }
+                  }
+                }
+                if (usage) meter(usage);
+              } catch {
+                /* metering never breaks the response */
+              }
+            }
+            resolve();
+          });
         }
       );
       up.on("error", (e) => {

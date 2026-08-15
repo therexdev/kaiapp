@@ -16,13 +16,59 @@ class ApiKeys {
     return this.store.get("apiKeys", {});
   }
 
+  _month() {
+    return new Date().toISOString().slice(0, 7); // calendar month, e.g. "2026-08"
+  }
+
   list() {
+    const month = this._month();
     return Object.entries(this._all()).map(([id, k]) => ({
       id,
       name: k.name,
       createdAt: k.createdAt,
       lastUsedAt: k.lastUsedAt ?? null,
+      budgetUsdMonthly: k.budgetUsdMonthly ?? null,
+      usage:
+        k.usage && k.usage.month === month
+          ? { requests: k.usage.requests, inTok: k.usage.inTok, outTok: k.usage.outTok, costUsd: (k.usage.costMicro / 1e6).toFixed(6) }
+          : { requests: 0, inTok: 0, outTok: 0, costUsd: "0.000000" },
     }));
+  }
+
+  /** §8 usage accounting: attribute tokens (and network cost) to a key.
+   *  Local inference records tokens with zero cost — local is free (§24). */
+  recordUsage(id, { inTok = 0, outTok = 0, costMicro = 0 } = {}) {
+    const all = this._all();
+    const k = all[id];
+    if (!k) return;
+    const month = this._month();
+    if (!k.usage || k.usage.month !== month) {
+      k.usage = { month, requests: 0, inTok: 0, outTok: 0, costMicro: 0 };
+    }
+    k.usage.requests += 1;
+    k.usage.inTok += Math.max(0, Math.floor(inTok) || 0);
+    k.usage.outTok += Math.max(0, Math.floor(outTok) || 0);
+    k.usage.costMicro += Math.max(0, Math.round(costMicro) || 0);
+    this.store.set("apiKeys." + id, k);
+  }
+
+  /** §8 budgets: monthly USD cap on NETWORK spend through this key. */
+  setBudget(id, budgetUsdMonthly) {
+    const all = this._all();
+    if (!all[id]) throw new Error("Unknown key id");
+    const v = budgetUsdMonthly == null || budgetUsdMonthly === "" ? null : Math.max(0, Number(budgetUsdMonthly));
+    if (v != null && !Number.isFinite(v)) throw new Error("Budget must be a number of dollars");
+    all[id].budgetUsdMonthly = v;
+    this.store.set("apiKeys", all);
+    return { id, budgetUsdMonthly: v };
+  }
+
+  /** Remaining monthly network budget in µ$ (Infinity when no budget set). */
+  budgetRemainingMicro(id) {
+    const k = this._all()[id];
+    if (!k || k.budgetUsdMonthly == null) return Infinity;
+    const spent = k.usage?.month === this._month() ? k.usage.costMicro : 0;
+    return Math.max(0, Math.round(k.budgetUsdMonthly * 1e6) - spent);
   }
 
   create({ name }) {

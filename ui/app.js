@@ -337,15 +337,34 @@ async function renderApi() {
     left.textContent = k.name + " ";
     const meta = document.createElement("span");
     meta.className = "meta";
-    meta.textContent = `created ${k.createdAt.slice(0, 10)}`;
+    // §8 developer view: usage this month, developer-dashboard style.
+    const u = k.usage || { requests: 0, inTok: 0, outTok: 0, costUsd: "0" };
+    meta.textContent =
+      `${u.requests} req · ${u.inTok.toLocaleString()} in / ${u.outTok.toLocaleString()} out tok · $${Number(u.costUsd).toFixed(4)}` +
+      (k.budgetUsdMonthly != null ? ` / $${k.budgetUsdMonthly} budget` : "");
     left.appendChild(meta);
+
+    const budget = document.createElement("button");
+    budget.className = "linklike";
+    budget.textContent = "budget";
+    budget.addEventListener("click", async () => {
+      const v = prompt("Monthly network budget in USD for this key (empty = no limit):", k.budgetUsdMonthly ?? "");
+      if (v === null) return;
+      await fetch(`/core/keys/${k.id}/budget`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ budgetUsdMonthly: v === "" ? null : Number(v) }),
+      });
+      renderApi();
+    });
+
     const del = document.createElement("button");
     del.textContent = "revoke";
     del.addEventListener("click", async () => {
       await fetch(`/core/keys/${k.id}`, { method: "DELETE" });
       renderApi();
     });
-    li.append(left, del);
+    li.append(left, budget, del);
     $("key-list").appendChild(li);
   }
 }
