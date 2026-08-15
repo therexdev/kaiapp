@@ -419,7 +419,7 @@ test("§20 splits: role division is exact, treasury/royalty settle as claims, de
   // and compute absorbs the remainder — the buckets still sum exactly.
   const unit = new Scheduler({ dataDir: path.join(dir, "unit"), epoch: 23, splits: { treasury: "T" } });
   unit.price = { ...unit.price, satPerMicro: 1n };
-  const odd = unit._splitChatValueSat({ jobType: "chat", usage: { prompt_tokens: 150, completion_tokens: 0 } });
+  const odd = unit._splitValueSat(15n, "koinos-fast"); // 150 in-tokens = 15 µ$ at 1 sat/µ$
   assert.equal(odd.valueSat, 15n, "15 µ$ at 1 sat/µ$");
   assert.equal(odd.verifySat, 0n, "3% of 15 floors to zero");
   assert.equal(odd.protocolSat, 1n, "7% of 15 floors to one");

@@ -134,13 +134,14 @@ test("§16 eval cap: bootstrap subsidy is a budget, not a faucet", async () => {
     for (let i = 0; i < 5; i++) {
       sched.receipts.push({ jobId: `j${i}`, worker: W, jobType: "inference-eval", honest: true });
     }
-    // One chat receipt rides along — chat value is NEVER capped.
+    // One PAID chat receipt rides along (freeTok: 0 = billed in full) —
+    // paid chat value is real revenue and NEVER draws on the §54 budget.
     sched.receipts.push({
-      jobId: "jc", worker: W, jobType: "chat", honest: true,
+      jobId: "jc", worker: W, jobType: "chat", honest: true, freeTok: 0,
       usage: { prompt_tokens: 0, completion_tokens: 1000000 }, // $0.40 = 40 KAI at $0.01
     });
     const summary = sched.closeEpoch();
-    // 3 capped evals x 1 KAI + 40 KAI chat = 43 KAI; the 2 excess evals mint nothing.
+    // 3 capped evals x 1 KAI + 40 KAI paid chat = 43 KAI; the 2 excess evals mint nothing.
     assert.equal(summary.totals[W], String(43n * 100000000n));
     assert.equal(summary.served[W], 6, "all honest receipts still count as service");
   } finally {
@@ -168,13 +169,13 @@ test("scheduler pins one price per epoch; conversions move only at close", async
     assert.equal(sched.price.usd, 0.01, "…but the pinned epoch price did NOT move");
 
     // A chat receipt's KAI value inside this epoch uses the pinned price.
-    const chat = { jobType: "chat", usage: { prompt_tokens: 0, completion_tokens: 1000000 } };
-    assert.equal(sched._receiptRewardSat(chat), 400000n * 10000n, "1M out = $0.40 = 40 KAI at $0.01");
+    const chat = { jobType: "chat", honest: true, freeTok: 0, usage: { prompt_tokens: 0, completion_tokens: 1000000 } };
+    assert.equal(sched._settleFor([chat]).workerSat, 400000n * 10000n, "1M out = $0.40 = 40 KAI at $0.01");
 
     const summary = sched.closeEpoch();
     assert.equal(summary.pricing.kaiRefUsd, 0.01, "the closed epoch records the price it ran at");
     assert.equal(sched.price.usd, 0.02, "the NEXT epoch repinned to the refreshed oracle");
-    assert.equal(sched._receiptRewardSat(chat), 400000n * 5000n, "same $0.40 is 20 KAI at $0.02");
+    assert.equal(sched._settleFor([chat]).workerSat, 400000n * 5000n, "same $0.40 is 20 KAI at $0.02");
   } finally {
     feed.close();
     await sched.close();
