@@ -7,13 +7,14 @@ const crypto = require("crypto");
 const { Signer } = require("koilib");
 
 /*
- * Koinos AI scheduler — M2 alpha (§12/§13/§16/§17). Project-operated; workers
- * connect OUTBOUND only (register + long-poll + submit), never accept inbound
- * connections. Alpha job types are protocol-funded and profile-approved (§31):
- * "inference-eval" only. Receipts are signed by the worker's wallet key and
- * verified here by address recovery; a sampling rate of hidden known-answer
- * challenges (§17) flags dishonest providers. Epochs aggregate receipts into
- * a Merkle root ready for on-chain commitment (M2 step 5).
+ * Koinos AI scheduler — M2/M3 alpha (§12/§13/§16/§17/§46.5). Project-operated;
+ * workers connect OUTBOUND only (register + long-poll + submit), never accept
+ * inbound connections. Job types are profile-approved (§31): "inference-eval"
+ * (protocol-funded) and "chat" (relayed consumer demand via /consume).
+ * Receipts are signed by the worker's wallet key and verified here by address
+ * recovery; a sampling rate of hidden known-answer challenges (§17) flags
+ * dishonest providers. Epochs aggregate receipts into a Merkle root that
+ * anchors on-chain (M2 step 5).
  *
  *   node server/scheduler.js          (PORT, KAI_OPERATOR_SECRET env)
  */
