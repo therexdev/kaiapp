@@ -29,12 +29,16 @@ class ModelManager {
   }
 
   aliases() {
-    return Object.entries(this.catalog.aliases).map(([alias, a]) => ({
-      alias,
-      label: a.label,
-      package: a.package,
-      status: this.packageStatus(a.package).status,
-    }));
+    return Object.entries(this.catalog.aliases).map(([alias, a]) => {
+      const q = this.quarantineOf(a.package);
+      return {
+        alias,
+        label: a.label,
+        package: a.package,
+        status: q ? "quarantined" : this.packageStatus(a.package).status,
+        ...(q ? { quarantineReason: q.reason } : {}),
+      };
+    });
   }
 
   resolveAlias(alias) {
@@ -42,7 +46,34 @@ class ModelManager {
     if (!a) throw new Error(`Unknown model alias: ${alias}`);
     const pkg = this.catalog.packages[a.package];
     if (!pkg) throw new Error(`Catalog is broken: missing package ${a.package}`);
+    const q = this.quarantineOf(a.package);
+    if (q) throw new Error(`Model package "${a.package}" is quarantined: ${q.reason}`);
     return { alias, packageId: a.package, ...pkg };
+  }
+
+  /** §32: why a package is quarantined, or null. */
+  quarantineOf(packageId) {
+    return this.state.get("quarantined", {})[packageId] || null;
+  }
+
+  /** §32 kill switch: quarantine every catalog package pinned to this
+   *  sha256. Persisted — the package stays dead across restarts until an
+   *  updated catalog ships a clean replacement. Returns affected ids. */
+  quarantineBySha(sha256, reason) {
+    const sha = String(sha256 || "").toLowerCase();
+    const q = this.state.get("quarantined", {});
+    const hit = [];
+    for (const [id, pkg] of Object.entries(this.catalog.packages)) {
+      if (String(pkg.sha256 || "").toLowerCase() === sha && !q[id]) {
+        q[id] = { reason: String(reason || "revoked by network operator"), at: new Date().toISOString() };
+        hit.push(id);
+      }
+    }
+    if (hit.length) {
+      this.state.set("quarantined", q);
+      this.onEvent({ type: "models:quarantined", packages: hit, reason });
+    }
+    return hit;
   }
 
   packagePath(packageId) {
@@ -68,6 +99,8 @@ class ModelManager {
   async ensurePackage(packageId) {
     const pkg = this.catalog.packages[packageId];
     if (!pkg) throw new Error(`Unknown package: ${packageId}`);
+    const q = this.quarantineOf(packageId);
+    if (q) throw new Error(`Model package "${packageId}" is quarantined: ${q.reason}`);
     // An existing file was verified at download time (or placed deliberately
     // by a developer) — usable even while its catalog pin is still pending.
     const file = this.packagePath(packageId);

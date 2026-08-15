@@ -147,6 +147,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     configure: ({ schedulerUrl }) => {
       settings.set("earn.schedulerUrl", String(schedulerUrl || "").trim());
       earningsCache = { at: 0, data: null };
+      syncKillSwitch().catch(() => {}); // §32: check the new scheduler's list promptly
       return earn.status();
     },
     createWallet: ({ password }) => {
@@ -231,6 +232,44 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
 
   // §7 routing policy (M3): privacy mode gates all network consumption.
   // local-only is the default — nothing leaves the machine unless chosen.
+  // §32 kill switch: poll the scheduler's revocation list. Earning or not,
+  // compromised weights must stop serving — chat included. When the ACTIVE
+  // model is hit, the engine stops immediately and §7 routing turns the
+  // next request into a capability miss, so Local-First machines fail over
+  // to the network instead of going dark. Quarantine persists locally;
+  // recovery ships as a catalog update with a clean package, never by
+  // un-forgetting.
+  const syncKillSwitch = async () => {
+    // §29 strict: a Local-Only machine emits NOTHING — not even safety
+    // polls. Its kill-switch coverage rides app/catalog updates instead;
+    // the moment the mode allows network participation, the live list is
+    // fetched (network.configure triggers a sync on that transition).
+    if (settings.get("network.privacyMode", "local-only") === "local-only") return;
+    const base = settings.get("earn.schedulerUrl", process.env.KAI_SCHEDULER_URL || "");
+    if (!base) return;
+    let revoked;
+    try {
+      const r = await fetch(`${base.replace(/\/$/, "")}/policy`, { signal: AbortSignal.timeout(8000) });
+      revoked = (await r.json())?.revoked;
+    } catch {
+      return; // unreachable — next tick retries
+    }
+    if (!Array.isArray(revoked)) return;
+    for (const entry of revoked) {
+      const hit = models.quarantineBySha(entry.sha256, entry.reason);
+      if (!hit.length) continue;
+      events({ type: "core:kill-switch", packages: hit, reason: entry.reason });
+      const activePkg = runtime.activeAlias ? models.catalog.aliases[runtime.activeAlias]?.package : null;
+      if (activePkg && hit.includes(activePkg)) {
+        if (worker && worker.status().running) {
+          await earn.stop({ userIntent: false }).catch(() => {});
+        }
+        runtime.stop();
+        events({ type: "core:kill-switch-stopped-engine", package: activePkg });
+      }
+    }
+  };
+
   const network = {
     status: () => ({
       privacyMode: settings.get("network.privacyMode", "local-only"),
@@ -256,6 +295,9 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
         throw new Error("privacyMode must be local-only, local-first, or network");
       }
       settings.set("network.privacyMode", m);
+      // §32: the moment network participation is allowed, fetch the
+      // safety list — don't wait out the poll interval.
+      if (m !== "local-only") syncKillSwitch().catch(() => {});
       return network.status();
     },
   };
@@ -302,9 +344,13 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
           (e) => events({ type: "earn:auto-resume-failed", message: String(e.message) })
         );
       }
+      syncKillSwitch().catch(() => {});
+      this._policyTimer = setInterval(() => syncKillSwitch().catch(() => {}), 5 * 60 * 1000);
+      this._policyTimer.unref?.();
       return p;
     },
     async stop() {
+      if (this._policyTimer) clearInterval(this._policyTimer);
       await earn.stop({ userIntent: false }).catch(() => {});
       runtime.stop();
       await gateway.close();

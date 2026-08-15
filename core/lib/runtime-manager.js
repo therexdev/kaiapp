@@ -39,6 +39,16 @@ class RuntimeManager {
   /** Endpoint of the healthy runtime serving `alias`, starting it if needed. */
   async ensure(alias) {
     this._stopped = false; // new demand revives the manager
+    // §32: consult the catalog EVERY time — the already-running fast path
+    // below must never keep serving a model that was quarantined after it
+    // loaded. If this engine is the one running the revoked package, take
+    // it down on the spot before refusing.
+    try {
+      this.models.resolveAlias(alias);
+    } catch (e) {
+      if (this.activeAlias === alias && this.runtime?.status().running) this.stop();
+      throw e;
+    }
     if (this.activeAlias === alias && this.runtime?.status().running) {
       return this.runtime.endpoint;
     }
