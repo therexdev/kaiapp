@@ -488,7 +488,7 @@ test("token-metered billing (amendment A1): free tokens -> prepaid USD -> epoch 
     // Published pricing is per-model token rates (OpenAI-style).
     const p = await (await fetch(`http://127.0.0.1:${port}/pricing`)).json();
     assert.equal(p.ok, true);
-    assert.deepEqual(p.models["koinos-fast"], { usdPerMInputTokens: 0.1, usdPerMOutputTokens: 0.4, cuClass: "LLM-CU" });
+    assert.deepEqual(p.models["koinos-fast"], { usdPerMInputTokens: 0.1, usdPerMOutputTokens: 0.4, cuClass: "LLM-CU", royaltyBps: 0 });
     assert.deepEqual([p.freeTokensPerEpoch, p.kaiRefUsd, p.status], [25000, 0.01, "PROVISIONAL"]);
   } finally {
     await sched.close();
