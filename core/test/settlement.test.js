@@ -63,3 +63,21 @@ test("anchor an epoch root on testnet (needs KAI_OPERATOR_WIF)", { skip: !proces
   assert.equal(check.anchorAddress, record.anchorAddress);
   console.log(`anchored: tx ${record.txId} -> ${record.anchorAddress}`);
 });
+
+test("merkleProof verifies exactly the way the contract does", () => {
+  const { merkleRoot, merkleProof } = require("../../server/scheduler");
+  const leaves = ["a", "b", "c", "d", "e"].map((s) => crypto.createHash("sha256").update(s).digest());
+  const root = merkleRoot(leaves);
+  for (let index = 0; index < leaves.length; index++) {
+    // Contract's verify: idx even -> H(h||sib), odd -> H(sib||h), idx >>= 1.
+    let h = leaves[index];
+    let idx = index;
+    for (const sib of merkleProof(leaves, index)) {
+      h = idx % 2 === 0
+        ? crypto.createHash("sha256").update(Buffer.concat([h, sib])).digest()
+        : crypto.createHash("sha256").update(Buffer.concat([sib, h])).digest();
+      idx = Math.floor(idx / 2);
+    }
+    assert.ok(h.equals(root), `leaf ${index} proof verifies`);
+  }
+});

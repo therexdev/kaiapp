@@ -4,8 +4,11 @@
 > real Koinos Foundation testnet: routed -> completed -> verified -> SETTLED. Epoch root
 > f59dfa6b… anchored in tx 0x122049bf…a78f8f (v0 address-commitment), independently verified
 > on-chain. Reproduce: fund an operator key via the Telegram faucet, then
-> `KAI_OPERATOR_WIF=… node server/scripts/demo-loop.js`. Remaining: KAI claim contract
-> (replaces v0 anchor), MANA-sponsored claims, Earn UI.
+> `KAI_OPERATOR_WIF=… node server/scripts/demo-loop.js`. UPDATE: **KAI claim contract DEPLOYED AND PROVEN** (2026-08-15) at
+> `149YvYQfj4MNaFecd7Rm3Z2rK6y2fkPYXz` — real epoch root submitted (tx 0x1220bcae…4216), real
+> Merkle claim (tx 0x12207c0e…c38c), 2 KAI minted to the provider, balance verified on-chain.
+> Operator pays all MANA (§21: providers never need KOIN). Earn UI shipped in v0.2.0.
+> Remaining for M2 close-out: §46.3 two-machine acceptance run.
 > Original status: READY TO BUILD (2026-08-15). Prereq M1 shipped (v0.1.1 live, auto-updating).
 > Governed by Part I of the Master Source of Truth; §-refs point there. Alpha settles on
 > **harbinger testnet** (working choice in V1_PLAN §2); mainnet at a §48 readiness gate.

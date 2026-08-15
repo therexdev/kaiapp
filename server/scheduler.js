@@ -184,17 +184,26 @@ class Scheduler {
     return String(output ?? "").includes(challenge.expected);
   }
 
-  /** Epoch close (§20): per-worker totals -> Merkle root over sorted leaves. */
+  /** Epoch close (§20): per-worker totals -> Merkle root over sorted leaves,
+   *  plus a proof per worker in the exact shape the KAI contract verifies. */
   closeEpoch() {
     const totals = {};
     for (const r of this.receipts) if (r.honest) totals[r.worker] = (totals[r.worker] || 0) + 1;
+    const entries = Object.entries(totals).sort(([a], [b]) => a.localeCompare(b));
+    const mkLeaves = entries.map(([worker, count]) =>
+      crypto.createHash("sha256").update(`${this.epoch}|${worker}|${count}`).digest()
+    );
+    const claims = {};
+    entries.forEach(([worker, count], index) => {
+      claims[worker] = { count, index, proof: merkleProof(mkLeaves, index).map((b) => b.toString("hex")) };
+    });
     const leaves = Object.entries(totals)
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([worker, count]) =>
         crypto.createHash("sha256").update(`${this.epoch}|${worker}|${count}`).digest()
       );
     const root = merkleRoot(leaves).toString("hex");
-    const summary = { epoch: this.epoch, root, totals, receipts: this.receipts.length };
+    const summary = { epoch: this.epoch, root, totals, claims, receipts: this.receipts.length };
     this._persist(summary);
     this.epoch += 1;
     this.receipts = [];
@@ -254,7 +263,27 @@ function merkleRoot(leaves) {
   return level[0];
 }
 
-module.exports = { Scheduler, merkleRoot };
+/** Sibling path for leaf `index`; odd nodes pair with themselves (matches merkleRoot). */
+function merkleProof(leaves, index) {
+  const proof = [];
+  let level = leaves;
+  let idx = index;
+  while (level.length > 1) {
+    const sib = level[idx ^ 1] ?? level[idx];
+    proof.push(sib);
+    const next = [];
+    for (let i = 0; i < level.length; i += 2) {
+      const a = level[i];
+      const b = level[i + 1] ?? a;
+      next.push(crypto.createHash("sha256").update(Buffer.concat([a, b])).digest());
+    }
+    level = next;
+    idx = Math.floor(idx / 2);
+  }
+  return proof;
+}
+
+module.exports = { Scheduler, merkleRoot, merkleProof };
 
 if (require.main === module) {
   const s = new Scheduler({

@@ -1,0 +1,71 @@
+syntax = "proto3";
+
+package kai;
+
+import "koinos/options.proto";
+
+// @description Returns the token name
+// @read-only true
+message name_arguments {}
+message name_result { string value = 1; }
+
+// @description Returns the token symbol
+// @read-only true
+message symbol_arguments {}
+message symbol_result { string value = 1; }
+
+// @description Returns the token decimals
+// @read-only true
+message decimals_arguments {}
+message decimals_result { uint32 value = 1; }
+
+// @description Returns the total supply
+// @read-only true
+message total_supply_arguments {}
+message total_supply_result { uint64 value = 1 [jstype = JS_STRING]; }
+
+// @description Returns the balance of an account
+// @read-only true
+message balance_of_arguments { bytes owner = 1 [(koinos.btype) = ADDRESS]; }
+message balance_of_result { uint64 value = 1 [jstype = JS_STRING]; }
+
+// @description Transfers tokens
+// @read-only false
+message transfer_arguments {
+  bytes from = 1 [(koinos.btype) = ADDRESS];
+  bytes to = 2 [(koinos.btype) = ADDRESS];
+  uint64 value = 3 [jstype = JS_STRING];
+}
+message transfer_result {}
+
+// @description Operator submits an epoch's receipt Merkle root
+// @read-only false
+message submit_root_arguments {
+  uint64 epoch = 1;
+  bytes root = 2;
+}
+message submit_root_result {}
+
+// @description Returns the stored root for an epoch
+// @read-only true
+message get_root_arguments { uint64 epoch = 1; }
+message get_root_result { bytes value = 1; }
+
+// @description Claim epoch rewards with a Merkle proof; mints KAI to the worker
+// @read-only false
+message claim_arguments {
+  uint64 epoch = 1;
+  string worker = 2;          // base58 address string (matches scheduler leaf format)
+  uint64 count = 3;           // accepted receipts in the epoch
+  uint64 index = 4;           // leaf index in the sorted leaf list
+  repeated bytes proof = 5;   // sibling hashes, leaf level upward
+}
+message claim_result { uint64 minted = 1 [jstype = JS_STRING]; }
+
+// @description Whether an epoch reward was already claimed
+// @read-only true
+message claimed_arguments {
+  uint64 epoch = 1;
+  string worker = 2;
+}
+message claimed_result { bool value = 1; }

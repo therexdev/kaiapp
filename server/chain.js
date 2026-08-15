@@ -102,4 +102,77 @@ class ChainClient {
   }
 }
 
-module.exports = { ChainClient, rootToAnchorAddress, TESTNET };
+/**
+ * Bindings for the deployed KAI settlement contract (contracts/kai). The
+ * contract lives at the operator's address (Koinos uploads to the signer).
+ */
+class KaiContract {
+  constructor({ chain, contractId, abiPath }) {
+    const { Contract } = require("koilib");
+    const abi = JSON.parse(require("fs").readFileSync(
+      abiPath || require("path").join(__dirname, "..", "contracts", "kai", "abi", "kai-abi.json"), "utf8"));
+    // The AS-SDK ABI dialect (entryPoint/input/output/readOnly) predates
+    // koilib's (entry_point/argument/return/read_only) — normalize both ways.
+    for (const m of Object.values(abi.methods)) {
+      m.entry_point = m.entry_point ?? m.entryPoint;
+      m.argument = m.argument ?? m.input;
+      m.return = m.return ?? m.output;
+      m.read_only = m.read_only ?? m.readOnly ?? m["read-only"] ?? false;
+    }
+    this.chain = chain;
+    this.contract = new Contract({
+      id: contractId || chain.address,
+      abi,
+      provider: chain.provider,
+      signer: chain.signer ?? undefined,
+    });
+  }
+
+  /** Upload contracts/kai/build/kai.wasm to the operator's address. */
+  async deploy(wasmPath) {
+    const fs = require("fs");
+    const path = require("path");
+    this.contract.bytecode = fs.readFileSync(
+      wasmPath || path.join(__dirname, "..", "contracts", "kai", "build", "kai.wasm"));
+    const { transaction } = await this.contract.deploy({ rcLimit: "1000000000" });
+    await transaction.wait("byBlock", 60000).catch(() => {});
+    return { txId: transaction.id, contractId: this.contract.getId() };
+  }
+
+  async submitRoot(epoch, rootHex) {
+    const { transaction } = await this.contract.functions.submit_root(
+      { epoch: String(epoch), root: Buffer.from(rootHex, "hex").toString("base64url") },
+      { rcLimit: "600000000" });
+    await transaction.wait("byBlock", 60000).catch(() => {});
+    return { txId: transaction.id };
+  }
+
+  async getRoot(epoch) {
+    const { result } = await this.contract.functions.get_root({ epoch: String(epoch) });
+    return result?.value ? Buffer.from(result.value, "base64url").toString("hex") : null;
+  }
+
+  /** Claim on behalf of a worker — permissionless push; operator pays MANA (§21 spirit). */
+  async claim(epoch, worker, { count, index, proof }) {
+    const { transaction } = await this.contract.functions.claim(
+      {
+        epoch: String(epoch),
+        worker,
+        count: String(count),
+        index: String(index),
+        proof: proof.map((h) => Buffer.from(h, "hex").toString("base64url")),
+      },
+      { rcLimit: "600000000" });
+    await transaction.wait("byBlock", 60000).catch(() => {});
+    return { txId: transaction.id };
+  }
+
+  async kaiBalance(addressB58) {
+    const { Signer } = require("koilib");
+    void Signer;
+    const { result } = await this.contract.functions.balance_of({ owner: addressB58 });
+    return BigInt(result?.value ?? 0);
+  }
+}
+
+module.exports = { ChainClient, KaiContract, rootToAnchorAddress, TESTNET };
