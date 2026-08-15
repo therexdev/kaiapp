@@ -36,6 +36,29 @@ test("wallet: signHash produces a signature the scheduler side can recover", asy
   assert.equal(WalletService.recoverAddress(hash, sig), address);
 });
 
+test("wallet: restore from WIF replaces a lost-password keystore, same address", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-w-"));
+  const w = new WalletService(dir);
+  const { address, wif } = w.create({ password: "forgotten password" });
+  w.lock();
+
+  // The password is gone — but the written-down backup code is not.
+  assert.throws(() => w.unlock("what i think it was"), /Incorrect password/);
+  assert.throws(() => w.restore({ wif: "garbage", password: "new password 9" }), /Invalid backup code/);
+
+  const r = w.restore({ wif, password: "new password 9" });
+  assert.equal(r.address, address, "same key, same address, same balance");
+  assert.equal(w.status().unlocked, true, "restored wallet is unlocked");
+
+  w.lock();
+  assert.equal(w.unlock("new password 9").address, address, "new password works");
+  assert.throws(() => w.unlock("forgotten password"), /Incorrect password/, "old password retired");
+  assert.ok(
+    fs.readdirSync(dir).some((f) => f.startsWith("wallet.json.bak-")),
+    "old keystore set aside, not destroyed"
+  );
+});
+
 test("merkleRoot is order-stable and pairs odd leaves", () => {
   const L = (s) => crypto.createHash("sha256").update(s).digest();
   const r3 = merkleRoot([L("a"), L("b"), L("c")]).toString("hex");

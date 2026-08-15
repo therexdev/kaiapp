@@ -89,6 +89,18 @@
               <input id="earn-unlock-pass" type="password" placeholder="Wallet password" />
               <button id="btn-earn-unlock" class="primary small">Unlock</button>
             </div>
+            <p class="hint"><button id="btn-earn-show-restore" class="linklike">Forgot your password? Restore with your backup code</button></p>
+            <div id="earn-restore" hidden>
+              <h2>Restore from backup code</h2>
+              <p class="hint">Enter the backup code you wrote down when the account was created, and choose a new password. Your address and balance stay the same.</p>
+              <div class="form-row">
+                <input id="earn-restore-wif" type="password" placeholder="Backup code" autocomplete="off" />
+              </div>
+              <div class="form-row">
+                <input id="earn-restore-pass" type="password" placeholder="New password (min 8 chars)" />
+                <button id="btn-earn-restore" class="primary small">Restore</button>
+              </div>
+            </div>
           </div>
 
           <div id="earn-ready" hidden>

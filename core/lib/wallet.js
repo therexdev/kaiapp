@@ -91,22 +91,41 @@ class WalletService {
     return { address: signer.getAddress(), wif: signer.getPrivateKey("wif") };
   }
 
+  _signerFromWif(wif) {
+    const cleanWif = String(wif || "").trim();
+    try {
+      if (!utils.isChecksumWif(cleanWif)) throw new Error("bad checksum");
+      return Signer.fromWif(cleanWif);
+    } catch {
+      throw new Error("Invalid backup code — check for typos and missing characters");
+    }
+  }
+
   importWif({ wif, password }) {
     this._checkPassword(password);
     if (this.exists()) {
       throw new Error("A wallet already exists. Back it up and remove it before importing another one.");
     }
-    const cleanWif = String(wif).trim();
-    let signer;
-    try {
-      if (!utils.isChecksumWif(cleanWif)) throw new Error("bad checksum");
-      signer = Signer.fromWif(cleanWif);
-    } catch {
-      throw new Error("Invalid private key (WIF)");
-    }
+    const signer = this._signerFromWif(wif);
     this._persist(signer, password);
     this._signer = signer;
     return { address: signer.getAddress() };
+  }
+
+  /**
+   * Recovery (§8): the WIF backup is stronger proof of ownership than the
+   * password, so it may replace a keystore whose password is lost. A new
+   * password is set; the old keystore is set aside on disk, never destroyed.
+   */
+  restore({ wif, password }) {
+    this._checkPassword(password);
+    const signer = this._signerFromWif(wif);
+    if (this.exists()) {
+      fs.renameSync(this.keystorePath, `${this.keystorePath}.bak-${Date.now()}`);
+    }
+    this._persist(signer, password);
+    this._signer = signer;
+    return { address: signer.getAddress(), restored: true };
   }
 
   _signerFromKeystore(password) {

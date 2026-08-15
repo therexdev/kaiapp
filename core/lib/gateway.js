@@ -185,6 +185,10 @@ class Gateway {
           // Returns the backup WIF exactly once — the UI shows it, Core forgets it.
           return this._json(res, 200, { ok: true, ...this.earn.createWallet(body) });
         }
+        if (path === "/core/earn/wallet/restore" && req.method === "POST") {
+          // Lost password + saved backup code: rebuild the keystore (§8).
+          return this._json(res, 200, { ok: true, ...this.earn.restoreWallet(body) });
+        }
         if (path === "/core/earn/unlock" && req.method === "POST") {
           return this._json(res, 200, { ok: true, ...this.earn.unlock(body.password) });
         }

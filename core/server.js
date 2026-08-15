@@ -107,6 +107,7 @@ async function createCore({ dataDir, port, llamaBin, onEvent } = {}) {
       return earn.status();
     },
     createWallet: ({ password }) => wallet.create({ password }),
+    restoreWallet: ({ wif, password }) => wallet.restore({ wif, password }),
     unlock: ({ password }) => wallet.unlock(password),
     start: async () => {
       const s = wallet.status();

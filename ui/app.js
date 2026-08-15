@@ -450,6 +450,24 @@ $("btn-earn-unlock").addEventListener("click", async () => {
   } catch { /* error shown */ }
 });
 
+$("btn-earn-show-restore").addEventListener("click", () => {
+  const box = $("earn-restore");
+  box.hidden = !box.hidden;
+});
+
+$("btn-earn-restore").addEventListener("click", async () => {
+  try {
+    await earnPost("/core/earn/wallet/restore", {
+      wif: $("earn-restore-wif").value,
+      password: $("earn-restore-pass").value,
+    });
+    $("earn-restore-wif").value = "";
+    $("earn-restore-pass").value = "";
+    $("earn-restore").hidden = true;
+    renderEarn();
+  } catch { /* error shown */ }
+});
+
 $("btn-earn-toggle").addEventListener("click", async () => {
   try {
     if ($("btn-earn-toggle").dataset.running) {
