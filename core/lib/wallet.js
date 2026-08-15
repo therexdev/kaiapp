@@ -53,7 +53,11 @@ class WalletService {
     return this._signer ? this._signer.getAddress() : (this.readKeystore()?.address ?? null);
   }
 
-  _checkPassword(password) {
+  /** Canonical password for saving: Unicode NFC, whitespace refused loudly.
+   *  Accented characters can arrive composed or decomposed — pixel-identical,
+   *  different bytes — so every save normalizes and every unlock retries the
+   *  same normalization (NIST 800-63B's recommendation for exactly this). */
+  _canonicalPassword(password) {
     if (typeof password !== "string" || password.length < MIN_PASSWORD_LENGTH) {
       throw new Error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`);
     }
@@ -62,6 +66,7 @@ class WalletService {
     if (password !== password.trim()) {
       throw new Error("Password can't start or end with a space — remove the stray whitespace and try again");
     }
+    return password.normalize("NFC");
   }
 
   _persist(signer, password) {
@@ -83,7 +88,7 @@ class WalletService {
   }
 
   create({ password }) {
-    this._checkPassword(password);
+    password = this._canonicalPassword(password);
     if (this.exists()) {
       throw new Error("A wallet already exists. Back it up and remove it before creating a new one.");
     }
@@ -112,7 +117,7 @@ class WalletService {
   }
 
   importWif({ wif, password }) {
-    this._checkPassword(password);
+    password = this._canonicalPassword(password);
     if (this.exists()) {
       throw new Error("A wallet already exists. Back it up and remove it before importing another one.");
     }
@@ -128,7 +133,7 @@ class WalletService {
    * password is set; the old keystore is set aside on disk, never destroyed.
    */
   restore({ wif, password }) {
-    this._checkPassword(password);
+    password = this._canonicalPassword(password);
     const signer = this._signerFromWif(wif);
     if (this.exists()) {
       fs.renameSync(this.keystorePath, `${this.keystorePath}.bak-${Date.now()}`);
@@ -150,21 +155,36 @@ class WalletService {
   }
 
   unlock(password) {
-    try {
-      this._signer = this._signerFromKeystore(password);
-    } catch (e) {
-      if (/Incorrect password/.test(String(e.message))) {
-        // Name the exact file that refused: if the creation time shown is not
-        // when the user (re)made their wallet, they're unlocking a stale or
-        // foreign keystore — a different problem than a mistyped password.
-        const ks = this.readKeystore();
-        throw new Error(
-          `Incorrect password for wallet ${ks?.address ?? "?"} (file created ${ks?.createdAt ?? "?"})`
-        );
+    // Equivalent-looking input must open the wallet: retry the Unicode-NFC
+    // and trimmed forms of what was typed — pixel-identical variants that
+    // differ only in bytes. Order: exact first, so byte-exact always wins.
+    const typed = String(password ?? "");
+    const variants = [...new Set([typed, typed.normalize("NFC"), typed.trim(), typed.normalize("NFC").trim()])];
+    let lastErr = null;
+    for (const candidate of variants) {
+      try {
+        this._signer = this._signerFromKeystore(candidate);
+        return { address: this._signer.getAddress() };
+      } catch (e) {
+        lastErr = e;
+        if (!/Incorrect password/.test(String(e.message))) throw e;
       }
-      throw e;
     }
-    return { address: this._signer.getAddress() };
+    // Name the exact file that refused, and say WHAT differs: a wrong length
+    // is a missing/extra character; a right length is a changed one.
+    const ks = this.readKeystore();
+    let detail = "";
+    if (ks?.pwHint?.len != null) {
+      const typedLen = [...typed].length;
+      detail =
+        typedLen !== ks.pwHint.len
+          ? ` — you typed ${typedLen} characters, but this wallet's password has ${ks.pwHint.len}`
+          : " — same length as the saved password, so one character differs (check Caps Lock and keyboard layout)";
+    }
+    throw new Error(
+      `Incorrect password for wallet ${ks?.address ?? "?"} (file created ${ks?.createdAt ?? "?"})${detail}`,
+      { cause: lastErr }
+    );
   }
 
   lock() {

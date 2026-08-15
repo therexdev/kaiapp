@@ -64,6 +64,24 @@ test("wallet: restore from WIF replaces a lost-password keystore, same address",
   );
 });
 
+test("wallet: unicode-equivalent and padded passwords open; refusals say what differs", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-w-"));
+  const w = new WalletService(dir);
+  // é typed composed (U+00E9) at save…
+  const { address } = w.create({ password: "café volt 42" });
+  w.lock();
+  // …and decomposed (e + combining accent) at unlock: visually identical.
+  assert.equal(w.unlock("café volt 42").address, address, "NFC-equivalent password opens");
+  w.lock();
+  assert.equal(w.unlock("café volt 42 ").address, address, "trailing space forgiven at unlock");
+  w.lock();
+
+  // Wrong length: the error says so, with counts.
+  assert.throws(() => w.unlock("café volt 4"), / you typed 11 characters, but this wallet's password has 12/);
+  // Right length, wrong character: the error says that instead.
+  assert.throws(() => w.unlock("café volt 43"), /same length as the saved password/);
+});
+
 test("wallet session: survives a 'restart', refuses wrong secrets and swapped files, ends on lock", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-w-"));
   const w1 = new WalletService(dir);

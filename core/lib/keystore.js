@@ -38,6 +38,14 @@ function encryptKeystore({ privateKeyHex, address, password }) {
     version: VERSION,
     address,
     createdAt: new Date().toISOString(),
+    // Support hint, not a secret: password length (code points) plus a tiny
+    // salted fingerprint, so "Incorrect password" can say WHAT differs
+    // (length vs a character) instead of leaving the user guessing. A 2-byte
+    // fingerprint is deliberately useless for cracking.
+    pwHint: {
+      len: [...String(password)].length,
+      fp: crypto.createHash("sha256").update(`kai-pw-hint|${salt.toString("hex")}|${password}`).digest("hex").slice(0, 4),
+    },
     crypto: {
       kdf: "scrypt",
       kdfparams: { ...SCRYPT, salt: salt.toString("hex") },
