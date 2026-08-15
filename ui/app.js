@@ -184,6 +184,7 @@ for (const b of document.querySelectorAll(".nav-item[data-view]")) {
     if (state.view === "models") renderModels();
     if (state.view === "compare") renderCompare();
     if (state.view === "tasks") renderTasks();
+    if (state.view === "docs") renderDocs();
   });
 }
 
@@ -1033,7 +1034,9 @@ async function renderModels() {
       const recommended = a.alias === recommendedAlias;
       let action;
       if (a.status === "quarantined") action = `<span class="model-badge danger">quarantined</span>`;
-      else if (a.status === "ready") {
+      else if (a.status === "missing") {
+        action = `<span class="model-badge danger">file moved — re-import</span>`;
+      } else if (a.status === "ready") {
         action = inUse
           ? `<span class="model-badge ok">in use</span>`
           : `<button class="primary small" data-use="${esc2(a.alias)}">Use</button>`;
@@ -1043,6 +1046,9 @@ async function renderModels() {
         action = `<span class="model-badge danger">needs ~${a.minRamGb} GB RAM</span>`;
       } else {
         action = `<button class="primary small" data-get="${esc2(a.alias)}">Download</button>`;
+      }
+      if (a.custom) {
+        action += ` <button class="chat-del" data-remove-custom="${esc2(a.alias)}" title="Remove from the list (your file is not deleted)">×</button>`;
       }
       const fitNote = tight && !hopeless ? ` · tight fit on this machine (~${a.minRamGb} GB RAM recommended)` : "";
       return `<div class="model-offer model-row${recommended ? " recommended" : ""}">
@@ -1057,6 +1063,15 @@ async function renderModels() {
       </div>`;
     })
     .join("");
+  // Live hash progress while an import verifies.
+  const imp = $("import-status");
+  if (imp && m.importing) {
+    imp.hidden = false;
+    imp.textContent = `Verifying ${m.importing.path.split(/[\\/]/).pop()} — ${m.importing.pct}%`;
+  } else if (imp && m.importError && !imp.textContent.includes("✓")) {
+    imp.hidden = false;
+    imp.textContent = m.importError;
+  }
   $("models-storage").textContent = m.storage?.usedBytes
     ? `Models on disk: ${(m.storage.usedBytes / 1e9).toFixed(1)} GB${m.storage.capBytes ? ` of ${(m.storage.capBytes / 1e9).toFixed(0)} GB cap` : ""}`
     : "";
@@ -1066,6 +1081,12 @@ async function renderModels() {
 }
 
 $("models-list").addEventListener("click", async (e) => {
+  const rm = e.target.closest("[data-remove-custom]");
+  if (rm) {
+    await fetch(`/core/models/custom/${encodeURIComponent(rm.dataset.removeCustom)}`, { method: "DELETE" });
+    renderModels();
+    return;
+  }
   const get = e.target.closest("[data-get]");
   const use = e.target.closest("[data-use]");
   if (get) {

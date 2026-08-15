@@ -36,6 +36,7 @@
       </div>
       <nav id="nav">
         <button class="nav-item active" data-view="chat">Chat</button>
+        <button class="nav-item" data-view="docs">Docs</button>
         <button class="nav-item" data-view="compare">Compare</button>
         <button class="nav-item" data-view="models">Models</button>
         <button class="nav-item" data-view="tasks">Tasks</button>
@@ -114,6 +115,40 @@
         </div>
       </section>
 
+      <!-- Docs: local-first writing surface with AI assist -->
+      <section id="view-docs" class="view" hidden>
+        <div class="docs-layout">
+          <aside class="docs-side">
+            <div class="docs-side-head"><span>Documents</span><button id="btn-new-doc" class="linklike">+ New</button></div>
+            <div id="doc-list"></div>
+          </aside>
+          <div class="docs-main">
+            <input id="doc-title" placeholder="Title" maxlength="80" />
+            <textarea id="doc-body" placeholder="Write here. Select some text (or nothing, for the whole document) and use the AI bar below — suggestions preview first, and only Apply changes your words." spellcheck="true"></textarea>
+            <div class="docs-status"><span id="doc-words"></span><span id="doc-saved"></span></div>
+            <div class="docs-ai-bar">
+              <select id="doc-model" title="Model for suggestions"></select>
+              <button class="doc-act" data-act="improve">Improve</button>
+              <button class="doc-act" data-act="grammar">Fix grammar</button>
+              <button class="doc-act" data-act="shorten">Shorten</button>
+              <button class="doc-act" data-act="expand">Expand</button>
+              <button class="doc-act" data-act="continue">Continue</button>
+              <input id="doc-custom" placeholder="…or tell it what to do (e.g. “make this friendlier”)" />
+              <button id="doc-custom-go" class="doc-act">Go</button>
+            </div>
+            <div id="doc-suggest" hidden>
+              <div class="doc-suggest-head"><span id="doc-suggest-label">Suggestion</span><span id="doc-suggest-target" class="hint"></span></div>
+              <div id="doc-suggest-body"></div>
+              <div class="doc-suggest-actions">
+                <button id="doc-apply" class="primary small">Apply</button>
+                <button id="doc-discard" class="doc-act">Discard</button>
+                <button id="doc-suggest-stop" class="doc-act" hidden>Stop</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- Compare: blind side-by-side of two models on one prompt -->
       <section id="view-compare" class="view" hidden>
         <div class="cmp-wrap">
@@ -183,7 +218,15 @@
           <p class="lede">Trusted models, verified by checksum before first use. Chat picks any model that's on this machine; bigger models answer better and download once.</p>
           <div id="models-list"></div>
           <p class="hint" id="models-storage"></p>
-          <p class="hint">Want a model that isn't listed? Tell us with Send feedback — custom model import is coming in beta.</p>
+          <div class="model-offer import-card">
+            <div>
+              <div class="model-name">Import your own model</div>
+              <div class="model-sub">Any GGUF file on this machine. It's verified (hashed) once and used in place — nothing is copied or uploaded.</div>
+              <div id="import-status" class="hint" hidden></div>
+              <div id="import-path-row" hidden><input id="import-path" placeholder="Full path to a .gguf file" /><button id="import-path-go" class="primary small">Import</button></div>
+            </div>
+            <button id="btn-import" class="primary small">Choose file…</button>
+          </div>
         </div>
       </section>
 
@@ -312,6 +355,7 @@
   <script src="markdown.js"></script>
   <script src="app.js"></script>
   <script src="app-extras.js"></script>
+  <script src="docs-view.js"></script>
 
 </body>
 </html>

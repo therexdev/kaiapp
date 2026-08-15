@@ -76,6 +76,17 @@ async function start() {
     },
   });
 
+  // Native file picker for model import — the sandboxed renderer can't
+  // learn a file's real path any other way.
+  ipcMain.handle("dialog:pick-gguf", async () => {
+    const r = await dialog.showOpenDialog(win, {
+      title: "Choose a GGUF model file",
+      filters: [{ name: "GGUF models", extensions: ["gguf"] }],
+      properties: ["openFile"],
+    });
+    return r.canceled ? null : r.filePaths[0];
+  });
+
   ipcMain.on("win:minimize", () => win?.minimize());
   ipcMain.on("win:toggle-maximize", () => {
     if (!win) return;

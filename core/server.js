@@ -346,6 +346,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     earn,
     network,
     chats: new ChatStore(path.join(dataDir, "chats")),
+    docs: new (require("./lib/docs").DocStore)(path.join(dataDir, "docs")),
     coreInfo: () => ({ version: VERSION, dataDir, hardware: hw }),
     // Feedback relay: one honest box in the app, straight to the project's
     // inbox. The diagnostic tail is core.log — events only, no chat

@@ -49,9 +49,10 @@ function estimateMessageTokens(messages) {
 }
 
 class Gateway {
-  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, earn, network, feedback, chats, onEvent }) {
+  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, earn, network, feedback, chats, docs, onEvent }) {
     this.feedback = feedback || null; // relay to the project's feedback inbox
     this.chats = chats || null; // local chat history store
+    this.docs = docs || null; // local documents store
     this.earn = earn || null; // earn controller (M2); null in minimal tests
     this.network = network || null; // §7 routing policy controller (M3)
     this.host = host;
@@ -155,6 +156,8 @@ class Gateway {
         storage: this.models.storageUsage(),
         runtime: this.runtime.status(),
         download: this.models.downloadProgress(),
+        importing: this.models.importStatus?.() ?? null,
+        importError: this._lastImportError ?? null,
         runtimeDownload: this.runtime.provisioner?.downloadProgress() ?? null,
         ensure: this._ensureJob
           ? { alias: this._ensureJob.alias, state: this._ensureJob.state, error: this._ensureJob.error }
@@ -232,6 +235,51 @@ class Gateway {
           const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
           return this._json(res, 200, { ok: true, ...this.chats.rename(id, body.title) });
         }
+      } catch (e) {
+        return this._json(res, 404, { ok: false, error: String(e.message) });
+      }
+    }
+
+    // Custom model import (bring your own GGUF, hashed + referenced in place).
+    if (this.models && path === "/core/models/import" && req.method === "POST") {
+      try {
+        const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+        // Hashing a 20 GB file takes minutes — run it as a job; the UI
+        // polls /core/models for importStatus.
+        const job = this.models.importCustom(body);
+        job.catch((e) => (this._lastImportError = String(e.message)));
+        this._lastImportError = null;
+        const winner = await Promise.race([job.then((e) => ({ done: true, entry: e })), new Promise((r) => setTimeout(() => r({ done: false }), 800))]);
+        return this._json(res, 200, { ok: true, ...winner });
+      } catch (e) {
+        return this._json(res, 400, { ok: false, error: { message: String(e.message) } });
+      }
+    }
+    if (this.models && path.startsWith("/core/models/custom/") && req.method === "DELETE") {
+      try {
+        return this._json(res, 200, { ok: true, ...this.models.removeCustom(decodeURIComponent(path.split("/")[4])) });
+      } catch (e) {
+        return this._json(res, 400, { ok: false, error: { message: String(e.message) } });
+      }
+    }
+
+    // Documents (local-first writing surface).
+    if (this.docs && path === "/core/docs" && req.method === "GET") {
+      return this._json(res, 200, { ok: true, docs: this.docs.list() });
+    }
+    if (this.docs && path === "/core/docs" && req.method === "POST") {
+      try {
+        const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+        return this._json(res, 200, { ok: true, ...this.docs.save(body) });
+      } catch (e) {
+        return this._json(res, 400, { ok: false, error: String(e.message) });
+      }
+    }
+    if (this.docs && path.startsWith("/core/docs/")) {
+      const id = path.split("/")[3];
+      try {
+        if (req.method === "GET") return this._json(res, 200, { ok: true, doc: this.docs.get(id) });
+        if (req.method === "DELETE") return this._json(res, 200, { ok: true, ...this.docs.remove(id) });
       } catch (e) {
         return this._json(res, 404, { ok: false, error: String(e.message) });
       }

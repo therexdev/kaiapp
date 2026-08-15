@@ -17,4 +17,7 @@ contextBridge.exposeInMainWorld("koinosShell", {
   onMaximizeChanged: (cb) => {
     ipcRenderer.on("win:maximize-changed", (_e, maximized) => cb(maximized));
   },
+  // Model import: a native picker is the only way a sandboxed renderer
+  // can learn a file's real on-disk path.
+  pickModelFile: () => ipcRenderer.invoke("dialog:pick-gguf"),
 });
