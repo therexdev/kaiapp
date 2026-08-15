@@ -345,6 +345,39 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     earn,
     network,
     coreInfo: () => ({ version: VERSION, dataDir, hardware: hw }),
+    // Feedback relay: one honest box in the app, straight to the project's
+    // inbox. The diagnostic tail is core.log — events only, no chat
+    // content and no keys ever land there.
+    feedback: async ({ message, email, includeLog }) => {
+      const text = String(message || "").trim().slice(0, 4000);
+      if (!text) throw new Error("Feedback needs a message");
+      let logTail = null;
+      if (includeLog) {
+        try {
+          const raw = fsl.readFileSync(logFile, "utf8");
+          logTail = raw.split("\n").slice(-120).join("\n").slice(-16000);
+        } catch { /* no log yet */ }
+      }
+      const target = process.env.KAI_FEEDBACK_URL || "https://koinosai.com/api/feedback";
+      const r = await fetch(target, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          message: text,
+          email: email ? String(email).slice(0, 200) : null,
+          appVersion: VERSION,
+          platform: `${process.platform}-${process.arch}`,
+          logTail,
+        }),
+        signal: AbortSignal.timeout(10000),
+      }).catch(() => {
+        throw new Error("Could not reach the feedback server — check your connection and try again");
+      });
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j?.ok) throw new Error(j?.error || `Feedback server answered ${r.status}`);
+      events({ type: "feedback:sent" });
+      return {};
+    },
   });
 
   return {

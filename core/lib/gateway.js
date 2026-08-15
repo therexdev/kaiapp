@@ -49,7 +49,8 @@ function estimateMessageTokens(messages) {
 }
 
 class Gateway {
-  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, earn, network, onEvent }) {
+  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, earn, network, feedback, onEvent }) {
+    this.feedback = feedback || null; // relay to the project's feedback inbox
     this.earn = earn || null; // earn controller (M2); null in minimal tests
     this.network = network || null; // §7 routing policy controller (M3)
     this.host = host;
@@ -168,6 +169,14 @@ class Gateway {
       } catch (e) {
         return this._json(res, 400, { ok: false, error: String(e.message) });
       }
+      // Platform preflight BEFORE the gigabyte model download: a machine
+      // with no inference engine build (today: Linux without Ollama) must
+      // hear that up front, not after the download completes.
+      try {
+        await this.runtime.preflight?.();
+      } catch (e) {
+        return this._json(res, 400, { ok: false, error: String(e.message) });
+      }
       if (this._ensureJob?.state === "working") {
         return this._json(res, 409, { ok: false, error: `Already loading ${this._ensureJob.alias}` });
       }
@@ -201,6 +210,15 @@ class Gateway {
       }
     }
     // ----- network policy control plane (M3 §7) -----
+    if (this.feedback && path === "/core/feedback" && req.method === "POST") {
+      const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+      try {
+        return this._json(res, 200, { ok: true, ...(await this.feedback(body)) });
+      } catch (e) {
+        return this._json(res, 502, { ok: false, error: { message: String(e.message) } });
+      }
+    }
+
     if (this.network && path === "/core/network" && req.method === "GET") {
       return this._json(res, 200, { ok: true, ...this.network.status() });
     }

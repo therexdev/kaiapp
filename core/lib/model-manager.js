@@ -36,6 +36,7 @@ class ModelManager {
         label: a.label,
         package: a.package,
         status: q ? "quarantined" : this.packageStatus(a.package).status,
+        ...(a.dev ? { dev: true } : {}),
         ...(q ? { quarantineReason: q.reason } : {}),
       };
     });

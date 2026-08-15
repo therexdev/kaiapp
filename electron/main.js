@@ -8,7 +8,7 @@
  */
 
 const path = require("path");
-const { app, BrowserWindow, dialog, shell } = require("electron");
+const { app, BrowserWindow, dialog, shell, ipcMain } = require("electron");
 
 const { createCore } = require("../core/server");
 const { JsonStore } = require("../core/lib/store");
@@ -63,13 +63,29 @@ async function start() {
     minHeight: 560,
     backgroundColor: "#07090c",
     autoHideMenuBar: true,
+    // Frameless: the UI draws its own titlebar so the whole app reads as
+    // one designed surface instead of web content in an OS frame.
+    frame: false,
     webPreferences: {
-      // The renderer is plain same-origin web content; it gets no Node access.
+      // The renderer is plain same-origin web content; it gets no Node
+      // access — only the allowlisted window-chrome bridge.
+      preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
     },
   });
+
+  ipcMain.on("win:minimize", () => win?.minimize());
+  ipcMain.on("win:toggle-maximize", () => {
+    if (!win) return;
+    if (win.isMaximized()) win.unmaximize();
+    else win.maximize();
+  });
+  ipcMain.on("win:close", () => win?.close());
+  const sendMax = () => win?.webContents.send("win:maximize-changed", win.isMaximized());
+  win.on("maximize", sendMax);
+  win.on("unmaximize", sendMax);
 
   win.on("close", () => winState.set("bounds", win.getBounds()));
   win.on("closed", () => (win = null));

@@ -1,6 +1,6 @@
 {
   "catalogVersion": 1,
-  "comment": "Model packages are versioned + immutable (spec §27): identity is the SHA-256. Launch aliases (Koinos Fast/Smart/Code) ship after the §51 model-selection validation; dev-tiny exists so the pipeline is testable end-to-end today.",
+  "comment": "Model packages are versioned + immutable (spec §27): identity is the SHA-256. koinos-fast is the launch alias; dev-tiny is the CI/pipeline test model, hidden from the picker unless it is the model actually in use.",
   "aliases": {
     "koinos-fast": {
       "label": "Koinos Fast",
@@ -8,7 +8,8 @@
     },
     "dev-tiny": {
       "label": "Dev Tiny (pipeline testing only — not a launch model)",
-      "package": "smollm2-135m-instruct-q8_0@1"
+      "package": "smollm2-135m-instruct-q8_0@1",
+      "dev": true
     }
   },
   "packages": {

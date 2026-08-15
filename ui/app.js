@@ -44,9 +44,15 @@ async function refresh() {
   }
 
   // Prefer a model that's already on disk (returning user goes straight
-  // to chat); a fresh install onboards onto the FIRST catalog alias — the
-  // launch model.
-  const first = models.aliases.find((a) => a.status === "ready") || models.aliases[0] || null;
+  // to chat); a fresh install onboards onto the first NON-DEV catalog
+  // alias — the launch model. Dev pipeline models are picked only when
+  // they're the only thing ready (CI, dev machines).
+  const first =
+    models.aliases.find((a) => a.status === "ready" && !a.dev) ||
+    models.aliases.find((a) => a.status === "ready") ||
+    models.aliases.find((a) => !a.dev) ||
+    models.aliases[0] ||
+    null;
   state.alias = state.alias || first?.alias || null;
   const entry = models.aliases.find((a) => a.alias === state.alias) || first;
   const running = models.runtime?.runtime?.running && models.runtime.activeAlias === state.alias;
@@ -73,7 +79,7 @@ async function refresh() {
   } else {
     setStatus("busy", "Setup needed");
   }
-  $("status-model").textContent = entry ? entry.label : "No models in catalog";
+  $("status-model").textContent = entry ? entry.label.split(" (")[0] : "No models in catalog";
   updateModelPick(models.aliases);
 
   // Route: onboarding until the model file is on disk.
@@ -121,8 +127,13 @@ async function updateModelPick(aliases) {
     }
   } catch { networkEligible = false; }
   const pick = $("model-pick");
+  // Dev pipeline models stay out of the picker unless they're the model
+  // actually in use — a curious tester selecting one gets a silent
+  // download and toy answers.
   const want = [
-    ...aliases.map((al) => ({ v: al.alias, label: "Local · " + al.label.split(" (")[0] })),
+    ...aliases
+      .filter((al) => !al.dev || al.alias === state.alias)
+      .map((al) => ({ v: al.alias, label: "Local · " + al.label.split(" (")[0] })),
     ...(networkEligible ? [{ v: "koinos-network", label: "Koinos Network" }] : []),
   ];
   const sig = want.map((w) => w.v).join(",");
@@ -135,7 +146,11 @@ async function updateModelPick(aliases) {
       pick.appendChild(o);
     }
     pick.dataset.sig = sig;
+    // Keep the user's explicit choice when still offered; otherwise track
+    // the READY model — defaulting to the first option regardless caused
+    // chats to target a model that wasn't downloaded yet.
     if ([...pick.options].some((o) => o.value === prev)) pick.value = prev;
+    else if (state.alias && [...pick.options].some((o) => o.value === state.alias)) pick.value = state.alias;
   }
 }
 
@@ -239,6 +254,8 @@ $("input").addEventListener("keydown", (e) => {
 $("btn-stop").addEventListener("click", () => state.abort?.abort());
 
 function addMsg(role, text) {
+  const empty = $("chat-empty");
+  if (empty) empty.remove();
   const div = document.createElement("div");
   div.className = `msg ${role}`;
   div.textContent = text;
@@ -660,4 +677,65 @@ $("privacy-pick").addEventListener("change", async () => {
     body: JSON.stringify({ privacyMode: $("privacy-pick").value }),
   });
   refresh();
+});
+
+// ---------- frameless shell chrome ----------
+// Present only under the Electron shell; a plain browser keeps OS chrome.
+if (window.koinosShell) {
+  $("titlebar").hidden = false;
+  document.body.classList.add("framed");
+  $("tb-min").addEventListener("click", () => window.koinosShell.minimize());
+  $("tb-max").addEventListener("click", () => window.koinosShell.toggleMaximize());
+  $("tb-close").addEventListener("click", () => window.koinosShell.close());
+  window.koinosShell.onMaximizeChanged((max) => {
+    $("tb-max").title = max ? "Restore" : "Maximize";
+    document.body.classList.toggle("maximized", max);
+  });
+}
+
+// ---------- feedback ----------
+$("btn-feedback").addEventListener("click", () => {
+  $("feedback-overlay").hidden = false;
+  $("feedback-error").hidden = true;
+  $("feedback-text").focus();
+});
+$("btn-feedback-cancel").addEventListener("click", () => {
+  $("feedback-overlay").hidden = true;
+});
+$("feedback-overlay").addEventListener("click", (e) => {
+  if (e.target === $("feedback-overlay")) $("feedback-overlay").hidden = true;
+});
+$("btn-feedback-send").addEventListener("click", async () => {
+  const message = $("feedback-text").value.trim();
+  if (!message) {
+    $("feedback-error").textContent = "Write a sentence or two first.";
+    $("feedback-error").hidden = false;
+    return;
+  }
+  const btn = $("btn-feedback-send");
+  btn.disabled = true;
+  btn.textContent = "Sending…";
+  try {
+    const r = await fetch("/core/feedback", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        message,
+        email: $("feedback-email").value.trim() || null,
+        includeLog: $("feedback-log").checked,
+      }),
+    });
+    const j = await r.json();
+    if (!r.ok || !j.ok) throw new Error(j?.error?.message || j?.error || `Send failed (${r.status})`);
+    $("feedback-text").value = "";
+    $("feedback-overlay").hidden = true;
+    // Thank the sender where they'll see it: the status line.
+    setStatus("ok", "Feedback sent — thank you!");
+  } catch (e) {
+    $("feedback-error").textContent = String(e.message);
+    $("feedback-error").hidden = false;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Send";
+  }
 });

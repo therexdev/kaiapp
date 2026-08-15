@@ -185,3 +185,128 @@ button.linklike {
 
 /* success note reusing the error slot (e.g. deposit confirmation) */
 .error.ok { color: #35d49a; border-color: #2a6f57; background: rgba(53,212,154,0.08); }
+
+/* ================= design pass: frameless shell + iOS-feel polish ======= */
+
+/* ----- custom titlebar (Electron frameless; hidden in plain browsers) -- */
+#titlebar {
+  height: 40px; flex-shrink: 0;
+  display: flex; align-items: stretch; justify-content: space-between;
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border);
+  -webkit-app-region: drag; user-select: none;
+}
+.tb-drag { display: flex; align-items: center; gap: 9px; padding: 0 14px; }
+.tb-mark { width: 16px; height: 16px; border-radius: 5px; }
+.tb-title { font-size: 0.8em; font-weight: 600; letter-spacing: 0.02em; color: var(--text-dim); }
+.tb-controls { display: flex; -webkit-app-region: no-drag; }
+.tb-btn {
+  width: 46px; border: 0; background: none; color: var(--text-dim);
+  display: flex; align-items: center; justify-content: center; cursor: default;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.tb-btn:hover { background: var(--bg-input); color: var(--text); }
+.tb-close:hover { background: #d13438; color: #fff; }
+
+/* body becomes a column when the shell titlebar is present */
+body.framed { display: flex; flex-direction: column; }
+body.framed #app { flex: 1; min-height: 0; }
+
+/* ----- scrollbars: slim, rounded, quiet until touched ------------------ */
+* { scrollbar-width: thin; scrollbar-color: #2a3648 transparent; }
+*::-webkit-scrollbar { width: 9px; height: 9px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: #232e40; border-radius: 999px;
+  border: 2px solid transparent; background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover { background: #34435c; border: 2px solid transparent; background-clip: padding-box; }
+*::-webkit-scrollbar-corner { background: transparent; }
+
+/* ----- motion: one tempo everywhere ------------------------------------ */
+button, .nav-item, .path, input, textarea, select, a { transition: background 0.16s ease, color 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, transform 0.12s ease, opacity 0.16s ease, filter 0.16s ease; }
+button.primary:active:not(:disabled), .tb-btn:active, .nav-item:active { transform: scale(0.98); }
+#messages { scroll-behavior: smooth; }
+
+/* views ease in instead of popping */
+.view:not([hidden]) { animation: viewIn 0.22s ease both; }
+@keyframes viewIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+/* chat bubbles arrive like messages, not like DOM */
+.msg { animation: msgIn 0.18s ease both; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); }
+@keyframes msgIn { from { opacity: 0; transform: translateY(4px) scale(0.99); } to { opacity: 1; transform: none; } }
+.msg.user { border-radius: 14px 14px 4px 14px; }
+.msg.assistant { border-radius: 14px 14px 14px 4px; }
+
+/* inputs get a soft glow instead of a hard outline */
+#input:focus, .form-row input:focus, #model-pick:focus, #privacy-pick:focus, .modal textarea:focus, .modal input:focus {
+  outline: none; border-color: var(--violet);
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.18);
+}
+:focus-visible { outline: none; }
+button:focus-visible, .nav-item:focus-visible, a:focus-visible { box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.28); }
+
+::selection { background: rgba(139, 92, 246, 0.35); }
+
+/* nav feels like a segmented control */
+.nav-item { position: relative; }
+.nav-item.active::before {
+  content: ""; position: absolute; left: 0; top: 22%; bottom: 22%; width: 3px;
+  border-radius: 999px; background: linear-gradient(180deg, var(--sky), var(--violet));
+}
+
+/* primary buttons: gradient sheen + lift */
+button.primary { box-shadow: 0 2px 10px rgba(109, 62, 240, 0.28); }
+button.primary:hover:not(:disabled) { box-shadow: 0 4px 16px rgba(109, 62, 240, 0.4); filter: brightness(1.1); }
+
+/* cards breathe a little */
+.hw-summary, .model-offer, #status-pane { box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2); }
+
+/* sidebar feedback link sits low-key above the footer */
+.feedback-link { margin-top: 4px; font-size: 0.88em; color: var(--text-dim); }
+.feedback-link:hover { color: var(--emerald); }
+
+/* ----- modal (feedback) ------------------------------------------------ */
+.overlay {
+  position: fixed; inset: 0; z-index: 50;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(4, 6, 9, 0.6);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  animation: overlayIn 0.18s ease both;
+}
+@keyframes overlayIn { from { opacity: 0; } to { opacity: 1; } }
+.modal {
+  width: min(480px, calc(100vw - 48px));
+  display: flex; flex-direction: column; gap: 12px;
+  background: var(--bg-raised); border: 1px solid var(--border);
+  border-radius: 16px; padding: 22px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+  animation: modalIn 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}
+@keyframes modalIn { from { opacity: 0; transform: translateY(14px) scale(0.98); } to { opacity: 1; transform: none; } }
+.modal textarea, .modal input[type="email"] {
+  background: var(--bg-input); color: var(--text);
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 12px; font: inherit; resize: vertical;
+}
+.modal .check { display: flex; gap: 8px; align-items: flex-start; font-size: 0.82em; color: var(--text-dim); }
+.modal .check input { margin-top: 3px; accent-color: var(--violet); }
+.modal-actions { display: flex; justify-content: flex-end; gap: 14px; align-items: center; }
+
+/* ----- accessibility: motion off when asked ---------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+  #messages { scroll-behavior: auto; }
+}
+
+/* empty chat state: a quiet invitation, gone at the first message */
+.chat-empty {
+  margin: auto; text-align: center; color: var(--text-dim);
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+  animation: viewIn 0.3s ease both;
+}
+.chat-empty-mark {
+  width: 44px; height: 44px; border-radius: 14px;
+  background: linear-gradient(135deg, var(--sky), var(--violet) 55%, var(--emerald));
+  opacity: 0.85; box-shadow: 0 6px 24px rgba(139, 92, 246, 0.35);
+}

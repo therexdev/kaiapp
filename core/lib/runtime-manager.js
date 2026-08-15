@@ -37,6 +37,26 @@ class RuntimeManager {
   }
 
   /** Endpoint of the healthy runtime serving `alias`, starting it if needed. */
+  /** Can ANY engine run on this machine? Called before big downloads so a
+   *  platform with no managed build (today: Linux without Ollama) fails in
+   *  plain language up front instead of after a gigabyte. A forced binary
+   *  or a working fallback engine counts as viable. */
+  async preflight() {
+    if (!this.provisioner) return; // forced binary (KAI_LLAMA_BIN) — viable
+    try {
+      this.provisioner.selectBuild("llamacpp");
+      return;
+    } catch {
+      /* no managed build — check the fallback before refusing */
+    }
+    if (this.makeFallback && (await Promise.resolve(this.makeFallback()).catch(() => null))) return;
+    throw new Error(
+      process.platform === "linux"
+        ? "Koinos AI on Linux currently needs Ollama installed (free, from ollama.com) — install it and relaunch, and Koinos AI will use it as the engine."
+        : "No AI engine build is available for this machine yet — check for an app update, or install Ollama (ollama.com) as a fallback engine."
+    );
+  }
+
   async ensure(alias) {
     this._stopped = false; // new demand revives the manager
     // §32: consult the catalog EVERY time — the already-running fast path

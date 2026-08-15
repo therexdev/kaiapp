@@ -9,6 +9,25 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+  <!-- Frameless-shell titlebar: shown only when the Electron bridge is
+       present; a plain browser (dev, tests) keeps the OS chrome. -->
+  <header id="titlebar" hidden>
+    <div class="tb-drag">
+      <div class="brand-mark tb-mark" aria-hidden="true"></div>
+      <span class="tb-title">Koinos AI</span>
+    </div>
+    <div class="tb-controls">
+      <button id="tb-min" class="tb-btn" aria-label="Minimize" title="Minimize">
+        <svg width="10" height="10" viewBox="0 0 10 10"><line x1="1" y1="5.5" x2="9" y2="5.5" stroke="currentColor" stroke-width="1.2"/></svg>
+      </button>
+      <button id="tb-max" class="tb-btn" aria-label="Maximize" title="Maximize">
+        <svg width="10" height="10" viewBox="0 0 10 10"><rect x="1.5" y="1.5" width="7" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+      </button>
+      <button id="tb-close" class="tb-btn tb-close" aria-label="Close" title="Close">
+        <svg width="10" height="10" viewBox="0 0 10 10"><path d="M1.5 1.5 L8.5 8.5 M8.5 1.5 L1.5 8.5" stroke="currentColor" stroke-width="1.2"/></svg>
+      </button>
+    </div>
+  </header>
   <div id="app">
     <aside id="sidebar">
       <div class="brand">
@@ -24,6 +43,7 @@
         <div class="status-row"><span id="status-dot" class="dot"></span><span id="status-text">Connecting…</span></div>
         <div class="status-sub" id="status-model"></div>
       </div>
+      <button id="btn-feedback" class="nav-item feedback-link">Send feedback</button>
       <footer class="local-note">
         <span id="app-version"></span>
         <span id="privacy-note">Runs on your hardware.<br />Nothing leaves this machine.</span>
@@ -54,7 +74,12 @@
 
       <!-- Chat -->
       <section id="view-chat" class="view" hidden>
-        <div id="messages" aria-live="polite"></div>
+        <div id="messages" aria-live="polite">
+          <div id="chat-empty" class="chat-empty">
+            <div class="chat-empty-mark" aria-hidden="true"></div>
+            <p>Ask anything. It runs on your machine —<br />private, free, even offline.</p>
+          </div>
+        </div>
         <form id="composer">
           <select id="model-pick" title="Where this chat runs"></select>
           <textarea id="input" rows="1" placeholder="Message your local AI…" autocomplete="off"></textarea>
@@ -169,6 +194,22 @@
       </section>
     </main>
   </div>
+  <!-- Feedback modal: one honest box, straight to the project. -->
+  <div id="feedback-overlay" class="overlay" hidden>
+    <div class="modal">
+      <h2>Send feedback</h2>
+      <p class="hint">Goes straight to the Koinos AI team. Crashes, confusion, ideas — all welcome.</p>
+      <textarea id="feedback-text" rows="5" placeholder="What happened? What did you expect?"></textarea>
+      <input id="feedback-email" type="email" placeholder="Email (optional — for a reply)" />
+      <label class="check"><input type="checkbox" id="feedback-log" checked /> Include the app's diagnostic log (recommended — no chat content, no keys)</label>
+      <p class="error" id="feedback-error" hidden></p>
+      <div class="modal-actions">
+        <button id="btn-feedback-cancel" class="linklike">Cancel</button>
+        <button id="btn-feedback-send" class="primary">Send</button>
+      </div>
+    </div>
+  </div>
   <script src="app.js"></script>
+
 </body>
 </html>
