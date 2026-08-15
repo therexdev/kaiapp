@@ -8,7 +8,7 @@
  */
 
 class RuntimeManager {
-  constructor({ models, makeRuntime, hardware, provisioner, makeFallback, preferFallback, onEvent }) {
+  constructor({ models, makeRuntime, hardware, provisioner, makeFallback, preferFallback, onEvent, state }) {
     this.models = models; // ModelManager
     this.makeRuntime = makeRuntime; // (binPath|null) => runtime adapter instance
     this.hardware = hardware; // detection snapshot (may be null in tests)
@@ -16,6 +16,7 @@ class RuntimeManager {
     this.makeFallback = makeFallback || null; // async () => alt runtime (e.g. Ollama) or null
     this.preferFallback = !!preferFallback; // KAI_RUNTIME override: skip llama.cpp entirely
     this.onEvent = onEvent || (() => {});
+    this.state = state || null; // JsonStore: remembers builds that crash on THIS machine
     this.runtime = null;
     this.activeAlias = null;
     this._loading = null; // in-flight ensure() promise
@@ -134,12 +135,29 @@ class RuntimeManager {
       if (this.hardware?.capabilities?.vulkanEligible) caps.push("vulkan");
       caps.push("cpu");
       const rungErrors = [];
+      const badBuilds = this.state?.get("badBuilds", {}) || {};
       for (let i = 0; i < caps.length; i++) {
         const cap = caps[i];
         try {
-          return await boot(await this.provisioner.ensure(kind, { cap }), cap === "cpu" ? 0 : 999);
+          const binPath = await this.provisioner.ensure(kind, { cap });
+          // A build that crashed its self-test on this machine stays
+          // skipped (an app update ships a new version dir, which retries
+          // naturally). Re-crashing it on every load wasted a rung and
+          // scared the status pane for nothing.
+          if (badBuilds[binPath]) {
+            rungErrors.push(`[${cap}] skipped — crashed self-test on this machine before (${badBuilds[binPath]})`);
+            continue;
+          }
+          return await boot(binPath, cap === "cpu" ? 0 : 999);
         } catch (e) {
           rungErrors.push(`[${cap}] ${String(e.message)}`);
+          if (this.state && /self-test failed/i.test(String(e.message)) && cap !== "cpu") {
+            const bad = this.state.get("badBuilds", {});
+            try {
+              bad[await this.provisioner.ensure(kind, { cap })] = String(e.message).slice(0, 160);
+              this.state.set("badBuilds", bad);
+            } catch { /* provisioning itself failed — nothing to remember */ }
+          }
           if (i < caps.length - 1) {
             this.onEvent({ type: "runtime:fallback", from: cap, to: caps[i + 1], reason: String(e.message) });
           }

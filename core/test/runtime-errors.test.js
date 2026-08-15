@@ -79,3 +79,51 @@ test("when every engine rung fails, the error names each rung's reason — not j
   assert.match(mgr.status().lastLoadError.message, /\[vulkan\].*\[cpu\]/s);
   mgr.stop();
 });
+
+test("a build that crashes self-test is remembered and skipped — not re-crashed on every load", async () => {
+  const { JsonStore } = require("../lib/store");
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-badbuild-"));
+  const state = new JsonStore(path.join(dir, "state.json"), {});
+  const started = [];
+  const mk = () =>
+    new RuntimeManager({
+      models: {
+        resolveAlias: () => ({ packageId: "p@1", contextSize: 4096, sizeBytes: 1e9 }),
+        ensurePackage: async () => "/fake/model.gguf",
+      },
+      hardware: { capabilities: { cudaEligible: false, vulkanEligible: true } },
+      // The vulkan "binary" doesn't exist → the REAL selfTest crashes on it,
+      // exactly like an access-violation build; cpu is pre-marked tested.
+      provisioner: { ensure: async (_k, { cap }) => path.join(dir, cap, "llama-server") },
+      makeRuntime: (binPath) => ({
+        start: async () => {
+          started.push(binPath);
+          return { endpoint: "http://127.0.0.1:1" };
+        },
+        stop() {},
+        status: () => ({ running: true }),
+      }),
+      onEvent: () => {},
+      state,
+    });
+
+  const mgr = mk();
+  mgr._testedBins.add(path.join(dir, "cpu", "llama-server")); // cpu build "passes"
+  await mgr.ensure("gemma3-12b"); // vulkan self-test crashes → cpu serves
+  assert.strictEqual(started.length, 1);
+  assert.match(started[0], /cpu/, "load lands on the cpu rung");
+  const bad = state.get("badBuilds", {});
+  assert.match(Object.values(bad)[0] || "", /self-test failed/i, "the crash is remembered per binary");
+
+  // A fresh manager (app restart) skips the bad build outright.
+  const mgr2 = mk();
+  mgr2._testedBins.add(path.join(dir, "cpu", "llama-server"));
+  await mgr2.ensure("gemma3-12b");
+  assert.strictEqual(started.length, 2);
+  assert.match(started[1], /cpu/, "restart goes straight to cpu — no re-crash");
+  mgr.stop();
+  mgr2.stop();
+});

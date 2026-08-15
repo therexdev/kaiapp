@@ -75,9 +75,9 @@ async function refresh() {
     const reason = models.ensure?.error || models.runtime?.lastLoadError?.message || "";
     onboardError(reason);
     // The reason is actionable (engine stderr, missing file, quarantine) —
-    // a bare "load failed" left testers with nothing to report.
-    const short = reason.length > 120 ? `${reason.slice(0, 120)}…` : reason;
-    setStatus("err", `Model load failed${short ? ` — ${short}` : ""}`);
+    // and truncating it hid the second engine's half of the story (field
+    // finding). Full text, wrapped; the pane grows.
+    setStatus("err", `Model load failed${reason ? ` — ${reason}` : ""}`);
     $("status-pane").title = reason;
   } else if (running) {
     setStatus("ok", "Model loaded");
@@ -1056,6 +1056,9 @@ async function renderModels() {
         action += ` <button class="chat-del" data-remove-custom="${esc2(a.alias)}" title="Remove from the list (your file is not deleted)">×</button>`;
       }
       const fitNote = tight && !hopeless ? ` · tight fit on this machine (~${a.minRamGb} GB RAM recommended)` : "";
+      // The last load failure shows on the card of the model it hit, so a
+      // single screenshot of Models carries the whole diagnosis.
+      const loadErr = m.runtime?.lastLoadError?.alias === a.alias ? m.runtime.lastLoadError.message : null;
       return `<div class="model-offer model-row${recommended ? " recommended" : ""}">
         <div>
           <div class="model-name">${esc2(a.label.split(" (")[0])}${recommended ? `<span class="chip-star">★ best for this machine</span>` : ""}</div>
@@ -1063,6 +1066,7 @@ async function renderModels() {
             .filter(Boolean)
             .map(esc2)
             .join(" · ")}${esc2(fitNote)}</div>
+          ${loadErr ? `<div class="model-load-err">last load failed: ${esc2(loadErr)}</div>` : ""}
         </div>
         ${action}
       </div>`;

@@ -479,3 +479,8 @@ button.primary:hover:not(:disabled) { box-shadow: 0 4px 16px rgba(109, 62, 240, 
 .import-card { border-style: dashed; }
 #import-path-row { display: flex; gap: 8px; margin-top: 8px; }
 #import-path { flex: 1; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px 11px; font: inherit; font-size: 0.85em; }
+
+/* load-failure diagnosis */
+#status-pane .status-row { align-items: flex-start; }
+#status-text { overflow-wrap: anywhere; }
+.model-load-err { margin-top: 6px; font-size: 0.78em; color: var(--danger); overflow-wrap: anywhere; line-height: 1.45; }
