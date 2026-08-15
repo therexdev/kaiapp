@@ -1,6 +1,12 @@
 # M2 — Earning Alpha (§46: 3, 4)
 
-> Status: READY TO BUILD (2026-08-15). Prereq M1 shipped (v0.1.1 live, auto-updating).
+> Status: STEPS 1-5(v0) PROVEN LIVE (2026-08-15). The §46.4 loop ran end to end against the
+> real Koinos Foundation testnet: routed -> completed -> verified -> SETTLED. Epoch root
+> f59dfa6b… anchored in tx 0x122049bf…a78f8f (v0 address-commitment), independently verified
+> on-chain. Reproduce: fund an operator key via the Telegram faucet, then
+> `KAI_OPERATOR_WIF=… node server/scripts/demo-loop.js`. Remaining: KAI claim contract
+> (replaces v0 anchor), MANA-sponsored claims, Earn UI.
+> Original status: READY TO BUILD (2026-08-15). Prereq M1 shipped (v0.1.1 live, auto-updating).
 > Governed by Part I of the Master Source of Truth; §-refs point there. Alpha settles on
 > **harbinger testnet** (working choice in V1_PLAN §2); mainnet at a §48 readiness gate.
 
