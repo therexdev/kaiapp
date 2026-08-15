@@ -78,6 +78,9 @@ async function start() {
   if (app.isPackaged) {
     try {
       const { autoUpdater } = require("electron-updater");
+      // 0.x releases may be flagged pre-release on GitHub; take them anyway —
+      // updaters that ignore the flag see no updates at all (field finding).
+      autoUpdater.allowPrerelease = true;
       autoUpdater.autoDownload = true;
       autoUpdater.autoInstallOnAppQuit = true;
       const check = () => autoUpdater.checkForUpdates().catch(() => {});
