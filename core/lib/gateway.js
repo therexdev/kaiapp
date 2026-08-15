@@ -301,77 +301,28 @@ class Gateway {
       if (!this.network) {
         return this._json(res, 400, { error: { message: "Network models are not configured", type: "invalid_request_error" } });
       }
-      const { privacyMode, schedulerUrl } = this.network.status();
+      const { privacyMode } = this.network.status();
       if (privacyMode === "local-only") {
         return this._json(res, 400, {
           error: { message: "Privacy mode is Local-Only: network requests are disabled on this machine", type: "invalid_request_error" },
         });
       }
-      if (!schedulerUrl) {
-        return this._json(res, 400, { error: { message: "No scheduler URL configured for network requests", type: "invalid_request_error" } });
-      }
-      // §8 budgets: a key whose monthly network budget is spent stops HERE,
-      // before any tokens are bought. Local inference is never gated.
-      const meterKey = req._apiKey || null;
-      if (meterKey && this.keys.budgetRemainingMicro(meterKey.id) <= 0) {
-        return this._json(res, 429, {
-          error: {
-            message: "This API key's monthly network budget is exhausted. Raise the budget in the Local API tab or wait for next month.",
-            type: "insufficient_quota",
-          },
-        });
-      }
-      // §23: sign the request with the earning account — the network meters
-      // per-address, so anonymous requests would be someone else's bill.
-      const ident = this.network.signConsume ? await this.network.signConsume(body.messages) : null;
-      if (!ident) {
-        return this._json(res, 400, {
-          error: {
-            message: "Koinos Network requests are signed by your earning account — create or unlock it in the Earn tab first",
-            type: "invalid_request_error",
-          },
-        });
-      }
-      let upstream;
-      try {
-        upstream = await fetch(`${schedulerUrl.replace(/\/$/, "")}/consume/chat/completions`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ messages: body.messages, ...ident }),
-          signal: AbortSignal.timeout(95000),
-        });
-      } catch (e) {
-        return this._json(res, 502, { error: { message: `Network request failed: ${e.message}`, type: "server_error" } });
-      }
-      const j = await upstream.json().catch(() => null);
-      if (!upstream.ok || !j) return this._json(res, upstream.status || 502, j || { error: { message: "bad upstream reply", type: "server_error" } });
-      if (meterKey && j.usage) {
-        // Estimated at published network rates regardless of any free
-        // allowance — the budget is the developer's conservative guardrail.
-        const rates = await this._networkRates(schedulerUrl);
-        const inTok = Number(j.usage.prompt_tokens || 0);
-        const outTok = Number(j.usage.completion_tokens || 0);
-        this.keys.recordUsage(meterKey.id, {
-          inTok,
-          outTok,
-          costMicro: Math.ceil((inTok * rates.inMicroPerM + outTok * rates.outMicroPerM) / 1e6),
-        });
-      }
-      if (body.stream) {
-        // SSE shim so streaming clients (the app UI) work unchanged.
-        res.writeHead(200, { "content-type": "text/event-stream" });
-        const content = j.choices?.[0]?.message?.content ?? "";
-        res.write(`data: ${JSON.stringify({ object: "chat.completion.chunk", model: alias, choices: [{ index: 0, delta: { content } }] })}\n\n`);
-        res.write("data: [DONE]\n\n");
-        return res.end();
-      }
-      return this._json(res, 200, j);
+      return this._chatNetwork(body, req, res);
     }
 
     let endpoint;
     try {
       endpoint = await this.runtime.ensure(alias);
     } catch (e) {
+      // §7 routing order: privacy → spending → capability. Capability just
+      // failed locally; the network is used only when the privacy mode
+      // permits it (Local-First and Network — never Local-Only, where the
+      // request must not leave the machine even if it cannot be served).
+      const net = this.network ? this.network.status() : null;
+      if (net && net.privacyMode !== "local-only" && net.schedulerUrl) {
+        this.onEvent({ type: "gateway:overflow", from: alias, reason: String(e.message) });
+        return this._chatNetwork(body, req, res, { overflowFrom: alias, localError: String(e.message) });
+      }
       return this._json(res, 400, { error: { message: String(e.message), type: "invalid_request_error" } });
     }
     // Some runtimes (Ollama) serve the model under their own registered name
@@ -393,6 +344,81 @@ class Gateway {
             })
         : null,
     });
+  }
+
+  /**
+   * §7/§46.5: serve a chat request from the Koinos Network. Reached two
+   * ways — the caller asked for "koinos-network" explicitly, or a local
+   * request overflowed here after a capability miss (opts.overflowFrom).
+   * The privacy gate has already passed in the caller; this method owns
+   * the spending checks (§8 budget, §23 signed identity) and the relay.
+   */
+  async _chatNetwork(body, req, res, { overflowFrom, localError } = {}) {
+    // On overflow, errors must say both truths: local couldn't serve, and
+    // why the network fallback stopped — otherwise the user sees only half
+    // the story and the fix (unlock wallet, raise budget) stays hidden.
+    const fail = (status, message, type) =>
+      this._json(res, status, {
+        error: {
+          message: overflowFrom
+            ? `Local model "${overflowFrom}" is unavailable (${localError}) and network fallback failed: ${message}`
+            : message,
+          type,
+        },
+      });
+    const { schedulerUrl } = this.network.status();
+    if (!schedulerUrl) {
+      return fail(400, "No scheduler URL configured for network requests", "invalid_request_error");
+    }
+    // §8 budgets: a key whose monthly network budget is spent stops HERE,
+    // before any tokens are bought. Local inference is never gated.
+    const meterKey = req._apiKey || null;
+    if (meterKey && this.keys.budgetRemainingMicro(meterKey.id) <= 0) {
+      return fail(429, "This API key's monthly network budget is exhausted. Raise the budget in the Local API tab or wait for next month.", "insufficient_quota");
+    }
+    // §23: sign the request with the earning account — the network meters
+    // per-address, so anonymous requests would be someone else's bill.
+    const ident = this.network.signConsume ? await this.network.signConsume(body.messages) : null;
+    if (!ident) {
+      return fail(400, "Koinos Network requests are signed by your earning account — create or unlock it in the Earn tab first", "invalid_request_error");
+    }
+    let upstream;
+    try {
+      upstream = await fetch(`${schedulerUrl.replace(/\/$/, "")}/consume/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ messages: body.messages, ...ident }),
+        signal: AbortSignal.timeout(95000),
+      });
+    } catch (e) {
+      return fail(502, `Network request failed: ${e.message}`, "server_error");
+    }
+    const j = await upstream.json().catch(() => null);
+    if (!upstream.ok || !j) return this._json(res, upstream.status || 502, j || { error: { message: "bad upstream reply", type: "server_error" } });
+    if (meterKey && j.usage) {
+      // Estimated at published network rates regardless of any free
+      // allowance — the budget is the developer's conservative guardrail.
+      const rates = await this._networkRates(schedulerUrl);
+      const inTok = Number(j.usage.prompt_tokens || 0);
+      const outTok = Number(j.usage.completion_tokens || 0);
+      this.keys.recordUsage(meterKey.id, {
+        inTok,
+        outTok,
+        costMicro: Math.ceil((inTok * rates.inMicroPerM + outTok * rates.outMicroPerM) / 1e6),
+      });
+    }
+    // §29 transparency: the response's model field always says
+    // "koinos-network" (the scheduler sets it; the stream shim matches), so
+    // a client can always tell an overflowed answer left the machine.
+    if (body.stream) {
+      // SSE shim so streaming clients (the app UI) work unchanged.
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      const content = j.choices?.[0]?.message?.content ?? "";
+      res.write(`data: ${JSON.stringify({ object: "chat.completion.chunk", model: "koinos-network", choices: [{ index: 0, delta: { content } }] })}\n\n`);
+      res.write("data: [DONE]\n\n");
+      return res.end();
+    }
+    return this._json(res, 200, j);
   }
 
   /** Published network token rates, cached for an hour; safe defaults. */

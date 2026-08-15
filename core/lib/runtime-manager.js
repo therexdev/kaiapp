@@ -42,12 +42,17 @@ class RuntimeManager {
     if (this.activeAlias === alias && this.runtime?.status().running) {
       return this.runtime.endpoint;
     }
-    if (this._loading) {
-      // Single-flight: concurrent requests for the same alias share the load;
-      // requests for a different model while loading are refused clearly.
-      const { alias: loadingAlias, promise } = this._loading;
-      if (loadingAlias === alias) return promise;
-      throw new Error(`Model "${loadingAlias}" is currently loading — try again shortly`);
+    // Single-flight: concurrent requests for the same alias share the load.
+    // A different model mid-load (one runtime slot) is WAITED OUT rather
+    // than refused — a boot warm-start racing the first chat message used
+    // to throw here, which the §7 router would read as a real capability
+    // miss and overflow a locally-servable request to the paid network.
+    while (this._loading && this._loading.alias !== alias) {
+      await this._loading.promise.catch(() => {});
+    }
+    if (this._loading) return this._loading.promise;
+    if (this.activeAlias === alias && this.runtime?.status().running) {
+      return this.runtime.endpoint;
     }
 
     const promise = this._load(alias);

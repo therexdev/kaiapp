@@ -121,6 +121,8 @@ button.primary.small { padding: 6px 12px; font-size: 0.88em; }
 .msg { max-width: 78%; padding: 10px 14px; border-radius: 12px; white-space: pre-wrap; overflow-wrap: break-word; }
 .msg.user { align-self: flex-end; background: #26204a; border: 1px solid #3b3370; }
 .msg.assistant { align-self: flex-start; background: var(--bg-raised); border: 1px solid var(--border); }
+/* §29 transparency: marks an answer that overflowed to the network */
+.route-tag { margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--border); font-size: 11px; opacity: 0.65; }
 .msg.assistant.streaming::after { content: "▍"; color: var(--violet); animation: blink 1s step-end infinite; }
 .msg.error { align-self: center; background: none; border: 1px solid var(--danger); color: var(--danger); font-size: 0.88em; }
 @keyframes blink { 50% { opacity: 0; } }

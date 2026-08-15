@@ -100,7 +100,9 @@ function updatePrivacyNote(mode) {
   el.innerHTML =
     mode === "local-only"
       ? "Runs on your hardware.<br />Nothing leaves this machine."
-      : "Network mode on — chats sent to<br />Koinos Network leave this machine.";
+      : mode === "local-first"
+        ? "Local when possible. If this machine<br />can't serve a chat, it overflows to<br />Koinos Network — and says so."
+        : "Network mode on — chats sent to<br />Koinos Network leave this machine.";
 }
 
 let networkEligible = false;
@@ -267,10 +269,23 @@ async function send() {
       throw new Error(j?.error?.message || `Core answered ${resp.status}`);
     }
     let acc = "";
-    for await (const delta of sseDeltas(resp.body)) {
-      acc += delta;
-      bubble.textContent = acc;
-      $("messages").scrollTop = $("messages").scrollHeight;
+    let servedBy = null;
+    for await (const { content, model } of sseDeltas(resp.body)) {
+      if (model) servedBy = model;
+      if (content) {
+        acc += content;
+        bubble.textContent = acc;
+        $("messages").scrollTop = $("messages").scrollHeight;
+      }
+    }
+    // §29 transparency: a Local-First answer that overflowed to the network
+    // says so on the message itself — silence would hide that the prompt
+    // left the machine.
+    if (servedBy === "koinos-network" && chatModel !== "koinos-network") {
+      const tag = document.createElement("div");
+      tag.className = "route-tag";
+      tag.textContent = "answered via Koinos Network — local model was unavailable";
+      bubble.appendChild(tag);
     }
     state.history.push({ role: "assistant", content: acc });
   } catch (e) {
@@ -291,7 +306,7 @@ async function send() {
   }
 }
 
-/** Parse an OpenAI SSE stream into content deltas. */
+/** Parse an OpenAI SSE stream into {content, model} chunk views. */
 async function* sseDeltas(body) {
   const decoder = new TextDecoder();
   let buf = "";
@@ -306,8 +321,8 @@ async function* sseDeltas(body) {
         const data = line.slice(6).trim();
         if (data === "[DONE]") return;
         try {
-          const delta = JSON.parse(data).choices?.[0]?.delta?.content;
-          if (delta) yield delta;
+          const j = JSON.parse(data);
+          yield { content: j.choices?.[0]?.delta?.content || "", model: j.model || null };
         } catch {
           /* keep-alive or non-JSON frame */
         }
