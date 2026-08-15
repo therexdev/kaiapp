@@ -62,6 +62,36 @@
       "minRamGb": 24,
       "package": "phi-4-q4_k_m@1"
     },
+    "mistral-small-24b": {
+      "label": "Mistral Small 24B",
+      "blurb": "Mistral's flagship small — big-model feel · 14.3 GB",
+      "minRamGb": 24,
+      "package": "mistral-small-24b-instruct-2501-q4_k_m@1"
+    },
+    "gemma3-27b": {
+      "label": "Gemma 3 27B",
+      "blurb": "Google's biggest Gemma — frontier-class local · 16.5 GB",
+      "minRamGb": 24,
+      "package": "google_gemma-3-27b-it-q4_k_m@1"
+    },
+    "qwen25-32b": {
+      "label": "Qwen 2.5 32B",
+      "blurb": "Deep quality for 32 GB machines · 19.9 GB",
+      "minRamGb": 32,
+      "package": "qwen2.5-32b-instruct-q4_k_m@1"
+    },
+    "qwen-coder-32b": {
+      "label": "Qwen Coder 32B",
+      "blurb": "State-of-the-art open coding · 19.9 GB",
+      "minRamGb": 32,
+      "package": "qwen2.5-coder-32b-instruct-q4_k_m@1"
+    },
+    "deepseek-r1-32b": {
+      "label": "DeepSeek R1 32B",
+      "blurb": "Reasoning specialist — shows its thinking · 19.9 GB",
+      "minRamGb": 32,
+      "package": "deepseek-r1-distill-qwen-32b-q4_k_m@1"
+    },
     "dev-tiny": {
       "label": "Dev Tiny (pipeline testing only — not a launch model)",
       "package": "smollm2-135m-instruct-q8_0@1",
@@ -176,6 +206,56 @@
       "sizeBytes": 9053114816,
       "license": "mit",
       "creator": "Microsoft (quantized by bartowski)",
+      "contextSize": 4096,
+      "runtime": "llamacpp"
+    },
+    "mistral-small-24b-instruct-2501-q4_k_m@1": {
+      "filename": "Mistral-Small-24B-Instruct-2501-Q4_K_M.gguf",
+      "url": "https://huggingface.co/bartowski/Mistral-Small-24B-Instruct-2501-GGUF/resolve/main/Mistral-Small-24B-Instruct-2501-Q4_K_M.gguf",
+      "sha256": "d1a6d049f09730c3f8ba26cf6b0b60c89790b5fdafa9a59c819acdfe93fffd1b",
+      "sizeBytes": 14333908672,
+      "license": "apache-2.0",
+      "creator": "Mistral AI (quantized by bartowski)",
+      "contextSize": 4096,
+      "runtime": "llamacpp"
+    },
+    "google_gemma-3-27b-it-q4_k_m@1": {
+      "filename": "google_gemma-3-27b-it-Q4_K_M.gguf",
+      "url": "https://huggingface.co/bartowski/google_gemma-3-27b-it-GGUF/resolve/main/google_gemma-3-27b-it-Q4_K_M.gguf",
+      "sha256": "4e83142e3ad3719ac61334f70a956dcc60bbba8adb29de5114161310bb9f7170",
+      "sizeBytes": 16546404992,
+      "license": "gemma",
+      "creator": "Google DeepMind (quantized by bartowski)",
+      "contextSize": 4096,
+      "runtime": "llamacpp"
+    },
+    "qwen2.5-32b-instruct-q4_k_m@1": {
+      "filename": "Qwen2.5-32B-Instruct-Q4_K_M.gguf",
+      "url": "https://huggingface.co/bartowski/Qwen2.5-32B-Instruct-GGUF/resolve/main/Qwen2.5-32B-Instruct-Q4_K_M.gguf",
+      "sha256": "2e5f6daea180dbc59f65a40641e94d3973b5dbaa32b3c0acf54647fa874e519e",
+      "sizeBytes": 19851336576,
+      "license": "apache-2.0",
+      "creator": "Qwen team, Alibaba Cloud (quantized by bartowski)",
+      "contextSize": 4096,
+      "runtime": "llamacpp"
+    },
+    "qwen2.5-coder-32b-instruct-q4_k_m@1": {
+      "filename": "Qwen2.5-Coder-32B-Instruct-Q4_K_M.gguf",
+      "url": "https://huggingface.co/bartowski/Qwen2.5-Coder-32B-Instruct-GGUF/resolve/main/Qwen2.5-Coder-32B-Instruct-Q4_K_M.gguf",
+      "sha256": "8e2fd78ff55e7cdf577fda257bac2776feb7d73d922613caf35468073807e815",
+      "sizeBytes": 19851336672,
+      "license": "apache-2.0",
+      "creator": "Qwen team, Alibaba Cloud (quantized by bartowski)",
+      "contextSize": 4096,
+      "runtime": "llamacpp"
+    },
+    "deepseek-r1-distill-qwen-32b-q4_k_m@1": {
+      "filename": "DeepSeek-R1-Distill-Qwen-32B-Q4_K_M.gguf",
+      "url": "https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-32B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-32B-Q4_K_M.gguf",
+      "sha256": "bed9b0f551f5b95bf9da5888a48f0f87c37ad6b72519c4cbd775f54ac0b9fc62",
+      "sizeBytes": 19851335840,
+      "license": "mit",
+      "creator": "DeepSeek (quantized by bartowski)",
       "contextSize": 4096,
       "runtime": "llamacpp"
     }
