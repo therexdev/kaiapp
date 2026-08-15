@@ -39,6 +39,7 @@ class ModelManager {
         package: a.package,
         sizeBytes: pkg.sizeBytes ?? null,
         license: pkg.license ?? null,
+        minRamGb: a.minRamGb ?? null,
         status: q ? "quarantined" : this.packageStatus(a.package).status,
         ...(a.dev ? { dev: true } : {}),
         ...(q ? { quarantineReason: q.reason } : {}),

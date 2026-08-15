@@ -848,11 +848,16 @@ refreshChatList();
 // ---------- models view (trusted catalog) ----------
 
 let modelsTimer = null;
+let machineRamGb = null;
 async function renderModels() {
   clearTimeout(modelsTimer);
   let m;
   try {
     m = await coreGet("/core/models");
+    if (machineRamGb == null) {
+      const h = await coreGet("/core/health");
+      machineRamGb = h.hardware?.ramBytes ? h.hardware.ramBytes / 1e9 : null;
+    }
   } catch { return; }
   const host = $("models-list");
   const dl = m.download; // {pct,...} while a package downloads
@@ -862,6 +867,10 @@ async function renderModels() {
     .map((a) => {
       const gb = a.sizeBytes ? (a.sizeBytes / 1e9).toFixed(1) + " GB" : "";
       const inUse = a.alias === state.alias;
+      // Honest hardware guidance: warn when a model is a tight fit for
+      // this machine's RAM, and don't offer downloads that can't run.
+      const tight = machineRamGb != null && a.minRamGb && machineRamGb < a.minRamGb;
+      const hopeless = machineRamGb != null && a.minRamGb && machineRamGb < a.minRamGb * 0.75;
       let action;
       if (a.status === "quarantined") action = `<span class="model-badge danger">quarantined</span>`;
       else if (a.status === "ready") {
@@ -870,16 +879,19 @@ async function renderModels() {
           : `<button class="primary small" data-use="${esc2(a.alias)}">Use</button>`;
       } else if (ensuring === a.alias) {
         action = `<span class="model-badge">downloading… ${dl?.pct != null ? dl.pct + "%" : ""}</span>`;
+      } else if (hopeless) {
+        action = `<span class="model-badge danger">needs ~${a.minRamGb} GB RAM</span>`;
       } else {
         action = `<button class="primary small" data-get="${esc2(a.alias)}">Download</button>`;
       }
+      const fitNote = tight && !hopeless ? ` · tight fit on this machine (~${a.minRamGb} GB RAM recommended)` : "";
       return `<div class="model-offer model-row">
         <div>
           <div class="model-name">${esc2(a.label.split(" (")[0])}</div>
           <div class="model-sub">${[a.blurb, a.license, !a.blurb && gb, a.status === "ready" && "on this machine"]
             .filter(Boolean)
             .map(esc2)
-            .join(" · ")}</div>
+            .join(" · ")}${esc2(fitNote)}</div>
         </div>
         ${action}
       </div>`;

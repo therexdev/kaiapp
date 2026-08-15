@@ -5,17 +5,62 @@
     "koinos-fast": {
       "label": "Koinos Fast",
       "blurb": "Quick answers on any machine · 1 GB",
-      "package": "qwen2.5-1.5b-instruct-q4_k_m@1"
+      "package": "qwen2.5-1.5b-instruct-q4_k_m@1",
+      "minRamGb": 4
     },
     "koinos-balanced": {
       "label": "Koinos Balanced",
       "blurb": "Noticeably smarter, still CPU-friendly · 2 GB",
-      "package": "llama-3.2-3b-instruct-q4_k_m@1"
+      "package": "llama-3.2-3b-instruct-q4_k_m@1",
+      "minRamGb": 8
     },
     "koinos-smart": {
       "label": "Koinos Smart",
       "blurb": "Best local quality — wants a GPU or 16 GB RAM · 4.7 GB",
-      "package": "qwen2.5-7b-instruct-q4_k_m@1"
+      "package": "qwen2.5-7b-instruct-q4_k_m@1",
+      "minRamGb": 12
+    },
+    "gemma3-4b": {
+      "label": "Gemma 3 4B",
+      "blurb": "Google — sharp for its size · 2.5 GB",
+      "minRamGb": 8,
+      "package": "google_gemma-3-4b-it-q4_k_m@1"
+    },
+    "mistral-7b": {
+      "label": "Mistral 7B",
+      "blurb": "The classic open workhorse · 4.4 GB",
+      "minRamGb": 12,
+      "package": "mistral-7b-instruct-v0.3-q4_k_m@1"
+    },
+    "qwen-coder-7b": {
+      "label": "Qwen Coder 7B",
+      "blurb": "Tuned for programming · 4.7 GB",
+      "minRamGb": 12,
+      "package": "qwen2.5-coder-7b-instruct-q4_k_m@1"
+    },
+    "llama31-8b": {
+      "label": "Llama 3.1 8B",
+      "blurb": "Meta's do-everything favorite · 4.9 GB",
+      "minRamGb": 12,
+      "package": "meta-llama-3.1-8b-instruct-q4_k_m@1"
+    },
+    "gemma3-12b": {
+      "label": "Gemma 3 12B",
+      "blurb": "Google — near-frontier local quality · 7.3 GB",
+      "minRamGb": 16,
+      "package": "google_gemma-3-12b-it-q4_k_m@1"
+    },
+    "qwen25-14b": {
+      "label": "Qwen 2.5 14B",
+      "blurb": "The biggest brain here · 9.0 GB",
+      "minRamGb": 24,
+      "package": "qwen2.5-14b-instruct-q4_k_m@1"
+    },
+    "phi-4": {
+      "label": "Phi-4 14B",
+      "blurb": "Microsoft — reasoning-strong · 9.1 GB",
+      "minRamGb": 24,
+      "package": "phi-4-q4_k_m@1"
     },
     "dev-tiny": {
       "label": "Dev Tiny (pipeline testing only — not a launch model)",
@@ -62,6 +107,76 @@
       "contextSize": 4096,
       "license": "apache-2.0",
       "creator": "HuggingFaceTB (quantized by bartowski)",
+      "runtime": "llamacpp"
+    },
+    "google_gemma-3-4b-it-q4_k_m@1": {
+      "filename": "google_gemma-3-4b-it-Q4_K_M.gguf",
+      "url": "https://huggingface.co/bartowski/google_gemma-3-4b-it-GGUF/resolve/main/google_gemma-3-4b-it-Q4_K_M.gguf",
+      "sha256": "4996030242583a40aa151ff93f49ed787ac8c25e4120c3ae4588b2e2a7d1ae94",
+      "sizeBytes": 2489758112,
+      "license": "gemma",
+      "creator": "Google DeepMind (quantized by bartowski)",
+      "contextSize": 4096,
+      "runtime": "llamacpp"
+    },
+    "mistral-7b-instruct-v0.3-q4_k_m@1": {
+      "filename": "Mistral-7B-Instruct-v0.3-Q4_K_M.gguf",
+      "url": "https://huggingface.co/bartowski/Mistral-7B-Instruct-v0.3-GGUF/resolve/main/Mistral-7B-Instruct-v0.3-Q4_K_M.gguf",
+      "sha256": "1270d22c0fbb3d092fb725d4d96c457b7b687a5f5a715abe1e818da303e562b6",
+      "sizeBytes": 4372812000,
+      "license": "apache-2.0",
+      "creator": "Mistral AI (quantized by bartowski)",
+      "contextSize": 4096,
+      "runtime": "llamacpp"
+    },
+    "qwen2.5-coder-7b-instruct-q4_k_m@1": {
+      "filename": "Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf",
+      "url": "https://huggingface.co/bartowski/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/Qwen2.5-Coder-7B-Instruct-Q4_K_M.gguf",
+      "sha256": "1664fccab734674a50763490a8c6931b70e3f2f8ec10031b54806d30e5f956b6",
+      "sizeBytes": 4683074336,
+      "license": "apache-2.0",
+      "creator": "Qwen team, Alibaba Cloud (quantized by bartowski)",
+      "contextSize": 4096,
+      "runtime": "llamacpp"
+    },
+    "meta-llama-3.1-8b-instruct-q4_k_m@1": {
+      "filename": "Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf",
+      "url": "https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf",
+      "sha256": "7b064f5842bf9532c91456deda288a1b672397a54fa729aa665952863033557c",
+      "sizeBytes": 4920739232,
+      "license": "llama3.1",
+      "creator": "Meta (quantized by bartowski)",
+      "contextSize": 4096,
+      "runtime": "llamacpp"
+    },
+    "google_gemma-3-12b-it-q4_k_m@1": {
+      "filename": "google_gemma-3-12b-it-Q4_K_M.gguf",
+      "url": "https://huggingface.co/bartowski/google_gemma-3-12b-it-GGUF/resolve/main/google_gemma-3-12b-it-Q4_K_M.gguf",
+      "sha256": "fc57f67efa46d711c346e587cbef7d049e95f3df8db2eb2271153343ef0acc7b",
+      "sizeBytes": 7300575264,
+      "license": "gemma",
+      "creator": "Google DeepMind (quantized by bartowski)",
+      "contextSize": 4096,
+      "runtime": "llamacpp"
+    },
+    "qwen2.5-14b-instruct-q4_k_m@1": {
+      "filename": "Qwen2.5-14B-Instruct-Q4_K_M.gguf",
+      "url": "https://huggingface.co/bartowski/Qwen2.5-14B-Instruct-GGUF/resolve/main/Qwen2.5-14B-Instruct-Q4_K_M.gguf",
+      "sha256": "e47ad95dad6ff848b431053b375adb5d39321290ea2c638682577dafca87c008",
+      "sizeBytes": 8988110976,
+      "license": "apache-2.0",
+      "creator": "Qwen team, Alibaba Cloud (quantized by bartowski)",
+      "contextSize": 4096,
+      "runtime": "llamacpp"
+    },
+    "phi-4-q4_k_m@1": {
+      "filename": "phi-4-Q4_K_M.gguf",
+      "url": "https://huggingface.co/bartowski/phi-4-GGUF/resolve/main/phi-4-Q4_K_M.gguf",
+      "sha256": "009aba717c09d4a35890c7d35eb59d54e1dba884c7c526e7197d9c13ab5911d9",
+      "sizeBytes": 9053114816,
+      "license": "mit",
+      "creator": "Microsoft (quantized by bartowski)",
+      "contextSize": 4096,
       "runtime": "llamacpp"
     }
   }
