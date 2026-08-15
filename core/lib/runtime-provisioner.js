@@ -5,7 +5,18 @@ const path = require("path");
 const os = require("os");
 
 const { downloadFile } = require("./download");
-const { extractZip } = require("./zip");
+const { extractZipAsync } = require("./zip");
+
+/** Streaming sha256 of a file — never loads it whole. */
+function sha256File(file) {
+  return new Promise((resolve, reject) => {
+    const h = require("crypto").createHash("sha256");
+    fs.createReadStream(file)
+      .on("data", (c) => h.update(c))
+      .on("error", reject)
+      .on("end", () => resolve(h.digest("hex")));
+  });
+}
 
 /*
  * Runtime provisioner: fetches the right inference-engine build for this
@@ -83,25 +94,48 @@ class RuntimeProvisioner {
       { url: build.url, sha256: build.sha256, sizeBytes: build.sizeBytes },
       ...(build.extras || []),
     ];
+    // Big engines need room to unpack — refuse up front in plain words,
+    // not halfway through with a cryptic write error.
+    const needBytes = archives.reduce((s, a) => s + (a.sizeBytes || 0), 0) * 2.4;
+    try {
+      const free = fs.statfsSync(os.tmpdir()).bavail * fs.statfsSync(os.tmpdir()).bsize;
+      if (free < needBytes) {
+        throw new Error(`Setting up this engine needs ~${Math.ceil(needBytes / 1e9)} GB free disk space — free some up and try again`);
+      }
+    } catch (e) {
+      if (String(e.message).includes("free disk space")) throw e;
+      /* statfs unsupported — proceed */
+    }
     for (let i = 0; i < archives.length; i++) {
       const a = archives[i];
       const zipPath = path.join(os.tmpdir(), `kai-runtime-${kind}-${build.version}-${build.key}-${i}.zip`);
-      let lastPct = -1;
-      await downloadFile(a.url, zipPath, {
-        sha256: a.sha256,
-        sizeBytes: a.sizeBytes,
-        onProgress: (p) => {
-          this._progress = { kind, archive: i + 1, archives: archives.length, ...p };
-          // Emit (and therefore log) only on whole-percent changes — the raw
-          // callback fires per network chunk and would flood core.log.
-          if (p.pct !== null && p.pct !== lastPct) {
-            lastPct = p.pct;
-            this.onEvent({ type: "runtime:download", kind, ...p });
-          }
-        },
-      });
-      extractZip(zipPath, installDir);
+      // A finished download that never got extracted (app closed mid-setup)
+      // is reused after hash verification — nobody re-downloads gigabytes.
+      const reusable = fs.existsSync(zipPath) && (await sha256File(zipPath)) === String(a.sha256).toLowerCase();
+      if (!reusable) {
+        let lastPct = -1;
+        await downloadFile(a.url, zipPath, {
+          sha256: a.sha256,
+          sizeBytes: a.sizeBytes,
+          onProgress: (p) => {
+            this._progress = { kind, archive: i + 1, archives: archives.length, ...p };
+            // Emit (and therefore log) only on whole-percent changes — the raw
+            // callback fires per network chunk and would flood core.log.
+            if (p.pct !== null && p.pct !== lastPct) {
+              lastPct = p.pct;
+              this.onEvent({ type: "runtime:download", kind, ...p });
+            }
+          },
+        });
+      }
+      // Unpacking runs in a worker thread — Core shares the app's main
+      // process, and a synchronous 1.4 GB extract froze the window for
+      // minutes (field finding). The UI shows "Setting up engine…".
+      this._progress = { kind, phase: "extracting" };
+      this.onEvent({ type: "runtime:extracting", kind, archive: i + 1, archives: archives.length });
+      await extractZipAsync(zipPath, installDir);
       fs.rmSync(zipPath, { force: true });
+      this._progress = null;
     }
     if (!fs.existsSync(bin)) {
       throw new Error(

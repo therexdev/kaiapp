@@ -216,3 +216,25 @@ test("runtime manager falls back to CPU when the CUDA path fails", async () => {
     server.close();
   }
 });
+
+test("zip extraction runs off-thread and round-trips content, modes, and nesting", async () => {
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+  const { execFileSync } = require("child_process");
+  const { extractZipAsync } = require("../lib/zip");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-zipw-"));
+  const src = path.join(dir, "src");
+  fs.mkdirSync(path.join(src, "lib", "deep"), { recursive: true });
+  fs.writeFileSync(path.join(src, "engine"), "#!/bin/sh\necho ok\n");
+  fs.chmodSync(path.join(src, "engine"), 0o755);
+  fs.writeFileSync(path.join(src, "lib", "deep", "data.bin"), Buffer.alloc(300000, 7));
+  execFileSync("zip", ["-qr", path.join(dir, "a.zip"), "."], { cwd: src });
+
+  const out = path.join(dir, "out");
+  const files = await extractZipAsync(path.join(dir, "a.zip"), out);
+  assert.ok(files.includes("engine"));
+  assert.strictEqual(fs.readFileSync(path.join(out, "engine"), "utf8"), "#!/bin/sh\necho ok\n");
+  assert.strictEqual(fs.statSync(path.join(out, "lib", "deep", "data.bin")).size, 300000);
+  assert.ok(fs.statSync(path.join(out, "engine")).mode & 0o100, "executable bit survives");
+});
