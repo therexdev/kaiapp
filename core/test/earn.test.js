@@ -135,3 +135,51 @@ test("scheduler rejects a receipt signed by a different key", async () => {
     await sched.close();
   }
 });
+
+test("earn control plane: wallet -> config -> start -> jobs -> stop, via the app gateway", async () => {
+  const { createCore } = require("../server");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-earnui-"));
+  // Pre-place the dev model so no download happens; fake engine binary.
+  fs.mkdirSync(path.join(dir, "models"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "models", "smollm2-135m-instruct-q8_0.gguf"), "weights");
+  const core = await createCore({
+    dataDir: dir,
+    port: 0,
+    llamaBin: path.join(__dirname, "fixtures", "fake-llama-server"),
+    onEvent: () => {},
+  });
+  const base = `http://127.0.0.1:${await core.start()}`;
+  const sched = new Scheduler({ dataDir: path.join(dir, "sched") });
+  const schedPort = await sched.listen();
+  const post = async (p, b) => (await fetch(base + p, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b || {}) })).json();
+
+  try {
+    let s = await (await fetch(base + "/core/earn")).json();
+    assert.equal(s.wallet.exists, false);
+
+    // Guardrails before setup.
+    assert.match((await post("/core/earn/start")).error, /Create a wallet/);
+
+    const created = await post("/core/earn/wallet", { password: "correct horse" });
+    assert.ok(created.wif, "backup WIF returned once");
+    await post("/core/earn/config", { schedulerUrl: `http://127.0.0.1:${schedPort}` });
+    const started = await post("/core/earn/start");
+    assert.equal(started.running, true);
+
+    sched.enqueue({ prompt: "hello", expected: "Hello" });
+    const deadline = Date.now() + 15000;
+    while (Date.now() < deadline) {
+      s = await (await fetch(base + "/core/earn")).json();
+      if (s.worker.receiptsAccepted >= 1) break;
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    assert.ok(s.worker.receiptsAccepted >= 1, `receipt accepted (got ${JSON.stringify(s.worker)})`);
+    assert.equal(sched.receipts[0].worker, s.wallet.address);
+
+    const stopped = await post("/core/earn/stop");
+    assert.equal(stopped.worker.running, false);
+  } finally {
+    await core.stop();
+    await sched.close();
+  }
+});

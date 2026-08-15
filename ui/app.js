@@ -92,7 +92,6 @@ function showView(name, { navOnly = false } = {}) {
   $(`view-${name}`).hidden = false;
   for (const b of document.querySelectorAll(".nav-item")) {
     b.classList.toggle("active", b.dataset.view === name);
-    if (navOnly) b.disabled = b.dataset.view === "earn";
   }
 }
 
@@ -102,6 +101,7 @@ for (const b of document.querySelectorAll(".nav-item[data-view]")) {
     state.view = b.dataset.view;
     showView(state.view);
     if (state.view === "api") renderApi();
+    if (state.view === "earn") renderEarn();
   });
 }
 
@@ -316,3 +316,95 @@ function esc(s) {
 }
 
 refresh();
+
+// ---------- earn view (M2 alpha) ----------
+
+let earnTimer = null;
+
+async function renderEarn() {
+  clearTimeout(earnTimer);
+  let s;
+  try {
+    s = await coreGet("/core/earn");
+  } catch {
+    earnErr("Core unreachable");
+    return;
+  }
+  const wifShowing = !$("earn-wif").hidden;
+  $("earn-setup").hidden = s.wallet.exists && !wifShowing;
+  $("earn-unlock").hidden = !s.wallet.exists || s.wallet.unlocked;
+  $("earn-ready").hidden = !(s.wallet.exists && s.wallet.unlocked) || wifShowing;
+
+  if (!$("earn-ready").hidden) {
+    if (document.activeElement !== $("earn-sched") && !$("earn-sched").value) {
+      $("earn-sched").value = s.schedulerUrl || "";
+    }
+    const rows = [
+      ["Account", s.wallet.address ?? "—"],
+      ["Status", s.worker.running ? "Earning" : "Stopped"],
+      ["Jobs completed", String(s.worker.jobsDone ?? 0)],
+      ["Receipts accepted", String(s.worker.receiptsAccepted ?? 0)],
+    ];
+    $("earn-stats").innerHTML = rows.map(([k, v]) => `<span class="k">${k}</span><span>${esc(v)}</span>`).join("");
+    $("btn-earn-toggle").textContent = s.worker.running ? "Stop Earning" : "Start Earning";
+    $("btn-earn-toggle").dataset.running = s.worker.running ? "1" : "";
+  }
+  if (!$("view-earn").hidden) {
+    earnTimer = setTimeout(renderEarn, s.worker?.running ? 2000 : 5000);
+  }
+}
+
+function earnErr(msg) {
+  $("earn-error").hidden = !msg;
+  $("earn-error").textContent = msg || "";
+}
+
+async function earnPost(path, body) {
+  earnErr(null);
+  const r = await fetch(path, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body || {}),
+  });
+  const j = await r.json();
+  if (!j.ok) {
+    earnErr(j.error);
+    throw new Error(j.error);
+  }
+  return j;
+}
+
+$("btn-earn-create").addEventListener("click", async () => {
+  try {
+    const j = await earnPost("/core/earn/wallet", { password: $("earn-pass").value });
+    $("earn-pass").value = "";
+    $("earn-wif-value").textContent = j.wif; // shown once, never stored by the UI
+    $("earn-wif").hidden = false;
+  } catch { /* error shown */ }
+});
+
+$("btn-earn-wif-done").addEventListener("click", () => {
+  $("earn-wif-value").textContent = "";
+  $("earn-wif").hidden = true;
+  renderEarn();
+});
+
+$("btn-earn-unlock").addEventListener("click", async () => {
+  try {
+    await earnPost("/core/earn/unlock", { password: $("earn-unlock-pass").value });
+    $("earn-unlock-pass").value = "";
+    renderEarn();
+  } catch { /* error shown */ }
+});
+
+$("btn-earn-toggle").addEventListener("click", async () => {
+  try {
+    if ($("btn-earn-toggle").dataset.running) {
+      await earnPost("/core/earn/stop");
+    } else {
+      await earnPost("/core/earn/config", { schedulerUrl: $("earn-sched").value.trim() });
+      await earnPost("/core/earn/start");
+    }
+    renderEarn();
+  } catch { /* error shown */ }
+});

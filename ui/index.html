@@ -18,7 +18,7 @@
       <nav id="nav">
         <button class="nav-item active" data-view="chat">Chat</button>
         <button class="nav-item" data-view="api">Local API</button>
-        <button class="nav-item" data-view="earn" disabled title="Arrives with the earning alpha (M2)">Earn <span class="soon">soon</span></button>
+        <button class="nav-item" data-view="earn">Earn <span class="soon">alpha</span></button>
       </nav>
       <div id="status-pane">
         <div class="status-row"><span id="status-dot" class="dot"></span><span id="status-text">Connecting…</span></div>
@@ -57,6 +57,47 @@
           <button id="btn-send" class="primary" type="submit">Send</button>
           <button id="btn-stop" type="button" hidden>Stop</button>
         </form>
+      </section>
+
+      <!-- Earn (M2 alpha) -->
+      <section id="view-earn" class="view" hidden>
+        <div class="api-card">
+          <h1>Earn with your hardware</h1>
+          <p class="lede">Run approved AI jobs for the network and earn KAI. Alpha runs on the Koinos testnet — rewards are test tokens while the network hardens.</p>
+
+          <div id="earn-setup" hidden>
+            <h2>Create your earning account</h2>
+            <p class="hint">A wallet is created on this machine. Its key never leaves your computer and is never shared with apps or the network.</p>
+            <div class="form-row">
+              <input id="earn-pass" type="password" placeholder="Choose a password (min 8 chars)" />
+              <button id="btn-earn-create" class="primary small">Create</button>
+            </div>
+            <div id="earn-wif" hidden>
+              <p class="hint strong">Backup key — shown only once. Write it down, then continue:</p>
+              <pre class="snippet" id="earn-wif-value"></pre>
+              <button id="btn-earn-wif-done" class="primary small">I saved it</button>
+            </div>
+          </div>
+
+          <div id="earn-unlock" hidden>
+            <h2>Unlock your earning account</h2>
+            <div class="form-row">
+              <input id="earn-unlock-pass" type="password" placeholder="Wallet password" />
+              <button id="btn-earn-unlock" class="primary small">Unlock</button>
+            </div>
+          </div>
+
+          <div id="earn-ready" hidden>
+            <div class="hw-summary" id="earn-stats"></div>
+            <div class="form-row">
+              <input id="earn-sched" type="text" placeholder="Scheduler URL (from the project)" />
+              <button id="btn-earn-toggle" class="primary">Start Earning</button>
+            </div>
+            <p class="hint">Stopping is immediate — no job runs after you press Stop.</p>
+          </div>
+
+          <p class="error" id="earn-error" hidden></p>
+        </div>
       </section>
 
       <!-- Local API -->

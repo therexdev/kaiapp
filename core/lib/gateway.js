@@ -32,7 +32,8 @@ const MIME = {
 const MAX_BODY_BYTES = 10 * 1024 * 1024;
 
 class Gateway {
-  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, onEvent }) {
+  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, earn, onEvent }) {
+    this.earn = earn || null; // earn controller (M2); null in minimal tests
     this.host = host;
     this.port = port;
     this.runtime = runtime; // RuntimeManager
@@ -155,6 +156,35 @@ class Gateway {
     if (path.startsWith("/core/keys/") && req.method === "DELETE") {
       return this._json(res, 200, { ok: true, ...this.keys.revoke(path.split("/")[3]) });
     }
+    // ----- earn control plane (M2 §5.7) -----
+    if (this.earn && path.startsWith("/core/earn")) {
+      try {
+        if (path === "/core/earn" && req.method === "GET") {
+          return this._json(res, 200, { ok: true, ...this.earn.status() });
+        }
+        const body =
+          req.method === "POST" ? JSON.parse((await this._readBody(req)).toString("utf8") || "{}") : {};
+        if (path === "/core/earn/config" && req.method === "POST") {
+          return this._json(res, 200, { ok: true, ...this.earn.configure(body) });
+        }
+        if (path === "/core/earn/wallet" && req.method === "POST") {
+          // Returns the backup WIF exactly once — the UI shows it, Core forgets it.
+          return this._json(res, 200, { ok: true, ...this.earn.createWallet(body) });
+        }
+        if (path === "/core/earn/unlock" && req.method === "POST") {
+          return this._json(res, 200, { ok: true, ...this.earn.unlock(body.password) });
+        }
+        if (path === "/core/earn/start" && req.method === "POST") {
+          return this._json(res, 200, { ok: true, ...(await this.earn.start()) });
+        }
+        if (path === "/core/earn/stop" && req.method === "POST") {
+          return this._json(res, 200, { ok: true, ...(await this.earn.stop()) });
+        }
+      } catch (e) {
+        return this._json(res, 400, { ok: false, error: String(e.message) });
+      }
+    }
+
     // The desktop UI's own chat lane. Same proxy as /v1/chat/completions but
     // on the control plane: creating an external API key must never lock the
     // app's built-in chat out (localhost control plane is the UI's surface).

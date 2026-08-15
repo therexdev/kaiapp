@@ -89,6 +89,41 @@ async function createCore({ dataDir, port, llamaBin, onEvent } = {}) {
     preferFallback: process.env.KAI_RUNTIME === "ollama",
   });
 
+  // Earn controller (M2 §5.7): wallet + worker behind the control plane.
+  // Wallet keys stay in Core (§8); the worker only starts on explicit opt-in
+  // and stops immediately on request (§10).
+  const { WalletService } = require("./lib/wallet");
+  const { Worker } = require("./lib/worker");
+  const wallet = new WalletService(path.join(dataDir, "wallet"));
+  let worker = null;
+  const earn = {
+    status: () => ({
+      wallet: wallet.status(),
+      worker: worker ? worker.status() : { running: false, jobsDone: 0, receiptsAccepted: 0 },
+      schedulerUrl: settings.get("earn.schedulerUrl", process.env.KAI_SCHEDULER_URL || ""),
+    }),
+    configure: ({ schedulerUrl }) => {
+      settings.set("earn.schedulerUrl", String(schedulerUrl || "").trim());
+      return earn.status();
+    },
+    createWallet: ({ password }) => wallet.create({ password }),
+    unlock: ({ password }) => wallet.unlock(password),
+    start: async () => {
+      const s = wallet.status();
+      if (!s.exists) throw new Error("Create a wallet first");
+      if (!s.unlocked) throw new Error("Unlock the wallet first");
+      const url = settings.get("earn.schedulerUrl", process.env.KAI_SCHEDULER_URL || "");
+      if (!url) throw new Error("Set the scheduler URL first");
+      if (worker?.running) return worker.status();
+      worker = new Worker({ schedulerUrl: url, wallet, runtime, hardware: hw, onEvent: events });
+      return worker.start();
+    },
+    stop: async () => {
+      if (worker) await worker.stop();
+      return earn.status();
+    },
+  };
+
   // The desktop UI is plain web content served by the gateway itself — the
   // Electron shell just opens a window onto it, and a browser works too.
   const uiDir = path.join(__dirname, "..", "ui");
@@ -99,6 +134,7 @@ async function createCore({ dataDir, port, llamaBin, onEvent } = {}) {
     keys,
     onEvent: events,
     uiDir: require("fs").existsSync(uiDir) ? uiDir : null,
+    earn,
     coreInfo: () => ({ version: VERSION, dataDir, hardware: hw }),
   });
 
@@ -123,6 +159,7 @@ async function createCore({ dataDir, port, llamaBin, onEvent } = {}) {
       return p;
     },
     async stop() {
+      await earn.stop().catch(() => {});
       runtime.stop();
       await gateway.close();
     },
