@@ -119,6 +119,8 @@ class OllamaRuntime {
       method: "POST",
       headers: { "content-type": opts.raw ? "application/octet-stream" : "application/json" },
       body: opts.raw ? body : JSON.stringify(body),
+      // Streamed request bodies (blob uploads) need half-duplex mode.
+      ...(opts.duplex ? { duplex: "half" } : {}),
       signal: AbortSignal.timeout(opts.timeoutMs || 120000),
     });
     return r;
@@ -137,7 +139,17 @@ class OllamaRuntime {
       // Upload the verified artifact as a blob (idempotent server-side),
       // then create the model from that exact digest.
       this.onEvent({ type: "runtime:ollama-import", model: name });
-      const blob = await this._api(`/api/blobs/${digest}`, fs.readFileSync(modelPath), { raw: true, timeoutMs: 300000 });
+      // STREAM the upload — readFileSync capped registration at Node's
+      // 2 GiB buffer limit (field finding: every model past Koinos Fast
+      // failed with "File size … greater than 2 GiB") and would have put
+      // a model-sized spike in memory besides. Localhost is disk-speed;
+      // the generous timeout covers 20 GB models on laptop drives.
+      const { Readable } = require("stream");
+      const blob = await this._api(`/api/blobs/${digest}`, Readable.toWeb(fs.createReadStream(modelPath)), {
+        raw: true,
+        duplex: true,
+        timeoutMs: 1800000,
+      });
       if (!blob.ok && blob.status !== 201) {
         throw new Error(`Ollama rejected the model blob: HTTP ${blob.status}`);
       }
