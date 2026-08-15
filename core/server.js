@@ -25,6 +25,10 @@ const { RuntimeManager } = require("./lib/runtime-manager");
 const { Gateway } = require("./lib/gateway");
 
 const VERSION = require("./package.json").version;
+// The project-operated scheduler (§12): baked in so Start Earning and
+// network mode work out of the box. KAI_SCHEDULER_URL overrides for
+// self-hosters; the Earn tab field overrides per machine.
+const DEFAULT_SCHEDULER_URL = process.env.KAI_SCHEDULER_URL || "https://koinosai.com/scheduler";
 
 async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = {}) {
   dataDir = dataDir || process.env.KAI_CORE_DATA || path.join(os.homedir(), ".koinos-ai");
@@ -107,7 +111,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
   // Cached 30s; only fetched while something asks (the Earn tab polls status).
   let earningsCache = { at: 0, data: null };
   const fetchEarnings = async () => {
-    const url = settings.get("earn.schedulerUrl", process.env.KAI_SCHEDULER_URL || "");
+    const url = settings.get("earn.schedulerUrl", DEFAULT_SCHEDULER_URL);
     const address = wallet.address;
     if (!url || !address) return null;
     if (Date.now() - earningsCache.at < 30000) return earningsCache.data;
@@ -130,22 +134,40 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
         };
       }
     } catch {
-      /* scheduler unreachable or chain read down — the row just shows a dash */
+      // Scheduler unreachable or chain read down: say so instead of
+      // degrading to unexplained dashes — silence reads as "earnings gone".
+      data = { error: "Balance temporarily unavailable — retrying" };
     }
+    if (data === null) data = { error: "Balance temporarily unavailable — retrying" };
     // Successes cache for the full 30s; a failed read retries in ~3s so one
     // slow moment doesn't blank the balance row for half a minute.
-    earningsCache = { at: data ? Date.now() : Date.now() - 27000, data };
+    earningsCache = { at: !data.error ? Date.now() : Date.now() - 27000, data };
     return data;
   };
   const earn = {
     status: async () => ({
       wallet: wallet.status(),
       worker: worker ? worker.status() : { running: false, jobsDone: 0, receiptsAccepted: 0 },
-      schedulerUrl: settings.get("earn.schedulerUrl", process.env.KAI_SCHEDULER_URL || ""),
+      schedulerUrl: settings.get("earn.schedulerUrl", DEFAULT_SCHEDULER_URL),
       earnings: await fetchEarnings(),
     }),
     configure: ({ schedulerUrl }) => {
-      settings.set("earn.schedulerUrl", String(schedulerUrl || "").trim());
+      let u = String(schedulerUrl || "").trim();
+      if (u) {
+        // A pasted bare host is the common case — repair it rather than
+        // letting the worker's fetch throw a cryptic parse error later.
+        if (!/^https?:\/\//i.test(u)) u = "https://" + u;
+        try {
+          new URL(u);
+        } catch {
+          throw new Error(`That doesn't look like a scheduler URL: "${schedulerUrl}"`);
+        }
+      } else {
+        // Clearing the field means "back to the network default", not
+        // "no scheduler" — a stored empty string would shadow the default.
+        u = DEFAULT_SCHEDULER_URL;
+      }
+      settings.set("earn.schedulerUrl", u);
       earningsCache = { at: 0, data: null };
       syncKillSwitch().catch(() => {}); // §32: check the new scheduler's list promptly
       return earn.status();
@@ -160,6 +182,11 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
       const r = wallet.restore({ wif, password });
       if (sessionSecret) wallet.saveSession(sessionSecret);
       events({ type: "wallet:restored", message: r.address });
+      return r;
+    },
+    revealWallet: ({ password }) => {
+      const r = wallet.revealWif(password);
+      events({ type: "wallet:backup-revealed", message: r.address });
       return r;
     },
     unlock: ({ password }) => {
@@ -185,7 +212,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     // (operator pays MANA), the wallet signs it HERE — the key never leaves —
     // and the signed tx goes back for the operator's co-signature.
     deposit: async ({ amountKai }) => {
-      const url = settings.get("earn.schedulerUrl", process.env.KAI_SCHEDULER_URL || "");
+      const url = settings.get("earn.schedulerUrl", DEFAULT_SCHEDULER_URL);
       if (!url) throw new Error("Set the scheduler URL first");
       const s = wallet.status();
       if (!s.unlocked) throw new Error("Unlock your earning account first");
@@ -212,10 +239,10 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
       const s = wallet.status();
       if (!s.exists) throw new Error("Create a wallet first");
       if (!s.unlocked) throw new Error("Unlock the wallet first");
-      const url = settings.get("earn.schedulerUrl", process.env.KAI_SCHEDULER_URL || "");
+      const url = settings.get("earn.schedulerUrl", DEFAULT_SCHEDULER_URL);
       if (!url) throw new Error("Set the scheduler URL first");
       if (worker?.running) return worker.status();
-      worker = new Worker({ schedulerUrl: url, wallet, runtime, hardware: hw, onEvent: events });
+      worker = new Worker({ schedulerUrl: url, wallet, runtime, hardware: hw, models, onEvent: events });
       const st = await worker.start();
       settings.set("earn.autoStart", true);
       return st;
@@ -244,8 +271,11 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     // polls. Its kill-switch coverage rides app/catalog updates instead;
     // the moment the mode allows network participation, the live list is
     // fetched (network.configure triggers a sync on that transition).
-    if (settings.get("network.privacyMode", "local-only") === "local-only") return;
-    const base = settings.get("earn.schedulerUrl", process.env.KAI_SCHEDULER_URL || "");
+    // EXCEPTION: an actively earning worker is already talking to the
+    // scheduler — it must not escape the kill switch on a privacy label.
+    const earning = worker && worker.status().running;
+    if (!earning && settings.get("network.privacyMode", "local-only") === "local-only") return;
+    const base = settings.get("earn.schedulerUrl", DEFAULT_SCHEDULER_URL);
     if (!base) return;
     let revoked;
     try {
@@ -273,7 +303,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
   const network = {
     status: () => ({
       privacyMode: settings.get("network.privacyMode", "local-only"),
-      schedulerUrl: settings.get("earn.schedulerUrl", process.env.KAI_SCHEDULER_URL || ""),
+      schedulerUrl: settings.get("earn.schedulerUrl", DEFAULT_SCHEDULER_URL),
       walletUnlocked: wallet.status().unlocked,
     }),
     // §23: network requests are signed by the earning account — identity and

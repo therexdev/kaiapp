@@ -128,7 +128,11 @@
               <input id="earn-deposit-amt" type="number" min="0" step="0.1" placeholder="KAI to convert" />
               <button id="btn-earn-deposit" class="primary small">Add funds</button>
             </div>
-            <p class="hint">Your wallet stays unlocked on this computer. <button id="btn-earn-lock" class="linklike">Lock wallet</button></p>
+            <p class="hint">Your wallet stays unlocked on this computer. <button id="btn-earn-lock" class="linklike">Lock wallet</button> · <button id="btn-earn-reveal" class="linklike">Show backup code</button></p>
+            <div class="form-row" id="earn-reveal-row" hidden>
+              <input id="earn-reveal-pass" type="password" placeholder="Wallet password (required to reveal)" />
+              <button id="btn-earn-reveal-go" class="primary small">Reveal</button>
+            </div>
           </div>
 
           <p class="error" id="earn-error" hidden></p>
@@ -146,7 +150,7 @@
           <div class="form-row">
             <select id="privacy-pick">
               <option value="local-only">Local-Only (nothing leaves this machine)</option>
-              <option value="local-first">Local-First (local when possible, network when needed)</option>
+              <option value="local-first">Local-First (local when possible, network when needed — first 25k tokens/epoch free)</option>
               <option value="network">Network</option>
             </select>
           </div>

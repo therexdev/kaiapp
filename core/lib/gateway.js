@@ -70,8 +70,22 @@ class Gateway {
         this._json(res, 500, { error: { message: String(e?.message ?? e), type: "server_error" } });
       });
     });
-    // 0 = OS-assigned port (tests); the real default is 41100.
-    return new Promise((resolve) => {
+    // 0 = OS-assigned port (tests); the real default is 41100. A second
+    // instance (or any process squatting the port) used to crash boot with
+    // an unhandled 'error' event — fall back to an OS-assigned port so the
+    // app still opens; the UI loads from whatever port we return.
+    return new Promise((resolve, reject) => {
+      this.server.once("error", (err) => {
+        if (err.code === "EADDRINUSE" && this.port !== 0) {
+          this.port = 0;
+          this.server.listen(0, this.host, () => {
+            this.port = this.server.address().port;
+            resolve(this.port);
+          });
+          return;
+        }
+        reject(err);
+      });
       this.server.listen(this.port, this.host, () => {
         this.port = this.server.address().port;
         resolve(this.port);
@@ -217,6 +231,11 @@ class Gateway {
         if (path === "/core/earn/wallet/restore" && req.method === "POST") {
           // Lost password + saved backup code: rebuild the keystore (§8).
           return this._json(res, 200, { ok: true, ...this.earn.restoreWallet(body) });
+        }
+        if (path === "/core/earn/wallet/reveal" && req.method === "POST") {
+          // Backup code on demand — password required every time, even
+          // while unlocked, so a walk-up can't exfiltrate the key.
+          return this._json(res, 200, { ok: true, ...this.earn.revealWallet(body) });
         }
         if (path === "/core/earn/unlock" && req.method === "POST") {
           // The controller takes {password} — passing body.password here once
@@ -482,7 +501,8 @@ class Gateway {
   /** Published network token rates + class context, cached for an hour;
    *  safe defaults. */
   async _networkRates(schedulerUrl) {
-    if (this._rates && Date.now() - this._rates.at < 3600000) return this._rates.v;
+    // Keyed by URL: switching schedulers must not serve the old one's rates.
+    if (this._rates && this._rates.url === schedulerUrl && Date.now() - this._rates.at < 3600000) return this._rates.v;
     let v = { inMicroPerM: 100000, outMicroPerM: 400000, ctxTokens: 4096 }; // Koinos Fast defaults
     try {
       const r = await fetch(`${schedulerUrl.replace(/\/$/, "")}/pricing`, { signal: AbortSignal.timeout(4000) });
@@ -498,7 +518,7 @@ class Gateway {
     } catch {
       /* defaults hold */
     }
-    this._rates = { at: Date.now(), v };
+    this._rates = { at: Date.now(), url: schedulerUrl, v };
     return v;
   }
 

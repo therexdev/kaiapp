@@ -96,7 +96,9 @@ test("local-only: koinos-network refused up front, zero bytes ever reach the sch
 
 test("network mode: chat relays gateway -> scheduler -> provider -> back, with a receipt; SSE shim streams", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-net-"));
-  const sched = new Scheduler({ dataDir: path.join(dir, "sched"), onEvent: () => {} });
+  // The fixture machine holds only dev-tiny — pin consumer jobs to it, as
+  // production pins jobs to the launch class its providers hold.
+  const sched = new Scheduler({ dataDir: path.join(dir, "sched"), jobModel: "dev-tiny", onEvent: () => {} });
   const schedPort = await sched.listen();
 
   const { core, base, post } = await bootCore(dir);

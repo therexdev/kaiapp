@@ -82,15 +82,10 @@ async function start() {
 
   await win.loadURL(`http://127.0.0.1:${port}/`);
 
-  // Launch at login so the local API + model are always available without a
-  // manual start (owner-requested; a Settings toggle arrives with M1 polish).
-  if (app.isPackaged) {
-    try {
-      app.setLoginItemSettings({ openAtLogin: true });
-    } catch {
-      /* not fatal */
-    }
-  }
+  // Auto-launch at login is opt-in, not default: silently installing into
+  // the user's startup list is exactly the kind of behavior alpha testers
+  // report as malware-adjacent. A Settings toggle ships it properly later;
+  // earners who want always-on can add the app to startup themselves.
 
   // Auto-update (§34; M1 ships the stable channel only): download in the
   // background, then ask — one dialog when the update is ready to apply,

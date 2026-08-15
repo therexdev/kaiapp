@@ -102,7 +102,7 @@ function updatePrivacyNote(mode) {
   el.dataset.mode = mode;
   el.innerHTML =
     mode === "local-only"
-      ? "Runs on your hardware.<br />Nothing leaves this machine."
+      ? "Your chats never leave this machine.<br />(Earning, if on, serves network jobs.)"
       : mode === "local-first"
         ? "Local when possible. If this machine<br />can't serve a chat, it overflows to<br />Koinos Network — and says so."
         : "Network mode on — chats sent to<br />Koinos Network leave this machine.";
@@ -112,7 +112,9 @@ let networkEligible = false;
 async function updateModelPick(aliases) {
   try {
     const n = await coreGet("/core/network");
-    networkEligible = n.privacyMode !== "local-only" && !!n.schedulerUrl;
+    // Wallet state is part of eligibility: advertising "Koinos Network"
+    // while the wallet is locked just defers the failure to send time.
+    networkEligible = n.privacyMode !== "local-only" && !!n.schedulerUrl && n.walletUnlocked !== false;
     updatePrivacyNote(n.privacyMode);
     if (document.getElementById("privacy-pick") && document.activeElement?.id !== "privacy-pick") {
       $("privacy-pick").value = n.privacyMode;
@@ -176,7 +178,7 @@ async function renderOnboarding(entry) {
         ["System", `${hw.platform ?? "?"} · ${hw.arch ?? "?"}`],
         ["CPU", `${hw.cpu?.model ?? "?"} (${hw.cpu?.cores ?? "?"} threads)`],
         ["Memory", hw.ramBytes ? `${(hw.ramBytes / 1e9).toFixed(0)} GB` : "?"],
-        ["GPU", gpu ? `${gpu.name} · ${(gpu.vramMb / 1024).toFixed(0)} GB VRAM` : "None detected — running on CPU"],
+        ["GPU", gpu ? `${gpu.name}${gpu.vramMb ? ` · ${(gpu.vramMb / 1024).toFixed(0)} GB VRAM` : ""}` : "None detected — running on CPU"],
       ];
       $("hw-summary").innerHTML = rows
         .map(([k, v]) => `<span class="k">${k}</span><span>${esc(v)}</span>`)
@@ -436,16 +438,27 @@ async function renderEarn() {
     if (document.activeElement !== $("earn-sched") && !$("earn-sched").value) {
       $("earn-sched").value = s.schedulerUrl || "";
     }
+    // "Earning" alone can hide a dead connection — surface last contact
+    // and the last error so silence is never mistaken for health.
+    let statusText = s.worker.running ? "Earning" : "Stopped";
+    if (s.worker.running) {
+      if (s.worker.lastError) statusText = `Earning — ⚠ ${s.worker.lastError}`;
+      else if (s.worker.lastPollOkAt) {
+        const ago = Math.max(0, Math.round((Date.now() - new Date(s.worker.lastPollOkAt).getTime()) / 1000));
+        statusText = `Earning · last contact ${ago}s ago`;
+      }
+    }
+    const earnErrMsg = s.earnings?.error || null;
     const rows = [
       ["Account", s.wallet.address ?? "—"],
-      ["Status", s.worker.running ? "Earning" : "Stopped"],
+      ["Status", statusText],
       ["Jobs completed", String(s.worker.jobsDone ?? 0)],
       ["Receipts accepted", String(s.worker.receiptsAccepted ?? 0)],
-      ["KAI balance", s.earnings ? `${s.earnings.kai} KAI` : "—"],
+      ["KAI balance", earnErrMsg ? earnErrMsg : s.earnings?.kai != null ? `${s.earnings.kai} KAI` : "—"],
       ["Prepaid balance", s.earnings?.balanceUsd != null ? `$${Number(s.earnings.balanceUsd).toFixed(4)}` : "—"],
       [
         "This epoch",
-        s.earnings
+        s.earnings && !earnErrMsg
           ? `${s.earnings.pendingReceipts} jobs${s.earnings.tokensProcessed != null ? ` · ${s.earnings.tokensProcessed.toLocaleString()} tokens processed` : ""}${s.earnings.pendingKai != null ? ` · ≈${Number(s.earnings.pendingKai).toFixed(4)} KAI pending` : ""}`
           : "—",
       ],
@@ -472,6 +485,14 @@ async function renderEarn() {
 function earnErr(msg) {
   $("earn-error").hidden = !msg;
   $("earn-error").textContent = msg || "";
+  if (msg) $("earn-error").classList.remove("ok");
+}
+
+/** Success note in the same slot errors use — one place to look. */
+function earnOk(msg) {
+  $("earn-error").hidden = false;
+  $("earn-error").textContent = msg;
+  $("earn-error").classList.add("ok");
 }
 
 async function earnPost(path, body) {
@@ -558,13 +579,36 @@ $("btn-earn-deposit").addEventListener("click", async () => {
   btn.disabled = true;
   btn.textContent = "Converting…";
   try {
-    await earnPost("/core/earn/deposit", { amountKai: amt });
+    const j = await earnPost("/core/earn/deposit", { amountKai: amt });
     $("earn-deposit-amt").value = "";
+    // A deposit that silently clears the input reads as "did that work?" —
+    // confirm with the amount and the on-chain receipt.
+    earnOk(`Deposited ${j.amountKai ?? amt} KAI${j.txId ? ` — tx ${j.txId.slice(0, 18)}…` : ""}. Credits update within a minute.`);
     renderEarn();
   } catch { /* error shown */ } finally {
     btn.disabled = false;
     btn.textContent = "Add funds";
   }
+});
+
+$("btn-earn-reveal").addEventListener("click", () => {
+  const row = $("earn-reveal-row");
+  row.hidden = !row.hidden;
+  if (!row.hidden) $("earn-reveal-pass").focus();
+});
+
+$("btn-earn-reveal-go").addEventListener("click", async () => {
+  const pw = $("earn-reveal-pass").value;
+  if (!pw) return earnErr("Type your wallet password to reveal the backup code.");
+  try {
+    const j = await earnPost("/core/earn/wallet/reveal", { password: pw });
+    $("earn-reveal-pass").value = "";
+    $("earn-reveal-row").hidden = true;
+    // Reuse the one-time backup panel — same warning copy, same dismiss.
+    $("earn-wif-value").textContent = j.wif;
+    $("earn-wif").hidden = false;
+    renderEarn();
+  } catch { /* error shown */ }
 });
 
 $("btn-earn-lock").addEventListener("click", async () => {

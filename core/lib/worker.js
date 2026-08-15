@@ -10,15 +10,18 @@ const crypto = require("crypto");
  * the loop checks a flag between polls and in-flight work finishes cleanly.
  */
 class Worker {
-  constructor({ schedulerUrl, wallet, runtime, hardware, onEvent }) {
+  constructor({ schedulerUrl, wallet, runtime, hardware, models, onEvent }) {
     this.schedulerUrl = String(schedulerUrl || "").replace(/\/$/, "");
     this.wallet = wallet; // WalletService (unlocked)
     this.runtime = runtime; // RuntimeManager
     this.hardware = hardware;
+    this.models = models || null; // ModelManager — advertises what this machine can serve
     this.onEvent = onEvent || (() => {});
     this.running = false;
     this.token = null;
-    this.stats = { jobsDone: 0, receiptsAccepted: 0, since: null };
+    // Health fields exist so "Earning" in the UI can never silently mean
+    // "talking to nobody": the Earn tab renders last contact and last error.
+    this.stats = { jobsDone: 0, receiptsAccepted: 0, since: null, lastPollOkAt: null, lastJobAt: null, lastError: null };
     this._loop = null;
     this._pollAbort = null; // aborts the idle long-poll so stop is immediate (§10)
   }
@@ -29,10 +32,14 @@ class Worker {
 
   async _register() {
     const address = this.wallet.address;
+    // Advertise the models actually on disk so the scheduler only hands
+    // this machine jobs it can serve — a job for a missing model would
+    // trigger a mid-lease gigabyte download and time out.
+    const ready = this.models ? this.models.aliases().filter((a) => a.status === "ready").map((a) => a.alias) : [];
     const r = await fetch(`${this.schedulerUrl}/worker/register`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ address, capabilities: this.hardware?.capabilities ?? {} }),
+      body: JSON.stringify({ address, capabilities: this.hardware?.capabilities ?? {}, models: ready }),
     });
     const j = await r.json();
     if (!j.ok) throw new Error(`Scheduler refused registration: ${j.error}`);
@@ -71,6 +78,8 @@ class Worker {
           signal: AbortSignal.any([AbortSignal.timeout(45000), this._pollAbort.signal]),
         });
         if (r.status === 200) {
+          this.stats.lastPollOkAt = new Date().toISOString();
+          this.stats.lastError = null;
           job = (await r.json()).job;
         } else if (r.status === 401) {
           // The scheduler restarted (redeploy) and forgot our token: register
@@ -80,13 +89,18 @@ class Worker {
           continue;
         } else if (r.status !== 204) {
           // Unexpected status (5xx, proxy error page): don't hot-spin on it.
+          this.stats.lastError = `scheduler answered ${r.status} — retrying`;
           await new Promise((res) => setTimeout(res, 3000));
           continue;
+        } else {
+          this.stats.lastPollOkAt = new Date().toISOString();
+          this.stats.lastError = null;
         }
       } catch {
         // Stop aborts the idle poll; anything else is the scheduler being
         // unreachable — back off, keep trying while enabled.
         if (!this.running) break;
+        this.stats.lastError = "scheduler unreachable — retrying";
         await new Promise((res) => setTimeout(res, 3000));
         continue;
       }
@@ -109,9 +123,11 @@ class Worker {
         });
         const jr = await res.json();
         this.stats.jobsDone += 1;
+        this.stats.lastJobAt = new Date().toISOString();
         if (jr.accepted) this.stats.receiptsAccepted += 1;
         this.onEvent({ type: "worker:job-done", jobId: job.id, accepted: !!jr.accepted });
       } catch (e) {
+        this.stats.lastError = `last job failed: ${String(e.message)}`;
         this.onEvent({ type: "worker:job-failed", jobId: job.id, message: String(e.message) });
       }
     }

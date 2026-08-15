@@ -182,3 +182,6 @@ button.linklike {
   border: 0; background: none; padding: 0; font: inherit; font-size: inherit;
   color: var(--sky); cursor: pointer; text-decoration: underline;
 }
+
+/* success note reusing the error slot (e.g. deposit confirmation) */
+.error.ok { color: #35d49a; border-color: #2a6f57; background: rgba(53,212,154,0.08); }
