@@ -136,6 +136,77 @@ test("scheduler rejects a receipt signed by a different key", async () => {
   }
 });
 
+test("a dead long-poll never consumes a job; a parked live worker still gets it", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-earn-"));
+  const sched = new Scheduler({ dataDir: path.join(dir, "sched") });
+  const port = await sched.listen();
+  const base = `http://127.0.0.1:${port}`;
+  const reg = async (address) =>
+    (await (
+      await fetch(`${base}/worker/register`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ address }),
+      })
+    ).json()).token;
+
+  try {
+    const tDead = await reg("1DeadWorkerAddr");
+    const tLive = await reg("1LiveWorkerAddr");
+
+    // A poll that parks first, then hangs up before any job arrives — the
+    // CI-observed race: its server handler must not eat the next job.
+    const ac = new AbortController();
+    const dead = fetch(`${base}/worker/next-job?token=${tDead}`, { signal: ac.signal }).catch(() => null);
+    await new Promise((r) => setTimeout(r, 150)); // parked server-side
+    ac.abort();
+    await dead;
+    await new Promise((r) => setTimeout(r, 150)); // server sees the close
+
+    const live = fetch(`${base}/worker/next-job?token=${tLive}`);
+    await new Promise((r) => setTimeout(r, 150)); // parked behind the corpse
+
+    sched.enqueue({ prompt: "who gets me?" });
+    const r = await live;
+    assert.equal(r.status, 200);
+    const j = await r.json();
+    assert.ok(j.job, "the live worker received the job");
+    assert.equal(sched.queue.length, 0, "job dispatched, not stranded");
+  } finally {
+    await sched.close();
+  }
+});
+
+test("a job taken by a worker that vanishes is requeued after its lease", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-earn-"));
+  const sched = new Scheduler({ dataDir: path.join(dir, "sched"), leaseMs: 200 });
+  const port = await sched.listen();
+  const base = `http://127.0.0.1:${port}`;
+
+  try {
+    const reg = await (
+      await fetch(`${base}/worker/register`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ address: "1FlakyWorkerAddr" }),
+      })
+    ).json();
+    const job = sched.enqueue({ prompt: "x" });
+
+    // Worker takes the job... and never reports back.
+    const took = await (await fetch(`${base}/worker/next-job?token=${reg.token}`)).json();
+    assert.equal(took.job.id, job.id);
+    assert.equal(sched.pending.size, 1);
+
+    await new Promise((r) => setTimeout(r, 300)); // lease expires
+    // Any traffic sweeps the lease; the next poll gets the same job back.
+    const again = await (await fetch(`${base}/worker/next-job?token=${reg.token}`)).json();
+    assert.equal(again.job?.id, job.id, "job re-dispatched after the lease");
+  } finally {
+    await sched.close();
+  }
+});
+
 test("earn control plane: wallet -> config -> start -> jobs -> stop, via the app gateway", async () => {
   const { createCore } = require("../server");
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-earnui-"));

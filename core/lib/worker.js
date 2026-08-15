@@ -61,8 +61,10 @@ class Worker {
       let job = null;
       try {
         this._pollAbort = new AbortController();
+        // Client timeout comfortably above the scheduler's 20s hold, so a
+        // loaded machine doesn't abort polls the server is still serving.
         const r = await fetch(`${this.schedulerUrl}/worker/next-job?token=${this.token}`, {
-          signal: AbortSignal.any([AbortSignal.timeout(30000), this._pollAbort.signal]),
+          signal: AbortSignal.any([AbortSignal.timeout(45000), this._pollAbort.signal]),
         });
         if (r.status === 200) job = (await r.json()).job;
       } catch {

@@ -1,6 +1,7 @@
 "use strict";
 
 const { spawn } = require("child_process");
+const net = require("net");
 const path = require("path");
 
 /*
@@ -16,6 +17,19 @@ const path = require("path");
 
 const HEALTH_TIMEOUT_MS = 120000; // model load can be slow on first start
 const HEALTH_POLL_MS = 500;
+
+/** An OS-assigned free port on `host`, released just before we hand it out. */
+function freePort(host) {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.unref();
+    srv.once("error", reject);
+    srv.listen(0, host, () => {
+      const { port } = srv.address();
+      srv.close(() => resolve(port));
+    });
+  });
+}
 
 /**
  * Engine self-test (no model involved): a binary that can't even print its
@@ -77,7 +91,11 @@ function selfTest(binPath) {
 }
 
 class LlamaCppRuntime {
-  constructor({ binPath, host = "127.0.0.1", port = 41101, onEvent }) {
+  // No fixed default port: each start() probes a free one, so a second Core
+  // instance (tests) or a stale llama-server from a crashed run can never be
+  // mistaken for — or collide with — this instance's engine.
+  constructor({ binPath, host = "127.0.0.1", port, onEvent }) {
+    this._fixedPort = port ?? null;
     this.binPath = binPath;
     this.host = host;
     this.port = port;
@@ -131,6 +149,7 @@ class LlamaCppRuntime {
   async start({ modelPath, contextSize = 4096, gpuLayers = 0, extraArgs = [] }) {
     if (this.child) throw new Error("Runtime already running — stop it first");
     this._stopping = false;
+    this.port = this._fixedPort ?? (await freePort(this.host));
     const args = [
       "--model", modelPath,
       "--host", this.host,

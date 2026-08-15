@@ -19,6 +19,7 @@ class RuntimeManager {
     this.runtime = null;
     this.activeAlias = null;
     this._loading = null; // in-flight ensure() promise
+    this._stopped = false; // stop() raced against an in-flight load
     this._testedBins = new Set(); // self-test once per binary per session
   }
 
@@ -37,6 +38,7 @@ class RuntimeManager {
 
   /** Endpoint of the healthy runtime serving `alias`, starting it if needed. */
   async ensure(alias) {
+    this._stopped = false; // new demand revives the manager
     if (this.activeAlias === alias && this.runtime?.status().running) {
       return this.runtime.endpoint;
     }
@@ -132,10 +134,17 @@ class RuntimeManager {
 
     this.runtime = runtime;
     this.activeAlias = alias;
+    // stop() may have run while this load was in flight (quick app quit
+    // during the warm start): the child it never saw must not outlive us.
+    if (this._stopped) {
+      this.stop();
+      throw new Error("Core is stopping");
+    }
     return runtime.endpoint;
   }
 
   stop() {
+    this._stopped = true;
     if (this.runtime) this.runtime.stop();
     this.runtime = null;
     this.activeAlias = null;
