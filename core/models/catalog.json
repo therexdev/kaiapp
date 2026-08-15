@@ -2,12 +2,26 @@
   "catalogVersion": 1,
   "comment": "Model packages are versioned + immutable (spec §27): identity is the SHA-256. Launch aliases (Koinos Fast/Smart/Code) ship after the §51 model-selection validation; dev-tiny exists so the pipeline is testable end-to-end today.",
   "aliases": {
+    "koinos-fast": {
+      "label": "Koinos Fast",
+      "package": "qwen2.5-1.5b-instruct-q4_k_m@1"
+    },
     "dev-tiny": {
       "label": "Dev Tiny (pipeline testing only — not a launch model)",
       "package": "smollm2-135m-instruct-q8_0@1"
     }
   },
   "packages": {
+    "qwen2.5-1.5b-instruct-q4_k_m@1": {
+      "filename": "Qwen2.5-1.5B-Instruct-Q4_K_M.gguf",
+      "url": "https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf",
+      "sha256": "1adf0b11065d8ad2e8123ea110d1ec956dab4ab038eab665614adba04b6c3370",
+      "sizeBytes": 986048768,
+      "contextSize": 4096,
+      "license": "apache-2.0",
+      "creator": "Qwen team, Alibaba Cloud (quantized by bartowski)",
+      "runtime": "llamacpp"
+    },
     "smollm2-135m-instruct-q8_0@1": {
       "filename": "smollm2-135m-instruct-q8_0.gguf",
       "url": "https://huggingface.co/bartowski/SmolLM2-135M-Instruct-GGUF/resolve/main/SmolLM2-135M-Instruct-Q8_0.gguf",

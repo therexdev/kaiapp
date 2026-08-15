@@ -43,7 +43,10 @@ async function refresh() {
     return;
   }
 
-  const first = models.aliases[0] || null;
+  // Prefer a model that's already on disk (returning user goes straight
+  // to chat); a fresh install onboards onto the FIRST catalog alias — the
+  // launch model.
+  const first = models.aliases.find((a) => a.status === "ready") || models.aliases[0] || null;
   state.alias = state.alias || first?.alias || null;
   const entry = models.aliases.find((a) => a.alias === state.alias) || first;
   const running = models.runtime?.runtime?.running && models.runtime.activeAlias === state.alias;
