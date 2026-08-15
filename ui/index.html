@@ -91,10 +91,20 @@
         </div>
         <form id="composer">
           <select id="model-pick" title="Where this chat runs"></select>
+          <select id="persona-pick" title="How the AI should answer">
+            <option value="">Default style</option>
+            <option value="concise">Concise</option>
+            <option value="explainer">Explain simply</option>
+            <option value="code">Code helper</option>
+            <option value="custom">Custom…</option>
+          </select>
           <textarea id="input" rows="1" placeholder="Message your local AI…" autocomplete="off"></textarea>
           <button id="btn-send" class="primary" type="submit">Send</button>
           <button id="btn-stop" type="button" hidden>Stop</button>
         </form>
+        <div id="persona-custom-row" hidden>
+          <textarea id="persona-custom" rows="2" placeholder="Describe how the AI should behave, e.g. “You are a pirate. Answer everything in character.”"></textarea>
+        </div>
       </section>
 
       <!-- Models: the trusted catalog, downloadable and switchable -->
@@ -230,6 +240,7 @@
       </div>
     </div>
   </div>
+  <script src="markdown.js"></script>
   <script src="app.js"></script>
 
 </body>

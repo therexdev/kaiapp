@@ -262,17 +262,62 @@ function addMsg(role, text) {
   if (empty) empty.remove();
   const div = document.createElement("div");
   div.className = `msg ${role}`;
-  div.textContent = text;
+  // Assistant text is markdown (rendered through the escape-first
+  // renderer); user text stays literal.
+  if (role === "assistant") div.innerHTML = mdToHtml(text);
+  else div.textContent = text;
+  if (role === "assistant" && text) attachMsgActions(div);
   $("messages").appendChild(div);
   $("messages").scrollTop = $("messages").scrollHeight;
   return div;
 }
 
-async function send() {
-  const text = $("input").value.trim();
+/** Hover actions on an assistant bubble: copy, and (on the last) regenerate. */
+function attachMsgActions(bubble) {
+  const bar = document.createElement("div");
+  bar.className = "msg-actions";
+  bar.innerHTML = `<button type="button" class="msg-act" data-act="copy" title="Copy message">Copy</button>
+    <button type="button" class="msg-act" data-act="regen" title="Ask again">Regenerate</button>`;
+  bubble.appendChild(bar);
+}
+
+$("messages").addEventListener("click", async (e) => {
+  const codeBtn = e.target.closest(".code-copy");
+  if (codeBtn) {
+    const code = codeBtn.closest(".code-block")?.querySelector("code")?.textContent || "";
+    await navigator.clipboard.writeText(code);
+    codeBtn.textContent = "Copied";
+    setTimeout(() => (codeBtn.textContent = "Copy"), 1200);
+    return;
+  }
+  const act = e.target.closest(".msg-act");
+  if (!act) return;
+  const bubble = act.closest(".msg");
+  if (act.dataset.act === "copy") {
+    // History is the source of truth — the bubble's textContent would
+    // include the action labels themselves.
+    const idx = [...$("messages").querySelectorAll(".msg.assistant")].indexOf(bubble);
+    const assistants = state.history.filter((m) => m.role === "assistant");
+    await navigator.clipboard.writeText(assistants[idx]?.content ?? "");
+    act.textContent = "Copied";
+    setTimeout(() => (act.textContent = "Copy"), 1200);
+  }
+  if (act.dataset.act === "regen" && !state.chatting) {
+    // Drop the answer being redone and replay the question.
+    const lastUser = [...state.history].reverse().find((m) => m.role === "user");
+    if (!lastUser) return;
+    while (state.history.length && state.history[state.history.length - 1].role !== "user") state.history.pop();
+    state.history.pop();
+    rebuildMessages();
+    send(lastUser.content);
+  }
+});
+
+async function send(replayText) {
+  const text = replayText ?? $("input").value.trim();
   if (!text || state.chatting || !state.alias) return;
   const chatModel = $("model-pick").value || state.alias;
-  $("input").value = "";
+  if (!replayText) $("input").value = "";
   state.history.push({ role: "user", content: text });
   addMsg("user", text);
 
@@ -288,7 +333,12 @@ async function send() {
       method: "POST",
       headers: { "content-type": "application/json" },
       signal: state.abort.signal,
-      body: JSON.stringify({ model: chatModel, stream: true, messages: state.history }),
+      body: JSON.stringify({
+        model: chatModel,
+        stream: true,
+        // Persona rides as a system turn; history itself stays user/assistant.
+        messages: personaText() ? [{ role: "system", content: personaText() }, ...state.history] : state.history,
+      }),
     });
     if (!resp.ok) {
       const j = await resp.json().catch(() => null);
@@ -296,14 +346,24 @@ async function send() {
     }
     let acc = "";
     let servedBy = null;
+    let lastPaint = 0;
     for await (const { content, model } of sseDeltas(resp.body)) {
       if (model) servedBy = model;
       if (content) {
         acc += content;
-        bubble.textContent = acc;
-        $("messages").scrollTop = $("messages").scrollHeight;
+        // Markdown live during the stream, throttled so re-rendering
+        // doesn't chew CPU the model needs.
+        const now = performance.now();
+        if (now - lastPaint > 80) {
+          bubble.innerHTML = mdToHtml(acc);
+          lastPaint = now;
+          $("messages").scrollTop = $("messages").scrollHeight;
+        }
       }
     }
+    bubble.innerHTML = mdToHtml(acc);
+    if (acc) attachMsgActions(bubble);
+    $("messages").scrollTop = $("messages").scrollHeight;
     // §29 transparency: a Local-First answer that overflowed to the network
     // says so on the message itself — silence would hide that the prompt
     // left the machine.
@@ -318,6 +378,7 @@ async function send() {
   } catch (e) {
     if (e.name === "AbortError") {
       state.history.push({ role: "assistant", content: bubble.textContent });
+      if (bubble.textContent) attachMsgActions(bubble);
       saveCurrentChat();
     } else {
       bubble.remove();
@@ -752,6 +813,34 @@ $("btn-feedback-send").addEventListener("click", async () => {
   }
 });
 
+// ---------- personas (how the AI should answer) ----------
+
+const PERSONAS = {
+  concise: "Be concise. Prefer short, direct answers; skip preamble and filler.",
+  explainer: "Explain clearly for a smart beginner. Use plain language and short, concrete examples.",
+  code: "You are a precise programming assistant. Prefer working code with a brief explanation, in markdown code blocks.",
+};
+
+function personaText() {
+  const v = $("persona-pick").value;
+  if (v === "custom") return $("persona-custom").value.trim();
+  return PERSONAS[v] || "";
+}
+
+$("persona-pick").addEventListener("change", () => {
+  $("persona-custom-row").hidden = $("persona-pick").value !== "custom";
+  if ($("persona-pick").value === "custom") $("persona-custom").focus();
+});
+
+function setPersonaUi(persona, system) {
+  if (persona && PERSONAS[persona]) $("persona-pick").value = persona;
+  else if (system) {
+    $("persona-pick").value = "custom";
+    $("persona-custom").value = system;
+  } else $("persona-pick").value = "";
+  $("persona-custom-row").hidden = $("persona-pick").value !== "custom";
+}
+
 // ---------- chat history (local-first, stored by Core) ----------
 
 function esc2(s) { const d = document.createElement("div"); d.textContent = String(s ?? ""); return d.innerHTML; }
@@ -759,10 +848,16 @@ function esc2(s) { const d = document.createElement("div"); d.textContent = Stri
 async function saveCurrentChat() {
   if (!state.history.length) return;
   try {
+    const v = $("persona-pick").value;
     const r = await fetch("/core/chats", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: state.chatId, messages: state.history }),
+      body: JSON.stringify({
+        id: state.chatId,
+        messages: state.history,
+        system: personaText() || undefined,
+        persona: v && v !== "custom" ? v : undefined,
+      }),
     });
     const j = await r.json();
     if (j.ok) state.chatId = j.id;
@@ -791,13 +886,48 @@ function renderChatList() {
   }
   host.innerHTML = rows
     .map(
-      (c) => `<div class="chat-row${c.id === state.chatId ? " active" : ""}" data-id="${esc2(c.id)}">
+      (c) => `<div class="chat-row${c.id === state.chatId ? " active" : ""}" data-id="${esc2(c.id)}" title="Double-click to rename">
         <span class="chat-row-title">${esc2(c.title)}</span>
         <button class="chat-del" data-id="${esc2(c.id)}" title="Delete chat" aria-label="Delete chat">×</button>
       </div>`
     )
     .join("");
 }
+
+// Rename: double-click a chat row, type, Enter (Escape cancels).
+$("chat-list").addEventListener("dblclick", (e) => {
+  const row = e.target.closest(".chat-row");
+  if (!row || row.querySelector("input")) return;
+  const span = row.querySelector(".chat-row-title");
+  const input = document.createElement("input");
+  input.className = "chat-rename";
+  input.value = span.textContent;
+  input.maxLength = 80;
+  span.replaceWith(input);
+  input.focus();
+  input.select();
+  let done = false;
+  const finish = async (commit) => {
+    if (done) return;
+    done = true;
+    const title = input.value.trim();
+    if (commit && title && title !== span.textContent) {
+      try {
+        await fetch(`/core/chats/${row.dataset.id}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ title }),
+        });
+      } catch { /* keep old title */ }
+    }
+    refreshChatList();
+  };
+  input.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") finish(true);
+    if (ev.key === "Escape") finish(false);
+  });
+  input.addEventListener("blur", () => finish(true));
+});
 
 function rebuildMessages() {
   const box = $("messages");
@@ -811,6 +941,7 @@ function rebuildMessages() {
 function newChat() {
   state.chatId = null;
   state.history = [];
+  setPersonaUi(null, null);
   rebuildMessages();
   renderChatList();
   state.view = "chat";
@@ -836,6 +967,7 @@ $("chat-list").addEventListener("click", async (e) => {
     const j = await coreGet(`/core/chats/${row.dataset.id}`);
     state.chatId = j.chat.id;
     state.history = j.chat.messages || [];
+    setPersonaUi(j.chat.persona, j.chat.system);
     rebuildMessages();
     renderChatList();
     state.view = "chat";
@@ -862,6 +994,13 @@ async function renderModels() {
   const host = $("models-list");
   const dl = m.download; // {pct,...} while a package downloads
   const ensuring = m.ensure?.state === "working" ? m.ensure.alias : null;
+  // "Recommended": the biggest model this machine runs comfortably —
+  // largest RAM ask at or below ~2/3 of physical RAM.
+  const recommendedAlias = machineRamGb
+    ? m.aliases
+        .filter((a) => !a.dev && a.minRamGb && a.minRamGb <= machineRamGb * 0.66)
+        .sort((x, y) => y.minRamGb - x.minRamGb)[0]?.alias
+    : null;
   host.innerHTML = m.aliases
     .filter((a) => !a.dev || a.alias === state.alias)
     .map((a) => {
@@ -871,6 +1010,7 @@ async function renderModels() {
       // this machine's RAM, and don't offer downloads that can't run.
       const tight = machineRamGb != null && a.minRamGb && machineRamGb < a.minRamGb;
       const hopeless = machineRamGb != null && a.minRamGb && machineRamGb < a.minRamGb * 0.75;
+      const recommended = a.alias === recommendedAlias;
       let action;
       if (a.status === "quarantined") action = `<span class="model-badge danger">quarantined</span>`;
       else if (a.status === "ready") {
@@ -885,9 +1025,9 @@ async function renderModels() {
         action = `<button class="primary small" data-get="${esc2(a.alias)}">Download</button>`;
       }
       const fitNote = tight && !hopeless ? ` · tight fit on this machine (~${a.minRamGb} GB RAM recommended)` : "";
-      return `<div class="model-offer model-row">
+      return `<div class="model-offer model-row${recommended ? " recommended" : ""}">
         <div>
-          <div class="model-name">${esc2(a.label.split(" (")[0])}</div>
+          <div class="model-name">${esc2(a.label.split(" (")[0])}${recommended ? `<span class="chip-star">★ best for this machine</span>` : ""}</div>
           <div class="model-sub">${[a.blurb, a.license, !a.blurb && gb, a.status === "ready" && "on this machine"]
             .filter(Boolean)
             .map(esc2)

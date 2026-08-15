@@ -173,7 +173,7 @@ h2 { font-size: 1.05em; }
 }
 .form-row input:focus { outline: 1px solid var(--violet); }
 
-#model-pick, #privacy-pick {
+#model-pick, #persona-pick, #privacy-pick {
   background: var(--bg-input); color: var(--text); border: 1px solid var(--border);
   border-radius: 8px; padding: 9px 10px; font: inherit; max-width: 200px;
 }
@@ -239,7 +239,7 @@ button.primary:active:not(:disabled), .tb-btn:active, .nav-item:active { transfo
 .msg.assistant { border-radius: 14px 14px 14px 4px; }
 
 /* inputs get a soft glow instead of a hard outline */
-#input:focus, .form-row input:focus, #model-pick:focus, #privacy-pick:focus, .modal textarea:focus, .modal input:focus {
+#input:focus, .form-row input:focus, #model-pick:focus, #persona-pick:focus, #privacy-pick:focus, .modal textarea:focus, .modal input:focus {
   outline: none; border-color: var(--violet);
   box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.18);
 }
@@ -359,3 +359,41 @@ button.primary:hover:not(:disabled) { box-shadow: 0 4px 16px rgba(109, 62, 240, 
 
 /* earn + api cards sit centered, not hugging the left edge */
 .api-card { margin: 0 auto; width: 100%; }
+
+/* ---------- rich chat (markdown) ---------- */
+.msg.assistant { line-height: 1.55; }
+.msg.assistant p { margin: 0 0 10px; }
+.msg.assistant p:last-child, .msg.assistant ul:last-child, .msg.assistant ol:last-child { margin-bottom: 0; }
+.msg.assistant h3, .msg.assistant h4, .msg.assistant h5 { margin: 14px 0 6px; line-height: 1.3; }
+.msg.assistant h3 { font-size: 17px; } .msg.assistant h4 { font-size: 15px; } .msg.assistant h5 { font-size: 14px; }
+.msg.assistant ul, .msg.assistant ol { margin: 0 0 10px; padding-left: 22px; }
+.msg.assistant li { margin: 3px 0; }
+.msg.assistant code { background: rgba(126, 108, 255, 0.14); border: 1px solid rgba(126, 108, 255, 0.22); border-radius: 5px; padding: 1px 5px; font-family: "Cascadia Code", Consolas, monospace; font-size: 0.9em; }
+.msg.assistant blockquote { margin: 0 0 10px; padding: 6px 12px; border-left: 3px solid var(--accent, #7e6cff); opacity: 0.85; }
+.msg.assistant hr { border: none; border-top: 1px solid rgba(255, 255, 255, 0.12); margin: 12px 0; }
+.msg.assistant a { color: var(--accent-2, #9d8cff); }
+.code-block { position: relative; margin: 8px 0 12px; background: rgba(10, 10, 18, 0.72); border: 1px solid rgba(255, 255, 255, 0.09); border-radius: 10px; }
+.code-block pre { margin: 0; padding: 12px 14px; overflow-x: auto; }
+.msg.assistant .code-block code, .code-block code { background: none; border: none; padding: 0; font-size: 12.8px; line-height: 1.5; border-radius: 0; }
+.code-lang { position: absolute; top: 7px; left: 12px; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.55; }
+.code-lang + .code-copy + pre { padding-top: 30px; }
+.code-copy { position: absolute; top: 5px; right: 6px; font-size: 11px; padding: 3px 9px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.14); background: rgba(255, 255, 255, 0.05); color: inherit; cursor: pointer; opacity: 0; transition: opacity 0.15s; }
+.code-block:hover .code-copy { opacity: 0.9; }
+
+/* per-message actions */
+.msg-actions { display: flex; gap: 6px; margin-top: 8px; opacity: 0; transition: opacity 0.15s; }
+.msg.assistant:hover .msg-actions, .msg-actions:focus-within { opacity: 1; }
+.msg-act { font-size: 11px; padding: 3px 10px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.13); background: rgba(255, 255, 255, 0.04); color: inherit; cursor: pointer; }
+.msg-act:hover { background: rgba(255, 255, 255, 0.1); }
+
+/* personas */
+#persona-pick { max-width: 150px; }
+#persona-custom-row { padding: 0 18px 10px; }
+#persona-custom { width: 100%; resize: vertical; min-height: 44px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.12); background: rgba(255, 255, 255, 0.04); color: inherit; padding: 8px 12px; font: inherit; font-size: 13px; }
+
+/* chat rename */
+.chat-rename { flex: 1; min-width: 0; border: 1px solid var(--accent, #7e6cff); border-radius: 6px; background: rgba(0, 0, 0, 0.3); color: inherit; font: inherit; font-size: 13px; padding: 2px 6px; }
+
+/* recommended model */
+.chip-star { margin-left: 8px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em; color: #ffd479; background: rgba(255, 212, 121, 0.12); border: 1px solid rgba(255, 212, 121, 0.35); border-radius: 999px; padding: 2px 8px; vertical-align: 2px; }
+.model-offer.recommended { border-color: rgba(255, 212, 121, 0.35); }

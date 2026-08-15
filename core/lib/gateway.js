@@ -228,6 +228,10 @@ class Gateway {
       try {
         if (req.method === "GET") return this._json(res, 200, { ok: true, chat: this.chats.get(id) });
         if (req.method === "DELETE") return this._json(res, 200, { ok: true, ...this.chats.remove(id) });
+        if (req.method === "PATCH") {
+          const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+          return this._json(res, 200, { ok: true, ...this.chats.rename(id, body.title) });
+        }
       } catch (e) {
         return this._json(res, 404, { ok: false, error: String(e.message) });
       }

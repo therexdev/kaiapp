@@ -54,26 +54,46 @@ class ChatStore {
     return JSON.parse(fs.readFileSync(this._file(id), "utf8"));
   }
 
-  save({ id, title, messages }) {
+  save({ id, title, messages, system, persona }) {
     if (!Array.isArray(messages) || messages.length === 0) throw new Error("messages required");
     id = id || `c${Date.now().toString(36)}${crypto.randomBytes(3).toString("hex")}`;
     const file = this._file(id);
     let createdAt = new Date().toISOString();
+    let keptTitle = null;
     try {
-      createdAt = JSON.parse(fs.readFileSync(file, "utf8")).createdAt || createdAt;
+      const prev = JSON.parse(fs.readFileSync(file, "utf8"));
+      createdAt = prev.createdAt || createdAt;
+      // A user-chosen title (via rename) outlives autosaves.
+      if (prev.renamed) keptTitle = prev.title;
     } catch {
       /* new chat */
     }
     fs.mkdirSync(this.dir, { recursive: true });
     const doc = {
       id,
-      title: String(title || messages.find((m) => m.role === "user")?.content || "Untitled chat").slice(0, 80),
+      title: String(keptTitle || title || messages.find((m) => m.role === "user")?.content || "Untitled chat").slice(0, 80),
+      renamed: Boolean(keptTitle),
       createdAt,
       updatedAt: new Date().toISOString(),
+      // Persona/system prompt ride along so reopening a chat keeps its voice.
+      ...(system ? { system: String(system).slice(0, 4000) } : {}),
+      ...(persona ? { persona: String(persona).slice(0, 40) } : {}),
       messages: messages.map((m) => ({ role: String(m.role), content: String(m.content) })),
     };
     fs.writeFileSync(file, JSON.stringify(doc));
     return { id };
+  }
+
+  rename(id, title) {
+    title = String(title || "").trim().slice(0, 80);
+    if (!title) throw new Error("title required");
+    const file = this._file(id);
+    const doc = JSON.parse(fs.readFileSync(file, "utf8"));
+    doc.title = title;
+    doc.renamed = true; // survives later autosaves
+    doc.updatedAt = new Date().toISOString();
+    fs.writeFileSync(file, JSON.stringify(doc));
+    return { id, title };
   }
 
   remove(id) {
