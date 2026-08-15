@@ -121,7 +121,7 @@ class RuntimeManager {
         this._testedBins.add(binPath);
       }
       const runtime = this.makeRuntime(binPath);
-      await runtime.start({ modelPath, contextSize: resolved.contextSize || 4096, gpuLayers });
+      await runtime.start({ modelPath, contextSize: resolved.contextSize || 4096, gpuLayers, sizeBytes: resolved.sizeBytes || 0 });
       return runtime;
     };
 
@@ -133,19 +133,21 @@ class RuntimeManager {
       if (wantGpu) caps.push("cuda");
       if (this.hardware?.capabilities?.vulkanEligible) caps.push("vulkan");
       caps.push("cpu");
-      let lastErr;
+      const rungErrors = [];
       for (let i = 0; i < caps.length; i++) {
         const cap = caps[i];
         try {
           return await boot(await this.provisioner.ensure(kind, { cap }), cap === "cpu" ? 0 : 999);
         } catch (e) {
-          lastErr = e;
+          rungErrors.push(`[${cap}] ${String(e.message)}`);
           if (i < caps.length - 1) {
             this.onEvent({ type: "runtime:fallback", from: cap, to: caps[i + 1], reason: String(e.message) });
           }
         }
       }
-      throw lastErr;
+      // Every rung's reason survives — reporting only the last one hid
+      // the GPU failure that started the slide (field finding).
+      throw new Error(rungErrors.join(" · "));
     };
 
     const bootFallback = async (why) => {

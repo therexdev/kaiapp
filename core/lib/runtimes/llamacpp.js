@@ -119,8 +119,8 @@ class LlamaCppRuntime {
     };
   }
 
-  async _waitHealthy() {
-    const deadline = Date.now() + HEALTH_TIMEOUT_MS;
+  async _waitHealthy(timeoutMs = HEALTH_TIMEOUT_MS) {
+    const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       if (!this.child) {
         const code = this._lastExit?.code;
@@ -146,7 +146,7 @@ class LlamaCppRuntime {
     throw new Error("llama-server did not become healthy in time");
   }
 
-  async start({ modelPath, contextSize = 4096, gpuLayers = 0, extraArgs = [] }) {
+  async start({ modelPath, contextSize = 4096, gpuLayers = 0, extraArgs = [], sizeBytes = 0 }) {
     if (this.child) throw new Error("Runtime already running — stop it first");
     this._stopping = false;
     this.port = this._fixedPort ?? (await freePort(this.host));
@@ -199,7 +199,11 @@ class LlamaCppRuntime {
     });
 
     try {
-      await this._waitHealthy();
+      // Big models on laptop disks — and first-run Vulkan pipeline
+      // compilation on Intel/AMD GPUs — legitimately take minutes. Scale
+      // the patience with the weights instead of failing a healthy load.
+      const budget = Math.max(HEALTH_TIMEOUT_MS, Math.ceil((sizeBytes / 1e9) * 30000));
+      await this._waitHealthy(budget);
     } catch (e) {
       const tail = stderrTail.slice(-600);
       this.stop();

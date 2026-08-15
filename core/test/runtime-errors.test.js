@@ -49,3 +49,33 @@ test("a failed load records the engine's reason; the next success clears it", as
   assert.strictEqual(mgr.status().lastLoadError, null, "success clears the stale diagnosis");
   mgr.stop();
 });
+
+test("when every engine rung fails, the error names each rung's reason — not just the last", async () => {
+  const mgr = new RuntimeManager({
+    models: {
+      resolveAlias: () => ({ packageId: "p@1", contextSize: 4096, sizeBytes: 1e9 }),
+      ensurePackage: async () => "/fake/model.gguf",
+    },
+    hardware: { capabilities: { cudaEligible: false, vulkanEligible: true } },
+    provisioner: { ensure: async (_k, { cap }) => `/bins/${cap}/llama-server` },
+    makeRuntime: (binPath) => ({
+      start: async () => {
+        throw new Error(binPath.includes("vulkan") ? "pipeline compile crashed" : "unknown model architecture 'gemma3'");
+      },
+      stop() {},
+      status: () => ({ running: false }),
+    }),
+    onEvent: () => {},
+  });
+  // selfTest would run real binaries — the fake paths must skip it.
+  mgr._testedBins.add("/bins/vulkan/llama-server");
+  mgr._testedBins.add("/bins/cpu/llama-server");
+
+  await assert.rejects(
+    () => mgr.ensure("gemma3-12b"),
+    (e) => /\[vulkan\] pipeline compile crashed/.test(e.message) && /\[cpu\] unknown model architecture/.test(e.message),
+    "both rung reasons survive into one error"
+  );
+  assert.match(mgr.status().lastLoadError.message, /\[vulkan\].*\[cpu\]/s);
+  mgr.stop();
+});
