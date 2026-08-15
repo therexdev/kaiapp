@@ -27,12 +27,8 @@ class Worker {
     return { running: this.running, scheduler: this.schedulerUrl || null, ...this.stats };
   }
 
-  async start() {
-    if (this.running) return this.status();
-    if (!this.schedulerUrl) throw new Error("No scheduler URL configured (KAI_SCHEDULER_URL)");
+  async _register() {
     const address = this.wallet.address;
-    if (!address) throw new Error("Earning needs a wallet — create one first");
-
     const r = await fetch(`${this.schedulerUrl}/worker/register`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -41,6 +37,14 @@ class Worker {
     const j = await r.json();
     if (!j.ok) throw new Error(`Scheduler refused registration: ${j.error}`);
     this.token = j.token;
+  }
+
+  async start() {
+    if (this.running) return this.status();
+    if (!this.schedulerUrl) throw new Error("No scheduler URL configured (KAI_SCHEDULER_URL)");
+    if (!this.wallet.address) throw new Error("Earning needs a wallet — create one first");
+
+    await this._register();
     this.running = true;
     this.stats.since = new Date().toISOString();
     this.onEvent({ type: "worker:started", scheduler: this.schedulerUrl });
@@ -66,7 +70,19 @@ class Worker {
         const r = await fetch(`${this.schedulerUrl}/worker/next-job?token=${this.token}`, {
           signal: AbortSignal.any([AbortSignal.timeout(45000), this._pollAbort.signal]),
         });
-        if (r.status === 200) job = (await r.json()).job;
+        if (r.status === 200) {
+          job = (await r.json()).job;
+        } else if (r.status === 401) {
+          // The scheduler restarted (redeploy) and forgot our token: register
+          // again and carry on — earning must survive scheduler restarts.
+          await this._register();
+          this.onEvent({ type: "worker:reregistered", scheduler: this.schedulerUrl });
+          continue;
+        } else if (r.status !== 204) {
+          // Unexpected status (5xx, proxy error page): don't hot-spin on it.
+          await new Promise((res) => setTimeout(res, 3000));
+          continue;
+        }
       } catch {
         // Stop aborts the idle poll; anything else is the scheduler being
         // unreachable — back off, keep trying while enabled.

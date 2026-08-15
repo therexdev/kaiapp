@@ -136,6 +136,61 @@ test("scheduler rejects a receipt signed by a different key", async () => {
   }
 });
 
+test("worker survives a scheduler restart: re-registers and keeps earning", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-earn-"));
+  const wallet = new WalletService(path.join(dir, "wallet"));
+  const { address } = wallet.create({ password: "correct horse" });
+
+  const http = require("http");
+  const fakeLlm = http.createServer((req, res) => {
+    req.on("data", () => {});
+    req.on("end", () => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: "42" } }] }));
+    });
+  });
+  const llmPort = await new Promise((r) => fakeLlm.listen(0, "127.0.0.1", function () { r(this.address().port); }));
+  const runtime = { ensure: async () => `http://127.0.0.1:${llmPort}`, servedModelName: () => null };
+
+  const events = [];
+  const sched1 = new Scheduler({ dataDir: path.join(dir, "s1") });
+  const port = await sched1.listen();
+  const worker = new Worker({
+    schedulerUrl: `http://127.0.0.1:${port}`,
+    wallet,
+    runtime,
+    hardware: { capabilities: {} },
+    onEvent: (e) => events.push(e.type),
+  });
+
+  let sched2 = null;
+  try {
+    await worker.start();
+    sched1.enqueue({ prompt: "first" });
+    let deadline = Date.now() + 10000;
+    while (sched1.receipts.length < 1 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 100));
+    assert.equal(sched1.receipts.length, 1, "earning against the first scheduler");
+
+    // Redeploy: the scheduler process restarts on the same address and
+    // forgets every token. The worker must notice, re-register, and earn on.
+    await sched1.close();
+    sched2 = new Scheduler({ dataDir: path.join(dir, "s2") });
+    await sched2.listen(port);
+    sched2.enqueue({ prompt: "second" });
+
+    deadline = Date.now() + 15000; // worker may be in a 3s outage backoff
+    while (sched2.receipts.length < 1 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 100));
+    assert.equal(sched2.receipts.length, 1, `receipt on restarted scheduler (events: ${events.join(",")})`);
+    assert.equal(sched2.receipts[0].worker, address);
+    assert.ok(events.includes("worker:reregistered"), "worker re-registered itself");
+  } finally {
+    await worker.stop();
+    await sched1.close().catch(() => {});
+    if (sched2) await sched2.close();
+    fakeLlm.close();
+  }
+});
+
 test("a dead long-poll never consumes a job; a parked live worker still gets it", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-earn-"));
   const sched = new Scheduler({ dataDir: path.join(dir, "sched") });
