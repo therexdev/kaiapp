@@ -31,6 +31,23 @@ const MIME = {
 
 const MAX_BODY_BYTES = 10 * 1024 * 1024;
 
+// §7 context capability: keep room for the completion so a prompt that
+// technically fits still has space to be answered.
+const CTX_HEADROOM_TOKENS = 512;
+
+/** Rough prompt-size estimate (~4 chars/token + per-message overhead).
+ *  Deliberately cheap — it gates routing, it does not bill anything. */
+function estimateMessageTokens(messages) {
+  if (!Array.isArray(messages)) return 0;
+  let chars = 0;
+  let n = 0;
+  for (const m of messages) {
+    n += 1;
+    chars += String(m?.content ?? "").length;
+  }
+  return Math.ceil(chars / 4) + n * 4;
+}
+
 class Gateway {
   constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, earn, network, onEvent }) {
     this.earn = earn || null; // earn controller (M2); null in minimal tests
@@ -310,6 +327,40 @@ class Gateway {
       return this._chatNetwork(body, req, res);
     }
 
+    // §7 capability, context first: an oversized prompt would fail
+    // mid-stream in the local runtime — and overflowing it blindly would
+    // bill the user to fail remotely on the same class size. Estimate up
+    // front; overflow only when the network's advertised class actually
+    // fits; otherwise refuse cleanly before any engine or wallet is
+    // touched. Unknown aliases fall through to ensure(), whose failure is
+    // the plain capability-miss overflow below.
+    let localCtx = null;
+    try {
+      localCtx = this.models.resolveAlias(alias).contextSize || 4096;
+    } catch {
+      /* not a local alias — ensure() decides */
+    }
+    const estTok = estimateMessageTokens(body.messages);
+    if (localCtx && estTok > localCtx - CTX_HEADROOM_TOKENS) {
+      const net = this.network ? this.network.status() : null;
+      const canNetwork = net && net.privacyMode !== "local-only" && net.schedulerUrl;
+      const netCtx = canNetwork ? (await this._networkRates(net.schedulerUrl)).ctxTokens : 0;
+      if (canNetwork && estTok <= netCtx - CTX_HEADROOM_TOKENS) {
+        const reason = `prompt ~${estTok} tokens exceeds the ${localCtx}-token local context`;
+        this.onEvent({ type: "gateway:overflow", from: alias, reason });
+        return this._chatNetwork(body, req, res, { overflowFrom: alias, localError: reason });
+      }
+      return this._json(res, 400, {
+        error: {
+          message:
+            `Prompt is ~${estTok} tokens — larger than the local model's ${localCtx}-token context` +
+            (canNetwork ? ` and the network's ${netCtx}-token class` : "") +
+            ". Shorten the prompt or start a new chat.",
+          type: "invalid_request_error",
+        },
+      });
+    }
+
     let endpoint;
     try {
       endpoint = await this.runtime.ensure(alias);
@@ -370,6 +421,13 @@ class Gateway {
     if (!schedulerUrl) {
       return fail(400, "No scheduler URL configured for network requests", "invalid_request_error");
     }
+    // §7 context: refuse an oversized prompt BEFORE buying tokens — the
+    // provider would fail on it and the failure would still be billed.
+    const netCtx = (await this._networkRates(schedulerUrl)).ctxTokens;
+    const estTok = estimateMessageTokens(body.messages);
+    if (estTok > netCtx - CTX_HEADROOM_TOKENS) {
+      return fail(400, `Prompt is ~${estTok} tokens — larger than the network's ${netCtx}-token class. Shorten the prompt.`, "invalid_request_error");
+    }
     // §8 budgets: a key whose monthly network budget is spent stops HERE,
     // before any tokens are bought. Local inference is never gated.
     const meterKey = req._apiKey || null;
@@ -421,16 +479,21 @@ class Gateway {
     return this._json(res, 200, j);
   }
 
-  /** Published network token rates, cached for an hour; safe defaults. */
+  /** Published network token rates + class context, cached for an hour;
+   *  safe defaults. */
   async _networkRates(schedulerUrl) {
     if (this._rates && Date.now() - this._rates.at < 3600000) return this._rates.v;
-    let v = { inMicroPerM: 100000, outMicroPerM: 400000 }; // Koinos Fast defaults
+    let v = { inMicroPerM: 100000, outMicroPerM: 400000, ctxTokens: 4096 }; // Koinos Fast defaults
     try {
       const r = await fetch(`${schedulerUrl.replace(/\/$/, "")}/pricing`, { signal: AbortSignal.timeout(4000) });
       const j = await r.json();
       const m = j?.models && Object.values(j.models)[0];
       if (m?.usdPerMInputTokens != null) {
-        v = { inMicroPerM: Math.round(m.usdPerMInputTokens * 1e6), outMicroPerM: Math.round(m.usdPerMOutputTokens * 1e6) };
+        v = {
+          inMicroPerM: Math.round(m.usdPerMInputTokens * 1e6),
+          outMicroPerM: Math.round(m.usdPerMOutputTokens * 1e6),
+          ctxTokens: Number(m.ctxTokens) || 4096,
+        };
       }
     } catch {
       /* defaults hold */

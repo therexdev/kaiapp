@@ -23,7 +23,7 @@ const { createCore } = require("../server");
  * data, so consume hits are counted separately from incidental control
  * traffic (pricing lookups, balance pings) the core makes around config.
  */
-function spyScheduler() {
+function spyScheduler({ ctxTokens } = {}) {
   const paths = [];
   const srv = http.createServer((req, res) => {
     paths.push(req.url);
@@ -31,6 +31,9 @@ function spyScheduler() {
     req.on("data", (c) => (raw += c));
     req.on("end", () => {
       res.writeHead(200, { "content-type": "application/json" });
+      if (req.url.startsWith("/pricing") && ctxTokens) {
+        return res.end(JSON.stringify({ ok: true, models: { "koinos-fast": { usdPerMInputTokens: 0.1, usdPerMOutputTokens: 0.4, ctxTokens } } }));
+      }
       if (!req.url.startsWith("/consume/")) return res.end("{}");
       res.end(
         JSON.stringify({
@@ -148,6 +151,75 @@ test("local-first: overflow respects §8 spending — exhausted key budget block
   } finally {
     await core.stop();
     spy.srv.close();
+  }
+});
+
+test("§7 context: oversized prompts refuse cleanly, and overflow only when the network class fits", async () => {
+  const big = "x".repeat(30000); // ~7,504 tokens: over a 4,096 ctx, under 8,192
+
+  // Local-only: clean refusal naming the estimate — never a runtime crash,
+  // never a byte to the scheduler.
+  {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-ctx-"));
+    const spy = spyScheduler();
+    const spyPort = await spy.listen();
+    const { core, post } = await bootCore(dir);
+    try {
+      await post("/core/earn/config", { schedulerUrl: `http://127.0.0.1:${spyPort}` });
+      await post("/core/network/config", { privacyMode: "local-only" });
+      const r = await post("/v1/chat/completions", { model: "dev-tiny", messages: [{ role: "user", content: big }] });
+      assert.strictEqual(r.status, 400);
+      assert.match(r.json.error.message, /larger than the local model/);
+      assert.strictEqual(spy.hits(), 0);
+    } finally {
+      await core.stop();
+      spy.srv.close();
+    }
+  }
+
+  // Local-first, network advertises the SAME class size: fits nowhere —
+  // refuse with both numbers instead of billing a remote failure.
+  {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-ctx-"));
+    const spy = spyScheduler(); // default pricing -> 4096 ctx
+    const spyPort = await spy.listen();
+    const { core, post } = await bootCore(dir);
+    try {
+      await post("/core/earn/wallet", { password: "correct horse" });
+      await post("/core/earn/config", { schedulerUrl: `http://127.0.0.1:${spyPort}` });
+      await post("/core/network/config", { privacyMode: "local-first" });
+      const r = await post("/v1/chat/completions", { model: "dev-tiny", messages: [{ role: "user", content: big }] });
+      assert.strictEqual(r.status, 400);
+      assert.match(r.json.error.message, /network's 4096-token class/);
+      assert.strictEqual(spy.hits(), 0, "a prompt that fits nowhere must not be billed anywhere");
+    } finally {
+      await core.stop();
+      spy.srv.close();
+    }
+  }
+
+  // Local-first, network advertises a BIGGER class: genuine capability
+  // difference -> overflow and serve.
+  {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-ctx-"));
+    const spy = spyScheduler({ ctxTokens: 8192 });
+    const spyPort = await spy.listen();
+    const events = [];
+    const { core, post } = await bootCore(dir, events);
+    try {
+      await post("/core/earn/wallet", { password: "correct horse" });
+      await post("/core/earn/config", { schedulerUrl: `http://127.0.0.1:${spyPort}` });
+      await post("/core/network/config", { privacyMode: "local-first" });
+      const r = await post("/v1/chat/completions", { model: "dev-tiny", messages: [{ role: "user", content: big }] });
+      assert.strictEqual(r.status, 200);
+      assert.strictEqual(r.json.model, "koinos-network");
+      assert.strictEqual(spy.hits(), 1);
+      const ev = events.find((e) => e.type === "gateway:overflow");
+      assert.match(ev.reason, /exceeds the 4096-token local context/);
+    } finally {
+      await core.stop();
+      spy.srv.close();
+    }
   }
 });
 
