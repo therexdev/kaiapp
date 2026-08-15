@@ -55,12 +55,41 @@ class Worker {
     this.running = true;
     this.stats.since = new Date().toISOString();
     this.onEvent({ type: "worker:started", scheduler: this.schedulerUrl });
-    this._loop = this._run();
+    this._startLoop();
+    // Watchdog: "the pane says Online but the network disagrees" must be
+    // impossible. If polls have been silent too long, re-register; if the
+    // loop itself died, restart it. Runs while earning is on.
+    this._watchdog = setInterval(async () => {
+      if (!this.running) return;
+      if (this._loopDone) {
+        this.onEvent({ type: "worker:watchdog-restarted-loop" });
+        this._startLoop();
+        return;
+      }
+      const last = this.stats.lastPollOkAt ? new Date(this.stats.lastPollOkAt).getTime() : 0;
+      if (!this._executing && Date.now() - last > 150000) {
+        try {
+          await this._register();
+          this.onEvent({ type: "worker:watchdog-reregistered" });
+        } catch {
+          /* scheduler unreachable — pane shows the retry state */
+        }
+      }
+    }, 60000);
+    this._watchdog.unref?.();
     return this.status();
+  }
+
+  _startLoop() {
+    this._loopDone = false;
+    this._loop = this._run().finally(() => {
+      this._loopDone = true;
+    });
   }
 
   async stop() {
     this.running = false;
+    clearInterval(this._watchdog);
     this._pollAbort?.abort();
     this.onEvent({ type: "worker:stopped" });
     await this._loop?.catch(() => {});
@@ -110,8 +139,17 @@ class Worker {
       // minutes, no polls happen meanwhile, and a silent worker used to
       // fall off the scheduler's live roster mid-job — consumers saw
       // "no providers" precisely when the provider was working hardest.
-      const beat = setInterval(() => {
-        fetch(`${this.schedulerUrl}/worker/heartbeat?token=${this.token}`, { method: "POST" }).catch(() => {});
+      const beat = setInterval(async () => {
+        try {
+          const r = await fetch(`${this.schedulerUrl}/worker/heartbeat?token=${this.token}`, { method: "POST" });
+          // Scheduler restarted mid-job and forgot us: re-register NOW so
+          // the machine stays on the roster while it finishes generating
+          // (field finding: a busy provider went invisible for the whole
+          // job after a deploy — its heartbeats were failing silently).
+          if (r.status === 401) await this._register();
+        } catch {
+          /* unreachable — next beat retries */
+        }
       }, 25000);
       try {
         const t0 = Date.now();
@@ -133,6 +171,7 @@ class Worker {
             body: JSON.stringify({ jobId: job.id, delta: chunk }),
           }).catch(() => {});
         };
+        this._executing = true;
         const { output, usage } = await this._execute(job, (d) => postDelta(d, false));
         postDelta("", true); // flush the tail
         // §51 CU groundwork: generation speed is the capability signal —
@@ -156,6 +195,7 @@ class Worker {
         this.stats.lastError = `last job failed: ${String(e.message)}`;
         this.onEvent({ type: "worker:job-failed", jobId: job.id, message: String(e.message) });
       } finally {
+        this._executing = false;
         clearInterval(beat);
       }
     }
