@@ -338,25 +338,64 @@ test("a job taken by a worker that vanishes is requeued after its lease", async 
   }
 });
 
-test("epoch close nets consumption against earnings (§23): free allowance, spend-down, debts", () => {
+test("epoch close nets VALUED consumption against earnings (§15/§23): spend in KAI, claim the rest", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-earn-"));
   const sched = new Scheduler({ dataDir: path.join(dir, "sched"), epoch: 9 });
-  // W served 6; consumed 8 -> 5 free + 3 billable -> net claim 3.
+  // W served 6 receipts; spent 0.9 KAI of earnings on network chats ->
+  // rounds up to 1 receipt -> net claim 5.
   for (let i = 0; i < 6; i++) sched.receipts.push({ worker: "W", honest: true });
-  sched.consumed.W = 8;
-  // C served nothing; consumed 7 -> 2 billable -> no claim, debt 2.
-  sched.consumed.C = 7;
-  // F stayed within the free allowance -> untouched.
-  sched.consumed.F = 5;
+  sched.spentSat.W = "90000000";
+  // C served nothing but somehow spent 2.5 KAI (anomaly) -> debt of 3 receipts.
+  sched.spentSat.C = "250000000";
 
   const s = sched.closeEpoch();
-  assert.equal(s.totals.W, 3, "claimable = served 6 - billable 3");
+  assert.equal(s.totals.W, 5, "claim = served 6 - ceil(0.9 KAI / 1 KAI)");
   assert.equal(s.served.W, 6);
-  assert.equal(s.totals.C, undefined, "pure consumer claims nothing");
-  assert.deepEqual(s.debts, { C: 2 }, "over-consumption recorded, not silently forgiven");
-  assert.equal(s.totals.F, undefined);
-  assert.equal(s.claims.W.count, 3, "on-chain claim carries the net count");
-  assert.equal(sched.consumed.W, undefined, "meter resets with the epoch");
+  assert.equal(s.spentKai.W, "0.9", "spend recorded in the epoch summary");
+  assert.equal(s.totals.C, undefined, "no earnings, no claim");
+  assert.deepEqual(s.debts, { C: 3 }, "anomalous spend recorded, not forgiven");
+  assert.equal(s.claims.W.count, 5, "on-chain claim carries the net count");
+  assert.ok(s.pricing.kaiPerCu > 0, "pricing snapshot travels with the epoch");
+  assert.equal(Object.keys(sched.spentSat).length, 0, "spend meter resets with the epoch");
+});
+
+test("consume charge order (§23): free allowance -> deposited KAI credits -> epoch earnings", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-earn-"));
+  // Chain says this address has deposited 1 KAI in total.
+  const settlement = { depositsOf: async () => "100000000", settleEpoch: async () => ({}), kaiBalance: async () => "0" };
+  const sched = new Scheduler({ dataDir: path.join(dir, "sched"), settlement });
+  const port = await sched.listen();
+  try {
+    await sched._syncDeposits("Addr", true);
+    assert.equal(sched.credits.Addr.creditSat, "100000000", "on-chain deposit credited once");
+    await sched._syncDeposits("Addr", true);
+    assert.equal(sched.credits.Addr.creditSat, "100000000", "high-water mark prevents double credit");
+
+    for (let i = 0; i < 5; i++) assert.equal(sched._chargeConsume("Addr"), "free");
+    // 1 KAI buys 3 requests at 0.3 KAI each…
+    for (let i = 0; i < 3; i++) assert.equal(sched._chargeConsume("Addr"), "credits");
+    assert.equal(sched.credits.Addr.creditSat, "10000000", "0.1 KAI left");
+    // …the remainder can't cover a request, so the next one hits earnings.
+    assert.equal(sched._chargeConsume("Addr"), "earnings");
+    assert.equal(sched.spentSat.Addr, "30000000");
+
+    // With nothing served, nothing left free, and credits short: unauthorized.
+    const cap = sched._consumeCapacity("Addr");
+    assert.ok(cap.freeLeft === 0 && cap.creditSat < cap.cost && cap.earningsLeft < cap.cost);
+
+    // The ledger survives a restart.
+    const sched2 = new Scheduler({ dataDir: path.join(dir, "sched"), settlement });
+    assert.equal(sched2.credits.Addr.creditSat, "10000000", "credits persisted to disk");
+
+    // Published pricing is the §15 shape.
+    const p = await (await fetch(`http://127.0.0.1:${port}/pricing`)).json();
+    assert.deepEqual(
+      [p.ok, p.cuClass, p.kaiPerCu, p.freeCuPerEpoch, p.status],
+      [true, "LLM-CU", 0.3, 5, "PROVISIONAL"]
+    );
+  } finally {
+    await sched.close();
+  }
 });
 
 test("closed epochs settle on-chain and /balance serves KAI + pending receipts", async () => {

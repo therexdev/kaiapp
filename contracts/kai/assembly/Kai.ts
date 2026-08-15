@@ -17,6 +17,7 @@ const BALANCES_SPACE: u32 = 0;
 const ROOTS_SPACE: u32 = 1;
 const CLAIMED_SPACE: u32 = 2;
 const SUPPLY_SPACE: u32 = 3;
+const DEPOSITS_SPACE: u32 = 4;
 const SUPPLY_KEY: Uint8Array = StringBytes.stringToBytes("supply");
 
 function sha256(data: Uint8Array): Uint8Array {
@@ -71,6 +72,14 @@ export class Kai {
     kai.total_supply_result.decode,
     kai.total_supply_result.encode,
     () => new kai.total_supply_result(0)
+  );
+
+  deposits: Storage.Map<Uint8Array, kai.deposits_of_result> = new Storage.Map(
+    this.contractId,
+    DEPOSITS_SPACE,
+    kai.deposits_of_result.decode,
+    kai.deposits_of_result.encode,
+    () => new kai.deposits_of_result(0)
   );
 
   name(args: kai.name_arguments): kai.name_result {
@@ -171,5 +180,35 @@ export class Kai {
   claimed(args: kai.claimed_arguments): kai.claimed_result {
     const key = StringBytes.stringToBytes(args.epoch.toString() + "|" + args.worker!);
     return this.claims.get(key)!;
+  }
+
+  // §23 phase A: funding network credits burns KAI from the depositor and
+  // records it in a monotonic per-account accumulator. Off-chain schedulers
+  // diff deposits_of to credit usage balances — the contract never gives any
+  // operator authority over user balances (§44), only the owner can deposit.
+  deposit(args: kai.deposit_arguments): kai.deposit_result {
+    const from = args.from!;
+    System.require(
+      System.checkAuthority(authority.authorization_type.contract_call, from),
+      "'from' has not authorized deposit"
+    );
+    System.require(args.value > 0, "deposit must be positive");
+    const bal = this.balances.get(from)!;
+    System.require(bal.value >= args.value, "insufficient balance");
+    bal.value -= args.value;
+    this.balances.put(from, bal);
+
+    const s = this.supply.get(SUPPLY_KEY)!;
+    s.value -= args.value; // burned: usage ultimately consumes KAI (§25 bounded burn)
+    this.supply.put(SUPPLY_KEY, s);
+
+    const d = this.deposits.get(from)!;
+    d.value += args.value;
+    this.deposits.put(from, d);
+    return new kai.deposit_result();
+  }
+
+  deposits_of(args: kai.deposits_of_arguments): kai.deposits_of_result {
+    return this.deposits.get(args.owner!)!;
   }
 }

@@ -123,6 +123,9 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
           pendingReceipts: j.pendingReceipts ?? 0,
           consumedThisEpoch: j.consumedThisEpoch ?? 0,
           freeRemaining: j.freeRemaining ?? null,
+          creditsKai: j.creditsKai ?? null,
+          priceKaiPerRequest: j.priceKaiPerRequest ?? null,
+          spentThisEpochKai: j.spentThisEpochKai ?? null,
         };
       }
     } catch {
@@ -175,6 +178,33 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
       settings.set("earn.autoStart", false);
       events({ type: "wallet:locked" });
       return earn.status();
+    },
+    // §21/§23: deposit KAI for network credits. The scheduler prepares the tx
+    // (operator pays MANA), the wallet signs it HERE — the key never leaves —
+    // and the signed tx goes back for the operator's co-signature.
+    deposit: async ({ amountKai }) => {
+      const url = settings.get("earn.schedulerUrl", process.env.KAI_SCHEDULER_URL || "");
+      if (!url) throw new Error("Set the scheduler URL first");
+      const s = wallet.status();
+      if (!s.unlocked) throw new Error("Unlock your earning account first");
+      const amt = Number(amountKai);
+      if (!(amt > 0)) throw new Error("Enter a positive KAI amount");
+      const base = url.replace(/\/$/, "");
+      const post = async (p, body) =>
+        (await fetch(`${base}${p}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(30000),
+        })).json();
+      const prep = await post("/deposit/prepare", { address: s.address, amountKai: amt });
+      if (!prep.ok) throw new Error(prep.error || "Deposits are not available on this scheduler yet");
+      const signed = await wallet.signer.signTransaction(prep.transaction);
+      const sub = await post("/deposit/submit", { address: s.address, transaction: signed });
+      if (!sub.ok) throw new Error(sub.error || "Deposit failed");
+      earningsCache = { at: 0, data: null }; // pick up new credits promptly
+      events({ type: "wallet:deposited", message: `${amt} KAI tx ${sub.txId}` });
+      return { txId: sub.txId, amountKai: amt };
     },
     start: async () => {
       const s = wallet.status();

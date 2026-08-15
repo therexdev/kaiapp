@@ -405,11 +405,12 @@ async function renderEarn() {
       ["Jobs completed", String(s.worker.jobsDone ?? 0)],
       ["Receipts accepted", String(s.worker.receiptsAccepted ?? 0)],
       ["KAI balance", s.earnings ? `${s.earnings.kai} KAI` : "—"],
+      ["Network credits", s.earnings?.creditsKai != null ? `${s.earnings.creditsKai} KAI` : "—"],
       ["This epoch", s.earnings ? `${s.earnings.pendingReceipts} receipts pending` : "—"],
       [
         "Network chats used",
         s.earnings && s.earnings.freeRemaining != null
-          ? `${s.earnings.consumedThisEpoch} (${s.earnings.freeRemaining} free left, then 1 receipt each)`
+          ? `${s.earnings.consumedThisEpoch} (${s.earnings.freeRemaining} free left${s.earnings.priceKaiPerRequest != null ? `, then ${s.earnings.priceKaiPerRequest} KAI each` : ""})`
           : "—",
       ],
     ];
@@ -502,6 +503,22 @@ $("btn-earn-unlock").addEventListener("click", async () => {
     $("earn-unlock-count").textContent = "";
     renderEarn();
   } catch { /* error shown */ }
+});
+
+$("btn-earn-deposit").addEventListener("click", async () => {
+  const amt = Number($("earn-deposit-amt").value);
+  if (!(amt > 0)) return earnErr("Enter a positive KAI amount to deposit");
+  const btn = $("btn-earn-deposit");
+  btn.disabled = true;
+  btn.textContent = "Depositing…";
+  try {
+    await earnPost("/core/earn/deposit", { amountKai: amt });
+    $("earn-deposit-amt").value = "";
+    renderEarn();
+  } catch { /* error shown */ } finally {
+    btn.disabled = false;
+    btn.textContent = "Deposit";
+  }
 });
 
 $("btn-earn-lock").addEventListener("click", async () => {

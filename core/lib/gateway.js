@@ -198,6 +198,9 @@ class Gateway {
         if (path === "/core/earn/lock" && req.method === "POST") {
           return this._json(res, 200, { ok: true, ...(await this.earn.lock()) });
         }
+        if (path === "/core/earn/deposit" && req.method === "POST") {
+          return this._json(res, 200, { ok: true, ...(await this.earn.deposit(body)) });
+        }
         if (path === "/core/earn/start" && req.method === "POST") {
           return this._json(res, 200, { ok: true, ...(await this.earn.start()) });
         }

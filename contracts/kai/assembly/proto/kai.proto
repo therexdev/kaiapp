@@ -69,3 +69,16 @@ message claimed_arguments {
   string worker = 2;
 }
 message claimed_result { bool value = 1; }
+
+// @description Deposit (burn) KAI to fund network credits; requires 'from' authority (§23 phase A)
+// @read-only false
+message deposit_arguments {
+  bytes from = 1 [(koinos.btype) = ADDRESS];
+  uint64 value = 2 [jstype = JS_STRING];
+}
+message deposit_result {}
+
+// @description Cumulative KAI ever deposited by an account (monotonic; schedulers diff it)
+// @read-only true
+message deposits_of_arguments { bytes owner = 1 [(koinos.btype) = ADDRESS]; }
+message deposits_of_result { uint64 value = 1 [jstype = JS_STRING]; }

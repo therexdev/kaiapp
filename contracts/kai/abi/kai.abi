@@ -69,7 +69,21 @@
             "description": "Whether an epoch reward was already claimed",
             "entry-point": "0xd79d3458",
             "read-only": true
+        },
+        "deposit": {
+            "argument": "kai.deposit_arguments",
+            "return": "kai.deposit_result",
+            "description": "Deposit (burn) KAI to fund network credits; requires 'from' authority (§23 phase A)",
+            "entry-point": "0xc3b9fb78",
+            "read-only": false
+        },
+        "deposits_of": {
+            "argument": "kai.deposits_of_arguments",
+            "return": "kai.deposits_of_result",
+            "description": "Cumulative KAI ever deposited by an account (monotonic; schedulers diff it)",
+            "entry-point": "0x7c36d46a",
+            "read-only": true
         }
     },
-    "types": "CtgHChhhc3NlbWJseS9wcm90by9rYWkucHJvdG8SA2thaRoUa29pbm9zL29wdGlvbnMucHJvdG8iEAoObmFtZV9hcmd1bWVudHMiIwoLbmFtZV9yZXN1bHQSFAoFdmFsdWUYASABKAlSBXZhbHVlIhIKEHN5bWJvbF9hcmd1bWVudHMiJQoNc3ltYm9sX3Jlc3VsdBIUCgV2YWx1ZRgBIAEoCVIFdmFsdWUiFAoSZGVjaW1hbHNfYXJndW1lbnRzIicKD2RlY2ltYWxzX3Jlc3VsdBIUCgV2YWx1ZRgBIAEoDVIFdmFsdWUiGAoWdG90YWxfc3VwcGx5X2FyZ3VtZW50cyIvChN0b3RhbF9zdXBwbHlfcmVzdWx0EhgKBXZhbHVlGAEgASgEQgIwAVIFdmFsdWUiMgoUYmFsYW5jZV9vZl9hcmd1bWVudHMSGgoFb3duZXIYASABKAxCBIC1GAZSBW93bmVyIi0KEWJhbGFuY2Vfb2ZfcmVzdWx0EhgKBXZhbHVlGAEgASgEQgIwAVIFdmFsdWUiXgoSdHJhbnNmZXJfYXJndW1lbnRzEhgKBGZyb20YASABKAxCBIC1GAZSBGZyb20SFAoCdG8YAiABKAxCBIC1GAZSAnRvEhgKBXZhbHVlGAMgASgEQgIwAVIFdmFsdWUiEQoPdHJhbnNmZXJfcmVzdWx0IkEKFXN1Ym1pdF9yb290X2FyZ3VtZW50cxIUCgVlcG9jaBgBIAEoBFIFZXBvY2gSEgoEcm9vdBgCIAEoDFIEcm9vdCIUChJzdWJtaXRfcm9vdF9yZXN1bHQiKgoSZ2V0X3Jvb3RfYXJndW1lbnRzEhQKBWVwb2NoGAEgASgEUgVlcG9jaCInCg9nZXRfcm9vdF9yZXN1bHQSFAoFdmFsdWUYASABKAxSBXZhbHVlIoEBCg9jbGFpbV9hcmd1bWVudHMSFAoFZXBvY2gYASABKARSBWVwb2NoEhYKBndvcmtlchgCIAEoCVIGd29ya2VyEhQKBWNvdW50GAMgASgEUgVjb3VudBIUCgVpbmRleBgEIAEoBFIFaW5kZXgSFAoFcHJvb2YYBSADKAxSBXByb29mIioKDGNsYWltX3Jlc3VsdBIaCgZtaW50ZWQYASABKARCAjABUgZtaW50ZWQiQQoRY2xhaW1lZF9hcmd1bWVudHMSFAoFZXBvY2gYASABKARSBWVwb2NoEhYKBndvcmtlchgCIAEoCVIGd29ya2VyIiYKDmNsYWltZWRfcmVzdWx0EhQKBXZhbHVlGAEgASgIUgV2YWx1ZWIGcHJvdG8z"
+    "types": "CpgJChhhc3NlbWJseS9wcm90by9rYWkucHJvdG8SA2thaRoUa29pbm9zL29wdGlvbnMucHJvdG8iEAoObmFtZV9hcmd1bWVudHMiIwoLbmFtZV9yZXN1bHQSFAoFdmFsdWUYASABKAlSBXZhbHVlIhIKEHN5bWJvbF9hcmd1bWVudHMiJQoNc3ltYm9sX3Jlc3VsdBIUCgV2YWx1ZRgBIAEoCVIFdmFsdWUiFAoSZGVjaW1hbHNfYXJndW1lbnRzIicKD2RlY2ltYWxzX3Jlc3VsdBIUCgV2YWx1ZRgBIAEoDVIFdmFsdWUiGAoWdG90YWxfc3VwcGx5X2FyZ3VtZW50cyIvChN0b3RhbF9zdXBwbHlfcmVzdWx0EhgKBXZhbHVlGAEgASgEQgIwAVIFdmFsdWUiMgoUYmFsYW5jZV9vZl9hcmd1bWVudHMSGgoFb3duZXIYASABKAxCBIC1GAZSBW93bmVyIi0KEWJhbGFuY2Vfb2ZfcmVzdWx0EhgKBXZhbHVlGAEgASgEQgIwAVIFdmFsdWUiXgoSdHJhbnNmZXJfYXJndW1lbnRzEhgKBGZyb20YASABKAxCBIC1GAZSBGZyb20SFAoCdG8YAiABKAxCBIC1GAZSAnRvEhgKBXZhbHVlGAMgASgEQgIwAVIFdmFsdWUiEQoPdHJhbnNmZXJfcmVzdWx0IkEKFXN1Ym1pdF9yb290X2FyZ3VtZW50cxIUCgVlcG9jaBgBIAEoBFIFZXBvY2gSEgoEcm9vdBgCIAEoDFIEcm9vdCIUChJzdWJtaXRfcm9vdF9yZXN1bHQiKgoSZ2V0X3Jvb3RfYXJndW1lbnRzEhQKBWVwb2NoGAEgASgEUgVlcG9jaCInCg9nZXRfcm9vdF9yZXN1bHQSFAoFdmFsdWUYASABKAxSBXZhbHVlIoEBCg9jbGFpbV9hcmd1bWVudHMSFAoFZXBvY2gYASABKARSBWVwb2NoEhYKBndvcmtlchgCIAEoCVIGd29ya2VyEhQKBWNvdW50GAMgASgEUgVjb3VudBIUCgVpbmRleBgEIAEoBFIFaW5kZXgSFAoFcHJvb2YYBSADKAxSBXByb29mIioKDGNsYWltX3Jlc3VsdBIaCgZtaW50ZWQYASABKARCAjABUgZtaW50ZWQiQQoRY2xhaW1lZF9hcmd1bWVudHMSFAoFZXBvY2gYASABKARSBWVwb2NoEhYKBndvcmtlchgCIAEoCVIGd29ya2VyIiYKDmNsYWltZWRfcmVzdWx0EhQKBXZhbHVlGAEgASgIUgV2YWx1ZSJHChFkZXBvc2l0X2FyZ3VtZW50cxIYCgRmcm9tGAEgASgMQgSAtRgGUgRmcm9tEhgKBXZhbHVlGAIgASgEQgIwAVIFdmFsdWUiEAoOZGVwb3NpdF9yZXN1bHQiMwoVZGVwb3NpdHNfb2ZfYXJndW1lbnRzEhoKBW93bmVyGAEgASgMQgSAtRgGUgVvd25lciIuChJkZXBvc2l0c19vZl9yZXN1bHQSGAoFdmFsdWUYASABKARCAjABUgV2YWx1ZWIGcHJvdG8z"
 }

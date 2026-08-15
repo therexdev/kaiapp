@@ -1,6 +1,6 @@
 {
   "name": "@koinos-ai/core",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "description": "Koinos AI Core service: runtime manager, model manager, local OpenAI-compatible gateway",
   "main": "server.js",
