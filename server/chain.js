@@ -175,4 +175,48 @@ class KaiContract {
   }
 }
 
-module.exports = { ChainClient, KaiContract, rootToAnchorAddress, TESTNET };
+/**
+ * Settlement adapter for the scheduler (§20–§22): submit the epoch root and
+ * push every worker's claim, idempotently — re-running skips whatever is
+ * already on-chain. The operator key signs and pays MANA; workers receive KAI.
+ */
+function makeSettlement({ wif, contractId, rpc, abiPath } = {}) {
+  const chain = new ChainClient({ wif, rpc });
+  const kai = new KaiContract({ chain, contractId, abiPath });
+  let checked = false;
+  const ready = async () => {
+    if (!checked) {
+      await chain.assertChain(); // fail closed on wrong network (§27 spirit)
+      checked = true;
+    }
+  };
+  return {
+    async settleEpoch(summary) {
+      await ready();
+      const out = { rootTx: null, claims: {}, settledAt: new Date().toISOString() };
+      const existing = await kai.getRoot(summary.epoch);
+      if (existing === summary.root) {
+        out.rootTx = "already-on-chain";
+      } else if (existing) {
+        throw new Error(`epoch ${summary.epoch} already has a different root on-chain`);
+      } else {
+        out.rootTx = (await kai.submitRoot(summary.epoch, summary.root)).txId;
+      }
+      for (const [worker, packet] of Object.entries(summary.claims)) {
+        try {
+          out.claims[worker] = { tx: (await kai.claim(summary.epoch, worker, packet)).txId };
+        } catch (e) {
+          // "already claimed" lands here on re-runs — recorded, not fatal.
+          out.claims[worker] = { error: String(e.message).slice(0, 200) };
+        }
+      }
+      return out;
+    },
+    async kaiBalance(address) {
+      await ready();
+      return (await kai.kaiBalance(address)).toString();
+    },
+  };
+}
+
+module.exports = { ChainClient, KaiContract, makeSettlement, rootToAnchorAddress, TESTNET };

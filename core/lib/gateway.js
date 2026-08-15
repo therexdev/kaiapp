@@ -174,12 +174,12 @@ class Gateway {
     if (this.earn && path.startsWith("/core/earn")) {
       try {
         if (path === "/core/earn" && req.method === "GET") {
-          return this._json(res, 200, { ok: true, ...this.earn.status() });
+          return this._json(res, 200, { ok: true, ...(await this.earn.status()) });
         }
         const body =
           req.method === "POST" ? JSON.parse((await this._readBody(req)).toString("utf8") || "{}") : {};
         if (path === "/core/earn/config" && req.method === "POST") {
-          return this._json(res, 200, { ok: true, ...this.earn.configure(body) });
+          return this._json(res, 200, { ok: true, ...(await this.earn.configure(body)) });
         }
         if (path === "/core/earn/wallet" && req.method === "POST") {
           // Returns the backup WIF exactly once — the UI shows it, Core forgets it.

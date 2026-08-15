@@ -96,14 +96,37 @@ async function createCore({ dataDir, port, llamaBin, onEvent } = {}) {
   const { Worker } = require("./lib/worker");
   const wallet = new WalletService(path.join(dataDir, "wallet"));
   let worker = null;
+  // On-chain KAI balance + open-epoch receipts, via the scheduler's /balance.
+  // Cached 30s; only fetched while something asks (the Earn tab polls status).
+  let earningsCache = { at: 0, data: null };
+  const fetchEarnings = async () => {
+    const url = settings.get("earn.schedulerUrl", process.env.KAI_SCHEDULER_URL || "");
+    const address = wallet.address;
+    if (!url || !address) return null;
+    if (Date.now() - earningsCache.at < 30000) return earningsCache.data;
+    let data = null;
+    try {
+      const r = await fetch(`${url.replace(/\/$/, "")}/balance?address=${encodeURIComponent(address)}`, {
+        signal: AbortSignal.timeout(4000),
+      });
+      const j = await r.json();
+      if (j.ok) data = { kai: j.kai, pendingReceipts: j.pendingReceipts ?? 0 };
+    } catch {
+      /* scheduler unreachable or chain read down — the row just shows a dash */
+    }
+    earningsCache = { at: Date.now(), data };
+    return data;
+  };
   const earn = {
-    status: () => ({
+    status: async () => ({
       wallet: wallet.status(),
       worker: worker ? worker.status() : { running: false, jobsDone: 0, receiptsAccepted: 0 },
       schedulerUrl: settings.get("earn.schedulerUrl", process.env.KAI_SCHEDULER_URL || ""),
+      earnings: await fetchEarnings(),
     }),
     configure: ({ schedulerUrl }) => {
       settings.set("earn.schedulerUrl", String(schedulerUrl || "").trim());
+      earningsCache = { at: 0, data: null };
       return earn.status();
     },
     createWallet: ({ password }) => wallet.create({ password }),

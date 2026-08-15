@@ -285,6 +285,54 @@ test("a job taken by a worker that vanishes is requeued after its lease", async 
   }
 });
 
+test("closed epochs settle on-chain and /balance serves KAI + pending receipts", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-earn-"));
+  const settled = [];
+  const settlement = {
+    settleEpoch: async (summary) => {
+      settled.push(summary.epoch);
+      return { rootTx: "0xroot", claims: { W1: { tx: "0xclaim" } }, settledAt: "t" };
+    },
+    kaiBalance: async () => "800000000", // 8 KAI in satoshis
+  };
+  const sched = new Scheduler({ dataDir: path.join(dir, "sched"), epoch: 7, settlement });
+  const port = await sched.listen();
+  try {
+    // Receipts in the open epoch show up as pending before any settlement.
+    sched.receipts.push({ worker: "W1", honest: true }, { worker: "W1", honest: true });
+    let b = await (await fetch(`http://127.0.0.1:${port}/balance?address=W1`)).json();
+    assert.deepEqual([b.ok, b.kai, b.pendingReceipts], [true, "8", 2]);
+
+    const summary = sched.closeEpoch();
+    const result = await sched.settleClosedEpoch(summary);
+    assert.equal(result.rootTx, "0xroot");
+    assert.deepEqual(settled, [7]);
+    const onDisk = JSON.parse(fs.readFileSync(path.join(dir, "sched", "epoch-7.json"), "utf8"));
+    assert.equal(onDisk.summary.settlement.rootTx, "0xroot", "settlement recorded in the epoch file");
+    assert.equal(onDisk.receipts.length, 2, "receipt detail preserved");
+
+    // The operator retry lane re-runs settlement idempotently.
+    const again = await (
+      await fetch(`http://127.0.0.1:${port}/operator/settle`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ epoch: 7 }),
+      })
+    ).json();
+    assert.equal(again.ok, true);
+    assert.deepEqual(settled, [7, 7]);
+
+    // Without settlement configured, /balance says so instead of guessing.
+    const bare = new Scheduler({ dataDir: path.join(dir, "bare") });
+    const p2 = await bare.listen();
+    const nb = await (await fetch(`http://127.0.0.1:${p2}/balance?address=W1`)).json();
+    assert.equal(nb.ok, false);
+    await bare.close();
+  } finally {
+    await sched.close();
+  }
+});
+
 test("earn control plane: wallet -> config -> start -> jobs -> stop, via the app gateway", async () => {
   const { createCore } = require("../server");
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-earnui-"));
@@ -298,7 +346,10 @@ test("earn control plane: wallet -> config -> start -> jobs -> stop, via the app
     onEvent: () => {},
   });
   const base = `http://127.0.0.1:${await core.start()}`;
-  const sched = new Scheduler({ dataDir: path.join(dir, "sched") });
+  const sched = new Scheduler({
+    dataDir: path.join(dir, "sched"),
+    settlement: { settleEpoch: async () => ({}), kaiBalance: async () => "800000000" },
+  });
   const schedPort = await sched.listen();
   const post = async (p, b) => (await fetch(base + p, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(b || {}) })).json();
 
@@ -324,6 +375,7 @@ test("earn control plane: wallet -> config -> start -> jobs -> stop, via the app
     }
     assert.ok(s.worker.receiptsAccepted >= 1, `receipt accepted (got ${JSON.stringify(s.worker)})`);
     assert.equal(sched.receipts[0].worker, s.wallet.address);
+    assert.equal(s.earnings?.kai, "8", "on-chain KAI balance surfaces through the app gateway");
 
     const stopped = await post("/core/earn/stop");
     assert.equal(stopped.worker.running, false);
