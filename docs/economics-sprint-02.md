@@ -68,14 +68,38 @@ until it lists, so:
   lists; then flip `KAI_PRICE_SOURCES` to the KoinDX pool quote plus at least one
   independent aggregator, so no single feed can move the median.
 
-## Decision list for the owner
+## Decisions made & implemented (2026-08-16)
 
-1. **Bootstrap pool size (F5):** how much KAI per epoch should the network mint,
-   total, for protocol-funded work at mainnet? (Pick a number → I implement the
-   pool split.)
-2. **Global free-tier budget (F7):** cap the network-wide free allowance per
-   epoch? (Yes/no + multiple; default suggestion 40×.)
-3. **Oracle rehearsal (above):** set `KAI_PRICE_SOURCES` on the host now, or keep
-   the fixed $0.01 anchor until closer to mainnet?
-4. **Treasury address (F8):** generate/choose the mainnet treasury address when
-   ready; splits activate the moment it is configured.
+The owner reviewed the findings and set the parameters. All are now IN CODE
+(`kai/lib/scheduler.js`), env-overridable, and proven by `kai/scripts/probe-perf-routing.js`:
+
+1. **Bootstrap = a capped network-wide POOL, not a per-machine mint (F5).** Replaced
+   the per-worker cap with one pool per epoch, divided across the epoch's *verified
+   useful work* (eval/verification + the free-allowance fraction of chat). **Unused
+   budget is not emitted — it stays in reserve. Passive uptime earns zero. Paid jobs
+   are never capped.** Because the cap is network-wide, N machines don't raise total
+   expense — they only dilute each machine's share, so Sybil farming is pointless.
+   Initial budget **1,500 KAI/day** (`KAI_BOOTSTRAP_KAI_PER_DAY`, = 15.625 KAI per
+   15-min epoch; governance-adjustable). This is *spending from an allocated reserve*,
+   not perpetual inflation.
+2. **Free tier is DAILY with a global ceiling (F7 + the epoch bug).** Found and fixed:
+   the free allowance was resetting every 15-min settlement epoch, i.e. **96× looser**
+   than the sim's per-day basis. Now **25k tokens/account/day** + a **~1M tokens/day
+   network-wide ceiling** (`KAI_FREE_TOKENS_PER_DAY`, `..._GLOBAL`), tracked by UTC day,
+   never reset by a settlement close. When the global ceiling is spent, **only
+   public-network free inference pauses until 00:00 UTC — local AI and paid KAI usage
+   keep working** (distinct 402 message tells the user which limit they hit).
+3. **Terminology fixed:** "epoch" now means only the 15-min settlement window; the free
+   tier is stated in "days." No silent double meaning.
+
+## Still owner-gated (not code-forced)
+
+4. **Oracle live sources (testnet rehearsal):** validated surrogate feed —
+   `KAI_PRICE_SOURCES` with CoinGecko `koinos.usd` (+ a second source) and
+   `KAI_REF_USD=0.042` as the rehearsal anchor. **KOIN is a surrogate for exercising
+   the mechanism, NOT a peg — KAI price ≠ KOIN price.** Set on the host when you want
+   the rehearsal; the oracle break-test harness (below) proves the machinery first.
+5. **Treasury address (F8):** splits (3%/7%) activate the moment `KAI_TREASURY_ADDR`
+   is set; choose the mainnet address when ready.
+6. **Mainnet contract deploy + adversarial audit of the settlement contract** — still
+   the big pre-mainnet gate, separate from these scheduler parameters.

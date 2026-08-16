@@ -6,6 +6,15 @@
  *   node tools/econ-sim.js        # human tables
  *   node tools/econ-sim.js --md   # markdown for docs/economics-sim-01.md
  *
+ * AS-BUILT NOTE (2026-08-16): the subsidy structure this sim analyzes (a
+ * per-PROVIDER eval mint) was SUPERSEDED. The scheduler now pays protocol-
+ * funded work from ONE capped NETWORK-WIDE pool (1,500 KAI/day, divided by
+ * useful work, unused left in reserve), and the free tier is DAILY with a
+ * global ceiling — see docs/economics-sprint-02.md. The hardware break-even
+ * tables below still hold (they don't depend on subsidy structure); the
+ * "eval subsidy share" and "protocol liabilities" tables describe the OLD
+ * per-provider model and are kept for historical comparison only.
+ *
  * Deterministic, dependency-free. Every input is a named constant below so
  * the next simulation run can vary one thing at a time. Grounded where
  * possible in MEASURED alpha data (the 2026-08-15 §46.3 acceptance run),
