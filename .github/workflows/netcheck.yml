@@ -29,6 +29,9 @@ jobs:
           curl -sS --max-time 15 -o /dev/null -w 'sched/stat HTTP %{http_code} in %{time_total}s\n' https://koinosai.com/scheduler/network/status
           curl -sS --max-time 15 -o /dev/null -w 'sched/heal HTTP %{http_code} in %{time_total}s\n' https://koinosai.com/api/health
           echo
+          echo "== /api/health (restart forensics) =="
+          curl -sS --max-time 15 https://koinosai.com/api/health | python3 -m json.tool || echo "(health unreachable)"
+          echo
           echo "== /scheduler/network/status body =="
           curl -sS --max-time 15 https://koinosai.com/scheduler/network/status | python3 -m json.tool || echo "(status endpoint unreachable)"
           echo
