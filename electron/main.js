@@ -109,6 +109,20 @@ async function start() {
 
   await win.loadURL(`http://127.0.0.1:${port}/`);
 
+  // OS wake is the earliest possible recovery signal: the moment Windows
+  // resumes from standby, re-register with the network — seconds instead
+  // of waiting out a timer (field finding: an idle laptop's standby took
+  // the node off the roster; recovery must be wake-instant).
+  {
+    const { powerMonitor } = require("electron");
+    powerMonitor.on("resume", () => {
+      fetch(`http://127.0.0.1:${port}/core/earn/nudge`, { method: "POST" }).catch(() => {});
+    });
+    powerMonitor.on("unlock-screen", () => {
+      fetch(`http://127.0.0.1:${port}/core/earn/nudge`, { method: "POST" }).catch(() => {});
+    });
+  }
+
   // Earning machines must not doze off: a sleeping laptop was the whole
   // network's "no providers" (field finding — the only provider walked
   // away and the lid logic took the network down). While earning is on,

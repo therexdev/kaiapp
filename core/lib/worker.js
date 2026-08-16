@@ -59,8 +59,26 @@ class Worker {
     // Watchdog: "the pane says Online but the network disagrees" must be
     // impossible. If polls have been silent too long, re-register; if the
     // loop itself died, restart it. Runs while earning is on.
+    this._lastTickAt = Date.now();
     this._watchdog = setInterval(async () => {
       if (!this.running) return;
+      // Frozen-clock detection: if this 60s timer fired FAR later than
+      // scheduled, the whole process was suspended (OS standby) — timers
+      // don't drift minutes on a running machine. Re-register immediately
+      // and count it, so the pane can tell the user their power settings
+      // are pausing earning (field finding: an idle Windows laptop
+      // suspended the app and the node silently fell off the roster).
+      const gap = Date.now() - this._lastTickAt;
+      this._lastTickAt = Date.now();
+      if (gap > 180000) {
+        this.stats.standbyResumes = (this.stats.standbyResumes || 0) + 1;
+        this.stats.lastStandbyAt = new Date().toISOString();
+        this.onEvent({ type: "worker:resumed-from-standby", suspendedSecs: Math.round(gap / 1000) });
+        try {
+          await this._register();
+        } catch { /* next tick retries */ }
+        return;
+      }
       if (this._loopDone) {
         this.onEvent({ type: "worker:watchdog-restarted-loop" });
         this._startLoop();
@@ -85,6 +103,17 @@ class Worker {
     this._loop = this._run().finally(() => {
       this._loopDone = true;
     });
+  }
+
+  /** Immediate presence recovery — called on OS resume (the shell hears
+   *  the native wake signal long before any timer notices). */
+  async nudge() {
+    if (!this.running) return { running: false };
+    try {
+      await this._register();
+      this.onEvent({ type: "worker:nudged-reregistered" });
+    } catch { /* unreachable — watchdog keeps retrying */ }
+    return { running: true };
   }
 
   async stop() {

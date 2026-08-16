@@ -255,6 +255,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
       settings.set("earn.autoStart", true);
       return st;
     },
+    nudge: async () => (worker ? worker.nudge() : { running: false }),
     // userIntent distinguishes the Stop button from process shutdown: only
     // the user's own Stop turns auto-resume off — a quit or update keeps
     // their "earning on" choice for the next launch.

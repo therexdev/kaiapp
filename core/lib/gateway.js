@@ -393,6 +393,10 @@ class Gateway {
         if (path === "/core/earn/stop" && req.method === "POST") {
           return this._json(res, 200, { ok: true, ...(await this.earn.stop()) });
         }
+        // OS just woke from standby: re-register NOW, not on the next timer.
+        if (path === "/core/earn/nudge" && req.method === "POST") {
+          return this._json(res, 200, { ok: true, ...(await (this.earn.nudge?.() ?? {})) });
+        }
       } catch (e) {
         return this._json(res, 400, { ok: false, error: String(e.message) });
       }

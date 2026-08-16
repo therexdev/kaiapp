@@ -638,6 +638,20 @@ async function renderEarn() {
         : null;
       stateEl.textContent = `Online — earning${ago != null ? ` · last contact ${ago}s ago` : ""}`;
     }
+    // Honest power guidance: if the OS suspended us, say so and name the
+    // fix — a silently flapping node looks like our bug, but it's a
+    // Windows sleep setting, and only the user can change it.
+    const standby = $("earn-standby-note");
+    if (standby) {
+      if (s.worker.standbyResumes > 0) {
+        standby.hidden = false;
+        standby.textContent =
+          `Windows standby paused earning ${s.worker.standbyResumes}× — the app reconnects on wake, but for 24/7 serving set ` +
+          `Sleep to “Never” while plugged in (Windows Settings → System → Power & battery).`;
+      } else {
+        standby.hidden = true;
+      }
+    }
     const earnErrMsg = s.earnings?.error || null;
     const rows = [
       ["Account", s.wallet.address ?? "—"],
