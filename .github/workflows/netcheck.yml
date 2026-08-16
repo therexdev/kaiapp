@@ -1,0 +1,24 @@
+name: Netcheck
+
+# Read-only probe of the live network, run where egress is open. Sandboxed
+# dev sessions can't always reach koinosai.com directly, so this dispatch-only
+# job prints the public status feeds into the job log — live evidence on
+# demand. It changes nothing anywhere.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  netcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Public network status
+        run: |
+          echo "== /scheduler/network/status =="
+          curl -sS --max-time 30 https://koinosai.com/scheduler/network/status | python3 -m json.tool
+          echo
+          echo "== /scheduler/network/models =="
+          curl -sS --max-time 30 https://koinosai.com/scheduler/network/models | python3 -m json.tool
+          echo
+          echo "== website =="
+          curl -sS --max-time 30 -o /dev/null -w 'koinosai.com HTTP %{http_code} in %{time_total}s\n' https://koinosai.com/
