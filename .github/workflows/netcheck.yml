@@ -7,9 +7,14 @@ name: Netcheck
 
 on:
   workflow_dispatch:
+  push:
+    branches: ["main", "claude/**"]
 
 jobs:
   netcheck:
+    # Push-triggered only when the commit message opts in with [netcheck]
+    # (same pattern as [bench] / [pin-verify]); dispatch always runs.
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[netcheck]')
     runs-on: ubuntu-latest
     steps:
       - name: Public network status
