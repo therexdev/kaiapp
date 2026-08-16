@@ -1,6 +1,6 @@
 # Koinos AI — Operational Source of Truth
 
-> **Status: CURRENT as of 2026-08-16 ~09:30Z (app v0.25.8, scheduler aa832ac).** This is the living record of what is
+> **Status: CURRENT as of 2026-08-16 ~21:00Z (app v0.25.8; scheduler f2f0350 — pool economics + restart forensics).** This is the living record of what is
 > BUILT, how it deploys, and the operational rules learned in the field. Spec authority
 > remains *Koinos AI — Master Source of Truth* Part I (owner's `.docx`); `§` references
 > point there. Planning history: `docs/V1_PLAN.md`, `docs/M2_PLAN.md`. When this doc and
@@ -154,8 +154,26 @@ for dev/screenshots).
     through a 3-lens multi-agent review (money-path, adversarial worker, runtime) with each
     finding independently refuted before acceptance. It caught the NaN crash, the
     answer-bank evasion, and the class of false-positives that would have burned honest
-    testers. Big money-path changes get this before deploy — the probe proves the fix, the
-    review finds what the probe didn't think to test.
+    testers. The economics batch got its own money-path review, which caught the debt-hole
+    (below) and corrected the owner's "Sybil-proof" premise. Big money-path changes get this
+    before deploy — the probe proves the fix, the review finds what the probe didn't test.
+11. **Economics: network bootstrap POOL + daily free tier (owner decision, deployed 2026-08-16)**:
+    protocol-funded work is paid from ONE capped network-wide budget per epoch
+    (`KAI_BOOTSTRAP_KAI_PER_DAY`, initial **1,500 KAI/day** = 15.625/15-min-epoch), divided
+    pro-rata across the epoch's useful work; **paid chat value is never capped; unused budget
+    stays in reserve (not minted); passive uptime earns zero.** Free tier is **daily** now
+    (`KAI_FREE_TOKENS_PER_DAY` 25k/account + `..._GLOBAL` ~1M/day network ceiling), tracked by
+    UTC day — fixed the 96× bug where 25k reset every 15-min epoch. Global-cap exhaustion
+    pauses only public free inference (local + paid keep working). **Review fix — earnings
+    debt hole**: because the pool divides by network demand, a worker's counted earnings can
+    DROP mid-epoch as others submit receipts; consumption is therefore authorized only against
+    the GUARANTEED floor (paid revenue, `_settleFor(mine,{poolSat:0,demandSat:1})`), which
+    never shrinks — so earnings-backed spend can't over-commit into an uncollectable debt.
+    Probes: `kai/scripts/probe-perf-routing.js` (pool caps total, divides by work, unused in
+    reserve, daily reset, global ceiling, debt floor) + `probe-oracle.js` (price break-tests).
+    **The pool bounds TOTAL emission (~50× tighter than the old per-worker cap) but NOT any
+    actor's SHARE** — a scripted fake-worker fleet still captures the pool's distribution.
+    That's the anti-Sybil work in §7.
 
 ## 5. Operational rules — do not relearn these
 
@@ -205,6 +223,15 @@ for dev/screenshots).
   09:21:59, then answered fine at 09:27. One or two failed probes right after a deploy are
   the rollover, not an outage — verify with a positive check a few minutes later before
   reverting. Workers ride it out (outbound-only + persisted roster; presence held).
+- **The host restarts the process on its own (not just on deploy).** 2026-08-16 ~20:43Z the
+  process went `i_0eceee22`→`i_b56be4e1` with a whole-site HTTP 000 blip the monitor caught,
+  with NO deploy — a host recycle (budget hosting) or a crash. The roster survived and workers
+  revived (persistence held), so it self-heals, but the CAUSE was a guess. Now instrumented:
+  `lib/runtime-log.js` records every exit's reason (host `signal:SIGTERM` vs code
+  `uncaughtException`+stack) and surfaces `{bootCount, lastExit}` on `/api/health`. **When
+  diagnosing a restart, read `/api/health` runtime first** — it tells you host-vs-code before
+  you theorize. Instance-id + bootAt changing across two `/network/status` samples = a restart;
+  perf counters (jobs/chal) reset with it.
 - **Checking the live network from a sandboxed session**: some dev environments block
   egress to koinosai.com entirely (curl and WebFetch both 403). The kaiapp **Netcheck**
   workflow (`.github/workflows/netcheck.yml`) prints `/network/status` + `/network/models`
@@ -252,22 +279,43 @@ for dev/screenshots).
 2. ~~Perf-fed routing (§51 phase 2)~~ — SHIPPED 2026-08-16 (`aa832ac`, §4.8). Watch the
    field: preference behavior on real consumer chats, probation false-positives (a slow
    machine mid-model-load eating lease expiries), whether the 4s window needs tuning.
-3. **Verification (§17)** — SHIPPED through `99a7c1f` (§4.9: enforced token-inflation +
-   tier-1/2; shadow class-discriminators + paid-path mystery chats). Remaining: **arm the
-   shadow tiers** once `perf.chal` field baselines prove honest pass rates, and **anti-Sybil
-   for penalties** — strikes/probation are per-address and addresses are free, so a real
-   deterrent needs staking or identity (this is the open-beta/mainnet integrity gate).
-4. ~~Public stats page~~ — SHIPPED 2026-08-16: `koinosai.com/network`.
-5. **Economics for mainnet (owner decisions pending)** — `docs/economics-sprint-02.md`:
-   (F5) replace per-provider eval minting with a fixed per-epoch bootstrap POOL — needs an
-   emission number from the owner; (F7) global per-epoch free-tier budget; (F8) set
-   `KAI_TREASURY_ADDR` to activate splits; oracle live sources (`KAI_PRICE_SOURCES`,
-   CoinGecko `koinos.usd` validated) — rehearse on testnet or hold anchor. Nothing changes
-   production until the owner picks numbers.
-6. **Ops hardening (mainnet)** — SHIPPED `99a7c1f`: rotating state backups + operator export;
-   `kai` scheduled monitor (issue/email on real failure). Remaining: zero-downtime deploys
-   (the ~6-min blackout per push) and moving JSON ledgers to something with real durability.
-7. Parked: async self-test (spawn vs spawnSync), Compare presets, deep-research surface,
+3. **Verification (§17)** — SHIPPED through `99a7c1f` (§4.9). Remaining: **arm the shadow
+   tiers** once `perf.chal` field baselines prove honest pass rates (early field data
+   2026-08-16: enforced t1/t2 at 100%, shadow t0 mystery already caught an honest worker
+   missing 1 of 3 at temp 0.7 — exactly why t0/t3 are shadow, not enforced).
+4. **Anti-Sybil / provider trust model (THE pre-mainnet integrity gate, owner-designed
+   2026-08-16)** — the bootstrap pool bounds total emission but not distribution; a scripted
+   fake fleet captures the pool's share. Direction DECIDED: **reputation-weighted first,
+   optional bonded staking layered at mainnet.** Owner's binding principles:
+   - **Reputation is non-transferable** and built from real signals: successful useful jobs,
+     verification-challenge history, random audits, reliability, benchmark consistency,
+     network age, real paid-demand served. 10,000 wallets = 10,000 *untrusted* identities.
+   - Reputation governs **eligibility / verification intensity / exposure to scarce
+     protocol-funded reward**, NOT payment multipliers. **Identical completed useful work has
+     the same base value** — faster hardware earns more only by completing more work. New
+     machines get higher audit rates + limited subsidy exposure, not lower pay for equal work.
+   - **Staking is optional, never required to start earning** ("you shouldn't have to buy KAI
+     to earn KAI"), added at mainnet for higher-assurance tiers/workloads; **staking earns no
+     passive yield** — it's economic accountability, not a faucet.
+   - **Slashing is narrow**: only provable fraud (forged receipts, fake computation, challenge
+     manipulation, protocol attack) past an evidence threshold. Ordinary operational failure
+     (outage, Windows update, driver crash) = job fails, no pay, reputation dent — never a slash.
+   - Defense in depth: reputation + device/benchmark fingerprints + challenge history +
+     paid-demand history + network age + optional bond + rate limits + anomaly detection, all
+     under the 1,500 KAI/day ceiling. Next build: reputation-weighted pool distribution (bring
+     a concrete design + sim before shipping).
+5. ~~Public stats page~~ — SHIPPED 2026-08-16: `koinosai.com/network`.
+6. **Economics (owner decisions MADE + deployed 2026-08-16, §4.11)**: bootstrap pool 1,500
+   KAI/day, daily free tier + 1M/day global ceiling — LIVE. Still owner-gated: `KAI_TREASURY_ADDR`
+   to activate splits (§F8); oracle live-source rehearsal (`KAI_PRICE_SOURCES` validated:
+   CoinGecko `koinos.usd`; owner sets on host, documented as SURROGATE not a peg;
+   `probe-oracle.js` proves the machinery). `docs/economics-sprint-02.md` is the record.
+7. **Ops hardening (mainnet)** — SHIPPED: rotating state backups + operator export; `kai`
+   scheduled monitor (issue/email on real failure); restart forensics on `/api/health` (§5).
+   Remaining: zero-downtime deploys (the ~6-min blackout per push) and moving JSON ledgers to
+   something with real durability. **Watch: the host recycled the process ~20:43Z 2026-08-16
+   with no deploy — check `/api/health` runtime after the next restart to confirm host-vs-code.**
+8. Parked: async self-test (spawn vs spawnSync), Compare presets, deep-research surface,
    Microsoft Store distribution, kaiapp scheduler-mirror resync-or-retire (§5).
 
 ## 8. Working with the owner
