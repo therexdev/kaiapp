@@ -112,12 +112,22 @@ for dev/screenshots).
    class selection when healthy alternatives exist; still serves named classes and still
    receives eval seeds (the road back). Provider-reported `tokPerSec` is display-only —
    routing trusts only server measurements. Probe: `kai/scripts/probe-perf-routing.js`
-   (7 assertions; fails on pre-`aa832ac` code). Eval leases honor the constructor
-   `leaseMs` override now (default unchanged) so probes can exercise expiry.
-9. **Deferred by design** (documented, not forgotten): seed-challenge verification needs
-   deepening before open beta (a dishonest worker claiming a catalog class — or inflating
-   its token counts, which billing AND `srvTokPerSec` read — is the remaining integrity
-   gap).
+   (11 assertions; the routing seven fail on pre-`aa832ac` code, the §17/lease four fail
+   on pre-`9af2a05`). Eval leases honor the constructor `leaseMs` override now (default
+   unchanged) so probes can exercise expiry. **Streaming refreshes the lease** (`9af2a05`):
+   a chunk posted mid-job resets its lease clock — a slow honest machine deep in a long
+   generation can't age into a timeout and drift onto probation; an absolute cap
+   (`KAI_JOB_ABS_CAP_MS`, 15 min) stops chunk spam holding a job forever. One `_busySet()`
+   definition serves stats, consume, seeding, reaping, and routing.
+9. **§17 verification, first deepening (`9af2a05`, 2026-08-16)**: hidden challenges are
+   GENERATED per seed (random-operand arithmetic, rotating capitals; multiplication and
+   spelling for classes ≥12GB) — no fixed pool to hardcode; rate via `KAI_CHALLENGE_RATE`
+   (default 0.4 ≈ the old 2-in-5 share); `dev-tiny` is never challenged. Token counts are
+   CLAMPED to ~2 chars/token of the visible prompt/output before billing or `srvTokPerSec`
+   read them (`scheduler:usage-clamped` events log offenders; not yet punished — watch the
+   field first). Still open before open beta: challenges that discriminate the CLASS
+   (catch a small model answering for a big one), and deciding when a clamp becomes a
+   dishonesty verdict.
 
 ## 5. Operational rules — do not relearn these
 
@@ -210,9 +220,13 @@ for dev/screenshots).
 2. ~~Perf-fed routing (§51 phase 2)~~ — SHIPPED 2026-08-16 (`aa832ac`, §4.8). Watch the
    field: preference behavior on real consumer chats, probation false-positives (a slow
    machine mid-model-load eating lease expiries), whether the 4s window needs tuning.
-3. **Verification deepening (§17)** — richer seed challenges per class before open beta.
-   Now also audits what routing consumes: token counts feed billing AND `srvTokPerSec`.
-4. **Public stats page** — graduate the Network tab's data to a koinosai.com page.
+3. **Verification deepening (§17)** — first pass SHIPPED 2026-08-16 (`9af2a05`, §4.9:
+   generated challenges + token clamp). Remaining before open beta: class-discriminating
+   challenges (catch a small model answering for a big class) and promoting repeated token
+   clamps to dishonesty verdicts once field baselines exist.
+4. ~~Public stats page~~ — SHIPPED 2026-08-16: `koinosai.com/network` (public
+   truncated-address feed, 10s refresh; nav + footer links; site contact is
+   contact@koinosai.com).
 5. Parked: async self-test (spawn vs spawnSync), Compare presets, deep-research surface,
    Microsoft Store distribution, kaiapp scheduler-mirror resync-or-retire (§5).
 
