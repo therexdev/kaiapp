@@ -119,15 +119,43 @@ for dev/screenshots).
    generation can't age into a timeout and drift onto probation; an absolute cap
    (`KAI_JOB_ABS_CAP_MS`, 15 min) stops chunk spam holding a job forever. One `_busySet()`
    definition serves stats, consume, seeding, reaping, and routing.
-9. **§17 verification, first deepening (`9af2a05`, 2026-08-16)**: hidden challenges are
-   GENERATED per seed (random-operand arithmetic, rotating capitals; multiplication and
-   spelling for classes ≥12GB) — no fixed pool to hardcode; rate via `KAI_CHALLENGE_RATE`
-   (default 0.4 ≈ the old 2-in-5 share); `dev-tiny` is never challenged. Token counts are
-   CLAMPED to ~2 chars/token of the visible prompt/output before billing or `srvTokPerSec`
-   read them (`scheduler:usage-clamped` events log offenders; not yet punished — watch the
-   field first). Still open before open beta: challenges that discriminate the CLASS
-   (catch a small model answering for a big one), and deciding when a clamp becomes a
-   dishonesty verdict.
+9. **§17 verification (`9af2a05` first pass, `99a7c1f` sprint-02)**: hidden challenges are
+   GENERATED per seed — no fixed pool to hardcode; `KAI_CHALLENGE_RATE` (default 0.4);
+   `dev-tiny` never challenged. Two enforcement postures, chosen by whether an honest model
+   can legitimately fail:
+   - **ENFORCED** (burns the receipt on fail): tier-1/2 per-class eval challenges (temp-0,
+     easy by construction) and **token-inflation** — a report over 3× a UTF-8 BYTE budget
+     (`24 + bytes`; unreachable by any real tokenizer, CJK/emoji included) earns strikes,
+     then burns after 3 (`KAI_CLAMP_ENFORCE`, default on). Byte budget, NOT char: a char
+     budget falsely clamped multilingual output.
+   - **SHADOW** (records pass/fail, never burns — arm with `KAI_CLASS_ENFORCE=1` once field
+     baselines prove honest pass rates): tier-3 **class discriminators** (multi-step tasks a
+     small model fumbles) and **mystery chats** — protocol-funded audits disguised as
+     consumer chats (`seedMysteryOnce`, `KAI_MYSTERY_RATE`/`_CAP_PER_EPOCH`). `give()` strips
+     EVERY server field (`forWorker`/`preferWorker`/`challenge`/`challengeTier`) at dispatch,
+     so a modified client can't distinguish an audit from paid work; prompts are diversified,
+     not one regex.
+   - **Anti-answer-bank**: `_passesChallenge` requires the answer to DOMINATE a normalized
+     reply (bounded length), so dumping "…95 96 97…" no longer passes. Per-tier history
+     (`perf.chal.t0..t3`) is the baseline for arming.
+   - Server-measured `srvTokPerSec` is capped (`KAI_SRV_TPS_CAP`, 400) so a garbage-dumper
+     can't fake speed to capture routing preference. Stranded mystery chats are GC'd like
+     evals (they're `type:chat` — previously exempt, could jam seeding).
+   - **CRITICAL fix**: non-numeric worker usage (`{}`/`"abc"`) became NaN in a receipt and
+     threw `BigInt(NaN)` at settlement — crashing the process every epoch and freezing all
+     earnings. All token counts now coerce to finite ints (`numOr`/`clampInt`) before any
+     math. (Pre-existing bug; found by the sprint-02 adversarial review.)
+   - **Residual (honest limits, before mainnet)**: a determined cheat can still re-register
+     under a fresh free address to shed strikes/probation — real anti-Sybil needs staking or
+     identity (see §7). The paid-path audit is a *deterrent that raises cost*, not a proof;
+     cryptographic assurance needs redundant cross-checking or attestation. Arming the shadow
+     tiers waits on watching `perf.chal` pass rates in the field.
+10. **Adversarial review discipline (proven 2026-08-16)**: the sprint-02 honesty batch went
+    through a 3-lens multi-agent review (money-path, adversarial worker, runtime) with each
+    finding independently refuted before acceptance. It caught the NaN crash, the
+    answer-bank evasion, and the class of false-positives that would have burned honest
+    testers. Big money-path changes get this before deploy — the probe proves the fix, the
+    review finds what the probe didn't think to test.
 
 ## 5. Operational rules — do not relearn these
 
@@ -224,14 +252,22 @@ for dev/screenshots).
 2. ~~Perf-fed routing (§51 phase 2)~~ — SHIPPED 2026-08-16 (`aa832ac`, §4.8). Watch the
    field: preference behavior on real consumer chats, probation false-positives (a slow
    machine mid-model-load eating lease expiries), whether the 4s window needs tuning.
-3. **Verification deepening (§17)** — first pass SHIPPED 2026-08-16 (`9af2a05`, §4.9:
-   generated challenges + token clamp). Remaining before open beta: class-discriminating
-   challenges (catch a small model answering for a big class) and promoting repeated token
-   clamps to dishonesty verdicts once field baselines exist.
-4. ~~Public stats page~~ — SHIPPED 2026-08-16: `koinosai.com/network` (public
-   truncated-address feed, 10s refresh; nav + footer links; site contact is
-   contact@koinosai.com).
-5. Parked: async self-test (spawn vs spawnSync), Compare presets, deep-research surface,
+3. **Verification (§17)** — SHIPPED through `99a7c1f` (§4.9: enforced token-inflation +
+   tier-1/2; shadow class-discriminators + paid-path mystery chats). Remaining: **arm the
+   shadow tiers** once `perf.chal` field baselines prove honest pass rates, and **anti-Sybil
+   for penalties** — strikes/probation are per-address and addresses are free, so a real
+   deterrent needs staking or identity (this is the open-beta/mainnet integrity gate).
+4. ~~Public stats page~~ — SHIPPED 2026-08-16: `koinosai.com/network`.
+5. **Economics for mainnet (owner decisions pending)** — `docs/economics-sprint-02.md`:
+   (F5) replace per-provider eval minting with a fixed per-epoch bootstrap POOL — needs an
+   emission number from the owner; (F7) global per-epoch free-tier budget; (F8) set
+   `KAI_TREASURY_ADDR` to activate splits; oracle live sources (`KAI_PRICE_SOURCES`,
+   CoinGecko `koinos.usd` validated) — rehearse on testnet or hold anchor. Nothing changes
+   production until the owner picks numbers.
+6. **Ops hardening (mainnet)** — SHIPPED `99a7c1f`: rotating state backups + operator export;
+   `kai` scheduled monitor (issue/email on real failure). Remaining: zero-downtime deploys
+   (the ~6-min blackout per push) and moving JSON ledgers to something with real durability.
+7. Parked: async self-test (spawn vs spawnSync), Compare presets, deep-research surface,
    Microsoft Store distribution, kaiapp scheduler-mirror resync-or-retire (§5).
 
 ## 8. Working with the owner
