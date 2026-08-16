@@ -23,11 +23,10 @@ streaming. Website + scheduler: **koinosai.com** (testers funnel: `koinosai.com/
 
 > **Branch note (2026-08-16):** active development moved to
 > `claude/koinos-ai-takeover-co25fw` (both repos), branched from the production tips above.
-> kaiapp CI runs on any `claude/**` branch, so app releases work from the new branch. But the
-> **kai production host still deploys from `claude/kai-production-website-fqx4pf`** — scheduler
-> changes pushed to the takeover branch do NOT reach koinosai.com until the owner either
-> repoints the host's deploy branch or approves pushing the takeover branch's commits to the
-> production branch. Resolve with the owner before the first scheduler change ships.
+> kaiapp CI runs on any `claude/**` branch, so app releases work from the new branch. The
+> kai production host still deploys from `claude/kai-production-website-fqx4pf`; the owner
+> approved (2026-08-16) pushing kai changes to that branch to deploy — develop on the
+> takeover branch, then push the same commits to the production branch to ship.
 
 - Version bumps: BOTH `package.json` and `core/package.json` (a test enforces the match).
 - Code signing: **not yet** — Azure Trusted Signing org validation pending (Web20Ranker LLC,
