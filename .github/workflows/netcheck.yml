@@ -28,3 +28,12 @@ jobs:
           echo "== website =="
           curl -sS --max-time 30 -o /dev/null -w 'koinosai.com HTTP %{http_code} in %{time_total}s\n' https://koinosai.com/
           curl -sS --max-time 30 -o /dev/null -w '/network HTTP %{http_code} in %{time_total}s\n' https://koinosai.com/network
+      - name: Price-feed formats (oracle rehearsal candidates)
+        if: contains(github.event.head_commit.message, '[pricecheck]')
+        run: |
+          echo "== coingecko koinos.usd =="
+          curl -sS --max-time 20 "https://api.coingecko.com/api/v3/simple/price?ids=koinos&vs_currencies=usd"
+          echo; echo "== coinpaprika quotes.USD.price =="
+          curl -sS --max-time 20 "https://api.coinpaprika.com/v1/tickers/koin-koinos" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['quotes']['USD']['price'])"
+          echo "== gateio 0.last =="
+          curl -sS --max-time 20 "https://api.gateio.ws/api/v4/spot/tickers?currency_pair=KOIN_USDT"
