@@ -29,8 +29,8 @@ streaming. Website + scheduler: **koinosai.com** (testers funnel: `koinosai.com/
 > takeover branch, then push the same commits to the production branch to ship.
 
 - Version bumps: BOTH `package.json` and `core/package.json` (a test enforces the match).
-- Code signing: **not yet** — Azure Trusted Signing org validation pending (Web20Ranker LLC,
-  East US). CI is pre-wired: adding the `AZURE_SIGNING_ACCOUNT`/`PROFILE` (+ tenant/client
+- Code signing: **not yet** — Azure Trusted Signing org identity validation pending (Koinos
+  AI, East US). CI is pre-wired: adding the `AZURE_SIGNING_ACCOUNT`/`PROFILE` (+ tenant/client
   secrets) makes the next `[release]` ship signed. Fallback option: SSL.com eSigner.
 - No PRs — direct pushes to the branch above. Commits carry no model identifiers.
 
