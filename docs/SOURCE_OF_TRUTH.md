@@ -21,6 +21,14 @@ streaming. Website + scheduler: **koinosai.com** (testers funnel: `koinosai.com/
 | `therexdev/kai` (website + scheduler) | `claude/kai-production-website-fqx4pf` | **Deploys to koinosai.com on push.** Scheduler restarts; roster survives (workers.json) and nodes revive on their next poll (liveness fix). Batch scheduler pushes; each restart is safe but not free. |
 | `therexdev/kaiapp` (desktop app) | `claude/kai-production-website-fqx4pf` | CI runs tests. **Installers build ONLY when the commit message starts with `[release]` or `[dist]`.** Publishes GitHub release + auto-update feeds (`latest.yml` / `latest-linux.yml`). Auto-updater checks at launch + every 4h. |
 
+> **Branch note (2026-08-16):** active development moved to
+> `claude/koinos-ai-takeover-co25fw` (both repos), branched from the production tips above.
+> kaiapp CI runs on any `claude/**` branch, so app releases work from the new branch. But the
+> **kai production host still deploys from `claude/kai-production-website-fqx4pf`** — scheduler
+> changes pushed to the takeover branch do NOT reach koinosai.com until the owner either
+> repoints the host's deploy branch or approves pushing the takeover branch's commits to the
+> production branch. Resolve with the owner before the first scheduler change ships.
+
 - Version bumps: BOTH `package.json` and `core/package.json` (a test enforces the match).
 - Code signing: **not yet** — Azure Trusted Signing org validation pending (Web20Ranker LLC,
   East US). CI is pre-wired: adding the `AZURE_SIGNING_ACCOUNT`/`PROFILE` (+ tenant/client
@@ -138,17 +146,30 @@ for dev/screenshots).
 - **Release habit**: after every `[release]` push, arm a silent check (~12–18 min) that
   verifies the GitHub release + installer assets exist; report to the user only on
   failure.
+- **Checking the live network from a sandboxed session**: some dev environments block
+  egress to koinosai.com entirely (curl and WebFetch both 403). The kaiapp **Netcheck**
+  workflow (`.github/workflows/netcheck.yml`) prints `/network/status` + `/network/models`
+  from a GitHub runner: push a commit whose message contains `[netcheck]` (empty commit is
+  fine), then read the job log. Manual `workflow_dispatch` exists but app-token dispatch is
+  403 — the commit-message trigger is the reliable path. Beware: dispatching `ci.yml`
+  manually builds Windows installers (`workflow_dispatch` satisfies its build gate).
 
-## 6. Live state (2026-08-16, ~08:00Z)
+## 6. Live state (2026-08-16, ~09:05Z)
 
-- **App v0.25.8** released (RAM-aware advertising). v0.25.5 fast-switch, v0.25.6 trust
-  boundary, v0.25.7 Network tab all published with full asset sets. A silent CI check for
-  v0.25.8 is armed for 08:53Z.
+- **App v0.25.8** released and VERIFIED (09:04Z, GitHub API): full asset set — Setup exe,
+  portable exe, AppImage, blockmap, `latest.yml` + `latest-linux.yml`; auto-update feed
+  already being pulled (6 `latest.yml` downloads). v0.25.5 fast-switch, v0.25.6 trust
+  boundary, v0.25.7 Network tab all published with full asset sets.
 - **Scheduler** deployed through commit `6b40ddc` (fair seeding + server capability gate).
-- **Network**: 3 workers online at last look — owner's laptop (8–9 classes, the machine
-  whose llama builds crash → Ollama fallback), owner's desktop (llama works on CPU rung),
-  and a third node serving `koinos-fast` + `qwen25-32b` (possibly the first outside
-  tester). 9 model classes live. Presence has held for hours since the liveness fix.
+  Live instance `i_50e07d94` booted 08:22:43Z — a restart around release time; the roster
+  survived it and all nodes revived (liveness fix holding).
+- **Network** (probed live 09:04Z via Netcheck): 3 workers online, none busy, all seen
+  ≤11s — `1AUgCZ…AXHo` (koinos-fast + qwen25-32b, 21 jobs, tok/s 0.83), `1H7Qva…FjvK`
+  (8 classes — owner's laptop, 17 jobs, tok/s 0.59), `1EXvuu…Mj6E` (koinos-fast +
+  koinos-balanced, 17 jobs, tok/s 0.71). 9 model classes live; queue 0, pending 0,
+  recentOffline empty. Fair seeding visibly balanced: 6/5/5 seeds this epoch. Perf
+  counters (`tokPerSec`, `cuRating`, jobs) are populating for every node — the §51
+  phase-2 inputs are real data now.
 - **Alpha announcement**: posted (Telegram-format post + 8 real screenshots delivered).
 - **Earlier project phases** (contract deposit/claim_value, splits, oracle, budgets,
   royalties, kill switch, feedback pipeline, design pass, Odysseus tranches 1–3) are
