@@ -330,7 +330,7 @@ class Gateway {
       if (!this._netModels || Date.now() - this._netModels.at > 20000) {
         let v = { workersOnline: 0, models: [] };
         try {
-          const r = await fetch(`${schedulerUrl.replace(/\/$/, "")}/network/models`, { signal: AbortSignal.timeout(4000) });
+          const r = await fetch(`${schedulerUrl.replace(/\/$/, "")}/network/models`, { headers: { connection: "close" }, signal: AbortSignal.timeout(4000) });
           const j = await r.json();
           if (j?.ok) v = { workersOnline: j.workersOnline, models: j.models || [] };
         } catch { /* offline — empty list */ }
@@ -617,7 +617,9 @@ class Gateway {
     try {
       upstream = await fetch(`${schedulerUrl.replace(/\/$/, "")}/consume/chat/completions`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        // Fresh TCP: an idle-dropped pooled connection must never eat a
+        // paid network request (see worker.js — same field finding).
+        headers: { "content-type": "application/json", connection: "close" },
         body: JSON.stringify({ messages: body.messages, model: netModel, stream: !!body.stream, ...ident }),
         signal: AbortSignal.timeout(190000), // streamed big-class answers run minutes
       });
@@ -718,7 +720,7 @@ class Gateway {
     if (!(this._rates && this._rates.url === schedulerUrl && Date.now() - this._rates.at < 3600000)) {
       let models = null;
       try {
-        const r = await fetch(`${schedulerUrl.replace(/\/$/, "")}/pricing`, { signal: AbortSignal.timeout(4000) });
+        const r = await fetch(`${schedulerUrl.replace(/\/$/, "")}/pricing`, { headers: { connection: "close" }, signal: AbortSignal.timeout(4000) });
         const j = await r.json();
         if (j?.models) models = j.models;
       } catch {

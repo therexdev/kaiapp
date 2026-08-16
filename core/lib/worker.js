@@ -38,7 +38,7 @@ class Worker {
     const ready = this.models ? this.models.aliases().filter((a) => a.status === "ready").map((a) => a.alias) : [];
     const r = await fetch(`${this.schedulerUrl}/worker/register`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", connection: "close" },
       body: JSON.stringify({ address, capabilities: this.hardware?.capabilities ?? {}, models: ready }),
     });
     const j = await r.json();
@@ -133,6 +133,11 @@ class Worker {
         // Client timeout comfortably above the scheduler's 20s hold, so a
         // loaded machine doesn't abort polls the server is still serving.
         const r = await fetch(`${this.schedulerUrl}/worker/next-job?token=${this.token}`, {
+          // Fresh TCP per request: NAT/routers silently drop idle pooled
+          // connections and Node's pool then serves the corpse to every
+          // later request — the node "goes offline" on an awake machine
+          // and never heals (field finding, the day's final boss).
+          headers: { connection: "close" },
           signal: AbortSignal.any([AbortSignal.timeout(45000), this._pollAbort.signal]),
         });
         if (r.status === 200) {
@@ -170,7 +175,7 @@ class Worker {
       // "no providers" precisely when the provider was working hardest.
       const beat = setInterval(async () => {
         try {
-          const r = await fetch(`${this.schedulerUrl}/worker/heartbeat?token=${this.token}`, { method: "POST" });
+          const r = await fetch(`${this.schedulerUrl}/worker/heartbeat?token=${this.token}`, { method: "POST", headers: { connection: "close" } });
           // Scheduler restarted mid-job and forgot us: re-register NOW so
           // the machine stays on the roster while it finishes generating
           // (field finding: a busy provider went invisible for the whole
@@ -196,7 +201,7 @@ class Worker {
           lastPost = now;
           fetch(`${this.schedulerUrl}/worker/chunk?token=${this.token}`, {
             method: "POST",
-            headers: { "content-type": "application/json" },
+            headers: { "content-type": "application/json", connection: "close" },
             body: JSON.stringify({ jobId: job.id, delta: chunk }),
           }).catch(() => {});
         };
@@ -212,7 +217,7 @@ class Worker {
         const signature = await this.wallet.signHash(hash);
         const res = await fetch(`${this.schedulerUrl}/worker/result?token=${this.token}`, {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: { "content-type": "application/json", connection: "close" },
           body: JSON.stringify({ jobId: job.id, output, usage, perf, signature }),
         });
         const jr = await res.json();

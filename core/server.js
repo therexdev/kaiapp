@@ -288,7 +288,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     if (!base) return;
     let revoked;
     try {
-      const r = await fetch(`${base.replace(/\/$/, "")}/policy`, { signal: AbortSignal.timeout(8000) });
+      const r = await fetch(`${base.replace(/\/$/, "")}/policy`, { headers: { connection: "close" }, signal: AbortSignal.timeout(8000) });
       revoked = (await r.json())?.revoked;
     } catch {
       return; // unreachable — next tick retries
