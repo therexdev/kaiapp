@@ -46,13 +46,35 @@ class Worker {
       // trigger a mid-lease gigabyte download and time out. Private models
       // stay private: custom imports and dev builds never ride the network
       // (unpriced, unvetted weights) — the scheduler enforces this too.
+      // And only models this machine can serve COMFORTABLY: downloading a
+      // model bigger than your RAM must not make you eligible for its jobs
+      // (field feedback — it would reward hoarding over capability). The
+      // same minRamGb line the catalog shows buyers gates what we offer.
+      const ramGb = this.hardware?.ramBytes ? this.hardware.ramBytes / 1e9 : null;
+      const fits = (a) => ramGb == null || !a.minRamGb || a.minRamGb <= ramGb;
       const ready = this.models
-        ? this.models.aliases().filter((a) => a.status === "ready" && !a.custom && !a.dev).map((a) => a.alias)
+        ? this.models.aliases().filter((a) => a.status === "ready" && !a.custom && !a.dev && fits(a)).map((a) => a.alias)
         : [];
+      // Every downloaded model is too big for this machine: say so instead
+      // of silently earning nothing (the empty advertisement is correct —
+      // this machine has nothing it can serve the network comfortably).
+      if (this.models && ready.length === 0 && this.models.aliases().some((a) => a.status === "ready" && !a.custom && !a.dev)) {
+        this.onEvent({
+          type: "worker:no-servable-models",
+          message: "The models on this machine need more RAM than it has — download a smaller model (like Koinos Fast) to serve and earn.",
+        });
+      }
       const r = await fetch(`${this.schedulerUrl}/worker/register`, {
         method: "POST",
         headers: { "content-type": "application/json", connection: "close" },
-        body: JSON.stringify({ address, capabilities: this.hardware?.capabilities ?? {}, models: ready }),
+        body: JSON.stringify({
+          address,
+          // RAM rides along so the scheduler can apply the same fit rule
+          // server-side — the honest-client filter alone can't bind stale
+          // or modified clients.
+          capabilities: { ...(this.hardware?.capabilities ?? {}), ...(ramGb ? { ramGb: Math.round(ramGb) } : {}) },
+          models: ready,
+        }),
       });
       const j = await r.json();
       if (!j.ok) throw new Error(`Scheduler refused registration: ${j.error}`);

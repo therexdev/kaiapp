@@ -37,14 +37,17 @@ test("worker advertises only catalog models — custom imports and dev builds st
       schedulerUrl: `http://127.0.0.1:${port}`,
       wallet: { address: "1TestAddr", signHash: async () => "sig" },
       runtime: { ensure: async () => "http://127.0.0.1:1" },
-      hardware: null,
+      hardware: { ramBytes: 8e9 }, // an 8 GB machine
       models: {
         aliases: () => [
-          { alias: "koinos-fast", status: "ready" },
-          { alias: "gemma3-4b", status: "absent" }, // not on disk — never advertised
+          { alias: "koinos-fast", status: "ready", minRamGb: 4 },
+          { alias: "gemma3-4b", status: "absent", minRamGb: 8 }, // not on disk — never advertised
           { alias: "dev-tiny", status: "ready", dev: true }, // pipeline model — private
           { alias: "custom-my-novel-gguf", status: "ready", custom: true }, // import — private
-          { alias: "koinos-balanced", status: "ready" },
+          // Downloaded but far beyond this machine's RAM: hoarding a model
+          // you can't serve must not make you eligible for its jobs.
+          { alias: "qwen25-14b", status: "ready", minRamGb: 24 },
+          { alias: "koinos-balanced", status: "ready" }, // no minRamGb — benefit of the doubt
         ],
       },
       onEvent: () => {},
