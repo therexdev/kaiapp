@@ -1,6 +1,6 @@
 # Koinos AI — Operational Source of Truth
 
-> **Status: CURRENT as of 2026-08-16 (app v0.25.8).** This is the living record of what is
+> **Status: CURRENT as of 2026-08-16 ~09:30Z (app v0.25.8, scheduler aa832ac).** This is the living record of what is
 > BUILT, how it deploys, and the operational rules learned in the field. Spec authority
 > remains *Koinos AI — Master Source of Truth* Part I (owner's `.docx`); `§` references
 > point there. Planning history: `docs/V1_PLAN.md`, `docs/M2_PLAN.md`. When this doc and
@@ -103,11 +103,21 @@ for dev/screenshots).
    minutes); eval leases 60s.
 7. **Streaming**: worker posts deltas to `/worker/chunk` (also a liveness signal);
    consumers get SSE with `servedModel` surfaced (the UI shows a route tag).
-8. **Deferred by design** (documented, not forgotten): perf-fed routing — the scheduler
-   already tracks `tokPerSec`/`cuRating`/jobs per address (§51 groundwork) but does not
-   yet weight dispatch or eligibility with it; seed-challenge verification needs deepening
-   before open beta (a dishonest worker claiming a catalog class is the remaining
-   integrity gap).
+8. **Perf-fed routing (§51 phase 2, SHIPPED 2026-08-16, commit `aa832ac`)**: the scheduler
+   measures every worker itself — `srvTokPerSec` (completion tokens over dispatch-to-result
+   wall time) and outcomes `ok`/`to` (lease expiry)/`bad` (failed challenge) folded into a
+   smoothed success rate `sr`. Chat jobs get a soft 4s reservation (`preferWorker`/
+   `preferUntil`, `KAI_PREFER_WINDOW_MS`) for the best-measured capable worker, then open
+   to everyone. Probation (≥4 outcomes, sr < 0.5): never preferred, excluded from "auto"
+   class selection when healthy alternatives exist; still serves named classes and still
+   receives eval seeds (the road back). Provider-reported `tokPerSec` is display-only —
+   routing trusts only server measurements. Probe: `kai/scripts/probe-perf-routing.js`
+   (7 assertions; fails on pre-`aa832ac` code). Eval leases honor the constructor
+   `leaseMs` override now (default unchanged) so probes can exercise expiry.
+9. **Deferred by design** (documented, not forgotten): seed-challenge verification needs
+   deepening before open beta (a dishonest worker claiming a catalog class — or inflating
+   its token counts, which billing AND `srvTokPerSec` read — is the remaining integrity
+   gap).
 
 ## 5. Operational rules — do not relearn these
 
@@ -145,6 +155,18 @@ for dev/screenshots).
 - **Release habit**: after every `[release]` push, arm a silent check (~12–18 min) that
   verifies the GitHub release + installer assets exist; report to the user only on
   failure.
+- **The kaiapp scheduler mirror is STALE.** `kai/lib/scheduler.js` claims to be "mirrored
+  from therexdev/kaiapp server/scheduler.js — keep in sync", but the sync stopped long ago:
+  the kai copy carries months of evolution (roster persistence, multi-class dispatch, fair
+  seeding, streaming, perf-fed routing) the kaiapp copy lacks, and kaiapp's `core/test`
+  scheduler tests exercise the OLD copy. The kai copy is CANONICAL — scheduler changes land
+  there with a probe script (`kai/scripts/`), not in kaiapp. Either resync the mirror (and
+  its tests) deliberately someday, or retire it; don't trust the header comment.
+- **Deploys cause a public unreachability window (minutes).** Shipping `aa832ac` the site
+  TCP-timed out at 09:21 and STILL at 09:26 despite the new instance's first stats serve at
+  09:21:59, then answered fine at 09:27. One or two failed probes right after a deploy are
+  the rollover, not an outage — verify with a positive check a few minutes later before
+  reverting. Workers ride it out (outbound-only + persisted roster; presence held).
 - **Checking the live network from a sandboxed session**: some dev environments block
   egress to koinosai.com entirely (curl and WebFetch both 403). The kaiapp **Netcheck**
   workflow (`.github/workflows/netcheck.yml`) prints `/network/status` + `/network/models`
@@ -153,7 +175,13 @@ for dev/screenshots).
   403 — the commit-message trigger is the reliable path. Beware: dispatching `ci.yml`
   manually builds Windows installers (`workflow_dispatch` satisfies its build gate).
 
-## 6. Live state (2026-08-16, ~09:05Z)
+## 6. Live state (2026-08-16, ~09:30Z)
+
+- **Perf-fed routing deployed**: scheduler at `aa832ac` (instance `i_7fc31d63`, boot
+  09:21:59Z), pushed to the production branch per the owner's approved deploy path. All 3
+  workers survived the restart; server-measured fields live on /network/status —
+  `srvTokPerSec` 4.13 (laptop `1H7Qva…`), 1.86 (`1EXvuu…`), 0.47 (`1AUgCZ…`), all `sr: 1`.
+  Roster, fair seeding, and the 9 live classes intact post-deploy.
 
 - **App v0.25.8** released and VERIFIED (09:04Z, GitHub API): full asset set — Setup exe,
   portable exe, AppImage, blockmap, `latest.yml` + `latest-linux.yml`; auto-update feed
@@ -179,13 +207,14 @@ for dev/screenshots).
 1. **Azure Trusted Signing** — waiting on the owner's identity validation; then add the
    secrets and the next `[release]` ships signed. (Portal path: top search bar → "Trusted
    Signing accounts"; provider `Microsoft.CodeSigning` must be registered.)
-2. **Perf-fed routing (§51 phase 2)** — feed measured tok/s, CU rating, success/timeout
-   rates into dispatch preference and class eligibility; promised to the tester community
-   as the follow-up to the RAM gate.
+2. ~~Perf-fed routing (§51 phase 2)~~ — SHIPPED 2026-08-16 (`aa832ac`, §4.8). Watch the
+   field: preference behavior on real consumer chats, probation false-positives (a slow
+   machine mid-model-load eating lease expiries), whether the 4s window needs tuning.
 3. **Verification deepening (§17)** — richer seed challenges per class before open beta.
+   Now also audits what routing consumes: token counts feed billing AND `srvTokPerSec`.
 4. **Public stats page** — graduate the Network tab's data to a koinosai.com page.
 5. Parked: async self-test (spawn vs spawnSync), Compare presets, deep-research surface,
-   Microsoft Store distribution.
+   Microsoft Store distribution, kaiapp scheduler-mirror resync-or-retire (§5).
 
 ## 8. Working with the owner
 
