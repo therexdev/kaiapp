@@ -185,13 +185,17 @@ for dev/screenshots).
   403 — the commit-message trigger is the reliable path. Beware: dispatching `ci.yml`
   manually builds Windows installers (`workflow_dispatch` satisfies its build gate).
 
-## 6. Live state (2026-08-16, ~09:30Z)
+## 6. Live state (2026-08-16, ~14:47Z)
 
-- **Perf-fed routing deployed**: scheduler at `aa832ac` (instance `i_7fc31d63`, boot
-  09:21:59Z), pushed to the production branch per the owner's approved deploy path. All 3
-  workers survived the restart; server-measured fields live on /network/status —
-  `srvTokPerSec` 4.13 (laptop `1H7Qva…`), 1.86 (`1EXvuu…`), 0.47 (`1AUgCZ…`), all `sr: 1`.
-  Roster, fair seeding, and the 9 live classes intact post-deploy.
+- **Scheduler at `9af2a05`** (instance `i_238755bb`, boot 14:40:43Z): perf-fed routing +
+  §17 first deepening + streaming lease guard, all live. All 3 workers survived both of
+  today's deploys; one was mid-job (`busy: true`) at the check — busy-state path working.
+  Generated challenges are flowing and honest machines are passing them (`sr: 1` across the
+  roster). The measured-vs-reported gap is visibly real: `1AUgCZ…` self-reports 11.87 tok/s
+  but measures 6.85 — routing uses the measured number.
+- **koinosai.com/network is live** (HTTP 200): the public stats page, nav+footer linked.
+  Site contact is contact@koinosai.com everywhere.
+- 9 model classes live; roster and fair seeding intact.
 
 - **App v0.25.8** released and VERIFIED (09:04Z, GitHub API): full asset set — Setup exe,
   portable exe, AppImage, blockmap, `latest.yml` + `latest-linux.yml`; auto-update feed
