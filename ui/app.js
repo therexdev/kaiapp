@@ -253,6 +253,7 @@ for (const b of document.querySelectorAll(".nav-item[data-view]")) {
     if (state.view === "models") renderModels();
     if (state.view === "compare") renderCompare();
     if (state.view === "tasks") renderTasks();
+    if (state.view === "network") renderNetwork();
     if (state.view === "docs") renderDocs();
   });
 }

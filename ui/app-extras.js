@@ -339,3 +339,90 @@ $("task-list").addEventListener("click", async (e) => {
     renderTasks();
   }
 });
+
+// ---------- Network status (live public stats — the admin view, for everyone) ----------
+
+let netTimer = null;
+
+function netEl(tag, cls, text) {
+  const el = document.createElement(tag);
+  if (cls) el.className = cls;
+  if (text != null) el.textContent = text;
+  return el;
+}
+
+async function renderNetwork() {
+  clearTimeout(netTimer);
+  if ($("view-network").hidden) return;
+
+  let s = null;
+  let myAddr = null;
+  try {
+    s = await coreGet("/core/network/status");
+  } catch { /* unreachable */ }
+  try {
+    const e = await coreGet("/core/earn");
+    const a = e?.wallet?.address;
+    if (a) myAddr = `${a.slice(0, 6)}…${a.slice(-4)}`; // matches the scheduler's display form
+  } catch { /* no wallet yet — nothing to mark */ }
+
+  const note = $("net-note");
+  const chips = $("net-models");
+  const list = $("net-workers");
+
+  if (!s || !s.reachable) {
+    $("net-computers").textContent = "–";
+    $("net-classes").textContent = "–";
+    $("net-queue").textContent = "–";
+    chips.replaceChildren();
+    list.replaceChildren();
+    note.textContent = "The network isn't reachable right now. It reconnects on its own — this page keeps retrying.";
+  } else {
+    $("net-computers").textContent = String(s.workersOnline ?? 0);
+    $("net-classes").textContent = String((s.models || []).length);
+    $("net-queue").textContent = String((s.queueDepth ?? 0) + (s.pendingJobs ?? 0));
+
+    chips.replaceChildren();
+    for (const m of s.models || []) {
+      const chip = netEl("span", "net-chip");
+      chip.append(netEl("b", null, state.aliasLabels?.[m.model] || m.model), ` ×${m.providers}`);
+      chips.appendChild(chip);
+    }
+    if (!(s.models || []).length) chips.appendChild(netEl("span", "hint", "No models are being served right now."));
+
+    list.replaceChildren();
+    for (const w of s.workers || []) {
+      const card = netEl("div", "net-worker");
+      const head = netEl("div", "net-worker-head");
+      head.appendChild(netEl("span", `net-dot${w.busy ? " busy" : ""}`));
+      head.appendChild(netEl("span", "net-status-word", w.busy ? "Busy — answering now" : "Online"));
+      head.appendChild(netEl("span", "net-addr", w.address));
+      if (myAddr && w.address === myAddr) head.appendChild(netEl("span", "chip-you", "this machine"));
+      head.appendChild(netEl("span", "net-seen", `seen ${w.lastSeenSecs}s ago`));
+      card.appendChild(head);
+
+      const mrow = netEl("div", "net-chips");
+      for (const m of w.models || []) mrow.appendChild(netEl("span", "net-chip", state.aliasLabels?.[m] || m));
+      if (!(w.models || []).length) mrow.appendChild(netEl("span", "hint", "no models advertised"));
+      card.appendChild(mrow);
+
+      const met = netEl("div", "net-worker-metrics");
+      const tok = w.perf?.tokPerSec;
+      const cu = w.perf?.cuRating;
+      const tokSpan = netEl("span");
+      tokSpan.append(netEl("b", null, tok ? tok.toFixed(1) : "–"), " tok/s");
+      const cuSpan = netEl("span");
+      cuSpan.append("CU ", netEl("b", null, cu ? cu.toFixed(2) : "–"));
+      const jobsSpan = netEl("span");
+      jobsSpan.append(netEl("b", null, String(w.jobsThisEpoch ?? 0)), " jobs this epoch");
+      met.append(tokSpan, cuSpan, jobsSpan);
+      card.appendChild(met);
+
+      list.appendChild(card);
+    }
+    if (!(s.workers || []).length) list.appendChild(netEl("p", "hint", "No computers are online right now. Yours can be the first — flip on Earn."));
+    note.textContent = "";
+  }
+
+  if (!$("view-network").hidden) netTimer = setTimeout(renderNetwork, 15000);
+}

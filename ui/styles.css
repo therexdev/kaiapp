@@ -493,3 +493,24 @@ button.primary:hover:not(:disabled) { box-shadow: 0 4px 16px rgba(109, 62, 240, 
   #composer #btn-send, #composer #btn-stop, #composer #btn-attach { order: 6; }
   #src-pick, #model-pick, #persona-pick { max-width: none; flex: 1 1 auto; }
 }
+
+/* ---------- Network status ---------- */
+.net-tiles { display: flex; gap: 12px; flex-wrap: wrap; }
+.net-tile { flex: 1 1 130px; background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius); padding: 15px 18px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2); }
+.net-tile-num { font-size: 1.85em; font-weight: 700; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.net-tile-label { font-size: 0.78em; color: var(--text-dim); margin-top: 3px; }
+.net-h { font-size: 1em; margin: 0 0 10px; }
+.net-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+.net-chip { font-size: 0.8em; border: 1px solid var(--border); background: var(--bg-input); border-radius: 999px; padding: 4px 11px; white-space: nowrap; }
+.net-chip b { font-weight: 650; }
+.net-workers { display: flex; flex-direction: column; gap: 10px; }
+.net-worker { background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; display: flex; flex-direction: column; gap: 9px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2); }
+.net-worker-head { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.net-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--emerald); flex: none; }
+.net-dot.busy { background: #ffd479; }
+.net-status-word { font-size: 0.78em; color: var(--text-dim); }
+.net-addr { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.86em; }
+.chip-you { font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em; color: var(--emerald); background: rgba(52, 199, 123, 0.1); border: 1px solid #2a6f57; border-radius: 999px; padding: 2px 8px; }
+.net-seen { margin-left: auto; font-size: 0.76em; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.net-worker-metrics { display: flex; gap: 18px; font-size: 0.84em; color: var(--text-dim); flex-wrap: wrap; }
+.net-worker-metrics b { color: var(--text); font-weight: 650; font-variant-numeric: tabular-nums; }

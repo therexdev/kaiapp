@@ -339,6 +339,27 @@ class Gateway {
       return this._json(res, 200, { ok: true, ...this._netModels.v });
     }
 
+    // Full network status — feeds the Network tab: computers online, live
+    // classes, and per-provider rows (addresses arrive pre-truncated from
+    // the scheduler). Same brief cache + fail-soft shape as the picker.
+    if (this.network && path === "/core/network/status" && req.method === "GET") {
+      const { schedulerUrl } = this.network.status();
+      if (!schedulerUrl) return this._json(res, 200, { ok: true, reachable: false, workersOnline: 0, models: [], workers: [] });
+      if (!this._netStatus || Date.now() - this._netStatus.at > 10000) {
+        let v = { reachable: false, workersOnline: 0, models: [], workers: [] };
+        try {
+          const r = await fetch(`${schedulerUrl.replace(/\/$/, "")}/network/status`, { headers: { connection: "close" }, signal: AbortSignal.timeout(4000) });
+          const j = await r.json();
+          if (j?.ok) {
+            const { ok, ...rest } = j;
+            v = { reachable: true, ...rest };
+          }
+        } catch { /* offline — empty shape */ }
+        this._netStatus = { at: Date.now(), v };
+      }
+      return this._json(res, 200, { ok: true, ...this._netStatus.v });
+    }
+
     if (this.network && path === "/core/network" && req.method === "GET") {
       return this._json(res, 200, { ok: true, ...this.network.status() });
     }

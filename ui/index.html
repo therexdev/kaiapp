@@ -40,6 +40,7 @@
         <button class="nav-item" data-view="compare">Compare</button>
         <button class="nav-item" data-view="models">Models</button>
         <button class="nav-item" data-view="tasks">Tasks</button>
+        <button class="nav-item" data-view="network">Network</button>
         <button class="nav-item" data-view="api">Local API</button>
         <button class="nav-item" data-view="earn">Earn <span class="soon">alpha</span></button>
       </nav>
@@ -209,6 +210,28 @@
             <div id="task-error" class="error" hidden></div>
           </form>
           <div id="task-list"></div>
+        </div>
+      </section>
+
+      <!-- Network: live public view of the Koinos network -->
+      <section id="view-network" class="view" hidden>
+        <div class="api-card">
+          <h1>Network status</h1>
+          <p class="lede">A live look at the Koinos network — the computers online right now and the models they serve. Refreshes every 15 seconds while open.</p>
+          <div class="net-tiles">
+            <div class="net-tile"><div class="net-tile-num" id="net-computers">–</div><div class="net-tile-label">Computers online</div></div>
+            <div class="net-tile"><div class="net-tile-num" id="net-classes">–</div><div class="net-tile-label">Model classes live</div></div>
+            <div class="net-tile"><div class="net-tile-num" id="net-queue">–</div><div class="net-tile-label">Jobs waiting</div></div>
+          </div>
+          <div>
+            <h2 class="net-h">Models on the network</h2>
+            <div id="net-models" class="net-chips"></div>
+          </div>
+          <div>
+            <h2 class="net-h">Computers</h2>
+            <div id="net-workers" class="net-workers"></div>
+          </div>
+          <p id="net-note" class="hint"></p>
         </div>
       </section>
 
