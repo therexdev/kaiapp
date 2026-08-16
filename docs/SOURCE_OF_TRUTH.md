@@ -1,6 +1,6 @@
 # Koinos AI — Operational Source of Truth
 
-> **Status: CURRENT as of 2026-08-16 ~21:00Z (app v0.25.8; scheduler f2f0350 — pool economics + restart forensics).** This is the living record of what is
+> **Status: CURRENT as of 2026-08-16 ~23:31Z (app v0.25.8; scheduler f2f0350 — pool economics + restart forensics). koinosai.com MIGRATED off Hostinger to a Vultr VPS (self-managed systemd + Caddy) — see §9.** This is the living record of what is
 > BUILT, how it deploys, and the operational rules learned in the field. Spec authority
 > remains *Koinos AI — Master Source of Truth* Part I (owner's `.docx`); `§` references
 > point there. Planning history: `docs/V1_PLAN.md`, `docs/M2_PLAN.md`. When this doc and
@@ -231,7 +231,10 @@ for dev/screenshots).
   `uncaughtException`+stack) and surfaces `{bootCount, lastExit}` on `/api/health`. **When
   diagnosing a restart, read `/api/health` runtime first** — it tells you host-vs-code before
   you theorize. Instance-id + bootAt changing across two `/network/status` samples = a restart;
-  perf counters (jobs/chal) reset with it.
+  perf counters (jobs/chal) reset with it. **RESOLVED**: three such unexplained host recycles in
+  one evening drove the move off Hostinger to a self-managed Vultr VPS (2026-08-16, §9). The
+  forensics stay useful — but on the new box a restart is `Restart=always` doing its job, and
+  the exit reason on `/api/health` still distinguishes a clean systemd restart from a crash.
 - **Checking the live network from a sandboxed session**: some dev environments block
   egress to koinosai.com entirely (curl and WebFetch both 403). The kaiapp **Netcheck**
   workflow (`.github/workflows/netcheck.yml`) prints `/network/status` + `/network/models`
@@ -312,9 +315,11 @@ for dev/screenshots).
    `probe-oracle.js` proves the machinery). `docs/economics-sprint-02.md` is the record.
 7. **Ops hardening (mainnet)** — SHIPPED: rotating state backups + operator export; `kai`
    scheduled monitor (issue/email on real failure); restart forensics on `/api/health` (§5).
-   Remaining: zero-downtime deploys (the ~6-min blackout per push) and moving JSON ledgers to
-   something with real durability. **Watch: the host recycled the process ~20:43Z 2026-08-16
-   with no deploy — check `/api/health` runtime after the next restart to confirm host-vs-code.**
+   **Migrated koinosai.com to a self-managed Vultr VPS (§9)** — this fixed the mystery host
+   recycles AND the ~6-min deploy blackout (systemd restart is now sub-second). Remaining:
+   (a) re-establish an auto-deploy on the new box (branch push no longer ships — §9 "DEPLOY
+   MODEL CHANGED"); (b) move JSON ledgers to something with real durability; (c) decommission
+   the dormant Hostinger app once Vultr has proven stable (keep the plan for email DNS).
 8. Parked: async self-test (spawn vs spawnSync), Compare presets, deep-research surface,
    Microsoft Store distribution, kaiapp scheduler-mirror resync-or-retire (§5).
 
@@ -326,3 +331,58 @@ endpoints); act rather than ask when the request is clear; never blame their mac
 without proof — that pattern failed three times before the real root causes surfaced.
 They test on two Windows machines (laptop: Core Ultra 7 255H + Arc 140T iGPU, 32GB —
 llama builds crash there, Ollama fallback carries it; desktop: llama CPU rung works).
+
+## 9. Production hosting — Vultr VPS (migrated 2026-08-16 ~23:30Z)
+
+koinosai.com no longer runs on Hostinger. After three unexplained host recycles in one
+evening (§5), the site moved to a **self-managed Vultr VPS** we control end to end.
+
+- **Server**: Vultr, Ubuntu 24.04, `root@45.76.255.224`. `ufw` on.
+- **App**: `/opt/koinos/kai`, checked out on the production branch
+  `claude/kai-production-website-fqx4pf`. Runs as the unprivileged `koinos` user.
+- **Process supervision**: `systemd` unit `koinos.service` — `Restart=always`,
+  `EnvironmentFile=/opt/koinos/kai.env`. This is the keep-alive that Hostinger never gave
+  us: a crash or reboot brings the process straight back. `systemctl status koinos`,
+  `journalctl -u koinos -f` for logs.
+- **Env** (`/opt/koinos/kai.env`, root-owned, secrets live ONLY on the box — never in chat
+  or git): `PORT=3000`, `STATE_ROOT=/var/lib/koinos`,
+  `SCHEDULER_DATA=/var/lib/koinos/scheduler`, plus `SESSION_SECRET`, `ADMIN_EMAIL`,
+  `ADMIN_PASSWORD`, `KAI_OPERATOR_SECRET`, `KAI_OPERATOR_WIF` (on-chain settlement is
+  ENABLED — WIF validated at boot), `KAI_TREASURY_ADDR` (verify whether a real value is set
+  before assuming splits §F8 are active).
+- **TLS / reverse proxy**: **Caddy** fronts the app — `/etc/caddy/Caddyfile` serves
+  `koinosai.com, www.koinosai.com { reverse_proxy localhost:3000 }` with automatic
+  Let's Encrypt HTTPS. Origin fingerprint on any response is `via: 1.1 Caddy` (proof a
+  request is hitting the new box, not the old CDN path).
+- **DNS** (managed in Hostinger's zone; Namecheap nameservers point at Hostinger): apex `@`
+  and `www` are now **A records → 45.76.255.224** (were an ALIAS/CNAME to Hostinger's CDN).
+  **Email records were left untouched** — MX `mx1/mx2.hostinger.com`, SPF TXT, and the
+  `autodiscover`/`autoconfig` CNAMEs still run mail through Hostinger. TTLs are 300s.
+- **Ledger migration**: at cutover the live state was pulled from the old app via
+  `GET /admin/api/state-export` (operator-secret gated, always-fresh gzip bundle) and
+  restored into `/var/lib/koinos/scheduler` with the service stopped, then `chown -R
+  koinos:koinos`. `runtime.json` was deliberately EXCLUDED so the new box keeps its own boot
+  forensics. Worker balances/receipts carried over; workers reconnected on their own.
+- **Cutover verified** (external GitHub-runner netcheck, 23:31Z): all endpoints HTTP 200 in
+  ~0.2–0.4s, `via: 1.1 Caddy`, `/api/health` `ok:true` with a clean `signal:SIGTERM` last
+  exit (the migration stop, not a crash), 3 workers online serving 9 model classes, queue
+  empty, challenges passing.
+
+### DEPLOY MODEL CHANGED — read before shipping to the live site
+
+Pushing to `claude/kai-production-website-fqx4pf` **no longer auto-deploys.** That worked
+only because Hostinger had a git integration watching the branch. On the Vultr box the live
+code is a plain checkout, so a push updates GitHub but NOT the running site. Until a proper
+pipeline exists, deploying a scheduler/website change is a manual step on the box:
+
+```
+cd /opt/koinos/kai && git pull && systemctl restart koinos
+```
+
+(`Restart=always` + a fast Node boot make this a sub-second blackout, far better than
+Hostinger's ~6-min rollover.) The `[netcheck]` workflow and the `kai` scheduled monitor both
+hit koinosai.com **by name**, so they now watch the new box automatically with no change.
+**Follow-ups**: (a) stand up a simple auto-deploy (git webhook or a pull-on-interval /
+`systemd` timer) so branch pushes ship again; (b) once traffic has been stable on Vultr for a
+while, decommission the dormant Hostinger app — but KEEP the Hostinger plan, it still serves
+the domain's email DNS.
