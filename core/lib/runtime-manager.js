@@ -23,6 +23,8 @@ class RuntimeManager {
     this._loading = null; // in-flight ensure() promise
     this._stopped = false; // stop() raced against an in-flight load
     this._testedBins = new Set(); // self-test once per binary per session
+    this._failedTests = new Map(); // binPath -> error message: a crash is remembered, never re-run
+    this._llamaDead = false; // full ladder failure this session: go straight to the fallback
   }
 
   /** Name the active runtime serves the model under (null = passthrough). */
@@ -105,6 +107,33 @@ class RuntimeManager {
     const kind = resolved.runtime || "llamacpp";
     const wantGpu = !!this.hardware?.capabilities?.cudaEligible;
 
+    // Fast switch on a llama-dead machine: the fallback daemon hosts every
+    // model — register the next one with it and serve. Without this, EVERY
+    // model switch re-ran the full crash-test ladder (field log: switches
+    // every few seconds, each one a blocking multi-second freeze that
+    // starved the worker's own presence signals while jobs kept serving).
+    if (this._llamaDead && this.runtime?.status().kind === "ollama" && this.runtime.status().running) {
+      const rt = this.runtime;
+      try {
+        this.onEvent({ type: "runtime:fast-switch", from: this.activeAlias, to: alias, via: "ollama" });
+        const modelName = `koinos-${alias}`.toLowerCase().replace(/[^a-z0-9._-]/g, "-");
+        await rt.start({ modelPath, sha256: resolved.sha256, modelName });
+        if (this._stopped) {
+          this.stop();
+          throw new Error("Core is stopping");
+        }
+        this.activeAlias = alias;
+        this.lastLoadError = null;
+        return rt.endpoint;
+      } catch (e) {
+        if (this._stopped) throw e;
+        // The daemon died under us: fall through to the full path, which
+        // rebuilds the fallback from scratch. That path is instant now —
+        // every crashing binary is cached, nothing re-tests.
+        this.onEvent({ type: "runtime:fast-switch-failed", reason: String(e.message) });
+      }
+    }
+
     if (this.runtime) {
       this.onEvent({ type: "runtime:switching", from: this.activeAlias, to: alias });
       this.runtime.stop();
@@ -124,28 +153,41 @@ class RuntimeManager {
     // with a directory snapshot — remote debugging needs to see the disk.
     this._healed = this._healed || new Set();
     const testHard = async (binPath, cap) => {
+      // A binary that crashed its self-test crashes it again 10 seconds
+      // later — and the test is a BLOCKING spawn of up to 15s that starves
+      // polls, heartbeats, and every timer in the process. Field log
+      // showed it re-running on EVERY model switch, several times a
+      // minute, strangling the node's own presence while it served jobs.
+      if (this._failedTests.has(binPath)) {
+        throw new Error(`${this._failedTests.get(binPath)} (cached — not re-tested this session)`);
+      }
       try {
-        return selfTest(binPath);
-      } catch (e1) {
-        if (typeof this.provisioner?.reprovision !== "function" || this._healed.has(binPath)) {
-          throw new Error(`${e1.message} [beside: ${dirSnapshot(binPath)}]`);
-        }
-        this._healed.add(binPath);
-        this.onEvent({ type: "runtime:heal", step: "reprovision", binPath, reason: String(e1.message) });
-        await this.provisioner.reprovision(kind, { cap });
         try {
           return selfTest(binPath);
-        } catch (e2) {
-          if (stripCpuVariants(binPath)) {
-            this.onEvent({ type: "runtime:heal", step: "strip-cpu-variants", binPath });
-            try {
-              return selfTest(binPath);
-            } catch (e3) {
-              throw new Error(`${e3.message} [after reprovision + variant strip; beside: ${dirSnapshot(binPath)}]`);
-            }
+        } catch (e1) {
+          if (typeof this.provisioner?.reprovision !== "function" || this._healed.has(binPath)) {
+            throw new Error(`${e1.message} [beside: ${dirSnapshot(binPath)}]`);
           }
-          throw new Error(`${e2.message} [after reprovision; beside: ${dirSnapshot(binPath)}]`);
+          this._healed.add(binPath);
+          this.onEvent({ type: "runtime:heal", step: "reprovision", binPath, reason: String(e1.message) });
+          await this.provisioner.reprovision(kind, { cap });
+          try {
+            return selfTest(binPath);
+          } catch (e2) {
+            if (stripCpuVariants(binPath)) {
+              this.onEvent({ type: "runtime:heal", step: "strip-cpu-variants", binPath });
+              try {
+                return selfTest(binPath);
+              } catch (e3) {
+                throw new Error(`${e3.message} [after reprovision + variant strip; beside: ${dirSnapshot(binPath)}]`);
+              }
+            }
+            throw new Error(`${e2.message} [after reprovision; beside: ${dirSnapshot(binPath)}]`);
+          }
         }
+      } catch (terminal) {
+        this._failedTests.set(binPath, String(terminal.message).slice(0, 600));
+        throw terminal;
       }
     };
     const boot = async (binPath, gpuLayers, cap) => {
@@ -224,6 +266,11 @@ class RuntimeManager {
         try {
           runtime = await bootLlama();
         } catch (e) {
+          // A machine-incompatibility signature (crashing self-tests) is a
+          // session-stable fact: stop paying the ladder on every switch and
+          // go straight to the fallback from here on. Transient failures
+          // (a download blip) don't set it — the ladder retries next load.
+          if (/self-test failed/i.test(String(e.message))) this._llamaDead = true;
           runtime = await bootFallback(String(e.message));
           if (!runtime) throw e;
         }

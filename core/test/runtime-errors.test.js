@@ -209,6 +209,132 @@ test("ggml-cpu variant strip keeps the conservative baseline and drops the exoti
   assert.strictEqual(stripCpuVariants(bin), false, "nothing left to strip → no false claim of healing");
 });
 
+/*
+ * Field finding (v0.25.x, Windows/Arc): the user's log showed
+ * `runtime:switching` every few seconds — chats wanted one model, network
+ * seeds another — and EVERY switch re-ran the full crash-test ladder
+ * (blocking spawns of up to 15s per rung). The event loop starved; the
+ * worker's polls, heartbeats, and watchdog silently died while jobs kept
+ * serving. These pin the fix: crash results are session-cached, and once
+ * the ladder is dead, switches ride the running fallback untouched.
+ */
+
+test("presence fix: a crashing self-test pays its ladder ONCE — later loads fail instantly from cache", async () => {
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-crashcache-"));
+  const bin = path.join(dir, "llama-server");
+  const countFile = path.join(dir, "runs.count");
+  // Every execution tallies a line — the point under test is HOW OFTEN the
+  // crashing binary actually runs, because each run is a blocking freeze.
+  const crashScript = `#!/bin/sh\necho x >> "${countFile}"\nexit 139\n`;
+  fs.writeFileSync(bin, crashScript);
+  fs.chmodSync(bin, 0o755);
+  const runs = () => (fs.existsSync(countFile) ? fs.readFileSync(countFile, "utf8").trim().split("\n").length : 0);
+
+  let reprovisions = 0;
+  const mgr = new RuntimeManager({
+    models: {
+      resolveAlias: () => ({ packageId: "p@1", contextSize: 4096, sizeBytes: 1e9 }),
+      ensurePackage: async () => "/fake/model.gguf",
+    },
+    hardware: null, // ladder = [cpu]
+    provisioner: {
+      ensure: async () => bin,
+      // The "fresh extract" restores the same crashing binary — a machine
+      // incompatibility, not a corrupted download.
+      reprovision: async () => (reprovisions++, fs.writeFileSync(bin, crashScript), fs.chmodSync(bin, 0o755), bin),
+      selectBuild: () => ({}),
+    },
+    makeRuntime: () => ({ start: async () => ({ endpoint: "http://127.0.0.1:1" }), stop() {}, status: () => ({ running: true }) }),
+    onEvent: () => {},
+  });
+
+  await assert.rejects(() => mgr.ensure("koinos-fast"), /self-test failed/i);
+  assert.strictEqual(runs(), 2, "first load pays the full ladder: test, heal, re-test");
+  assert.strictEqual(reprovisions, 1);
+  assert.strictEqual(mgr._llamaDead, true, "crashing self-tests mark the ladder dead for the session");
+
+  // The field log showed this ladder re-running on EVERY model switch,
+  // several times a minute. Now: instant cached refusal, zero executions.
+  await assert.rejects(() => mgr.ensure("koinos-large"), /cached — not re-tested this session/);
+  await assert.rejects(() => mgr.ensure("koinos-fast"), /cached/);
+  assert.strictEqual(runs(), 2, "the crashing binary never executes again this session");
+  assert.strictEqual(reprovisions, 1, "no repeat heal attempts either");
+  mgr.stop();
+});
+
+test("presence fix: once the ladder is dead, model switches ride the running fallback — no teardown, no re-test", async () => {
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-fastswitch-"));
+  const bin = path.join(dir, "llama-server");
+  const countFile = path.join(dir, "runs.count");
+  const crashScript = `#!/bin/sh\necho x >> "${countFile}"\nexit 139\n`;
+  fs.writeFileSync(bin, crashScript);
+  fs.chmodSync(bin, 0o755);
+  const runs = () => (fs.existsSync(countFile) ? fs.readFileSync(countFile, "utf8").trim().split("\n").length : 0);
+
+  const events = [];
+  const fb = {
+    started: [], stops: 0, failNext: false, running: false,
+    endpoint: "http://127.0.0.1:11434/v1",
+    async start({ modelName }) {
+      if (this.failNext) { this.failNext = false; throw new Error("daemon gone"); }
+      this.started.push(modelName);
+      this.running = true;
+    },
+    stop() { this.stops++; this.running = false; },
+    status() { return { kind: "ollama", running: this.running }; },
+    servedName() { return this.started[this.started.length - 1] || null; },
+  };
+  let fbMade = 0;
+  const mgr = new RuntimeManager({
+    models: {
+      resolveAlias: (alias) => ({ packageId: `${alias}@1`, contextSize: 4096, sizeBytes: 1e9 }),
+      ensurePackage: async () => "/fake/model.gguf",
+    },
+    hardware: null,
+    provisioner: {
+      ensure: async () => bin,
+      reprovision: async () => (fs.writeFileSync(bin, crashScript), fs.chmodSync(bin, 0o755), bin),
+      selectBuild: () => ({}),
+    },
+    makeRuntime: () => ({ start: async () => { throw new Error("must not be used — ladder is dead"); }, stop() {}, status: () => ({ running: false }) }),
+    makeFallback: async () => (fbMade++, fb),
+    onEvent: (e) => events.push(e),
+  });
+
+  // Load 1: the ladder crashes (its one and only run), the fallback serves.
+  const ep1 = await mgr.ensure("koinos-fast");
+  assert.strictEqual(ep1, fb.endpoint);
+  assert.strictEqual(runs(), 2, "ladder paid exactly once");
+
+  // Load 2 — a model SWITCH, the field killer: same daemon, new model.
+  const ep2 = await mgr.ensure("koinos-large");
+  assert.strictEqual(ep2, fb.endpoint);
+  assert.strictEqual(runs(), 2, "switch did NOT re-run the crash ladder");
+  assert.strictEqual(fb.stops, 0, "switch did NOT tear the daemon down");
+  assert.strictEqual(fbMade, 1, "same adapter reused, not rebuilt");
+  assert.deepStrictEqual(fb.started, ["koinos-koinos-fast", "koinos-koinos-large"]);
+  assert.ok(events.some((e) => e.type === "runtime:fast-switch" && e.from === "koinos-fast" && e.to === "koinos-large"), "the switch announces itself");
+  assert.ok(!events.some((e) => e.type === "runtime:switching"), "the heavyweight switch path never ran");
+  assert.strictEqual(mgr.status().lastLoadError, null);
+  assert.strictEqual(mgr.status().activeAlias, "koinos-large");
+
+  // Load 3: the daemon dies mid-switch → one clean rebuild, still no re-test.
+  fb.failNext = true;
+  const ep3 = await mgr.ensure("koinos-ultra");
+  assert.strictEqual(ep3, fb.endpoint);
+  assert.strictEqual(runs(), 2, "even the rebuild path never re-runs the crashing binary");
+  assert.strictEqual(fbMade, 2, "fallback re-created after the daemon died");
+  assert.strictEqual(fb.stops, 1, "the dead daemon was cleaned up exactly once");
+  assert.strictEqual(mgr.status().activeAlias, "koinos-ultra");
+  mgr.stop();
+});
+
 test("register storm is impossible: single-flight gate + in-flight poll recall", async () => {
   const http = require("http");
   const { Worker } = require("../lib/worker");
