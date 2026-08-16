@@ -27,3 +27,4 @@ jobs:
           echo
           echo "== website =="
           curl -sS --max-time 30 -o /dev/null -w 'koinosai.com HTTP %{http_code} in %{time_total}s\n' https://koinosai.com/
+          curl -sS --max-time 30 -o /dev/null -w '/network HTTP %{http_code} in %{time_total}s\n' https://koinosai.com/network
