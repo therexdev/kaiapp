@@ -19,15 +19,20 @@ jobs:
     steps:
       - name: Public network status
         run: |
-          echo "== /scheduler/network/status =="
-          curl -sS --max-time 30 https://koinosai.com/scheduler/network/status | python3 -m json.tool
+          # Tolerant: never abort on the first slow endpoint — probe ALL of
+          # them so a scheduler hang can be told apart from a whole-site
+          # outage. Each line prints its own HTTP code + timing.
+          set +e
+          echo "== reachability (code / time) =="
+          curl -sS --max-time 15 -o /dev/null -w 'root       HTTP %{http_code} in %{time_total}s\n' https://koinosai.com/
+          curl -sS --max-time 15 -o /dev/null -w '/network   HTTP %{http_code} in %{time_total}s\n' https://koinosai.com/network
+          curl -sS --max-time 15 -o /dev/null -w 'sched/stat HTTP %{http_code} in %{time_total}s\n' https://koinosai.com/scheduler/network/status
+          curl -sS --max-time 15 -o /dev/null -w 'sched/heal HTTP %{http_code} in %{time_total}s\n' https://koinosai.com/api/health
           echo
-          echo "== /scheduler/network/models =="
-          curl -sS --max-time 30 https://koinosai.com/scheduler/network/models | python3 -m json.tool
+          echo "== /scheduler/network/status body =="
+          curl -sS --max-time 15 https://koinosai.com/scheduler/network/status | python3 -m json.tool || echo "(status endpoint unreachable)"
           echo
-          echo "== website =="
-          curl -sS --max-time 30 -o /dev/null -w 'koinosai.com HTTP %{http_code} in %{time_total}s\n' https://koinosai.com/
-          curl -sS --max-time 30 -o /dev/null -w '/network HTTP %{http_code} in %{time_total}s\n' https://koinosai.com/network
+          exit 0
       - name: Price-feed formats (oracle rehearsal candidates)
         if: contains(github.event.head_commit.message, '[pricecheck]')
         run: |
