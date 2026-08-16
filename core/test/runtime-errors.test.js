@@ -208,3 +208,48 @@ test("ggml-cpu variant strip keeps the conservative baseline and drops the exoti
   );
   assert.strictEqual(stripCpuVariants(bin), false, "nothing left to strip → no false claim of healing");
 });
+
+test("register storm is impossible: single-flight gate + in-flight poll recall", async () => {
+  const http = require("http");
+  const { Worker } = require("../lib/worker");
+  let registers = 0;
+  const srv = http.createServer((req, res) => {
+    if (req.url.startsWith("/worker/register")) {
+      registers++;
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify({ ok: true, token: `wt_${registers}` }));
+    }
+    res.writeHead(204);
+    res.end();
+  });
+  const port = await new Promise((r) => srv.listen(0, "127.0.0.1", function () { r(this.address().port); }));
+  try {
+    const worker = new Worker({
+      schedulerUrl: `http://127.0.0.1:${port}`,
+      wallet: { address: "1TestAddr", signHash: async () => "sig" },
+      runtime: { ensure: async () => "http://127.0.0.1:1" },
+      hardware: null,
+      models: null,
+      onEvent: () => {},
+    });
+
+    // Three concurrent register attempts (watchdog racing the 401 path)
+    // collapse into ONE server-side registration — no token churn.
+    await Promise.all([worker._register(), worker._register(), worker._register()]);
+    assert.strictEqual(registers, 1, "single-flight: three concurrent callers, one register");
+    assert.strictEqual(worker.token, "wt_1");
+
+    // A register recalls the in-flight long-poll: the old token it carries
+    // just died server-side, so waiting out the hold only buys a 401.
+    worker._pollAbort = new AbortController();
+    let recalled = false;
+    worker._pollAbort.signal.addEventListener("abort", () => (recalled = true));
+    await worker._register();
+    assert.strictEqual(registers, 2);
+    assert.strictEqual(worker.token, "wt_2");
+    assert.strictEqual(recalled, true, "in-flight poll recalled so the loop re-polls with the fresh token");
+  } finally {
+    srv.closeAllConnections?.();
+    srv.close();
+  }
+});

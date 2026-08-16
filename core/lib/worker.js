@@ -31,19 +31,36 @@ class Worker {
   }
 
   async _register() {
-    const address = this.wallet.address;
-    // Advertise the models actually on disk so the scheduler only hands
-    // this machine jobs it can serve — a job for a missing model would
-    // trigger a mid-lease gigabyte download and time out.
-    const ready = this.models ? this.models.aliases().filter((a) => a.status === "ready").map((a) => a.alias) : [];
-    const r = await fetch(`${this.schedulerUrl}/worker/register`, {
-      method: "POST",
-      headers: { "content-type": "application/json", connection: "close" },
-      body: JSON.stringify({ address, capabilities: this.hardware?.capabilities ?? {}, models: ready }),
+    // Single-flight, and the poll in the air is aborted afterward. The
+    // scheduler keeps ONE token per address, so a register invalidates
+    // whatever token the in-flight long-poll is carrying — without this,
+    // the watchdog and the poll loop invalidate each other's tokens in a
+    // perpetual 401 storm: ~90s on the roster after each register, then
+    // aged off until the next one, in a 2–4 minute oscillation (field
+    // finding — the night's actual final boss, timestamped by monitors).
+    if (this._registerGate) return this._registerGate;
+    this._registerGate = (async () => {
+      const address = this.wallet.address;
+      // Advertise the models actually on disk so the scheduler only hands
+      // this machine jobs it can serve — a job for a missing model would
+      // trigger a mid-lease gigabyte download and time out.
+      const ready = this.models ? this.models.aliases().filter((a) => a.status === "ready").map((a) => a.alias) : [];
+      const r = await fetch(`${this.schedulerUrl}/worker/register`, {
+        method: "POST",
+        headers: { "content-type": "application/json", connection: "close" },
+        body: JSON.stringify({ address, capabilities: this.hardware?.capabilities ?? {}, models: ready }),
+      });
+      const j = await r.json();
+      if (!j.ok) throw new Error(`Scheduler refused registration: ${j.error}`);
+      this.token = j.token;
+      // The old token just died server-side: recall the in-flight poll so
+      // the loop re-polls with the fresh token immediately instead of
+      // waiting out a hold to receive a 401.
+      this._pollAbort?.abort();
+    })().finally(() => {
+      this._registerGate = null;
     });
-    const j = await r.json();
-    if (!j.ok) throw new Error(`Scheduler refused registration: ${j.error}`);
-    this.token = j.token;
+    return this._registerGate;
   }
 
   async start() {
