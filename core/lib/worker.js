@@ -43,8 +43,12 @@ class Worker {
       const address = this.wallet.address;
       // Advertise the models actually on disk so the scheduler only hands
       // this machine jobs it can serve — a job for a missing model would
-      // trigger a mid-lease gigabyte download and time out.
-      const ready = this.models ? this.models.aliases().filter((a) => a.status === "ready").map((a) => a.alias) : [];
+      // trigger a mid-lease gigabyte download and time out. Private models
+      // stay private: custom imports and dev builds never ride the network
+      // (unpriced, unvetted weights) — the scheduler enforces this too.
+      const ready = this.models
+        ? this.models.aliases().filter((a) => a.status === "ready" && !a.custom && !a.dev).map((a) => a.alias)
+        : [];
       const r = await fetch(`${this.schedulerUrl}/worker/register`, {
         method: "POST",
         headers: { "content-type": "application/json", connection: "close" },
