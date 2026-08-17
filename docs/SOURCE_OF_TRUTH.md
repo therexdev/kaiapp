@@ -1,6 +1,6 @@
 # Koinos AI — Operational Source of Truth
 
-> **Status: CURRENT as of 2026-08-16 ~23:31Z (app v0.25.8; scheduler f2f0350 — pool economics + restart forensics). koinosai.com MIGRATED off Hostinger to a Vultr VPS (self-managed systemd + Caddy) — see §9.** This is the living record of what is
+> **Status: CURRENT as of 2026-08-17 ~02:00Z (app v0.25.8; scheduler `cecf09b` — shadow reputation + perf persistence + shadow-trends + Trust stat live on the Vultr VPS, §9; auto-deploy ships production-branch pushes in ~1 min).** This is the living record of what is
 > BUILT, how it deploys, and the operational rules learned in the field. Spec authority
 > remains *Koinos AI — Master Source of Truth* Part I (owner's `.docx`); `§` references
 > point there. Planning history: `docs/V1_PLAN.md`, `docs/M2_PLAN.md`. When this doc and
