@@ -48,6 +48,20 @@ function freePort(host) {
  * (newest on the machine), fall back to Electron's only when there is no
  * redist at all, and overwrite a differing copy instead of keeping it.
  */
+/** Spawn env for the engine. Linux tarballs keep their .so files beside the
+ *  binary — set LD_LIBRARY_PATH so the loader finds them even if the build
+ *  lacks an $ORIGIN rpath. (KMP guards: see the selfTest comment.) */
+function engineEnv(binPath) {
+  return {
+    ...process.env,
+    KMP_AFFINITY: "disabled",
+    KMP_DUPLICATE_LIB_OK: "TRUE",
+    ...(process.platform !== "win32"
+      ? { LD_LIBRARY_PATH: [path.dirname(binPath), process.env.LD_LIBRARY_PATH].filter(Boolean).join(":") }
+      : {}),
+  };
+}
+
 const CRT_DLLS = ["msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll"];
 function ensureCrtBeside(binPath, srcDirOverride) {
   if (process.platform !== "win32") return;
@@ -157,7 +171,7 @@ function selfTest(binPath) {
       windowsHide: true,
       cwd: path.dirname(binPath),
       encoding: "utf8",
-      env: { ...process.env, KMP_AFFINITY: "disabled", KMP_DUPLICATE_LIB_OK: "TRUE" },
+      env: engineEnv(binPath),
     });
   let r = attempt();
   // llama-server prints its version and exits 0 (some builds exit 1 after
@@ -260,7 +274,7 @@ class LlamaCppRuntime {
     const child = spawn(this.binPath, args, {
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
-      env: { ...process.env, KMP_AFFINITY: "disabled", KMP_DUPLICATE_LIB_OK: "TRUE" },
+      env: engineEnv(this.binPath),
       // llama.cpp release archives keep shared libs beside the binary.
       cwd: path.dirname(this.binPath),
     });

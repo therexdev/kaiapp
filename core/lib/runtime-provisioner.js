@@ -7,6 +7,20 @@ const os = require("os");
 const { downloadFile } = require("./download");
 const { extractZipAsync } = require("./zip");
 
+/** Extract a .tar.gz via the system tar (universal on the Linux/macOS
+ *  machines these archives target; Windows builds stay zips). Async spawn —
+ *  never blocks the app process. */
+function extractTarGzAsync(file, destDir) {
+  return new Promise((resolve, reject) => {
+    fs.mkdirSync(destDir, { recursive: true });
+    const child = require("child_process").spawn("tar", ["-xzf", file, "-C", destDir], { stdio: ["ignore", "ignore", "pipe"] });
+    let err = "";
+    child.stderr.on("data", (c) => (err += c));
+    child.on("error", (e) => reject(new Error(`tar unavailable: ${e.message}`)));
+    child.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`tar failed (${code}): ${err.slice(0, 200)}`))));
+  });
+}
+
 /** Streaming sha256 of a file — never loads it whole. */
 function sha256File(file) {
   return new Promise((resolve, reject) => {
@@ -108,7 +122,11 @@ class RuntimeProvisioner {
     }
     for (let i = 0; i < archives.length; i++) {
       const a = archives[i];
-      const zipPath = path.join(os.tmpdir(), `kai-runtime-${kind}-${build.version}-${build.key}-${i}.zip`);
+      // llama.cpp ships Windows builds as .zip and Linux builds as .tar.gz —
+      // keep the downloaded file's real extension so extraction picks the
+      // right tool (the arm64/Pi support runs on tarballs).
+      const isTar = /\.t(ar\.)?gz$/i.test(String(a.url));
+      const zipPath = path.join(os.tmpdir(), `kai-runtime-${kind}-${build.version}-${build.key}-${i}.${isTar ? "tar.gz" : "zip"}`);
       // A finished download that never got extracted (app closed mid-setup)
       // is reused after hash verification — nobody re-downloads gigabytes.
       const reusable = fs.existsSync(zipPath) && (await sha256File(zipPath)) === String(a.sha256).toLowerCase();
@@ -128,12 +146,13 @@ class RuntimeProvisioner {
           },
         });
       }
-      // Unpacking runs in a worker thread — Core shares the app's main
+      // Unpacking runs off the main thread — Core shares the app's main
       // process, and a synchronous 1.4 GB extract froze the window for
       // minutes (field finding). The UI shows "Setting up engine…".
       this._progress = { kind, phase: "extracting" };
       this.onEvent({ type: "runtime:extracting", kind, archive: i + 1, archives: archives.length });
-      await extractZipAsync(zipPath, installDir);
+      if (isTar) await extractTarGzAsync(zipPath, installDir);
+      else await extractZipAsync(zipPath, installDir);
       fs.rmSync(zipPath, { force: true });
       this._progress = null;
     }

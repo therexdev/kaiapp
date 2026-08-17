@@ -1,5 +1,5 @@
 {
-  "comment": "Inference-engine builds, versioned + sha256-pinned like model packages (§27). PENDING hashes fail closed until pinned: the Pin & Verify workflow (or pin-runtime.js on a networked machine) fills them and CI commits them back after the real E2E passes. binPath is the server binary inside the extracted archive; extras are companion archives extracted into the same directory (CUDA needs the cudart runtime). llama.cpp publishes no Linux release binaries — Linux dev machines build from source and point KAI_LLAMA_BIN at it; the §9 server edition will carry its own packaging.",
+  "comment": "Inference-engine builds, versioned + sha256-pinned like model packages (\u00a727). PENDING hashes fail closed until pinned: the Pin & Verify workflow (or pin-runtime.js on a networked machine) fills them and CI commits them back after the real E2E passes. binPath is the server binary inside the extracted archive; extras are companion archives extracted into the same directory (CUDA needs the cudart runtime). llama.cpp now publishes Linux tarballs (ubuntu x64/arm64, plain + vulkan) \u2014 pinned below; the provisioner extracts .tar.gz via the system tar. Raspberry Pi / arm64 rides linux-arm64-cpu.",
   "llamacpp": {
     "version": "b10423",
     "builds": {
@@ -27,12 +27,36 @@
             "sizeBytes": 391443627
           }
         ]
+      },
+      "linux-x64-cpu": {
+        "url": "https://github.com/ggml-org/llama.cpp/releases/download/b10423/llama-b10423-bin-ubuntu-x64.tar.gz",
+        "sha256": "",
+        "sizeBytes": 16606819,
+        "binPath": "llama-b10423/llama-server"
+      },
+      "linux-arm64-cpu": {
+        "url": "https://github.com/ggml-org/llama.cpp/releases/download/b10423/llama-b10423-bin-ubuntu-arm64.tar.gz",
+        "sha256": "",
+        "sizeBytes": 13465291,
+        "binPath": "llama-b10423/llama-server"
+      },
+      "linux-x64-vulkan": {
+        "url": "https://github.com/ggml-org/llama.cpp/releases/download/b10423/llama-b10423-bin-ubuntu-vulkan-x64.tar.gz",
+        "sha256": "",
+        "sizeBytes": 32989764,
+        "binPath": "llama-b10423/llama-server"
+      },
+      "linux-arm64-vulkan": {
+        "url": "https://github.com/ggml-org/llama.cpp/releases/download/b10423/llama-b10423-bin-ubuntu-vulkan-arm64.tar.gz",
+        "sha256": "",
+        "sizeBytes": 26990350,
+        "binPath": "llama-b10423/llama-server"
       }
     }
   },
   "ollama": {
     "version": "v0.32.13",
-    "comment": "Portable fallback engine — provisioned lazily, only when the managed llama.cpp build cannot run on a machine. Official release zip, used in place; models live under the app data dir.",
+    "comment": "Portable fallback engine \u2014 provisioned lazily, only when the managed llama.cpp build cannot run on a machine. Official release zip, used in place; models live under the app data dir.",
     "builds": {
       "win32-x64-cpu": {
         "url": "https://github.com/ollama/ollama/releases/download/v0.32.13/ollama-windows-amd64.zip",
