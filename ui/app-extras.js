@@ -416,6 +416,27 @@ async function renderNetwork() {
       const jobsSpan = netEl("span");
       jobsSpan.append(netEl("b", null, String(w.jobsThisEpoch ?? 0)), " jobs this epoch");
       met.append(tokSpan, cuSpan, jobsSpan);
+      // Server-side truth (present once the scheduler measured this machine;
+      // absent-safe against older schedulers): speed the network itself
+      // clocked, delivery reliability, and the shadow trust score.
+      const srv = w.perf?.srvTokPerSec;
+      if (srv != null) {
+        const s2 = netEl("span");
+        s2.append("measured ", netEl("b", null, Number(srv).toFixed(1)), " tok/s");
+        met.appendChild(s2);
+      }
+      const sr = w.perf?.sr;
+      if (sr != null) {
+        const s3 = netEl("span");
+        s3.append("reliability ", netEl("b", null, `${Math.round(Number(sr) * 100)}%`));
+        met.appendChild(s3);
+      }
+      const rep = w.reputation?.r;
+      if (rep != null) {
+        const s4 = netEl("span");
+        s4.append("trust ", netEl("b", null, Number(rep).toFixed(2)));
+        met.appendChild(s4);
+      }
       card.appendChild(met);
 
       list.appendChild(card);
