@@ -151,9 +151,10 @@
       "mmproj": {
         "filename": "gemma-3-4b-it-mmproj-model-f16.gguf",
         "url": "https://huggingface.co/ggml-org/gemma-3-4b-it-GGUF/resolve/main/mmproj-model-f16.gguf",
-        "sha256": "",
-        "sizeBytes": 0
-      }
+        "sha256": "8c0fb064b019a6972856aaae2c7e4792858af3ca4561be2dbf649123ba6c40cb",
+        "sizeBytes": 851251104
+      },
+      "vision": true
     },
     "mistral-7b-instruct-v0.3-q4_k_m@1": {
       "filename": "Mistral-7B-Instruct-v0.3-Q4_K_M.gguf",
