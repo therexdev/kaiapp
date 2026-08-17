@@ -64,9 +64,12 @@ jobs:
           echo "== llama.cpp b10423 assets mentioning ubuntu/arm =="
           curl -sS --max-time 20 "https://api.github.com/repos/ggml-org/llama.cpp/releases/tags/b10423" \
             | python3 -c "import json,sys; [print(a['name'], a['size']) for a in json.load(sys.stdin).get('assets',[]) if 'ubuntu' in a['name'] or 'arm' in a['name']]"
-          echo "== ollama v0.32.13 linux assets =="
-          curl -sS --max-time 20 "https://api.github.com/repos/ollama/ollama/releases/tags/v0.32.13" \
-            | python3 -c "import json,sys; [print(a['name'], a['size']) for a in json.load(sys.stdin).get('assets',[]) if 'linux' in a['name']]"
+          echo "== ubuntu-arm64 tarball contents (binPath discovery) =="
+          curl -sSL --max-time 60 -o /tmp/arm.tgz "https://github.com/ggml-org/llama.cpp/releases/download/b10423/llama-b10423-bin-ubuntu-arm64.tar.gz" \
+            && tar -tzf /tmp/arm.tgz | head -30
+          echo "== ubuntu-x64 tarball contents =="
+          curl -sSL --max-time 60 -o /tmp/x64.tgz "https://github.com/ggml-org/llama.cpp/releases/download/b10423/llama-b10423-bin-ubuntu-x64.tar.gz" \
+            && tar -tzf /tmp/x64.tgz | head -30
           echo
           exit 0
       - name: Price-feed formats (oracle rehearsal candidates)
