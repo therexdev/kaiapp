@@ -134,3 +134,25 @@ jobs:
           echo "== ubuntu tarball contents (future Linux voice binPath discovery) =="
           curl -sSL --max-time 60 -o wu.tgz "https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.2/whisper-bin-ubuntu-x64.tar.gz" && tar -tzf wu.tgz | head -25
           exit 0
+
+  # Proves the "tool servers set themselves up" promise on the SHIPPING OS.
+  # Windows has a different Node layout (flat zip, node_modules/npm) than the
+  # posix tarballs, and the runners always have a system node — so the script
+  # forces the managed path that a real user without Node would take.
+  nodecheck:
+    if: contains(github.event.head_commit.message, '[nodecheck]')
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      - name: Provision Node + launch a catalog MCP server (no system node used)
+        run: node core/scripts/verify-node-runtime.js
