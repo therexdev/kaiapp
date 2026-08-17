@@ -32,7 +32,11 @@ jobs:
     # Release), on demand, or when a commit message opts in with [dist]
     # (artifacts only, nothing published).
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[dist]') || contains(github.event.head_commit.message, '[release]')
-    needs: test
+    # ALSO needs build-linux: both dist jobs racing `--publish always`
+    # once created the same release simultaneously — linux won, windows
+    # died on 422 already_exists and the release shipped half-empty
+    # (v0.26.0 field finding). Serializing lets linux create, windows attach.
+    needs: [test, build-linux]
     runs-on: windows-latest
     permissions:
       contents: write
