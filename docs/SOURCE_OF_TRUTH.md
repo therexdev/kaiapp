@@ -305,15 +305,20 @@ for dev/screenshots).
      (outage, Windows update, driver crash) = job fails, no pay, reputation dent — never a slash.
    - Defense in depth: reputation + device/benchmark fingerprints + challenge history +
      paid-demand history + network age + optional bond + rate limits + anomaly detection, all
-     under the 1,500 KAI/day ceiling. **DESIGN + SIM DONE (awaiting owner review), NOT shipped**:
-     `docs/anti-sybil-reputation-weighting.md` + `tools/sybil-sim.js`. Key finding: a plain
-     reputation *multiplier* barely dents a 4:1 fleet (share still ∝ volume); the load-bearing
-     idea is a reputation **eligibility GATE** — below `R_GATE` a node earns full PAY but ZERO
-     pool draw (paid revenue never gated, equal-work-equal-pay preserved). Gated sim cuts a
-     fresh compute-backed fleet's capture ~80%→~22–30%, and holds a fresh fleet attacking an
-     established network at 0% for its first ~2 weeks. Ships shadow-first behind
-     `KAI_REPUTATION_ENFORCE` (default off), probe FAILS on flat / PASSES on gated. Owner
-     decisions open (doc §9): gate hardness `R_GATE`, signal weights, shadow length, fingerprint binding.
+     under the 1,500 KAI/day ceiling. Design + sim: `docs/anti-sybil-reputation-weighting.md`
+     + `tools/sybil-sim.js`. Key finding: a plain reputation *multiplier* barely dents a 4:1
+     fleet (share still ∝ volume); the load-bearing idea is a reputation **eligibility GATE** —
+     below `R_GATE` a node earns full PAY but ZERO pool draw (paid revenue never gated,
+     equal-work-equal-pay preserved). Gated sim cuts a fresh compute-backed fleet's capture
+     ~80%→~22–30%, holds a fresh fleet attacking an established network at 0% for ~2 weeks.
+     **SHADOW MEASUREMENT SHIPPED 2026-08-17 (kai `1cb1959`)**: the scheduler now computes
+     per-worker reputation (durable `firstSeen` age + `repPaidJobs` paid-demand, plus perf
+     sr/challenge history), surfaces it in stats detail + records `reputationShadow` per epoch —
+     but does NOT touch settlement/routing/pay (proven by `probe-reputation.js` + adversarial
+     review + the full econ suite). Enforcement is still OFF (no `KAI_REPUTATION_ENFORCE` wired).
+     **OWNER DECISIONS OPEN before arming the GATE** (doc §9): gate hardness `R_GATE`, signal
+     weights, shadow length, fingerprint binding. Two review fixes already applied to the shadow
+     build (firstSeen type-hardening; paid-demand counts only genuinely-paid chats, not free-tier).
 5. ~~Public stats page~~ — SHIPPED 2026-08-16: `koinosai.com/network`.
 6. **Economics (owner decisions MADE + deployed 2026-08-16, §4.11)**: bootstrap pool 1,500
    KAI/day, daily free tier + 1M/day global ceiling — LIVE. Still owner-gated: `KAI_TREASURY_ADDR`

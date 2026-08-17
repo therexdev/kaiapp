@@ -1,7 +1,11 @@
 # Anti-Sybil: reputation-gated pool distribution (design + simulation)
 
-**Status: DESIGN — for owner review before any code ships.** Task #20 / SOURCE_OF_TRUTH §7.4.
-Nothing in here is live. This is the "concrete design + sim before shipping" the roadmap asked for.
+**Status: SHADOW MEASUREMENT SHIPPED (kai `1cb1959`, 2026-08-17); GATE NOT ARMED — awaiting
+owner decisions (§9).** Task #20 / SOURCE_OF_TRUTH §7.4. The scheduler now *computes and
+surfaces* reputation but does NOT apply it to any payout, split, routing, or consumption
+(verified by probe + adversarial review). The eligibility GATE below is the design for the
+next phase; it ships only after the §9 decisions, shadow field data, and a flip of
+`KAI_REPUTATION_ENFORCE`. Sim: `tools/sybil-sim.js`.
 
 ---
 
