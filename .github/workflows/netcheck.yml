@@ -48,15 +48,11 @@ jobs:
         if: contains(github.event.head_commit.message, '[pricecheck]')
         run: |
           set +e
-          echo "== coingecko koinos.usd (CONFIRMED) =="
+          # CoinGecko is the only free KOIN feed that answers reliably (validated
+          # 2026-08-17): MEXC/KuCoin/Gate.io don't list KOIN, CoinCap's host is
+          # retired, CryptoCompare needs a key, CoinPaprika's koin-koinos is
+          # is_active:false. Re-run this to re-confirm before an oracle rehearsal.
+          echo "== coingecko koinos.usd (path: koinos.usd) =="
           curl -sS --max-time 20 "https://api.coingecko.com/api/v3/simple/price?ids=koinos&vs_currencies=usd"
-          echo; echo "== mexc KOINUSDT .price =="
-          curl -sS --max-time 20 "https://api.mexc.com/api/v3/ticker/price?symbol=KOINUSDT" | head -c 200
-          echo; echo "== coincap koinos data.priceUsd =="
-          curl -sS --max-time 20 "https://api.coincap.io/v2/assets/koinos" | head -c 300
-          echo; echo "== kucoin KOIN-USDT data.price =="
-          curl -sS --max-time 20 "https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=KOIN-USDT" | head -c 300
-          echo; echo "== coinpaprika search (trailing slash, find id) =="
-          curl -sS --max-time 20 "https://api.coinpaprika.com/v1/search/?q=koinos&c=currencies&limit=3" | head -c 400
           echo
           exit 0

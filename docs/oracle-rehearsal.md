@@ -17,13 +17,24 @@ only testnet billing math, and is fully reversible.
 - Movement is deliberately gradual (10%/epoch step cap), so watch it converge over a few
   epochs, not seconds. That gradualness IS the breaker working.
 
+## Available feeds (validated live 2026-08-17 via Netcheck `[pricecheck]`)
+KOIN is thinly listed, so free live feeds are scarce. Only **CoinGecko** answers reliably
+(`{"koinos":{"usd":0.0419}}`). Dead/rejected: CryptoCompare (now needs an API key), MEXC
+(no `KOINUSDT`), KuCoin (`KOIN-USDT` null), CoinCap (host retired), CoinPaprika
+(`koin-koinos` exists but `is_active:false`), Gate.io (no pair). So the live rehearsal runs
+**single-source**. That exercises fetch → EMA smoothing → step clamp → floor/ceil bounds →
+stale-hold → per-epoch pinning. The **median-across-sources / outlier-rejection** breaker
+can't be tested live without a 2nd independent feed (none exists free) — it stays validated
+by `kai/scripts/probe-oracle.js` (synthetic sources, all cases pass). To test median live
+later, add the design's "operator-attested price file" as a 2nd source.
+
 ## Enable (run on the box as root)
 Explicit floor/ceil bracket KOIN (~$0.04) so the bound breakers are exercised regardless of
 the current anchor:
 
 ```bash
 cat >> /opt/koinos/kai.env <<'EOF'
-KAI_PRICE_SOURCES=[{"url":"https://api.coingecko.com/api/v3/simple/price?ids=koinos&vs_currencies=usd","path":"koinos.usd"},{"url":"https://min-api.cryptocompare.com/data/price?fsym=KOIN&tsyms=USD","path":"USD"},{"url":"https://api.coinpaprika.com/v1/tickers/koin-koinos","path":"quotes.USD.price"}]
+KAI_PRICE_SOURCES=[{"url":"https://api.coingecko.com/api/v3/simple/price?ids=koinos&vs_currencies=usd","path":"koinos.usd"}]
 KAI_PRICE_FLOOR_USD=0.005
 KAI_PRICE_CEIL_USD=0.30
 KAI_PRICE_ALPHA=0.25

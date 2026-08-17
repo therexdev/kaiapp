@@ -322,9 +322,13 @@ for dev/screenshots).
 5. ~~Public stats page~~ — SHIPPED 2026-08-16: `koinosai.com/network`.
 6. **Economics (owner decisions MADE + deployed 2026-08-16, §4.11)**: bootstrap pool 1,500
    KAI/day, daily free tier + 1M/day global ceiling — LIVE. Still owner-gated: `KAI_TREASURY_ADDR`
-   to activate splits (§F8); oracle live-source rehearsal (`KAI_PRICE_SOURCES` validated:
-   CoinGecko `koinos.usd`; owner sets on host, documented as SURROGATE not a peg;
-   `probe-oracle.js` proves the machinery). `docs/economics-sprint-02.md` is the record.
+   to activate splits (§F8); oracle live-source rehearsal — **runbook ready**
+   (`docs/oracle-rehearsal.md`), owner runs one env block on the box then watches `/pricing`.
+   Feeds re-validated live 2026-08-17: **CoinGecko `koinos.usd` is the ONLY reliable free KOIN
+   feed** (CryptoCompare now needs a key; MEXC/KuCoin/Gate.io don't list KOIN; CoinCap host
+   retired; CoinPaprika `koin-koinos` is_active:false) — so the rehearsal is single-source
+   (fetch→EMA→step/floor/ceil→stale-hold); the median/outlier breaker stays covered by
+   `probe-oracle.js` offline. SURROGATE, not a peg. `docs/economics-sprint-02.md` is the record.
 7. **Ops hardening (mainnet)** — SHIPPED: rotating state backups + operator export; `kai`
    scheduled monitor (issue/email on real failure); restart forensics on `/api/health` (§5).
    **Migrated koinosai.com to a self-managed Vultr VPS (§9)** — this fixed the mystery host
