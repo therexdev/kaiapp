@@ -1,6 +1,6 @@
 # Koinos AI — Operational Source of Truth
 
-> **Status: CURRENT as of 2026-08-17 ~02:00Z (app v0.25.8; scheduler `cecf09b` — shadow reputation + perf persistence + shadow-trends + Trust stat live on the Vultr VPS, §9; auto-deploy ships production-branch pushes in ~1 min).** This is the living record of what is
+> **Status: CURRENT as of 2026-08-17 ~04:55Z (app v0.25.8; scheduler `3713164` — PHASE 1 LIVE: epoch resume on boot (a restart no longer vaporizes in-flight earnings), persistent daily free tier, price pinning across restarts, strict close persistence gating settlement, boot settlement repair, charge-time spend durability, firstSeen backfill; plus TWO INERT FLAGS awaiting the owner: `KAI_REPUTATION_ENFORCE=1` arms the anti-Sybil pool gate, `KAI_STORE=sqlite` cuts ledgers over to the transactional DB. All shipped through a 22-agent adversarial review (14 confirmed findings fixed pre-deploy) + a ten-probe suite.** This is the living record of what is
 > BUILT, how it deploys, and the operational rules learned in the field. Spec authority
 > remains *Koinos AI — Master Source of Truth* Part I (owner's `.docx`); `§` references
 > point there. Planning history: `docs/V1_PLAN.md`, `docs/M2_PLAN.md`. When this doc and

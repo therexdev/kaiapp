@@ -1,4 +1,21 @@
-# Durable ledger storage — phase 0 (shipped) + SQLite cutover design (for review)
+# Durable ledger storage — phases 0 AND 1 SHIPPED (kai `3713164`, 2026-08-17)
+
+> **As-built status.** Everything below the phase-1 heading is now BUILT and deployed,
+> hardened by a 22-agent adversarial review (14 confirmed findings fixed before deploy —
+> highlights: charge-time spend durability closing a CRITICAL resume over-mint; strict
+> close persistence that withholds on-chain settlement when the disk write failed; boot
+> settlement repair; per-epoch price pinning across restarts; db-export retiring the DB on
+> rollback; backup view refresh; 200-epoch caps). The sqlite backend is INERT until the
+> owner sets `KAI_STORE=sqlite` on the box (json stays the default; the probe suite proves
+> the refactor is behavior-identical). One documented one-time transition cost: the FIRST
+> boot under the resume feature resurrects the pre-deploy in-flight epoch's receipts
+> without its (never-persisted) spend counters — bounded to that single epoch, after which
+> charge-time persistence keeps spend and receipts in lockstep.
+>
+> Also shipped alongside (same review batch): epoch RESUME on boot (a restart used to
+> abandon up to 15 min of workers' earned receipts), persistent daily free-tier counters,
+> and the fast-restart submit_root collision guard.
+#
 
 Task #26. The scheduler's money records (balances, receipts, epoch settlements) live as
 JSON files on one disk. Two failure classes matter as we approach mainnet:
