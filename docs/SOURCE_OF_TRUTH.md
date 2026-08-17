@@ -1,6 +1,17 @@
 # Koinos AI — Operational Source of Truth
 
-> **Status: CURRENT as of 2026-08-17 ~04:55Z (app v0.25.8; scheduler `3713164` — PHASE 1 LIVE: epoch resume on boot (a restart no longer vaporizes in-flight earnings), persistent daily free tier, price pinning across restarts, strict close persistence gating settlement, boot settlement repair, charge-time spend durability, firstSeen backfill; plus TWO INERT FLAGS awaiting the owner: `KAI_REPUTATION_ENFORCE=1` arms the anti-Sybil pool gate, `KAI_STORE=sqlite` cuts ledgers over to the transactional DB. All shipped through a 22-agent adversarial review (14 confirmed findings fixed pre-deploy) + a ten-probe suite.** This is the living record of what is
+> **Status: CURRENT as of 2026-08-17 ~06:05Z. Scheduler `3713164` (PHASE 1 LIVE: epoch
+> resume, persistent free tier, price pinning, strict close persistence gating settlement,
+> boot settlement repair, charge-time spend durability, firstSeen backfill; INERT owner
+> flags: `KAI_REPUTATION_ENFORCE=1` arms the anti-Sybil gate, `KAI_STORE=sqlite` cuts over
+> the transactional ledger — 22-agent adversarial review, 14 findings fixed pre-deploy).
+> App (dev branch, UNRELEASED at owner's hold — v0.25.8 still public): chat FAVORITES;
+> WEB SEARCH in chat (keyless DDG+Wikipedia, §7-gated: hard-403 in Local-Only, SSRF-guarded
+> fetch) with a search→read→answer research agent + persistent citations; VISION —
+> gemma3-4b + pinned mmproj (sha256 8c0fb064…, runner-verified) with image attach
+> (client-downscaled, content-parts on vision models only, clean refusals elsewhere, 👁
+> picker marker, graceful text-only degradation); READ-ALOUD via OS voices. App suite
+> 116 pass / 0 fail. Voice INPUT (Whisper) is designed-next, not built.** This is the living record of what is
 > BUILT, how it deploys, and the operational rules learned in the field. Spec authority
 > remains *Koinos AI — Master Source of Truth* Part I (owner's `.docx`); `§` references
 > point there. Planning history: `docs/V1_PLAN.md`, `docs/M2_PLAN.md`. When this doc and
