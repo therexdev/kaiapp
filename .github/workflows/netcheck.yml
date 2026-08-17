@@ -57,6 +57,18 @@ jobs:
           curl -sS --max-time 15 https://koinosai.com/scheduler/network/status | python3 -m json.tool || echo "(status endpoint unreachable)"
           echo
           exit 0
+      - name: ARM64 engine availability (Pi support — runtime catalog candidates)
+        if: contains(github.event.head_commit.message, '[armcheck]')
+        run: |
+          set +e
+          echo "== llama.cpp b10423 assets mentioning ubuntu/arm =="
+          curl -sS --max-time 20 "https://api.github.com/repos/ggml-org/llama.cpp/releases/tags/b10423" \
+            | python3 -c "import json,sys; [print(a['name'], a['size']) for a in json.load(sys.stdin).get('assets',[]) if 'ubuntu' in a['name'] or 'arm' in a['name']]"
+          echo "== ollama v0.32.13 linux assets =="
+          curl -sS --max-time 20 "https://api.github.com/repos/ollama/ollama/releases/tags/v0.32.13" \
+            | python3 -c "import json,sys; [print(a['name'], a['size']) for a in json.load(sys.stdin).get('assets',[]) if 'linux' in a['name']]"
+          echo
+          exit 0
       - name: Price-feed formats (oracle rehearsal candidates)
         if: contains(github.event.head_commit.message, '[pricecheck]')
         run: |

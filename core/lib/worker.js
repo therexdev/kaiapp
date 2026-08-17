@@ -51,7 +51,12 @@ class Worker {
       // (field feedback — it would reward hoarding over capability). The
       // same minRamGb line the catalog shows buyers gates what we offer.
       const ramGb = this.hardware?.ramBytes ? this.hardware.ramBytes / 1e9 : null;
-      const fits = (a) => ramGb == null || !a.minRamGb || a.minRamGb <= ramGb;
+      // Round like the capabilities report below does (field finding: a
+      // "4 GB" Raspberry Pi sees ~3.9 GB after the GPU carve-out, so a
+      // strict minRamGb<=ramGb refused Koinos Fast on the exact machine it
+      // was named for — while the scheduler, receiving the ROUNDED ramGb,
+      // would have accepted it. One fit rule, both sides).
+      const fits = (a) => ramGb == null || !a.minRamGb || a.minRamGb <= Math.round(ramGb);
       const ready = this.models
         ? this.models.aliases().filter((a) => a.status === "ready" && !a.custom && !a.dev && fits(a)).map((a) => a.alias)
         : [];

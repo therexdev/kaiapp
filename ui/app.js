@@ -243,11 +243,23 @@ function renderCitations(bubble, citations) {
 let networkEligible = false;
 let pickable = []; // latest [{v,label}] the chat picker offers — reused by Compare/Tasks
 async function updateModelPick(aliases) {
+  let netBlockedWhy = "";
   try {
     const n = await coreGet("/core/network");
     // Wallet state is part of eligibility: advertising "Koinos Network"
     // while the wallet is locked just defers the failure to send time.
     networkEligible = n.privacyMode !== "local-only" && !!n.schedulerUrl && n.walletUnlocked !== false;
+    // Field finding (owner's Pi): with the Local-Only default, the network
+    // source simply didn't EXIST in the picker and looked broken. Name the
+    // reason so it's discoverable instead of invisible.
+    if (!networkEligible) {
+      netBlockedWhy =
+        n.privacyMode === "local-only"
+          ? "enable in Local API → Privacy"
+          : !n.schedulerUrl
+            ? "no network configured"
+            : "unlock your wallet in Earn";
+    }
     updatePrivacyNote(n.privacyMode);
     if (document.getElementById("privacy-pick") && document.activeElement?.id !== "privacy-pick") {
       $("privacy-pick").value = n.privacyMode;
@@ -263,13 +275,20 @@ async function updateModelPick(aliases) {
   state.aliasLabels = Object.fromEntries(aliases.map((al) => [al.alias, al.label.split(" (")[0]]));
   state.visionAliases = new Set(aliases.filter((al) => al.vision).map((al) => al.alias)); // gates image attach
   const src = $("src-pick");
-  const srcSig = `local${networkEligible ? ",network" : ""}`;
+  const srcSig = `local${networkEligible ? ",network" : `,blocked:${netBlockedWhy}`}`;
   if (src.dataset.sig !== srcSig) {
     const prevSrc = src.value;
     src.innerHTML = "";
     for (const [v, label] of [["local", "This machine"], ...(networkEligible ? [["network", "Koinos Network"]] : [])]) {
       const o = document.createElement("option");
       o.value = v; o.textContent = label;
+      src.appendChild(o);
+    }
+    if (!networkEligible && netBlockedWhy) {
+      // Visible but not selectable — the network exists; here's how to get it.
+      const o = document.createElement("option");
+      o.disabled = true;
+      o.textContent = `Koinos Network — ${netBlockedWhy}`;
       src.appendChild(o);
     }
     if ([...src.options].some((o) => o.value === prevSrc)) src.value = prevSrc;
