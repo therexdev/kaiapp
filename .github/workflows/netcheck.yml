@@ -48,11 +48,16 @@ jobs:
         if: contains(github.event.head_commit.message, '[pricecheck]')
         run: |
           set +e
-          # CoinGecko is the only free KOIN feed that answers reliably (validated
-          # 2026-08-17): MEXC/KuCoin/Gate.io don't list KOIN, CoinCap's host is
-          # retired, CryptoCompare needs a key, CoinPaprika's koin-koinos is
-          # is_active:false. Re-run this to re-confirm before an oracle rehearsal.
-          echo "== coingecko koinos.usd (path: koinos.usd) =="
+          # ON-CHAIN price from the vKOIN/USDT pool with the deepest liquidity
+          # (owner-specified primary market): read the SAME Ethereum pool via two
+          # independent aggregators for median-of-two redundancy. Confirm which
+          # priceUsd field is the ~$0.04 vKOIN side (base vs quote).
+          POOL=0xa50ad3a559a10f384a5bb2e27516f63e0b937b1a
+          echo "== dexscreener pairs/ethereum/POOL (path: pairs.0.priceUsd) =="
+          curl -sS --max-time 20 "https://api.dexscreener.com/latest/dex/pairs/ethereum/$POOL" | head -c 700
+          echo; echo "== geckoterminal eth/pools/POOL (attributes.base_token_price_usd) =="
+          curl -sS --max-time 20 "https://api.geckoterminal.com/api/v2/networks/eth/pools/$POOL" | head -c 900
+          echo; echo "== coingecko koinos.usd (compare / staleness check) =="
           curl -sS --max-time 20 "https://api.coingecko.com/api/v3/simple/price?ids=koinos&vs_currencies=usd"
           echo
           exit 0
