@@ -14,7 +14,12 @@
 > (client-downscaled, content-parts on vision models only, clean refusals elsewhere, 👁
 > picker marker, graceful text-only degradation); READ-ALOUD via OS voices; typing-dots
 > loading animation + first-reply/tok-s meta; Linux/ARM engines (Pi) with RAM-gate parity.
-> App suite 116 pass / 0 fail local, 120 CI. Voice INPUT (Whisper) is designed-next, not built.** This is the living record of what is
+> App suite 122 pass / 0 fail local, 126 CI. Voice INPUT (Whisper): BUILT on the dev branch
+> (mic push-to-talk → renderer 16 kHz WAV → /core/transcribe → whisper-cli one-shot; local
+> always, fail-closed catalog pins) — awaiting [voicecheck] hashes + a release. kai side:
+> repo-carried env channel (deploy/app.env, on-box env wins) + KAI_STORE=sqlite flip staged
+> at ad421ae on the dev branch — production push PENDING OWNER GO (permission gate).
+> Oracle rehearsal block queues behind the sqlite verify (one app.env append).** This is the living record of what is
 > BUILT, how it deploys, and the operational rules learned in the field. Spec authority
 > remains *Koinos AI — Master Source of Truth* Part I (owner's `.docx`); `§` references
 > point there. Planning history: `docs/V1_PLAN.md`, `docs/M2_PLAN.md`. When this doc and
