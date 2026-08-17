@@ -27,7 +27,25 @@
 > Chat/Research/Agent — Research = multi-round LLM-in-the-loop (search→read→condense→gap
 > check→re-search, ≤3 rounds ≤6 pages, notes fit 4k ctx), Agent = JSON-action ReAct loop
 > over the registry (≤6 steps, per-call confirm dialogs, visible trace; sandboxed
-> workspace file tools, NO bash by design); MCP CLIENT stdio+Streamable-HTTP
+> workspace file tools, NO bash by design). **Agent mode is 4k-HONEST and
+> SMALL-MODEL-HONEST** (v0.27.4, from a tester running a 29-tool third-party server on
+> koinos-balanced): the tool menu is BUDGETED (≤2200 chars, first-sentence descriptions,
+> param prose degraded to bare names, per-question relevance subsetting with a built-in
+> bias) because the unbudgeted menu measured ~3746 tokens and Core's OWN token gate 400'd
+> every step — the loop then fell back to "answering without tools" with no visible cause;
+> and tools are presented under SHORT ALIASES (`network_status`, collisions numbered)
+> instead of registry names, because `mcp:<id>:<tool>` taught models to answer
+> `{"mcp":"<id>:<tool>"}` — namespace as the KEY, no `tool` field, action parsed to null.
+> parseAgentAction now reverse-maps aliases / normalised spellings / `mcp` / `function`
+> shapes back to registry names, refuses genuinely ambiguous ones rather than guessing, and
+> the transcript echoes aliases so the model is never re-taught the colon form. The
+> conversation is trimmed to system+question+last 3 exchanges so a long loop cannot walk off
+> the context either. Registry naming is UNCHANGED — namespacing is real and stays;
+> aliasing lives at the prompt boundary only. n_ctx deliberately NOT raised: KV cache is the
+> binding constraint on the low-RAM machines this targets. Proof:
+> core/scripts/verify-agent-loop.js (real 29-tool MCP subprocess, real registry, real /core
+> routes, model simulated with the same context gate and the same naming failure) — FAILS on
+> 0.27.3, PASSES after, and runs on every push via the agentcheck CI job. MCP CLIENT stdio+Streamable-HTTP
 > (initialize/tools-list/tools-call, session ids, curated 3-entry catalog, one-click add,
 > trusted/localSafe flags per server; NODE RUNTIME auto-provisioned — official v24.19.0 LTS
 > hash-pinned in the runtime catalog, downloaded on demand INSIDE the app (no system
@@ -36,7 +54,7 @@
 > — server-fetch was dropped, it is a PyPI package not npm); EMAIL imapflow/mailparser/nodemailer (presets+app
 > passwords, safeStorage-encrypted creds, inbox/read/summarize/draft via chat, send =
 > human click ONLY, never an agent tool); CALENDAR CalDAV stdlib (REPORT+PUT, minimal
-> VEVENT parse, presets). Suite 137 pass / 0 fail local. kai side: **SQLITE LEDGER LIVE** (ad421ae
+> VEVENT parse, presets). Suite 153 pass / 0 fail / 4 skipped local. kai side: **SQLITE LEDGER LIVE** (ad421ae
 > deployed 17:15Z; /api/health reports `store.mode=sqlite`, no `degraded`; bootCount 13→14,
 > clean SIGTERM, 3 workers back in <16s, job counts and ageDays carried through the
 > migration — proof the ledgers survived). Delivered by the repo-carried env channel

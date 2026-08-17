@@ -22,6 +22,166 @@
   var RESEARCH_MAX_PAGES = 6;
   var AGENT_MAX_STEPS = 6;
   var OBS_CAP = 1200; // chars of tool output fed back per step
+  var CONVO_KEEP_STEPS = 3; // tool exchanges carried forward (see trimConvo)
+
+  /*
+   * Tool-prompt budget. Local models run a 4096-token context (see
+   * core/models/catalog.json) and Core REFUSES an oversized prompt outright
+   * rather than failing mid-stream. Field report (v0.27.3, a 29-tool MCP
+   * server): the tool menu alone blew past the context, every step 400'd, and
+   * Agent mode silently degraded to "answering without tools".
+   *
+   * So the menu is bounded on both axes: each tool costs at most a line, and
+   * only the tools most relevant to THIS question are listed. Any catalog
+   * server can be large; the prompt cannot.
+   */
+  var TOOL_PROMPT_MAX_CHARS = 2200; // ≈550 tokens, leaving room for the loop
+  var TOOL_DESC_MAX_CHARS = 110;
+  var TOOL_MAX_PARAMS = 5;
+  var TOOL_PARAMS_MAX_CHARS = 90;
+
+  var MCP_PREFIX = /^mcp:[^:]+:/;
+
+  /** Registry name → the bare tool name a model can actually reproduce. */
+  function shortName(name) {
+    var s = String(name || "").replace(MCP_PREFIX, "");
+    return /^[A-Za-z0-9_.-]+$/.test(s) ? s : String(name || "");
+  }
+
+  /** Loose key: case and separators are exactly what small models get wrong. */
+  function normKey(s) {
+    return String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  }
+
+  /*
+   * Registry names are namespaced (mcp:<serverId>:<tool>) because two servers
+   * may legitimately export the same tool name. Small local models cannot
+   * reproduce that shape: shown mcp:srvmsxq1a2b:network_status they answer
+   *
+   *     {"mcp": "srvmsxq1a2b:network_status", "args": {}}
+   *
+   * — the namespace becomes the KEY and there is no "tool" field at all, so
+   * the action fails to parse and the loop stalls out. Fix: show aliases (the
+   * bare tool name), and map whatever comes back to a registry name. Two
+   * servers exporting the same name get numbered aliases; the ambiguous bare
+   * spelling then resolves to nothing rather than to a guess.
+   */
+  function toolAliases(names) {
+    var list = (names || []).map(String);
+    var used = Object.create(null);
+    var alias = Object.create(null);
+    var i;
+    for (i = 0; i < list.length; i++) {
+      var s = shortName(list[i]);
+      if (used[s]) s = s + "_" + ++used[s];
+      else used[s] = 1;
+      alias[list[i]] = s;
+    }
+
+    // Reverse index of every spelling we accept. A key claimed by two
+    // different tools is ambiguous and gets dropped — never a guess.
+    var lookup = Object.create(null);
+    var clash = Object.create(null);
+    function add(key, name) {
+      if (!key) return;
+      if (lookup[key] !== undefined && lookup[key] !== name) clash[key] = true;
+      else lookup[key] = name;
+    }
+    for (i = 0; i < list.length; i++) {
+      var full = list[i];
+      add(full, full);
+      add(normKey(full), full);
+      add(alias[full], full);
+      add(normKey(alias[full]), full);
+      add(normKey(shortName(full)), full); // bare name, even if it lost a collision
+    }
+    for (var k in clash) delete lookup[k];
+
+    /** Whatever the model called it → a real registry name, or null. */
+    function resolve(raw) {
+      if (typeof raw !== "string") return null;
+      var s = raw.trim();
+      if (!s) return null;
+      if (lookup[s] !== undefined) return lookup[s];
+      if (lookup[normKey(s)] !== undefined) return lookup[normKey(s)];
+      // Models routinely echo only part of a namespaced name
+      // ("srvmsxq1a2b:network_status", "mcp:network_status"). Take the tail.
+      var tail = normKey(s.split(":").pop());
+      return lookup[tail] !== undefined ? lookup[tail] : null;
+    }
+
+    return { alias: alias, resolve: resolve };
+  }
+
+  var STOPWORDS = " the a an and or of to in for on at is are was can you your my me our what how why does did with from about please tell show get ";
+
+  function questionWords(q) {
+    var words = String(q || "").toLowerCase().match(/[a-z0-9]{3,}/g) || [];
+    var out = [];
+    for (var i = 0; i < words.length && out.length < 12; i++) {
+      if (STOPWORDS.indexOf(" " + words[i] + " ") === -1 && out.indexOf(words[i]) === -1) out.push(words[i]);
+    }
+    return out;
+  }
+
+  /** Trim to the first sentence when there is one; hard-cap regardless. */
+  function firstSentence(text, cap) {
+    var d = String(text || "").trim().replace(/\s+/g, " ");
+    var m = /^[\s\S]{20,}?[.!?](\s|$)/.exec(d);
+    if (m && m[0].length <= cap) return m[0].trim();
+    return d.length > cap ? d.slice(0, cap - 1).replace(/\s+\S*$/, "") + "…" : d;
+  }
+
+  function paramSummary(params) {
+    var keys = Object.keys(params || {});
+    if (!keys.length) return "";
+    var parts = keys.slice(0, TOOL_MAX_PARAMS).map(function (k) {
+      var v = String(params[k] == null ? "" : params[k]).trim().replace(/\s+/g, " ");
+      if (!v) return k;
+      return k + " (" + (v.length > 24 ? v.slice(0, 23) + "…" : v) + ")";
+    });
+    var s = parts.join(", ") + (keys.length > TOOL_MAX_PARAMS ? ", …" : "");
+    // Prose that still will not fit degrades to bare names — the model needs
+    // to know WHICH arguments exist far more than what they mean.
+    return s.length > TOOL_PARAMS_MAX_CHARS ? keys.slice(0, TOOL_MAX_PARAMS).join(", ") : s;
+  }
+
+  function toolLine(t, name) {
+    var desc = firstSentence(t.description, TOOL_DESC_MAX_CHARS);
+    var p = paramSummary(t.params);
+    return "- " + name + ": " + desc + (p ? " Args: " + p : "");
+  }
+
+  /**
+   * Pick the tools worth spending prompt budget on for THIS question.
+   * Greedy: score by keyword overlap, then fill to the char budget. Built-ins
+   * carry a small bias so one large MCP server cannot crowd web_search out of
+   * the menu entirely.
+   */
+  function selectTools(tools, question, aliasMap, budgetChars) {
+    var budget = budgetChars || TOOL_PROMPT_MAX_CHARS;
+    var words = questionWords(question);
+    var ranked = (tools || []).map(function (t, i) {
+      var hay = (shortName(t.name) + " " + (t.description || "")).toLowerCase();
+      var s = 0;
+      for (var w = 0; w < words.length; w++) if (hay.indexOf(words[w]) !== -1) s += 1;
+      if (!MCP_PREFIX.test(String(t.name))) s += 0.5;
+      return { t: t, i: i, s: s };
+    });
+    ranked.sort(function (a, b) { return b.s - a.s || a.i - b.i; });
+
+    var picked = [];
+    var used = 0;
+    for (var k = 0; k < ranked.length; k++) {
+      var t = ranked[k].t;
+      var line = toolLine(t, (aliasMap && aliasMap[t.name]) || shortName(t.name));
+      // Keep scanning rather than breaking: a later, shorter line may fit.
+      if (picked.length && used + line.length + 1 > budget) continue;
+      used += line.length + 1;
+      picked.push(t);
+    }
+    return picked;
+  }
 
   /** First balanced {...} block in model output → parsed object, or null.
    *  Small models wrap JSON in prose/fences; never trust raw JSON.parse. */
@@ -54,31 +214,58 @@
     return null;
   }
 
-  /** Validate a model "action" into {tool,args} | {answer:true} | null. */
+  /** Validate a model "action" into {tool,args} | {answer:true} | null.
+   *  `tool` is always a REGISTRY name, whatever spelling the model used. */
   function parseAgentAction(text, toolNames) {
     var j = extractJson(text);
     if (!j) return null;
     if (j.answer === true || j.final === true || j.done === true) return { answer: true };
-    var name = j.tool || j.name || j.action;
-    if (typeof name === "string" && toolNames.indexOf(name) !== -1) {
-      var args = j.args || j.arguments || j.parameters || {};
-      return { tool: name, args: typeof args === "object" && args ? args : {} };
+
+    var args = j.args || j.arguments || j.parameters || j.input || {};
+    // The name lands under whichever key the model felt like. "mcp" is not
+    // hypothetical: a mcp:<id>:<tool> name in the prompt actively teaches the
+    // model to split it into {"mcp": "<id>:<tool>"}.
+    var raw = j.tool || j.name || j.action || j.mcp || j.tool_name || j.function;
+    if (raw && typeof raw === "object") {
+      // OpenAI shape: {"function": {"name": …, "arguments": …}}
+      args = raw.arguments || raw.args || args;
+      raw = raw.name;
     }
-    return null;
+    if (typeof args === "string") args = extractJson(args) || {}; // arguments-as-string
+
+    var name = toolAliases(toolNames || []).resolve(raw);
+    if (!name) return null;
+    return { tool: name, args: args && typeof args === "object" ? args : {} };
   }
 
-  function buildAgentSystem(tools) {
-    var lines = tools.map(function (t) {
-      var params = Object.keys(t.params || {}).map(function (k) {
-        return k + " (" + t.params[k] + ")";
-      });
-      return "- " + t.name + ": " + t.description + (params.length ? " Args: " + params.join(", ") : "");
+  /**
+   * The tool menu. opts.allNames is the FULL registry list so aliases stay
+   * stable no matter which subset this question selected; opts.question
+   * drives that selection.
+   */
+  function buildAgentSystem(tools, opts) {
+    opts = opts || {};
+    var all = opts.allNames || (tools || []).map(function (t) { return t.name; });
+    var map = toolAliases(all);
+    var listed = selectTools(tools, opts.question, map.alias, opts.budgetChars);
+    var lines = listed.map(function (t) {
+      return toolLine(t, map.alias[t.name] || shortName(t.name));
     });
     return (
       "You can use tools before answering. Available tools:\n" +
       lines.join("\n") +
-      '\n\nRespond with ONLY a JSON object, nothing else.\nTo use a tool: {"tool": "tool_name", "args": {...}}\nWhen you have enough to answer: {"answer": true}\nUse at most one tool per response. Prefer answering as soon as you can.'
+      '\n\nRespond with ONLY a JSON object, nothing else.\nTo use a tool: {"tool": "tool_name", "args": {...}}\nWhen you have enough to answer: {"answer": true}\n' +
+      "Copy the tool name exactly as written above. Use at most one tool per response. Prefer answering as soon as you can."
     );
+  }
+
+  /** Bound the working set: system + question always survive, older tool
+   *  exchanges fall off so a long loop cannot walk off the end of a 4k
+   *  context and turn every remaining step into a 400. */
+  function trimConvo(convo) {
+    var keep = CONVO_KEEP_STEPS * 2;
+    if (convo.length <= 2 + keep) return convo;
+    return convo.slice(0, 2).concat(convo.slice(convo.length - keep));
   }
 
   // ---- browser-only runtime below (needs fetch to Core) ----
@@ -177,7 +364,12 @@
         var tools = tr.tools || [];
         if (!tools.length) return null;
         var toolNames = tools.map(function (t) { return t.name; });
-        var system = buildAgentSystem(tools);
+        var map = toolAliases(toolNames);
+        var listed = selectTools(tools, question, map.alias);
+        var system = buildAgentSystem(listed, { question: question, allNames: toolNames });
+        // Subsetting is visible, not silent: a field report of "it stopped
+        // using tools" is unanswerable without knowing what it was shown.
+        var menu = listed.length < tools.length ? " (" + listed.length + " of " + tools.length + " tools)" : "";
         var convo = [{ role: "system", content: system }, { role: "user", content: question }];
         var observations = [];
         var citations = [];
@@ -202,8 +394,8 @@
 
         function step(n) {
           if (n > AGENT_MAX_STEPS) return Promise.resolve();
-          setStatus("🤖 Step " + n + ": deciding…");
-          return askModelOnce(convo, model).then(function (out) {
+          setStatus("🤖 Step " + n + ": deciding…" + menu);
+          return askModelOnce(trimConvo(convo), model).then(function (out) {
             var action = parseAgentAction(out, toolNames);
             if (!action) {
               // Model refused the format twice = it wants to answer.
@@ -211,7 +403,7 @@
               return n === AGENT_MAX_STEPS ? Promise.resolve() : step(n + 1);
             }
             if (action.answer) return Promise.resolve();
-            var label = action.tool.replace(/^mcp:[^:]+:/, "");
+            var label = map.alias[action.tool] || action.tool.replace(/^mcp:[^:]+:/, "");
             setStatus("🛠 " + label + " " + JSON.stringify(action.args).slice(0, 80) + "…");
             return callTool(action.tool, action.args).then(function (result) {
               traceLines.push("🛠 " + label + " → " + String(result).split("\n")[0].slice(0, 90));
@@ -224,7 +416,10 @@
                   if (!citations.some(function (c) { return c.url === u; })) citations.push({ title: u.replace(/^https?:\/\//, "").slice(0, 80), url: u });
                 });
               }
-              convo.push({ role: "assistant", content: JSON.stringify({ tool: action.tool, args: action.args }) });
+              // Echo the ALIAS back, never the registry name — replaying
+              // mcp:<id>:<tool> into the transcript re-teaches the model the
+              // exact spelling it cannot produce.
+              convo.push({ role: "assistant", content: JSON.stringify({ tool: label, args: action.args }) });
               convo.push({ role: "user", content: "Tool result:\n" + String(result).slice(0, OBS_CAP) + '\n\nNext: ONLY JSON — another {"tool": ...} or {"answer": true}.' });
               return step(n + 1);
             });
@@ -253,8 +448,12 @@
     extractJson: extractJson,
     parseAgentAction: parseAgentAction,
     buildAgentSystem: buildAgentSystem,
+    toolAliases: toolAliases,
+    selectTools: selectTools,
+    trimConvo: trimConvo,
     makeRuntime: makeRuntime,
     RESEARCH_MAX_ROUNDS: RESEARCH_MAX_ROUNDS,
     AGENT_MAX_STEPS: AGENT_MAX_STEPS,
+    TOOL_PROMPT_MAX_CHARS: TOOL_PROMPT_MAX_CHARS,
   };
 });

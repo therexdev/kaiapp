@@ -156,3 +156,21 @@ jobs:
           ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
       - name: Provision Node + launch a catalog MCP server (no system node used)
         run: node core/scripts/verify-node-runtime.js
+
+  # Agent mode against a REAL 29-tool MCP server, with a model simulated as
+  # badly as small local models actually behave (field report v0.27.3: the
+  # tool menu overran the 4k context AND mcp:<id>:<tool> names were
+  # unspeakable, so the loop silently stopped using tools). Runs everywhere,
+  # every push — it needs no network and takes seconds.
+  agentcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      - name: Replay the agent loop against a 29-tool MCP server
+        run: node core/scripts/verify-agent-loop.js
