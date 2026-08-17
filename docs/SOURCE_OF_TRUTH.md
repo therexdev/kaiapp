@@ -20,10 +20,13 @@
 > (client-downscaled, content-parts on vision models only, clean refusals elsewhere, 👁
 > picker marker, graceful text-only degradation); READ-ALOUD via OS voices; typing-dots
 > loading animation + first-reply/tok-s meta; Linux/ARM engines (Pi) with RAM-gate parity.
-> App suite 122 pass / 0 fail local, 126 CI. kai side:
-> repo-carried env channel (deploy/app.env, on-box env wins) + KAI_STORE=sqlite flip staged
-> at ad421ae on the dev branch — production push PENDING OWNER GO (permission gate).
-> Oracle rehearsal block queues behind the sqlite verify (one app.env append).** This is the living record of what is
+> App suite 122 pass / 0 fail local, 126 CI. kai side: **SQLITE LEDGER LIVE** (ad421ae
+> deployed 17:15Z; /api/health reports `store.mode=sqlite`, no `degraded`; bootCount 13→14,
+> clean SIGTERM, 3 workers back in <16s, job counts and ageDays carried through the
+> migration — proof the ledgers survived). Delivered by the repo-carried env channel
+> (deploy/app.env; on-box env always wins; no secrets). **Oracle rehearsal COMMITTED at
+> 4c31a1c on the kai dev branch, NOT yet deployed** — production push needs owner go
+> (permission gate); on deploy, /scheduler/pricing walks anchor→live over epochs.** This is the living record of what is
 > BUILT, how it deploys, and the operational rules learned in the field. Spec authority
 > remains *Koinos AI — Master Source of Truth* Part I (owner's `.docx`); `§` references
 > point there. Planning history: `docs/V1_PLAN.md`, `docs/M2_PLAN.md`. When this doc and
