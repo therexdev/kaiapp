@@ -1,17 +1,20 @@
 # Koinos AI — Operational Source of Truth
 
-> **Status: CURRENT as of 2026-08-17 ~06:05Z. Scheduler `3713164` (PHASE 1 LIVE: epoch
+> **Status: CURRENT as of 2026-08-17 ~13:10Z. Scheduler `3713164` (PHASE 1 LIVE: epoch
 > resume, persistent free tier, price pinning, strict close persistence gating settlement,
 > boot settlement repair, charge-time spend durability, firstSeen backfill; INERT owner
 > flags: `KAI_REPUTATION_ENFORCE=1` arms the anti-Sybil gate, `KAI_STORE=sqlite` cuts over
 > the transactional ledger — 22-agent adversarial review, 14 findings fixed pre-deploy).
-> App (dev branch, UNRELEASED at owner's hold — v0.25.8 still public): chat FAVORITES;
-> WEB SEARCH in chat (keyless DDG+Wikipedia, §7-gated: hard-403 in Local-Only, SSRF-guarded
-> fetch) with a search→read→answer research agent + persistent citations; VISION —
-> gemma3-4b + pinned mmproj (sha256 8c0fb064…, runner-verified) with image attach
+> App **v0.25.11 PUBLIC and SIGNED** (2026-08-17 13:00Z; first Azure-signed release —
+> installer/portable/uninstaller/elevate all carry Authenticode, verified on the published
+> asset). Feature state (shipped v0.25.9→.11): chat FAVORITES + rename; WEB SEARCH in chat
+> (keyless DDG+Wikipedia, §7-gated: hard-403 in Local-Only, SSRF-guarded fetch) with a
+> search→read→answer research agent + persistent citations + agent trace on network chats;
+> VISION — gemma3-4b + pinned mmproj (sha256 8c0fb064…, runner-verified) with image attach
 > (client-downscaled, content-parts on vision models only, clean refusals elsewhere, 👁
-> picker marker, graceful text-only degradation); READ-ALOUD via OS voices. App suite
-> 116 pass / 0 fail. Voice INPUT (Whisper) is designed-next, not built.** This is the living record of what is
+> picker marker, graceful text-only degradation); READ-ALOUD via OS voices; typing-dots
+> loading animation + first-reply/tok-s meta; Linux/ARM engines (Pi) with RAM-gate parity.
+> App suite 116 pass / 0 fail local, 120 CI. Voice INPUT (Whisper) is designed-next, not built.** This is the living record of what is
 > BUILT, how it deploys, and the operational rules learned in the field. Spec authority
 > remains *Koinos AI — Master Source of Truth* Part I (owner's `.docx`); `§` references
 > point there. Planning history: `docs/V1_PLAN.md`, `docs/M2_PLAN.md`. When this doc and
@@ -40,9 +43,16 @@ streaming. Website + scheduler: **koinosai.com** (testers funnel: `koinosai.com/
 > takeover branch, then push the same commits to the production branch to ship.
 
 - Version bumps: BOTH `package.json` and `core/package.json` (a test enforces the match).
-- Code signing: **not yet** — Azure Trusted Signing org identity validation pending (Koinos
-  AI, East US). CI is pre-wired: adding the `AZURE_SIGNING_ACCOUNT`/`PROFILE` (+ tenant/client
-  secrets) makes the next `[release]` ship signed. Fallback option: SSL.com eSigner.
+- Code signing: **LIVE since v0.25.11** (2026-08-17) — Azure Trusted Signing, subject
+  CN=Michael Milas (Bennington NE), Microsoft ID Verified chain. CI signs installer +
+  portable + uninstaller + elevate helper on every `[release]`. Secrets:
+  `AZURE_SIGNING_ACCOUNT` (portal resource name, hyphenated — NOT the profile name),
+  `AZURE_SIGNING_PROFILE`, `AZURE_SIGNING_ENDPOINT` (region URI from the account's
+  Overview), `AZURE_PUBLISHER_NAME`, + tenant/client-id/client-secret (secret VALUE, not
+  ID). Signer role: "Artifact Signing Certificate Profile Signer" on the account. Certs
+  rotate ~3 days server-side (normal; timestamped signatures outlive rotation).
+  Debug trail: 403 at "Submitting digest" = account/profile/endpoint name mismatch or
+  missing signer role; AADSTS7000215 = client-secret ID pasted instead of its value.
 - No PRs — direct pushes to the branch above. Commits carry no model identifiers.
 
 ## 3. Architecture map
@@ -290,9 +300,9 @@ for dev/screenshots).
 
 ## 7. Open threads (next work, in rough priority)
 
-1. **Azure Trusted Signing** — waiting on the owner's identity validation; then add the
-   secrets and the next `[release]` ships signed. (Portal path: top search bar → "Trusted
-   Signing accounts"; provider `Microsoft.CodeSigning` must be registered.)
+1. ~~Azure Trusted Signing~~ — **SHIPPED 2026-08-17, v0.25.11 signed** (see §2 for the
+   secret layout and the 403/AADSTS debug trail). Watch the field: SmartScreen reputation
+   still accrues per-file over downloads; signed ≠ instant zero warnings on day one.
 2. ~~Perf-fed routing (§51 phase 2)~~ — SHIPPED 2026-08-16 (`aa832ac`, §4.8). Watch the
    field: preference behavior on real consumer chats, probation false-positives (a slow
    machine mid-model-load eating lease expiries), whether the 4s window needs tuning.
