@@ -126,3 +126,17 @@ test("mcp manager: npx servers are rewritten onto the resolved runtime; non-npx 
   assert.strictEqual(plain.command, "/usr/local/bin/my-server", "a non-npx command is untouched");
   assert.deepStrictEqual(plain.args, ["--flag"]);
 });
+
+test("mcp: the connect handshake gets a far more patient budget than tool calls", () => {
+  // Windows CI finding: a cold `npx` download outlasted the 30s RPC budget
+  // and initialize timed out mid-install. Connecting must tolerate that;
+  // ordinary calls must still fail fast so a wedged server is obvious.
+  const { RPC_TIMEOUT_MS, CONNECT_TIMEOUT_MS } = require("../lib/mcp");
+  assert.ok(CONNECT_TIMEOUT_MS >= 180000, `connect budget covers a cold package download (${CONNECT_TIMEOUT_MS}ms)`);
+  assert.ok(RPC_TIMEOUT_MS <= 60000, "tool calls still fail fast");
+  assert.ok(CONNECT_TIMEOUT_MS > RPC_TIMEOUT_MS * 4, "the two budgets are meaningfully different");
+
+  const src = fs.readFileSync(path.join(__dirname, "..", "lib", "mcp.js"), "utf8");
+  assert.match(src, /"initialize",[\s\S]{0,240}CONNECT_TIMEOUT_MS/, "initialize uses the patient budget");
+  assert.match(src, /"tools\/list", \{\}, \{ timeoutMs: CONNECT_TIMEOUT_MS \}/, "so does the first tools/list");
+});

@@ -377,12 +377,15 @@
       body: JSON.stringify({ name: entry.name, transport: entry.transport, url: entry.url, command: entry.command, args }),
     });
     if (r.ok) {
-      btn.textContent = "Starting…";
+      // First run downloads the server package itself and can take a
+      // minute+ — an unexplained wait here reads as a hang (Windows CI
+      // finding: the handshake outlasted the old 30s budget mid-download).
+      btn.disabled = true;
+      btn.textContent = "Downloading & starting… (first time only)";
       const c = await jfetch(`/core/mcp/${r.server.id}/connect`, { method: "POST" });
+      btn.disabled = false;
       btn.textContent = "Add";
-      // First run of an npm-based server downloads the package itself — say
-      // so instead of letting a 30s wait look like a hang.
-      if (!c.ok) alert(`Added, but couldn't start it:\n${c.error}`);
+      if (!c.ok) alert(`Added, but couldn't start it:\n${c.error}\n\nIt stays in your list — press Connect to try again.`);
     } else alert(r.error || "couldn't add");
     render();
   });

@@ -23,6 +23,15 @@ const { spawn } = require("child_process");
 
 const PROTOCOL_VERSION = "2025-03-26";
 const RPC_TIMEOUT_MS = 30000;
+/*
+ * The FIRST connect to an npm-based server has to download the package
+ * before the server process says a word, which on a cold machine routinely
+ * outlasts a normal RPC timeout (Windows CI: initialize timed out at 30s
+ * while npx was still installing). Connecting therefore gets its own, far
+ * more patient budget; ordinary tool calls keep the short one so a wedged
+ * server still fails fast.
+ */
+const CONNECT_TIMEOUT_MS = 240000;
 
 class McpConnection {
   constructor(config, onEvent) {
@@ -38,7 +47,7 @@ class McpConnection {
   }
 
   // ---- transport: http (Streamable HTTP) ----
-  async _httpRpc(method, params, { notification = false } = {}) {
+  async _httpRpc(method, params, { notification = false, timeoutMs = RPC_TIMEOUT_MS } = {}) {
     const body = { jsonrpc: "2.0", method, ...(params !== undefined ? { params } : {}) };
     if (!notification) body.id = this._nextId++;
     const headers = {
@@ -50,7 +59,7 @@ class McpConnection {
       method: "POST",
       headers,
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(RPC_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     const sid = resp.headers.get("mcp-session-id");
     if (sid) this._sessionId = sid;
@@ -120,7 +129,7 @@ class McpConnection {
     });
   }
 
-  _stdioRpc(method, params, { notification = false } = {}) {
+  _stdioRpc(method, params, { notification = false, timeoutMs = RPC_TIMEOUT_MS } = {}) {
     if (!this._child) throw new Error("MCP server not running");
     const body = { jsonrpc: "2.0", method, ...(params !== undefined ? { params } : {}) };
     if (notification) {
@@ -131,8 +140,8 @@ class McpConnection {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this._pending.delete(body.id);
-        reject(new Error(`MCP call timed out: ${method}`));
-      }, RPC_TIMEOUT_MS);
+        reject(new Error(`MCP call timed out: ${method}${timeoutMs >= CONNECT_TIMEOUT_MS ? " (the tool server never started — if it downloads on first run, try again once it is cached)" : ""}`));
+      }, timeoutMs);
       this._pending.set(body.id, { resolve, reject, timer });
       this._child.stdin.write(JSON.stringify(body) + "\n");
     });
@@ -144,14 +153,14 @@ class McpConnection {
 
   async connect() {
     if (this.config.transport === "stdio") this._stdioStart();
-    const init = await this._rpc("initialize", {
-      protocolVersion: PROTOCOL_VERSION,
-      capabilities: {},
-      clientInfo: { name: "koinos-ai", version: "1.0" },
-    });
+    const init = await this._rpc(
+      "initialize",
+      { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "koinos-ai", version: "1.0" } },
+      { timeoutMs: CONNECT_TIMEOUT_MS } // first run downloads the package
+    );
     this.serverInfo = init?.serverInfo || null;
     await this._rpc("notifications/initialized", undefined, { notification: true });
-    const listed = await this._rpc("tools/list", {});
+    const listed = await this._rpc("tools/list", {}, { timeoutMs: CONNECT_TIMEOUT_MS });
     this.tools = (listed?.tools || []).map((t) => ({
       name: t.name,
       description: String(t.description || "").slice(0, 300),
@@ -176,4 +185,4 @@ class McpConnection {
   }
 }
 
-module.exports = { McpConnection, PROTOCOL_VERSION };
+module.exports = { McpConnection, PROTOCOL_VERSION, RPC_TIMEOUT_MS, CONNECT_TIMEOUT_MS };
