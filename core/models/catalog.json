@@ -1,99 +1,99 @@
 {
   "catalogVersion": 1,
-  "comment": "Model packages are versioned + immutable (spec \u00a727): identity is the SHA-256. koinos-fast is the launch alias; dev-tiny is the CI/pipeline test model, hidden from the picker unless it is the model actually in use.",
+  "comment": "Model packages are versioned + immutable (spec §27): identity is the SHA-256. koinos-fast is the launch alias; dev-tiny is the CI/pipeline test model, hidden from the picker unless it is the model actually in use.",
   "aliases": {
     "koinos-fast": {
       "label": "Koinos Fast",
-      "blurb": "Quick answers on any machine \u00b7 1 GB",
+      "blurb": "Quick answers on any machine · 1 GB",
       "package": "qwen2.5-1.5b-instruct-q4_k_m@1",
       "minRamGb": 4
     },
     "koinos-balanced": {
       "label": "Koinos Balanced",
-      "blurb": "Noticeably smarter, still CPU-friendly \u00b7 2 GB",
+      "blurb": "Noticeably smarter, still CPU-friendly · 2 GB",
       "package": "llama-3.2-3b-instruct-q4_k_m@1",
       "minRamGb": 8
     },
     "koinos-smart": {
       "label": "Koinos Smart",
-      "blurb": "Best local quality \u2014 wants a GPU or 16 GB RAM \u00b7 4.7 GB",
+      "blurb": "Best local quality — wants a GPU or 16 GB RAM · 4.7 GB",
       "package": "qwen2.5-7b-instruct-q4_k_m@1",
       "minRamGb": 12
     },
     "gemma3-4b": {
       "label": "Gemma 3 4B",
-      "blurb": "Google \u2014 sharp for its size \u00b7 2.5 GB",
+      "blurb": "Google — sharp for its size · 2.5 GB",
       "minRamGb": 8,
       "package": "google_gemma-3-4b-it-q4_k_m@1"
     },
     "mistral-7b": {
       "label": "Mistral 7B",
-      "blurb": "The classic open workhorse \u00b7 4.4 GB",
+      "blurb": "The classic open workhorse · 4.4 GB",
       "minRamGb": 12,
       "package": "mistral-7b-instruct-v0.3-q4_k_m@1"
     },
     "qwen-coder-7b": {
       "label": "Qwen Coder 7B",
-      "blurb": "Tuned for programming \u00b7 4.7 GB",
+      "blurb": "Tuned for programming · 4.7 GB",
       "minRamGb": 12,
       "package": "qwen2.5-coder-7b-instruct-q4_k_m@1"
     },
     "llama31-8b": {
       "label": "Llama 3.1 8B",
-      "blurb": "Meta's do-everything favorite \u00b7 4.9 GB",
+      "blurb": "Meta's do-everything favorite · 4.9 GB",
       "minRamGb": 12,
       "package": "meta-llama-3.1-8b-instruct-q4_k_m@1"
     },
     "gemma3-12b": {
       "label": "Gemma 3 12B",
-      "blurb": "Google \u2014 near-frontier local quality \u00b7 7.3 GB",
+      "blurb": "Google — near-frontier local quality · 7.3 GB",
       "minRamGb": 16,
       "package": "google_gemma-3-12b-it-q4_k_m@1"
     },
     "qwen25-14b": {
       "label": "Qwen 2.5 14B",
-      "blurb": "The biggest brain here \u00b7 9.0 GB",
+      "blurb": "The biggest brain here · 9.0 GB",
       "minRamGb": 24,
       "package": "qwen2.5-14b-instruct-q4_k_m@1"
     },
     "phi-4": {
       "label": "Phi-4 14B",
-      "blurb": "Microsoft \u2014 reasoning-strong \u00b7 9.1 GB",
+      "blurb": "Microsoft — reasoning-strong · 9.1 GB",
       "minRamGb": 24,
       "package": "phi-4-q4_k_m@1"
     },
     "mistral-small-24b": {
       "label": "Mistral Small 24B",
-      "blurb": "Mistral's flagship small \u2014 big-model feel \u00b7 14.3 GB",
+      "blurb": "Mistral's flagship small — big-model feel · 14.3 GB",
       "minRamGb": 24,
       "package": "mistral-small-24b-instruct-2501-q4_k_m@1"
     },
     "gemma3-27b": {
       "label": "Gemma 3 27B",
-      "blurb": "Google's biggest Gemma \u2014 frontier-class local \u00b7 16.5 GB",
+      "blurb": "Google's biggest Gemma — frontier-class local · 16.5 GB",
       "minRamGb": 24,
       "package": "google_gemma-3-27b-it-q4_k_m@1"
     },
     "qwen25-32b": {
       "label": "Qwen 2.5 32B",
-      "blurb": "Deep quality for 32 GB machines \u00b7 19.9 GB",
+      "blurb": "Deep quality for 32 GB machines · 19.9 GB",
       "minRamGb": 32,
       "package": "qwen2.5-32b-instruct-q4_k_m@1"
     },
     "qwen-coder-32b": {
       "label": "Qwen Coder 32B",
-      "blurb": "State-of-the-art open coding \u00b7 19.9 GB",
+      "blurb": "State-of-the-art open coding · 19.9 GB",
       "minRamGb": 32,
       "package": "qwen2.5-coder-32b-instruct-q4_k_m@1"
     },
     "deepseek-r1-32b": {
       "label": "DeepSeek R1 32B",
-      "blurb": "Reasoning specialist \u2014 shows its thinking \u00b7 19.9 GB",
+      "blurb": "Reasoning specialist — shows its thinking · 19.9 GB",
       "minRamGb": 32,
       "package": "deepseek-r1-distill-qwen-32b-q4_k_m@1"
     },
     "dev-tiny": {
-      "label": "Dev Tiny (pipeline testing only \u2014 not a launch model)",
+      "label": "Dev Tiny (pipeline testing only — not a launch model)",
       "package": "smollm2-135m-instruct-q8_0@1",
       "dev": true
     }
