@@ -37,16 +37,33 @@ const MAX_BODY_BYTES = 10 * 1024 * 1024;
 const CTX_HEADROOM_TOKENS = 512;
 
 /** Rough prompt-size estimate (~4 chars/token + per-message overhead).
- *  Deliberately cheap — it gates routing, it does not bill anything. */
+ *  Deliberately cheap — it gates routing, it does not bill anything.
+ *  Multimodal content-parts: text parts count by chars; each image counts a
+ *  flat ~800 tokens (typical projector budget), NOT its base64 length —
+ *  String()-ing an array would both miscount and crash the gate. */
 function estimateMessageTokens(messages) {
   if (!Array.isArray(messages)) return 0;
   let chars = 0;
   let n = 0;
+  let images = 0;
   for (const m of messages) {
     n += 1;
-    chars += String(m?.content ?? "").length;
+    const c = m?.content;
+    if (Array.isArray(c)) {
+      for (const part of c) {
+        if (part?.type === "image_url") images += 1;
+        else chars += String(part?.text ?? "").length;
+      }
+    } else {
+      chars += String(c ?? "").length;
+    }
   }
-  return Math.ceil(chars / 4) + n * 4;
+  return Math.ceil(chars / 4) + n * 4 + images * 800;
+}
+
+/** True when any message carries an image content part. */
+function hasImageParts(messages) {
+  return Array.isArray(messages) && messages.some((m) => Array.isArray(m?.content) && m.content.some((p) => p?.type === "image_url"));
 }
 
 class Gateway {
@@ -538,7 +555,32 @@ class Gateway {
           error: { message: "Privacy mode is Local-Only: network requests are disabled on this machine", type: "invalid_request_error" },
         });
       }
+      // _chatNetwork re-serializes {messages,...} for signing — image content
+      // parts would be mangled, not transported. Refuse honestly until the
+      // network protocol carries them.
+      if (hasImageParts(body.messages)) {
+        return this._json(res, 400, {
+          error: { message: "Network models can't see images yet — pick a local vision model for this chat", type: "invalid_request_error" },
+        });
+      }
       return this._chatNetwork(body, req, res);
+    }
+
+    // Images only reach a model that can actually see them: the package must
+    // be vision-capable (its projector loads with the engine). Anything else
+    // would silently describe nothing — worse than a clear refusal.
+    if (hasImageParts(body.messages)) {
+      let vision = false;
+      try {
+        vision = Boolean(this.models.resolveAlias(alias).vision);
+      } catch {
+        /* unknown alias — ensure() below will fail with its own message */
+      }
+      if (!vision) {
+        return this._json(res, 400, {
+          error: { message: `${alias || "This model"} can't see images — pick a vision-capable model from the picker`, type: "invalid_request_error" },
+        });
+      }
     }
 
     // §7 capability, context first: an oversized prompt would fail
@@ -892,4 +934,4 @@ class Gateway {
   }
 }
 
-module.exports = { Gateway };
+module.exports = { Gateway, estimateMessageTokens, hasImageParts };

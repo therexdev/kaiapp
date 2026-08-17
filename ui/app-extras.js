@@ -24,8 +24,41 @@ function clearAttachment() {
   $("attach-chip-row").hidden = true;
 }
 
+// Images attach as vision input: downscaled client-side (≤1024px JPEG) so a
+// phone photo doesn't become a 12 MB base64 blob in a 4k-token request.
+function setImageAttachment(name, dataUri) {
+  state.attachment = { kind: "image", name, dataUri };
+  $("attach-name").textContent = `🖼️ ${name}`;
+  $("attach-chip-row").hidden = false;
+}
+
+function readImageFile(file) {
+  if (file.size > 20_000_000) {
+    addMsg("error", "That image is over 20 MB — attach something smaller.");
+    return;
+  }
+  const img = new Image();
+  const url = URL.createObjectURL(file);
+  img.onload = () => {
+    URL.revokeObjectURL(url);
+    const MAX = 1024;
+    const scale = Math.min(1, MAX / Math.max(img.naturalWidth, img.naturalHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+    canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+    setImageAttachment(file.name, canvas.toDataURL("image/jpeg", 0.85));
+  };
+  img.onerror = () => {
+    URL.revokeObjectURL(url);
+    addMsg("error", `“${file.name}” doesn't look like an image this app can read.`);
+  };
+  img.src = url;
+}
+
 function readAttachFile(file) {
   if (!file) return;
+  if (/^image\//.test(file.type || "")) return readImageFile(file);
   if (file.size > 1_000_000) {
     addMsg("error", "That file is over 1 MB — attach something smaller (text only).");
     return;

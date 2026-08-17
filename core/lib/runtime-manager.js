@@ -190,13 +190,31 @@ class RuntimeManager {
         throw terminal;
       }
     };
+    // Vision packages ship a projector file; llama-server takes it as
+    // --mmproj and then accepts OpenAI-style image_url content parts.
+    // Projector trouble (unpinned, download failed) must never take TEXT
+    // serving down with it — degrade to text-only and say so.
+    let mmprojPath = null;
+    if (resolved.vision && resolved.mmproj) {
+      try {
+        mmprojPath = await this.models.ensureMmproj(resolved.packageId);
+      } catch (e) {
+        this.onEvent?.({ type: "runtime:vision-degraded", alias, message: String(e.message).slice(0, 200) });
+      }
+    }
     const boot = async (binPath, gpuLayers, cap) => {
       if (binPath && !this._testedBins.has(binPath)) {
         await testHard(binPath, cap);
         this._testedBins.add(binPath);
       }
       const runtime = this.makeRuntime(binPath);
-      await runtime.start({ modelPath, contextSize: resolved.contextSize || 4096, gpuLayers, sizeBytes: resolved.sizeBytes || 0 });
+      await runtime.start({
+        modelPath,
+        contextSize: resolved.contextSize || 4096,
+        gpuLayers,
+        sizeBytes: resolved.sizeBytes || 0,
+        extraArgs: mmprojPath ? ["--mmproj", mmprojPath] : [],
+      });
       return runtime;
     };
 

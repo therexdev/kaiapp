@@ -186,6 +186,40 @@ async function webResearch(query, statusEl) {
   return { context, citations: results.map((x) => ({ title: x.title, url: x.url })) };
 }
 
+/** API wire format: image-bearing turns become OpenAI content parts (what
+ *  llama-server-with-mmproj and Ollama vision models accept); everything else
+ *  is plain {role, content} — UI-only fields (citations, images) never leak
+ *  into the request body. */
+function toWire(messages) {
+  return messages.map((m) =>
+    Array.isArray(m.images) && m.images.length
+      ? {
+          role: m.role,
+          content: [
+            { type: "text", text: String(m.content || "") },
+            ...m.images.map((u) => ({ type: "image_url", image_url: { url: u } })),
+          ],
+        }
+      : { role: m.role, content: m.content }
+  );
+}
+
+/** Thumbnails on an image-bearing user message (data: URIs — CSP-safe). */
+function renderMsgImages(el, images) {
+  if (!Array.isArray(images) || !images.length) return;
+  const row = document.createElement("div");
+  row.className = "msg-images";
+  for (const u of images.slice(0, 3)) {
+    if (!String(u).startsWith("data:image/")) continue;
+    const img = document.createElement("img");
+    img.src = u;
+    img.alt = "attached image";
+    img.className = "msg-img";
+    row.appendChild(img);
+  }
+  if (row.children.length) el.appendChild(row);
+}
+
 /** Citation chips under an assistant message — plain links, renderer-safe. */
 function renderCitations(bubble, citations) {
   if (!Array.isArray(citations) || !citations.length) return;
@@ -227,6 +261,7 @@ async function updateModelPick(aliases) {
     .filter((al) => al.status === "ready" && (!al.dev || al.alias === state.alias))
     .map((al) => ({ v: al.alias, label: al.label.split(" (")[0] }));
   state.aliasLabels = Object.fromEntries(aliases.map((al) => [al.alias, al.label.split(" (")[0]]));
+  state.visionAliases = new Set(aliases.filter((al) => al.vision).map((al) => al.alias)); // gates image attach
   const src = $("src-pick");
   const srcSig = `local${networkEligible ? ",network" : ""}`;
   if (src.dataset.sig !== srcSig) {
@@ -256,7 +291,9 @@ async function updateModelPick(aliases) {
     pick.innerHTML = "";
     for (const w of state.localModels) {
       const o = document.createElement("option");
-      o.value = w.v; o.textContent = w.label;
+      o.value = w.v;
+      // 👁 marks vision-capable models — the ones that accept image attachments.
+      o.textContent = state.visionAliases?.has(w.v) ? `${w.label} 👁` : w.label;
       pick.appendChild(o);
     }
     pick.dataset.sig = sig;
@@ -440,9 +477,33 @@ function addMsg(role, text) {
 function attachMsgActions(bubble) {
   const bar = document.createElement("div");
   bar.className = "msg-actions";
+  // Read aloud uses the OS voices Chromium ships (speechSynthesis): offline,
+  // free, no downloads — hidden only if the platform has no voices at all.
+  const canSpeak = "speechSynthesis" in window;
   bar.innerHTML = `<button type="button" class="msg-act" data-act="copy" title="Copy message">Copy</button>
-    <button type="button" class="msg-act" data-act="regen" title="Ask again">Regenerate</button>`;
+    <button type="button" class="msg-act" data-act="regen" title="Ask again">Regenerate</button>${
+      canSpeak ? `<button type="button" class="msg-act" data-act="speak" title="Read this reply aloud">🔊 Read</button>` : ""
+    }`;
   bubble.appendChild(bar);
+}
+
+/** One utterance at a time; clicking again (or another message) stops it. */
+function speakText(btn, text) {
+  const speaking = window.speechSynthesis.speaking;
+  window.speechSynthesis.cancel();
+  for (const b of document.querySelectorAll('.msg-act[data-act="speak"]')) b.textContent = "🔊 Read";
+  if (speaking && btn.dataset.speaking === "1") {
+    delete btn.dataset.speaking;
+    return;
+  }
+  const u = new SpeechSynthesisUtterance(text);
+  u.onend = u.onerror = () => {
+    btn.textContent = "🔊 Read";
+    delete btn.dataset.speaking;
+  };
+  btn.textContent = "⏹ Stop";
+  btn.dataset.speaking = "1";
+  window.speechSynthesis.speak(u);
 }
 
 $("messages").addEventListener("click", async (e) => {
@@ -475,6 +536,11 @@ $("messages").addEventListener("click", async (e) => {
     rebuildMessages();
     send(lastUser.content);
   }
+  if (act.dataset.act === "speak") {
+    const idx = [...$("messages").querySelectorAll(".msg.assistant")].indexOf(bubble);
+    const assistants = state.history.filter((m) => m.role === "assistant");
+    speakText(act, assistants[idx]?.content ?? bubble.textContent ?? "");
+  }
 });
 
 async function send(replayText) {
@@ -482,17 +548,30 @@ async function send(replayText) {
   if (!text || state.chatting || !state.alias) return;
   const chatModel = composedChatModel();
   if (!replayText) $("input").value = "";
-  // An attached file becomes its own user turn right before the question,
-  // so it round-trips through history and re-renders faithfully.
-  if (!replayText && state.attachment) {
+  // An attached IMAGE rides on the question turn itself (vision input) —
+  // gated to models that can actually see (the gateway enforces this too;
+  // client-side is just the instant, friendlier refusal).
+  let pendingImages = null;
+  if (!replayText && state.attachment?.kind === "image") {
+    if (chatModel.startsWith("koinos-network") || !state.visionAliases?.has(chatModel)) {
+      addMsg("error", "That model can't see images — pick a vision-capable model (👁 in the picker), then send again.");
+      $("input").value = text;
+      return;
+    }
+    pendingImages = [state.attachment.dataUri];
+    clearAttachment();
+  } else if (!replayText && state.attachment) {
+    // An attached text file becomes its own user turn right before the
+    // question, so it round-trips through history and re-renders faithfully.
     const a = state.attachment;
     const fileMsg = `📎 ${a.name}${a.trimmed ? " (trimmed)" : ""}\n\n\`\`\`\n${a.text}\n\`\`\``;
     state.history.push({ role: "user", content: fileMsg });
     addMsg("user", fileMsg);
     clearAttachment();
   }
-  state.history.push({ role: "user", content: text });
-  addMsg("user", text);
+  state.history.push({ role: "user", content: text, ...(pendingImages ? { images: pendingImages } : {}) });
+  const userEl = addMsg("user", text);
+  if (pendingImages) renderMsgImages(userEl, pendingImages);
 
   const bubble = addMsg("assistant", "");
   bubble.classList.add("streaming");
@@ -531,7 +610,9 @@ async function send(replayText) {
         model: chatModel,
         stream: true,
         // Persona rides as a system turn; history itself stays user/assistant.
-        messages: personaText() ? [{ role: "system", content: personaText() }, ...reqHistory] : reqHistory,
+        // toWire converts image-bearing turns to OpenAI content parts and
+        // strips UI-only fields (citations) off everything else.
+        messages: toWire(personaText() ? [{ role: "system", content: personaText() }, ...reqHistory] : reqHistory),
       }),
     });
     if (!resp.ok) {
@@ -1154,6 +1235,7 @@ function rebuildMessages() {
   for (const m of state.history) {
     const el = addMsg(m.role === "user" ? "user" : "assistant", m.content);
     if (m.role === "assistant" && m.citations) renderCitations(el, m.citations);
+    if (m.role === "user" && m.images) renderMsgImages(el, m.images);
   }
   if (!state.history.length) {
     box.innerHTML = `<div id="chat-empty" class="chat-empty"><div class="chat-empty-mark" aria-hidden="true"></div><p>Ask anything. It runs on your machine —<br />private, free, even offline.</p></div>`;

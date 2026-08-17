@@ -98,6 +98,17 @@ class ChatStore {
                 .filter((c) => /^https?:\/\//i.test(c.url)),
             }
           : {}),
+        // Attached images ride with the user message that sent them —
+        // data: URIs only (renderer CSP allows img data:), bounded so one
+        // chat file can't balloon (the UI downscales before attach anyway).
+        ...(Array.isArray(m.images) && m.images.length
+          ? {
+              images: m.images
+                .map((u) => String(u))
+                .filter((u) => u.startsWith("data:image/") && u.length <= 2_500_000)
+                .slice(0, 3),
+            }
+          : {}),
       })),
     };
     fs.writeFileSync(file, JSON.stringify(doc));

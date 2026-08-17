@@ -17,9 +17,9 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 
-async function pinOne(pkg, id) {
-  console.error(`Fetching ${pkg.url} …`);
-  const resp = await fetch(pkg.url, { redirect: "follow" });
+async function hashUrl(url, id) {
+  console.error(`Fetching ${url} …`);
+  const resp = await fetch(url, { redirect: "follow" });
   if (!resp.ok) throw new Error(`HTTP ${resp.status} for ${id} — check the URL`);
   const hash = crypto.createHash("sha256");
   let bytes = 0;
@@ -32,14 +32,29 @@ async function pinOne(pkg, id) {
       console.error(`${id}: ${(bytes / 1e6).toFixed(0)} MB…`);
     }
   }
-  pkg.sha256 = hash.digest("hex");
-  pkg.sizeBytes = bytes;
-  console.log(JSON.stringify({ id, sha256: pkg.sha256, sizeBytes: bytes }));
+  return { sha256: hash.digest("hex"), sizeBytes: bytes };
+}
+
+async function pinOne(pkg, id, { mmprojOnly = false } = {}) {
+  if (!mmprojOnly) {
+    const r = await hashUrl(pkg.url, id);
+    pkg.sha256 = r.sha256;
+    pkg.sizeBytes = r.sizeBytes;
+    console.log(JSON.stringify({ id, sha256: pkg.sha256, sizeBytes: pkg.sizeBytes }));
+  }
+  // Vision packages carry a projector (--mmproj) — same identity-by-hash rule.
+  if (pkg.mmproj && pkg.mmproj.url) {
+    const r = await hashUrl(pkg.mmproj.url, `${id}#mmproj`);
+    pkg.mmproj.sha256 = r.sha256;
+    pkg.mmproj.sizeBytes = r.sizeBytes;
+    console.log(JSON.stringify({ id: `${id}#mmproj`, sha256: r.sha256, sizeBytes: r.sizeBytes }));
+  }
 }
 
 async function main() {
   const args = process.argv.slice(2);
   const write = args.includes("--write");
+  const mmprojOnly = args.includes("--mmproj-only"); // pin just the projector (skip the big weights re-download)
   const catIdx = args.indexOf("--catalog");
   const catalogPath =
     catIdx >= 0 ? path.resolve(args[catIdx + 1]) : path.join(__dirname, "..", "models", "catalog.json");
@@ -58,7 +73,7 @@ async function main() {
       console.error(`Unknown package "${id}". Known: ${Object.keys(catalog.packages).join(", ")}`);
       process.exit(1);
     }
-    await pinOne(pkg, id);
+    await pinOne(pkg, id, { mmprojOnly });
   }
   if (write) {
     fs.writeFileSync(catalogPath, JSON.stringify(catalog, null, 2) + "\n");

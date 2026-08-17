@@ -126,6 +126,9 @@ class ModelManager {
         license: pkg.license ?? null,
         minRamGb: a.minRamGb ?? null,
         status: q ? "quarantined" : this.packageStatus(a.package).status,
+        // Vision-capable packages (mmproj projector rides along) — the chat
+        // UI gates image attachments on this flag.
+        ...(pkg.vision ? { vision: true } : {}),
         ...(a.dev ? { dev: true } : {}),
         ...(q ? { quarantineReason: q.reason } : {}),
       };
@@ -286,6 +289,42 @@ class ModelManager {
   cancelDownload() {
     if (this._active) this._active.controller.abort();
     return { cancelled: !!this._active };
+  }
+
+  /** Vision packages carry a second artifact: the multimodal projector
+   *  (--mmproj). Same fail-closed rules as the weights themselves — pinned
+   *  sha256 or no download, quarantine honored via the parent package.
+   *  Returns the local path, or null when the package has no projector. */
+  async ensureMmproj(packageId) {
+    const pkg = this.catalog.packages[packageId];
+    const mm = pkg && pkg.mmproj;
+    if (!mm || !mm.filename) return null;
+    const file = path.join(this.modelsDir, mm.filename);
+    if (fs.existsSync(file)) return file;
+    if (!/^[0-9a-f]{64}$/i.test(String(mm.sha256 || ""))) {
+      throw new Error(
+        `Package ${packageId} has no pinned sha256 for its vision projector. ` +
+          `Run "node core/scripts/pin-model.js ${packageId} --write" on a networked machine first.`
+      );
+    }
+    if (this._active) throw new Error(`Another download is in progress (${this._active.alias})`);
+    fs.mkdirSync(this.modelsDir, { recursive: true });
+    const controller = new AbortController();
+    this._active = { alias: `${packageId}#mmproj`, controller };
+    try {
+      await downloadFile(mm.url, file, {
+        sha256: mm.sha256,
+        sizeBytes: mm.sizeBytes,
+        signal: controller.signal,
+        onProgress: ({ pct, done, total }) => {
+          this._progress = { packageId: `${packageId}#mmproj`, pct, done, total };
+          this.onEvent({ type: "model:download", packageId: `${packageId}#mmproj`, pct, done, total });
+        },
+      });
+      return file;
+    } finally {
+      this._active = null;
+    }
   }
 
   /** Bytes used by the local model store (§5: storage limits surface later). */

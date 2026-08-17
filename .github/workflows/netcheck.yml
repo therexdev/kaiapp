@@ -11,6 +11,19 @@ on:
     branches: ["main", "claude/**"]
 
 jobs:
+  # One-shot pin of the gemma3-4b vision projector (§27 identity-by-hash):
+  # streams the mmproj from HF on the runner and prints its sha256/size.
+  # Trigger with [pin-vision] in the commit message; paste the printed JSON
+  # into catalog.json (mmproj block) and set "vision": true in that commit.
+  pinvision:
+    if: contains(github.event.head_commit.message, '[pin-vision]')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node core/scripts/pin-model.js google_gemma-3-4b-it-q4_k_m@1 --mmproj-only
   netcheck:
     # Push-triggered only when the commit message opts in with [netcheck]
     # (same pattern as [bench] / [pin-verify]); dispatch always runs.
