@@ -329,4 +329,4 @@ class LlamaCppRuntime {
   }
 }
 
-module.exports = { LlamaCppRuntime, selfTest, ensureCrtBeside, removeCrtBeside, stripCpuVariants, dirSnapshot };
+module.exports = { LlamaCppRuntime, selfTest, engineEnv, ensureCrtBeside, removeCrtBeside, stripCpuVariants, dirSnapshot };

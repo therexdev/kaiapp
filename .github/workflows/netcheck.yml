@@ -111,7 +111,9 @@ jobs:
           unzip -q w.zip -d weng
           echo "== zip contents (binPath discovery) =="
           (cd weng && find . -type f | head -40)
-          BIN=$(find weng -iname "whisper-cli.exe" -o -iname "main.exe" | head -1)
+          # whisper-cli.exe ONLY — main.exe is a deprecation shim that exits 1
+          # without transcribing (first-run finding: find's -o picked it).
+          BIN=$(find weng -iname "whisper-cli.exe" | head -1)
           echo "binary: $BIN"
           echo "== model ggml-base.en.bin =="
           curl -sSL --max-time 300 -o model.bin "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin"
@@ -120,4 +122,6 @@ jobs:
           python3 -c "import wave,struct,math; w=wave.open('test.wav','wb'); w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); [w.writeframes(struct.pack('<h', int(3000*math.sin(i*2*math.pi*440/16000)))) for i in range(32000)]; w.close()"
           "$BIN" -m model.bin -f test.wav --no-timestamps
           echo "engine exit: $?"
+          echo "== ubuntu tarball contents (future Linux voice binPath discovery) =="
+          curl -sSL --max-time 60 -o wu.tgz "https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.2/whisper-bin-ubuntu-x64.tar.gz" && tar -tzf wu.tgz | head -25
           exit 0

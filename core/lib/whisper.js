@@ -6,6 +6,11 @@ const path = require("path");
 const { spawn } = require("child_process");
 
 const { downloadFile } = require("./download");
+// The whisper.cpp zips ship the same ggml loader as llama.cpp — with the
+// same field-crash surface: CPU-variant DLLs mis-probing on very new hybrid
+// CPUs (Arrow Lake, v0.22.x finding), the MSVC runtime beside-copy dance,
+// and clang-libomp topology faults. Reuse the battle-tested guards.
+const { engineEnv, ensureCrtBeside, stripCpuVariants } = require("./runtimes/llamacpp");
 
 /*
  * Voice input (§5 one-click, §7 privacy: audio NEVER leaves the machine).
@@ -28,9 +33,11 @@ function transcribeWav({ binPath, modelPath, wavPath, timeoutMs = TRANSCRIBE_TIM
   return new Promise((resolve, reject) => {
     // --no-timestamps: stdout is the transcription lines and nothing else;
     // banner/perf chatter goes to stderr on every build we ship.
+    ensureCrtBeside(binPath); // MSVC runtime beside the exe (win32 no-op elsewhere)
     const child = spawn(binPath, ["-m", modelPath, "-f", wavPath, "--no-timestamps"], {
       windowsHide: true,
       cwd: path.dirname(binPath), // whisper.cpp zips keep DLLs beside the exe
+      env: engineEnv(binPath), // KMP guards + LD_LIBRARY_PATH (llama field lessons)
       timeout: timeoutMs,
     });
     let out = "";
@@ -145,6 +152,11 @@ class VoiceManager {
       if (!this._binPath()) {
         if (!this.provisioner) throw new Error("KAI_WHISPER_BIN not set and no provisioner available");
         await this.provisioner.ensure("whisper");
+        // Same ggml loader as llama.cpp, same Arrow Lake variant-probe crash:
+        // strip the exotic CPU-variant DLLs down to the safe baseline NOW,
+        // not after a user's first transcription dies (v0.22.x field lesson).
+        const bin = this._binPath();
+        if (bin) stripCpuVariants(bin);
       }
       if (!this._modelPath()) {
         if (!this.model) throw new Error("no voice model in catalog");
