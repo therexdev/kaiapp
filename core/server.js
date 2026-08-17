@@ -345,6 +345,30 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
   // Electron shell just opens a window onto it, and a browser works too.
   const uiDir = path.join(__dirname, "..", "ui");
   const { ChatStore } = require("./lib/chats");
+
+  // ---- unified tool layer: ONE policy point for everything a model can do
+  // beyond generating text (§7 egress gating + confirm-before-use) ----
+  const { ToolRegistry } = require("./lib/tools");
+  const { MemoryStore, registerMemoryTools } = require("./lib/memory");
+  const { registerBuiltinTools } = require("./lib/builtin-tools");
+  const { McpManager } = require("./lib/mcp-manager");
+  const { EmailService, registerEmailTools } = require("./lib/email");
+  const { CalendarService, registerCalendarTools } = require("./lib/caldav");
+  const registry = new ToolRegistry({ privacyMode: () => settings.get("network.privacyMode") || "local-only" });
+  const memory = new MemoryStore(dataDir);
+  registerMemoryTools(registry, memory);
+  registerBuiltinTools(registry, { dataDir });
+  // Electron's safeStorage encrypts account credentials with the OS keychain;
+  // absent (tests, headless) the services fall back to a 0600 file and say so.
+  let safeStorage = null;
+  try { safeStorage = require("electron").safeStorage; } catch { /* not in electron */ }
+  const emailSvc = new EmailService({ dataDir, safeStorage, onEvent: events });
+  registerEmailTools(registry, emailSvc);
+  const calendarSvc = new CalendarService({ dataDir, safeStorage, onEvent: events });
+  registerCalendarTools(registry, calendarSvc);
+  const mcp = new McpManager({ settings, registry, onEvent: events });
+  mcp.autoConnect().catch(() => {}); // reconnect servers the user used before
+
   // Local speech-to-text (§7: audio never leaves the machine). Engine+model
   // are catalog-pinned; nothing downloads until the user opts into setup.
   const { VoiceManager } = require("./lib/whisper");
@@ -364,6 +388,11 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     earn,
     network,
     voice,
+    tools: registry,
+    memory,
+    mcp,
+    email: emailSvc,
+    calendar: calendarSvc,
     chats: new ChatStore(path.join(dataDir, "chats")),
     docs: new (require("./lib/docs").DocStore)(path.join(dataDir, "docs")),
     coreInfo: () => ({ version: VERSION, dataDir, hardware: hw }),
@@ -458,6 +487,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     async stop() {
       if (this._policyTimer) clearInterval(this._policyTimer);
       this.tasks?.stop();
+      mcp.closeAll(); // stdio tool servers are child processes — never orphan them
       await earn.stop({ userIntent: false }).catch(() => {});
       runtime.stop();
       await gateway.close();

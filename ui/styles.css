@@ -173,7 +173,7 @@ h2 { font-size: 1.05em; }
 }
 .form-row input:focus { outline: 1px solid var(--violet); }
 
-#src-pick, #model-pick, #persona-pick, #privacy-pick {
+#src-pick, #model-pick, #persona-pick, #privacy-pick, #mode-pick {
   background: var(--bg-input); color: var(--text); border: 1px solid var(--border);
   border-radius: 8px; padding: 9px 10px; font: inherit; max-width: 200px;
 }
@@ -519,7 +519,7 @@ button.primary:hover:not(:disabled) { box-shadow: 0 4px 16px rgba(109, 62, 240, 
   #composer { flex-wrap: wrap; }
   #composer #input { flex: 1 1 100%; order: 5; min-width: 0; }
   #composer #btn-send, #composer #btn-stop, #composer #btn-attach, #composer #btn-web, #composer #btn-mic { order: 6; }
-  #src-pick, #model-pick, #persona-pick { max-width: none; flex: 1 1 auto; }
+  #src-pick, #model-pick, #persona-pick, #mode-pick { max-width: none; flex: 1 1 auto; }
 }
 
 /* Typing indicator: three dots swelling in sequence while the model thinks —
@@ -582,3 +582,15 @@ button.primary:hover:not(:disabled) { box-shadow: 0 4px 16px rgba(109, 62, 240, 
 @media (prefers-reduced-motion: reduce) {
   #btn-mic.recording { animation: none; }
 }
+
+/* Tools & accounts view */
+.tool-row { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 13px; margin: 8px 0; display: flex; flex-direction: column; gap: 6px; }
+.tool-row.slim { flex-direction: row; align-items: center; justify-content: space-between; gap: 10px; }
+.tool-row-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.tool-state { margin-left: auto; font-size: 0.8em; color: var(--text-dim); }
+.tool-state.on { color: var(--emerald); }
+.tool-controls { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.tool-flag { font-size: 0.85em; color: var(--text-dim); display: flex; align-items: center; gap: 6px; }
+button.linklike.danger { color: var(--danger); }
+#mcp-advanced { margin: 8px 0; }
+#view-tools .net-h { margin-top: 22px; }

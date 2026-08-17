@@ -129,6 +129,48 @@ function updatePrivacyNote(mode) {
     webBtn.hidden = mode === "local-only";
     if (mode === "local-only") setWebSearch(false);
   }
+  // Research mode reads the web; in Local-Only it's greyed out with the why.
+  // Agent mode stays — the tool registry hides egress tools by itself.
+  const researchOpt = document.querySelector('#mode-pick option[value="research"]');
+  if (researchOpt) {
+    researchOpt.disabled = mode === "local-only";
+    researchOpt.textContent = mode === "local-only" ? "🔬 Research — needs web (see Privacy)" : "🔬 Research";
+    if (mode === "local-only" && getChatMode() === "research") setChatMode("chat");
+  }
+}
+
+// ---- answer mode (Chat / Research / Agent), persisted like other prefs ----
+function getChatMode() {
+  return document.getElementById("mode-pick")?.value || "chat";
+}
+function setChatMode(m) {
+  const pick = document.getElementById("mode-pick");
+  if (pick) pick.value = m;
+  try { localStorage.setItem("kai-chat-mode", m); } catch { /* private mode */ }
+}
+setChatMode((() => { try { return localStorage.getItem("kai-chat-mode") || "chat"; } catch { return "chat"; } })());
+document.getElementById("mode-pick")?.addEventListener("change", () => setChatMode(getChatMode()));
+
+/** One short non-streaming model call — the workhorse of research/agent
+ *  phases. Same endpoint, same routing (local or network) as the chat. */
+async function askModelOnce(messages, model) {
+  const r = await fetch("/core/chat/completions", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    signal: state.abort?.signal,
+    body: JSON.stringify({ model, stream: false, messages }),
+  });
+  const j = await r.json().catch(() => null);
+  if (!r.ok) throw new Error(j?.error?.message || `Core answered ${r.status}`);
+  return j?.choices?.[0]?.message?.content || "";
+}
+
+/** Plain-language consent for sensitive tools. The Core enforces this
+ *  server-side (HTTP 428) — this dialog is how the user says yes. */
+function confirmTool(name, args) {
+  const pretty = name.replace(/^mcp:[^:]+:/, "");
+  const detail = Object.entries(args || {}).map(([k, v]) => `${k}: ${String(v).slice(0, 120)}`).join("\n");
+  return Promise.resolve(window.confirm(`The AI wants to use a tool:\n\n${pretty}\n${detail ? "\n" + detail + "\n" : ""}\nAllow it this once?`));
 }
 
 // ---- web search toggle (persisted like other renderer prefs) ----
@@ -505,7 +547,8 @@ function attachMsgActions(bubble) {
   // free, no downloads — hidden only if the platform has no voices at all.
   const canSpeak = "speechSynthesis" in window;
   bar.innerHTML = `<button type="button" class="msg-act" data-act="copy" title="Copy message">Copy</button>
-    <button type="button" class="msg-act" data-act="regen" title="Ask again">Regenerate</button>${
+    <button type="button" class="msg-act" data-act="regen" title="Ask again">Regenerate</button>
+    <button type="button" class="msg-act" data-act="remember" title="Remember the key fact from this message across all chats">📌 Remember</button>${
       canSpeak ? `<button type="button" class="msg-act" data-act="speak" title="Read this reply aloud">🔊 Read</button>` : ""
     }`;
   bubble.appendChild(bar);
@@ -550,6 +593,26 @@ $("messages").addEventListener("click", async (e) => {
     await navigator.clipboard.writeText(assistants[idx]?.content ?? "");
     act.textContent = "Copied";
     setTimeout(() => (act.textContent = "Copy"), 1200);
+  }
+  if (act.dataset.act === "remember") {
+    // Distill the message into ONE short fact worth keeping — the model
+    // does the summarizing so the memory stays a note, not a transcript.
+    const idx = [...$("messages").querySelectorAll(".msg.assistant")].indexOf(bubble);
+    const assistants = state.history.filter((m) => m.role === "assistant");
+    const src = assistants[idx]?.content ?? "";
+    if (!src) return;
+    act.textContent = "…";
+    try {
+      let fact = src.length <= 200 ? src : await askModelOnce([
+        { role: "user", content: `Condense this into ONE short fact worth remembering long-term (max 25 words, no preamble):\n\n${src.slice(0, 2000)}` },
+      ], state.alias);
+      fact = String(fact || "").trim().slice(0, 300) || src.slice(0, 200);
+      await fetch("/core/memory", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: fact, source: "pinned" }) });
+      act.textContent = "📌 Remembered";
+      setTimeout(() => (act.textContent = "📌 Remember"), 1600);
+    } catch {
+      act.textContent = "📌 Remember";
+    }
   }
   if (act.dataset.act === "regen" && !state.chatting) {
     // Drop the answer being redone and replay the question.
@@ -613,7 +676,32 @@ async function send(replayText) {
   // 4k-token context. The citations persist on the assistant message.
   let webCitations = null;
   let reqHistory = state.history;
-  if (state.webSearch && !replayText) {
+  const answerMode = replayText ? "chat" : getChatMode();
+  if (answerMode !== "chat") {
+    // Research / Agent phase: gather first (multi-round, tool calls), then
+    // the final answer streams through the normal path below. The gathered
+    // context is a TRANSIENT turn — same rule as the 🌐 flow.
+    const status = document.createElement("div");
+    status.className = "web-status";
+    bubble.before(status);
+    try {
+      const rt = KaiAgents.makeRuntime({
+        askModelOnce,
+        confirmTool,
+        setStatus: (t) => { status.textContent = t; },
+      });
+      const phase = answerMode === "research" ? await rt.deepResearch(text, chatModel) : await rt.runAgent(text, chatModel);
+      if (phase) {
+        webCitations = phase.citations?.length ? phase.citations : null;
+        status.textContent = phase.trace || "";
+        reqHistory = [...state.history.slice(0, -1), { role: "user", content: phase.context }, state.history[state.history.length - 1]];
+      }
+    } catch (e) {
+      status.textContent = `⚠ ${String(e.message || e).slice(0, 140)} — answering without tools.`;
+    } finally {
+      if (!status.textContent) status.remove();
+    }
+  } else if (state.webSearch && !replayText) {
     const status = document.createElement("div");
     status.className = "web-status";
     bubble.before(status);
@@ -628,6 +716,17 @@ async function send(replayText) {
     }
   }
 
+  // Cross-chat memory: quietly bring in the few facts that match this
+  // message. All local, fail-open — a memory hiccup never blocks a chat.
+  let memoryNote = "";
+  try {
+    const mr = await fetch(`/core/memory?q=${encodeURIComponent(text.slice(0, 300))}&k=3`);
+    const mj = await mr.json();
+    if (mj?.memories?.length) {
+      memoryNote = "Things you remember about this user from earlier conversations:\n" + mj.memories.map((m) => `- ${m.text}`).join("\n");
+    }
+  } catch { /* memory is a bonus, never a blocker */ }
+
   const t0 = performance.now();
   try {
     const resp = await fetch("/core/chat/completions", {
@@ -637,10 +736,15 @@ async function send(replayText) {
       body: JSON.stringify({
         model: chatModel,
         stream: true,
-        // Persona rides as a system turn; history itself stays user/assistant.
-        // toWire converts image-bearing turns to OpenAI content parts and
-        // strips UI-only fields (citations) off everything else.
-        messages: toWire(personaText() ? [{ role: "system", content: personaText() }, ...reqHistory] : reqHistory),
+        // Persona + remembered facts ride as ONE system turn; history itself
+        // stays user/assistant. toWire converts image-bearing turns to OpenAI
+        // content parts and strips UI-only fields (citations) off the rest.
+        messages: toWire(
+          (() => {
+            const sys = [personaText(), memoryNote].filter(Boolean).join("\n\n");
+            return sys ? [{ role: "system", content: sys }, ...reqHistory] : reqHistory;
+          })()
+        ),
       }),
     });
     if (!resp.ok) {

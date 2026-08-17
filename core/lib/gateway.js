@@ -67,7 +67,12 @@ function hasImageParts(messages) {
 }
 
 class Gateway {
-  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, earn, network, feedback, chats, docs, voice, onEvent }) {
+  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, earn, network, feedback, chats, docs, voice, tools, memory, mcp, email, calendar, onEvent }) {
+    this.tools = tools || null; // unified tool registry (agents/MCP/memory/…)
+    this.memory = memory || null; // cross-chat memory store
+    this.mcp = mcp || null; // MCP server manager
+    this.email = email || null; // IMAP/SMTP service
+    this.calendar = calendar || null; // CalDAV service
     this.voice = voice || null; // local speech-to-text (whisper)
     this.feedback = feedback || null; // relay to the project's feedback inbox
     this.chats = chats || null; // local chat history store
@@ -285,6 +290,132 @@ class Gateway {
       const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
       try {
         return this._json(res, 200, { ok: true, page: await fetchPage(body.url) });
+      } catch (e) {
+        return this._json(res, 400, { ok: false, error: String(e.message) });
+      }
+    }
+
+    // ---- unified tool layer: list + call. Policy (egress gating in
+    // Local-Only, confirm-before-use for sensitive tools) is enforced in the
+    // registry itself — this route is a dumb pipe on purpose. ----
+    if (this.tools && path === "/core/tools" && req.method === "GET") {
+      return this._json(res, 200, { ok: true, tools: this.tools.list() });
+    }
+    if (this.tools && path === "/core/tools/call" && req.method === "POST") {
+      const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+      try {
+        const result = await this.tools.call(String(body.name || ""), body.args || {}, { confirmed: Boolean(body.confirmed) });
+        return this._json(res, 200, { ok: true, result });
+      } catch (e) {
+        return this._json(res, e.needsConfirmation ? 428 : 400, {
+          ok: false,
+          error: String(e.message),
+          ...(e.needsConfirmation ? { needsConfirmation: true } : {}),
+        });
+      }
+    }
+
+    // ---- cross-chat memory (all local — no privacy gate needed) ----
+    if (this.memory && path === "/core/memory" && req.method === "GET") {
+      const q = url.searchParams.get("q");
+      return this._json(res, 200, { ok: true, memories: q ? this.memory.search(q, Number(url.searchParams.get("k")) || 4) : this.memory.list() });
+    }
+    if (this.memory && path === "/core/memory" && req.method === "POST") {
+      const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+      try {
+        return this._json(res, 200, { ok: true, memory: this.memory.add(body.text, { source: body.source || "user" }) });
+      } catch (e) {
+        return this._json(res, 400, { ok: false, error: String(e.message) });
+      }
+    }
+    if (this.memory && path.startsWith("/core/memory/") && req.method === "DELETE") {
+      try {
+        const id = decodeURIComponent(path.split("/")[3]);
+        if (id === "all") this.memory.clear();
+        else this.memory.remove(id);
+        return this._json(res, 200, { ok: true });
+      } catch (e) {
+        return this._json(res, 404, { ok: false, error: String(e.message) });
+      }
+    }
+
+    // ---- MCP servers (manage; connecting is the user's explicit act) ----
+    if (this.mcp && path === "/core/mcp" && req.method === "GET") {
+      const { CATALOG } = require("./mcp-manager");
+      return this._json(res, 200, { ok: true, servers: this.mcp.servers(), catalog: CATALOG });
+    }
+    if (this.mcp && path === "/core/mcp" && req.method === "POST") {
+      const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+      try {
+        return this._json(res, 200, { ok: true, server: this.mcp.addServer(body) });
+      } catch (e) {
+        return this._json(res, 400, { ok: false, error: String(e.message) });
+      }
+    }
+    if (this.mcp && /^\/core\/mcp\/[^/]+\/(connect|disconnect|flags)$/.test(path) && req.method === "POST") {
+      const [, , , id, action] = path.split("/");
+      try {
+        if (action === "connect") {
+          const tools = await this.mcp.connect(id);
+          return this._json(res, 200, { ok: true, tools });
+        }
+        if (action === "disconnect") {
+          this.mcp.disconnect(id);
+          return this._json(res, 200, { ok: true });
+        }
+        const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+        return this._json(res, 200, { ok: true, server: this.mcp.setServerFlags(id, body) });
+      } catch (e) {
+        return this._json(res, 400, { ok: false, error: String(e.message) });
+      }
+    }
+    if (this.mcp && /^\/core\/mcp\/[^/]+$/.test(path) && req.method === "DELETE") {
+      this.mcp.removeServer(path.split("/")[3]);
+      return this._json(res, 200, { ok: true });
+    }
+
+    // ---- email + calendar (egress by definition: same Local-Only refusal
+    // contract as /core/search — checked here so even the UI views obey) ----
+    if ((this.email && path.startsWith("/core/email")) || (this.calendar && path.startsWith("/core/calendar"))) {
+      const mode = this.network ? this.network.status().privacyMode : "local-only";
+      const isStatus = req.method === "GET" && (path === "/core/email" || path === "/core/calendar");
+      if (mode === "local-only" && !isStatus) {
+        return this._json(res, 403, { ok: false, error: "Privacy mode is Local-Only: email and calendar talk to servers and are disabled" });
+      }
+      try {
+        if (path === "/core/email" && req.method === "GET") return this._json(res, 200, { ok: true, ...this.email.status(), localOnly: mode === "local-only" });
+        if (path === "/core/email/config" && req.method === "POST") {
+          const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+          return this._json(res, 200, { ok: true, ...this.email.saveConfig(body) });
+        }
+        if (path === "/core/email/config" && req.method === "DELETE") {
+          this.email.removeConfig();
+          return this._json(res, 200, { ok: true });
+        }
+        if (path === "/core/email/inbox" && req.method === "GET") return this._json(res, 200, { ok: true, messages: await this.email.inbox() });
+        if (path === "/core/email/message" && req.method === "GET") return this._json(res, 200, { ok: true, message: await this.email.read(Number(url.searchParams.get("uid"))) });
+        if (path === "/core/email/send" && req.method === "POST") {
+          // Reached only from the compose UI after an explicit user click —
+          // sending is deliberately NOT an agent tool.
+          const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+          return this._json(res, 200, { ok: true, ...(await this.email.send(body)) });
+        }
+        if (path === "/core/calendar" && req.method === "GET") return this._json(res, 200, { ok: true, ...this.calendar.status(), localOnly: mode === "local-only" });
+        if (path === "/core/calendar/config" && req.method === "POST") {
+          const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+          return this._json(res, 200, { ok: true, ...this.calendar.saveConfig(body) });
+        }
+        if (path === "/core/calendar/config" && req.method === "DELETE") {
+          this.calendar.removeConfig();
+          return this._json(res, 200, { ok: true });
+        }
+        if (path === "/core/calendar/events" && req.method === "GET") {
+          return this._json(res, 200, { ok: true, events: await this.calendar.events(Number(url.searchParams.get("days")) || 14) });
+        }
+        if (path === "/core/calendar/create" && req.method === "POST") {
+          const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+          return this._json(res, 200, { ok: true, event: await this.calendar.create(body) });
+        }
       } catch (e) {
         return this._json(res, 400, { ok: false, error: String(e.message) });
       }

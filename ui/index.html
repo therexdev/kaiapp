@@ -41,6 +41,7 @@
         <button class="nav-item" data-view="models">Models</button>
         <button class="nav-item" data-view="tasks">Tasks</button>
         <button class="nav-item" data-view="network">Network</button>
+        <button class="nav-item" data-view="tools">Tools</button>
         <button class="nav-item" data-view="api">Local API</button>
         <button class="nav-item" data-view="earn">Earn <span class="soon">alpha</span></button>
       </nav>
@@ -94,6 +95,11 @@
           </div>
         </div>
         <form id="composer">
+          <select id="mode-pick" title="How to answer: plain chat, multi-step web research, or an agent that uses tools">
+            <option value="chat">💬 Chat</option>
+            <option value="research">🔬 Research</option>
+            <option value="agent">🛠 Agent</option>
+          </select>
           <select id="src-pick" title="Run on this machine, or on the network"></select>
           <select id="model-pick" title="Which model answers"></select>
           <select id="persona-pick" title="How the AI should answer">
@@ -234,6 +240,43 @@
             <div id="net-workers" class="net-workers"></div>
           </div>
           <p id="net-note" class="hint"></p>
+        </div>
+      </section>
+
+      <!-- Tools: MCP servers, memory, and connected accounts (email/calendar) -->
+      <section id="view-tools" class="view" hidden>
+        <div class="api-card">
+          <h1>Tools &amp; accounts</h1>
+          <p class="lede">Give your AI abilities: tool servers (MCP), a memory that lasts across chats, and your email &amp; calendar. Everything asks before acting until you say otherwise.</p>
+          <p id="tools-localonly-note" class="hint" hidden>Privacy mode is <b>Local-Only</b>: tools that talk to the internet (including email &amp; calendar) are switched off. Change it in Local API → Privacy.</p>
+
+          <h2 class="net-h">Tool servers <span class="hint">(Model Context Protocol)</span></h2>
+          <div id="mcp-list"></div>
+          <div class="form-row">
+            <select id="mcp-catalog"></select>
+            <button id="mcp-add-catalog" class="primary small" type="button">Add</button>
+          </div>
+          <details id="mcp-advanced">
+            <summary class="hint">Add your own (URL or command)</summary>
+            <div class="form-row"><input id="mcp-name" placeholder="Name, e.g. My tools" /></div>
+            <div class="form-row"><input id="mcp-url" placeholder="https://… (an MCP server URL)" /></div>
+            <div class="form-row"><input id="mcp-cmd" placeholder="or a local command, e.g. npx -y @modelcontextprotocol/server-fetch" /></div>
+            <div class="form-row"><button id="mcp-add-custom" class="primary small" type="button">Add server</button></div>
+          </details>
+
+          <h2 class="net-h">Memory</h2>
+          <p class="hint">Facts your AI remembers across chats — all stored on this machine. Pin one from any message (📌), or the AI saves them while working (always visible in the chat).</p>
+          <div id="memory-list"></div>
+          <div class="form-row">
+            <input id="memory-new" placeholder="Add something to remember, e.g. “I prefer metric units”" />
+            <button id="memory-add" class="primary small" type="button">Remember</button>
+          </div>
+
+          <h2 class="net-h">Email</h2>
+          <div id="email-panel"></div>
+
+          <h2 class="net-h">Calendar</h2>
+          <div id="calendar-panel"></div>
         </div>
       </section>
 
@@ -381,7 +424,9 @@
   </div>
   <script src="markdown.js"></script>
   <script src="audio-wav.js"></script>
+  <script src="agents.js"></script>
   <script src="app.js"></script>
+  <script src="tools-view.js"></script>
   <script src="app-extras.js"></script>
   <script src="docs-view.js"></script>
 

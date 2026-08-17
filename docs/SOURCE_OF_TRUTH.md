@@ -20,7 +20,19 @@
 > (client-downscaled, content-parts on vision models only, clean refusals elsewhere, 👁
 > picker marker, graceful text-only degradation); READ-ALOUD via OS voices; typing-dots
 > loading animation + first-reply/tok-s meta; Linux/ARM engines (Pi) with RAM-gate parity.
-> App suite 122 pass / 0 fail local, 126 CI. kai side: **SQLITE LEDGER LIVE** (ad421ae
+> **WORKSPACE SPRINT (dev branch, unreleased)**: unified TOOL LAYER in Core (/core/tools —
+> one registry + one policy point: egress tools refused in Local-Only, sensitive tools
+> require confirmed:true server-side, HTTP 428 contract); MEMORY across chats (all-local
+> TF-IDF store, 📌 Remember, auto-injection, Tools-view management); composer MODES
+> Chat/Research/Agent — Research = multi-round LLM-in-the-loop (search→read→condense→gap
+> check→re-search, ≤3 rounds ≤6 pages, notes fit 4k ctx), Agent = JSON-action ReAct loop
+> over the registry (≤6 steps, per-call confirm dialogs, visible trace; sandboxed
+> workspace file tools, NO bash by design); MCP CLIENT stdio+Streamable-HTTP
+> (initialize/tools-list/tools-call, session ids, curated 3-entry catalog, one-click add,
+> trusted/localSafe flags per server); EMAIL imapflow/mailparser/nodemailer (presets+app
+> passwords, safeStorage-encrypted creds, inbox/read/summarize/draft via chat, send =
+> human click ONLY, never an agent tool); CALENDAR CalDAV stdlib (REPORT+PUT, minimal
+> VEVENT parse, presets). Suite 137 pass / 0 fail local. kai side: **SQLITE LEDGER LIVE** (ad421ae
 > deployed 17:15Z; /api/health reports `store.mode=sqlite`, no `degraded`; bootCount 13→14,
 > clean SIGTERM, 3 workers back in <16s, job counts and ageDays carried through the
 > migration — proof the ledgers survived). Delivered by the repo-carried env channel
