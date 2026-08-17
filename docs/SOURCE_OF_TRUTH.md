@@ -5,7 +5,13 @@
 > boot settlement repair, charge-time spend durability, firstSeen backfill; INERT owner
 > flags: `KAI_REPUTATION_ENFORCE=1` arms the anti-Sybil gate, `KAI_STORE=sqlite` cuts over
 > the transactional ledger — 22-agent adversarial review, 14 findings fixed pre-deploy).
-> App **v0.25.11 PUBLIC and SIGNED** (2026-08-17 13:00Z; first Azure-signed release —
+> App **v0.26.1 PUBLIC and SIGNED** (2026-08-17 16:17Z): VOICE INPUT shipped — push-to-talk
+> mic → on-device whisper.cpp v1.9.2 (pinned engine 8 MB + base.en model 148 MB, opt-in
+> setup, llama crash-guards reused, runner E2E-verified). Windows-first; ubuntu tarball
+> binPath already discovered for Linux follow-up. Release NOTE: v0.26.0 tag is DEBRIS
+> (create-release race shipped it linux-only; dist jobs now serialized in ci.yml —
+> build-windows needs build-linux; owner can delete the v0.26.0 release in the web UI).
+> Previously v0.25.11 (2026-08-17 13:00Z; first Azure-signed release —
 > installer/portable/uninstaller/elevate all carry Authenticode, verified on the published
 > asset). Feature state (shipped v0.25.9→.11): chat FAVORITES + rename; WEB SEARCH in chat
 > (keyless DDG+Wikipedia, §7-gated: hard-403 in Local-Only, SSRF-guarded fetch) with a
