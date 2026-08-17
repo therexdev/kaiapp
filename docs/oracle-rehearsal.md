@@ -17,26 +17,33 @@ only testnet billing math, and is fully reversible.
 - Movement is deliberately gradual (10%/epoch step cap), so watch it converge over a few
   epochs, not seconds. That gradualness IS the breaker working.
 
-## Available feeds (validated live 2026-08-17 via Netcheck `[pricecheck]`)
-KOIN is thinly listed, so free live feeds are scarce. Only **CoinGecko** answers reliably
-(`{"koinos":{"usd":0.0419}}`). Dead/rejected: CryptoCompare (now needs an API key), MEXC
-(no `KOINUSDT`), KuCoin (`KOIN-USDT` null), CoinCap (host retired), CoinPaprika
-(`koin-koinos` exists but `is_active:false`), Gate.io (no pair). So the live rehearsal runs
-**single-source**. That exercises fetch → EMA smoothing → step clamp → floor/ceil bounds →
-stale-hold → per-epoch pinning. The **median-across-sources / outlier-rejection** breaker
-can't be tested live without a 2nd independent feed (none exists free) — it stays validated
-by `kai/scripts/probe-oracle.js` (synthetic sources, all cases pass). To test median live
-later, add the design's "operator-attested price file" as a 2nd source.
+## Price source: the on-chain vKOIN/USDT market (owner-chosen, validated 2026-08-17)
+The reference is the real tradeable market — **vKOIN** ("Vortex Koin", the KOIN market on
+Ethereum), token `0xa50ad3a559a10f384a5bb2e27516f63e0b937b1a`, whose deepest pair is the
+Uniswap-v4 vKOIN/USDT pool. Read via **two independent aggregators** of the SAME token for
+median-of-two redundancy (either can carry if the other is down; a single manipulated feed
+can't move a median of two):
+
+| Source | URL | path | value 2026-08-17 |
+|---|---|---|---|
+| DexScreener | `…/latest/dex/tokens/0xa50ad3…b937b1a` | `pairs.0.priceUsd` | 0.008735 |
+| GeckoTerminal | `…/networks/eth/tokens/0xa50ad3…b937b1a` | `data.attributes.price_usd` | 0.008687 |
+
+**Note the discrepancy that motivated this**: CoinGecko's `koinos.usd` reported ~$0.042 —
+~5× the actual vKOIN/USDT DEX price (~$0.0087). The on-chain market is the honest number.
+This market is thin (~$14.5k liquidity), so price can be volatile — which is exactly what the
+oracle's breakers (median, ±10%/epoch step, floor/ceil, stale-hold) are for. Dead free feeds
+(don't list KOIN or need a key): CryptoCompare, MEXC, KuCoin, CoinCap, CoinPaprika, Gate.io.
 
 ## Enable (run on the box as root)
-Explicit floor/ceil bracket KOIN (~$0.04) so the bound breakers are exercised regardless of
-the current anchor:
+Floor/ceil bracket the ~$0.0087 vKOIN price; the anchor doubles as the all-sources-down fallback:
 
 ```bash
 cat >> /opt/koinos/kai.env <<'EOF'
-KAI_PRICE_SOURCES=[{"url":"https://api.coingecko.com/api/v3/simple/price?ids=koinos&vs_currencies=usd","path":"koinos.usd"}]
-KAI_PRICE_FLOOR_USD=0.005
-KAI_PRICE_CEIL_USD=0.30
+KAI_PRICE_SOURCES=[{"url":"https://api.dexscreener.com/latest/dex/tokens/0xa50ad3a559a10f384a5bb2e27516f63e0b937b1a","path":"pairs.0.priceUsd"},{"url":"https://api.geckoterminal.com/api/v2/networks/eth/tokens/0xa50ad3a559a10f384a5bb2e27516f63e0b937b1a","path":"data.attributes.price_usd"}]
+KAI_REF_USD=0.0087
+KAI_PRICE_FLOOR_USD=0.001
+KAI_PRICE_CEIL_USD=0.05
 KAI_PRICE_ALPHA=0.25
 KAI_PRICE_MAX_STEP_PCT=10
 EOF
@@ -54,7 +61,7 @@ of the ones that answer carries it, and a single manipulated feed can't move a m
 ## Reverse (back to anchor)
 Remove the block (or blank the sources) and restart:
 ```bash
-sed -i '/^KAI_PRICE_/d' /opt/koinos/kai.env && systemctl restart koinos
+sed -i -E '/^KAI_(PRICE_|REF_USD)/d' /opt/koinos/kai.env && systemctl restart koinos
 ```
 
 ## Safety

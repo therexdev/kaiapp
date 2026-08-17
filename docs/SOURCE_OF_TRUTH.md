@@ -322,13 +322,15 @@ for dev/screenshots).
 5. ~~Public stats page~~ — SHIPPED 2026-08-16: `koinosai.com/network`.
 6. **Economics (owner decisions MADE + deployed 2026-08-16, §4.11)**: bootstrap pool 1,500
    KAI/day, daily free tier + 1M/day global ceiling — LIVE. Still owner-gated: `KAI_TREASURY_ADDR`
-   to activate splits (§F8); oracle live-source rehearsal — **runbook ready**
-   (`docs/oracle-rehearsal.md`), owner runs one env block on the box then watches `/pricing`.
-   Feeds re-validated live 2026-08-17: **CoinGecko `koinos.usd` is the ONLY reliable free KOIN
-   feed** (CryptoCompare now needs a key; MEXC/KuCoin/Gate.io don't list KOIN; CoinCap host
-   retired; CoinPaprika `koin-koinos` is_active:false) — so the rehearsal is single-source
-   (fetch→EMA→step/floor/ceil→stale-hold); the median/outlier breaker stays covered by
-   `probe-oracle.js` offline. SURROGATE, not a peg. `docs/economics-sprint-02.md` is the record.
+   to activate splits (§F8); oracle live-source — **runbook ready** (`docs/oracle-rehearsal.md`),
+   owner runs one env block on the box then watches `/pricing`. **Price source (owner decision
+   2026-08-17): the on-chain vKOIN/USDT market** — vKOIN token `0xa50ad3…b937b1a` (Uniswap-v4,
+   the deepest real KOIN market), read via TWO independent aggregators of the same token
+   (DexScreener `pairs.0.priceUsd` + GeckoTerminal `data.attributes.price_usd`) for median-of-two.
+   **Validated live: both agree ~$0.0087 — vs CoinGecko's `koinos.usd` ~$0.042 (~5× off/stale)**,
+   which is why we moved off CoinGecko to the on-chain read. Thin market (~$14.5k liq) → the
+   oracle's breakers (median, ±10%/epoch, floor/ceil, stale-hold) matter; all covered by
+   `probe-oracle.js`. `docs/economics-sprint-02.md` is the record.
 7. **Ops hardening (mainnet)** — SHIPPED: rotating state backups + operator export; `kai`
    scheduled monitor (issue/email on real failure); restart forensics on `/api/health` (§5).
    **Migrated koinosai.com to a self-managed Vultr VPS (§9)** — this fixed the mystery host
