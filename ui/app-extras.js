@@ -480,3 +480,139 @@ async function renderNetwork() {
 
   if (!$("view-network").hidden) netTimer = setTimeout(renderNetwork, 15000);
 }
+
+// ---- voice input: push-to-talk → local whisper → text in the composer ----
+// Audio is recorded here, downsampled to 16 kHz WAV in this process, and
+// POSTed to 127.0.0.1 only — it never leaves the machine (works the same in
+// Local-Only mode). The mic button appears only when Core says voice can
+// work here (already set up, or a pinned engine+model can be fetched).
+(function voiceInput() {
+  const btn = document.getElementById("btn-mic");
+  const input = document.getElementById("input");
+  if (!btn || !input || !navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") return;
+
+  let rec = null; // { recorder, chunks, stream, timer }
+  let busy = false;
+  let flashTimer = null;
+  const basePlaceholder = input.placeholder;
+
+  function flash(msg, sticky) {
+    input.placeholder = msg;
+    clearTimeout(flashTimer);
+    if (!sticky) flashTimer = setTimeout(() => (input.placeholder = basePlaceholder), 5000);
+  }
+
+  async function voiceStatus() {
+    try {
+      const r = await fetch("/core/voice");
+      return r.ok ? await r.json() : null;
+    } catch {
+      return null;
+    }
+  }
+
+  (async () => {
+    const s = await voiceStatus();
+    if (s && (s.available || s.installable)) btn.hidden = false;
+  })();
+
+  async function ensureSetup() {
+    let s = await voiceStatus();
+    if (!s) return false;
+    if (s.available) return true;
+    if (!s.installable) {
+      flash("Voice input isn't available on this machine yet.");
+      return false;
+    }
+    const mb = Math.max(1, Math.round((s.downloadBytes || 0) / 1e6));
+    if (!confirm(`Set up voice input?\n\nOne-time download (~${mb} MB). After that, speech is transcribed entirely on this machine — audio never leaves it.`)) return false;
+    await fetch("/core/voice/setup", { method: "POST" });
+    btn.classList.add("busy");
+    flash("Setting up voice input — downloading the speech engine…", true);
+    try {
+      for (let i = 0; i < 900; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        s = await voiceStatus();
+        if (s?.available) {
+          flash("Voice input ready — click the mic and speak.");
+          return true;
+        }
+        if (s?.setup?.state === "error") {
+          flash(`Voice setup failed: ${s.setup.error}`);
+          return false;
+        }
+      }
+      flash("Voice setup is taking unusually long — check your connection and try again.");
+      return false;
+    } finally {
+      btn.classList.remove("busy");
+    }
+  }
+
+  async function startRecording() {
+    if (!(await ensureSetup())) return;
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      flash("Microphone access was blocked — allow it in your system settings.");
+      return;
+    }
+    const recorder = new MediaRecorder(stream);
+    const chunks = [];
+    recorder.ondataavailable = (e) => e.data?.size && chunks.push(e.data);
+    recorder.start();
+    rec = { recorder, chunks, stream, timer: setTimeout(stopRecording, 180000) }; // 3 min cap
+    btn.classList.add("recording");
+    flash("Listening… click the mic again to stop.", true);
+  }
+
+  async function stopRecording() {
+    if (!rec) return;
+    const { recorder, chunks, stream, timer } = rec;
+    rec = null;
+    clearTimeout(timer);
+    btn.classList.remove("recording");
+    btn.classList.add("busy");
+    busy = true;
+    flash("Transcribing on this machine…", true);
+    try {
+      await new Promise((resolve) => {
+        recorder.onstop = resolve;
+        recorder.stop();
+      });
+      stream.getTracks().forEach((t) => t.stop());
+      const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+      const raw = await blob.arrayBuffer();
+      // Decode via an offline context pinned at 16 kHz; browsers that ignore
+      // the rate still get resampled by the encoder (inRate passthrough).
+      const ctx = new OfflineAudioContext(1, 1, 16000);
+      const audio = await ctx.decodeAudioData(raw);
+      const wav = KaiWav.encodeWav16kMono(audio.getChannelData(0), audio.sampleRate);
+      const r = await fetch("/core/transcribe", { method: "POST", headers: { "content-type": "audio/wav" }, body: wav });
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j?.ok) throw new Error(j?.error || `transcribe failed (${r.status})`);
+      const text = (j.text || "").trim();
+      if (!text) {
+        flash("Didn't catch anything — try speaking closer to the mic.");
+        return;
+      }
+      input.value = input.value ? `${input.value.replace(/\s+$/, "")} ${text}` : text;
+      input.dispatchEvent(new Event("input", { bubbles: true })); // auto-grow hook
+      input.focus();
+      input.selectionStart = input.selectionEnd = input.value.length;
+      flash(basePlaceholder);
+    } catch (e) {
+      flash(`Voice input failed: ${String(e.message || e).slice(0, 120)}`);
+    } finally {
+      busy = false;
+      btn.classList.remove("busy");
+    }
+  }
+
+  btn.addEventListener("click", () => {
+    if (busy) return;
+    if (rec) stopRecording();
+    else startRecording();
+  });
+})();

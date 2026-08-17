@@ -87,3 +87,37 @@ jobs:
           curl -sS --max-time 20 "https://api.geckoterminal.com/api/v2/networks/eth/tokens/$ADDR" | head -c 700
           echo
           exit 0
+
+  # Voice input groundwork: discover the real whisper.cpp Windows release
+  # asset (name drifts across tags), hash engine + model for catalog pinning,
+  # and run a REAL transcription on the shipping OS — the full E2E the
+  # sandbox can't do. Output feeds core/runtimes/catalog.json's whisper entry.
+  voicecheck:
+    if: contains(github.event.head_commit.message, '[voicecheck]')
+    runs-on: windows-latest
+    steps:
+      - name: Whisper engine + model discovery and E2E
+        shell: bash
+        run: |
+          set +e
+          echo "== whisper.cpp latest release =="
+          REL=$(curl -sS --max-time 30 https://api.github.com/repos/ggml-org/whisper.cpp/releases/latest)
+          echo "$REL" | python3 -c "import json,sys; r=json.load(sys.stdin); print('tag:', r['tag_name']); [print(a['name'], a['size']) for a in r['assets']]"
+          URL=$(echo "$REL" | python3 -c "import json,sys; r=json.load(sys.stdin); c=[a['browser_download_url'] for a in r['assets'] if 'x64' in a['name'].lower() and a['name'].endswith('.zip') and 'cu' not in a['name'].lower() and 'blas' not in a['name'].lower()]; print(c[0] if c else '')")
+          echo "chosen asset: $URL"
+          [ -z "$URL" ] && { echo "NO x64 CPU ZIP FOUND — see asset list above"; exit 0; }
+          curl -sSL --max-time 300 -o w.zip "$URL"
+          echo "engine zip sha256/size:"; sha256sum w.zip; stat -c %s w.zip
+          unzip -q w.zip -d weng
+          echo "== zip contents (binPath discovery) =="
+          (cd weng && find . -type f | head -40)
+          BIN=$(find weng -iname "whisper-cli.exe" -o -iname "main.exe" | head -1)
+          echo "binary: $BIN"
+          echo "== model ggml-base.en.bin =="
+          curl -sSL --max-time 300 -o model.bin "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin"
+          echo "model sha256/size:"; sha256sum model.bin; stat -c %s model.bin
+          echo "== E2E: transcribe a generated 16k wav on windows =="
+          python3 -c "import wave,struct,math; w=wave.open('test.wav','wb'); w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); [w.writeframes(struct.pack('<h', int(3000*math.sin(i*2*math.pi*440/16000)))) for i in range(32000)]; w.close()"
+          "$BIN" -m model.bin -f test.wav --no-timestamps
+          echo "engine exit: $?"
+          exit 0

@@ -67,7 +67,8 @@ function hasImageParts(messages) {
 }
 
 class Gateway {
-  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, earn, network, feedback, chats, docs, onEvent }) {
+  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, earn, network, feedback, chats, docs, voice, onEvent }) {
+    this.voice = voice || null; // local speech-to-text (whisper)
     this.feedback = feedback || null; // relay to the project's feedback inbox
     this.chats = chats || null; // local chat history store
     this.docs = docs || null; // local documents store
@@ -286,6 +287,27 @@ class Gateway {
         return this._json(res, 200, { ok: true, page: await fetchPage(body.url) });
       } catch (e) {
         return this._json(res, 400, { ok: false, error: String(e.message) });
+      }
+    }
+
+    // Voice input (LOCAL always — audio never leaves this machine, so no §7
+    // gate: it works identically in Local-Only mode). The UI records, encodes
+    // 16 kHz WAV, POSTs it here; whisper runs one-shot and hands back text.
+    if (this.voice && path === "/core/voice" && req.method === "GET") {
+      return this._json(res, 200, { ok: true, ...this.voice.status() });
+    }
+    if (this.voice && path === "/core/voice/setup" && req.method === "POST") {
+      // Long download — run in background; the UI polls /core/voice.
+      this.voice.ensure().catch(() => {}); // failure lands in status().setup
+      return this._json(res, 200, { ok: true, ...this.voice.status() });
+    }
+    if (this.voice && path === "/core/transcribe" && req.method === "POST") {
+      try {
+        const wav = await this._readBody(req);
+        return this._json(res, 200, { ok: true, ...(await this.voice.transcribe(wav)) });
+      } catch (e) {
+        const msg = String(e.message);
+        return this._json(res, /not set up/.test(msg) ? 503 : 400, { ok: false, error: msg });
       }
     }
 

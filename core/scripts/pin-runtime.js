@@ -65,6 +65,14 @@ async function main() {
     if (!rt.builds[key]) throw new Error(`Unknown build key ${key}. Known: ${Object.keys(rt.builds).join(", ")}`);
     await pinOne(rt.builds, key);
   }
+  // Bare model files some runtimes carry (whisper's ggml speech model) —
+  // pinned with --all alongside the builds, same fail-closed contract.
+  if (all && rt.models) {
+    for (const name of Object.keys(rt.models)) {
+      Object.assign(rt.models[name], await hashUrl(`model ${name}`, rt.models[name].url));
+      console.log(JSON.stringify({ model: name, sha256: rt.models[name].sha256, sizeBytes: rt.models[name].sizeBytes }));
+    }
+  }
   if (write) {
     fs.writeFileSync(CATALOG, JSON.stringify(catalog, null, 2) + "\n");
     console.error("catalog.json updated — commit it.");

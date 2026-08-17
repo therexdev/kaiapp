@@ -345,6 +345,15 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
   // Electron shell just opens a window onto it, and a browser works too.
   const uiDir = path.join(__dirname, "..", "ui");
   const { ChatStore } = require("./lib/chats");
+  // Local speech-to-text (§7: audio never leaves the machine). Engine+model
+  // are catalog-pinned; nothing downloads until the user opts into setup.
+  const { VoiceManager } = require("./lib/whisper");
+  const voice = new VoiceManager({
+    provisioner,
+    catalogPath: path.join(__dirname, "runtimes", "catalog.json"),
+    voiceDir: path.join(dataDir, "voice"),
+    onEvent: events,
+  });
   const gateway = new Gateway({
     port: port ?? Number(process.env.KAI_CORE_PORT || 41100),
     runtime,
@@ -354,6 +363,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     uiDir: require("fs").existsSync(uiDir) ? uiDir : null,
     earn,
     network,
+    voice,
     chats: new ChatStore(path.join(dataDir, "chats")),
     docs: new (require("./lib/docs").DocStore)(path.join(dataDir, "docs")),
     coreInfo: () => ({ version: VERSION, dataDir, hardware: hw }),

@@ -106,6 +106,7 @@
           <textarea id="input" rows="1" placeholder="Message your local AI…" autocomplete="off"></textarea>
           <button id="btn-attach" type="button" title="Attach a text file as context">📎</button>
           <button id="btn-web" type="button" title="Web search: the AI looks things up live (your search query leaves this machine)" hidden>🌐</button>
+          <button id="btn-mic" type="button" title="Voice input: speak, and it's typed for you — transcribed on this machine, audio never leaves it" hidden>🎤</button>
           <button id="btn-send" class="primary" type="submit">Send</button>
           <button id="btn-stop" type="button" hidden>Stop</button>
           <input id="attach-input" type="file" hidden />
@@ -379,6 +380,7 @@
     </div>
   </div>
   <script src="markdown.js"></script>
+  <script src="audio-wav.js"></script>
   <script src="app.js"></script>
   <script src="app-extras.js"></script>
   <script src="docs-view.js"></script>

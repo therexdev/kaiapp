@@ -425,8 +425,8 @@ button.primary:hover:not(:disabled) { box-shadow: 0 4px 16px rgba(109, 62, 240, 
 .model-offer.recommended { border-color: rgba(255, 212, 121, 0.35); }
 
 /* ---------- attachments ---------- */
-#btn-attach, #btn-web { border: 1px solid var(--border); background: var(--bg-input); color: var(--text); border-radius: 8px; padding: 9px 12px; font: inherit; cursor: pointer; }
-#btn-attach:hover, #btn-web:hover { border-color: var(--violet); }
+#btn-attach, #btn-web, #btn-mic { border: 1px solid var(--border); background: var(--bg-input); color: var(--text); border-radius: 8px; padding: 9px 12px; font: inherit; cursor: pointer; }
+#btn-attach:hover, #btn-web:hover, #btn-mic:hover { border-color: var(--violet); }
 #btn-web.on { border-color: var(--violet); background: rgba(139, 92, 246, 0.18); }
 #attach-chip-row { padding: 0 8% 12px; }
 #attach-chip { display: inline-flex; align-items: center; gap: 8px; font-size: 0.85em; border: 1px solid var(--violet); border-radius: 999px; padding: 4px 12px; background: rgba(139, 92, 246, 0.1); }
@@ -518,7 +518,7 @@ button.primary:hover:not(:disabled) { box-shadow: 0 4px 16px rgba(109, 62, 240, 
 @media (max-width: 1180px) {
   #composer { flex-wrap: wrap; }
   #composer #input { flex: 1 1 100%; order: 5; min-width: 0; }
-  #composer #btn-send, #composer #btn-stop, #composer #btn-attach, #composer #btn-web { order: 6; }
+  #composer #btn-send, #composer #btn-stop, #composer #btn-attach, #composer #btn-web, #composer #btn-mic { order: 6; }
   #src-pick, #model-pick, #persona-pick { max-width: none; flex: 1 1 auto; }
 }
 
@@ -571,3 +571,14 @@ button.primary:hover:not(:disabled) { box-shadow: 0 4px 16px rgba(109, 62, 240, 
 .net-seen { margin-left: auto; font-size: 0.76em; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 .net-worker-metrics { display: flex; gap: 18px; font-size: 0.84em; color: var(--text-dim); flex-wrap: wrap; }
 .net-worker-metrics b { color: var(--text); font-weight: 650; font-variant-numeric: tabular-nums; }
+
+/* Voice input: the mic pulses while listening, dims while transcribing. */
+#btn-mic.recording { border-color: #e5484d; color: #e5484d; animation: mic-pulse 1.2s ease-in-out infinite; }
+#btn-mic.busy { opacity: 0.55; cursor: progress; }
+@keyframes mic-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(229, 72, 77, 0.45); }
+  50% { box-shadow: 0 0 0 6px rgba(229, 72, 77, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  #btn-mic.recording { animation: none; }
+}
