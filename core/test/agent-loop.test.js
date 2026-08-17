@@ -135,6 +135,15 @@ test("agent tools: two servers exporting the same tool stay unambiguous", () => 
   // The one spelling that genuinely cannot be attributed resolves to nothing.
   assert.strictEqual(map.resolve("readfile"), null, "ambiguous → no action, never a coin flip");
   assert.strictEqual(map.resolve("mcp:srvB:read_file"), "mcp:srvB:read_file", "exact names always win");
+
+  // A numbered alias must never steal the name of a tool that is really
+  // called read_file_2 somewhere else.
+  const m2 = toolAliases(["mcp:srvA:read_file", "mcp:srvB:read_file", "mcp:srvC:read_file_2"]);
+  const aliases = Object.values(m2.alias);
+  assert.strictEqual(new Set(aliases).size, 3, `every tool keeps its own alias: ${aliases.join(", ")}`);
+  assert.strictEqual(m2.alias["mcp:srvC:read_file_2"], "read_file_2", "the real name wins over a generated one");
+  assert.strictEqual(m2.resolve("read_file_2"), "mcp:srvC:read_file_2");
+  assert.strictEqual(m2.resolve("read_file_3"), "mcp:srvB:read_file", "the collision skips past the taken name");
 });
 
 test("agent loop: the conversation stops growing so late steps still fit", () => {

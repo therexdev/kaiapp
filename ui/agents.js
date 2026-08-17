@@ -68,13 +68,22 @@
    */
   function toolAliases(names) {
     var list = (names || []).map(String);
-    var used = Object.create(null);
     var alias = Object.create(null);
+    var used = Object.create(null);
     var i;
+    // Every bare name is spoken for before numbering starts, so a generated
+    // "read_file_2" can never steal the alias of a tool actually called
+    // read_file_2 on some other server.
+    var taken = Object.create(null);
+    for (i = 0; i < list.length; i++) taken[shortName(list[i])] = true;
     for (i = 0; i < list.length; i++) {
       var s = shortName(list[i]);
-      if (used[s]) s = s + "_" + ++used[s];
-      else used[s] = 1;
+      if (used[s]) {
+        var base = s;
+        var n = 1;
+        do { s = base + "_" + ++n; } while (used[s] || taken[s]);
+      }
+      used[s] = true;
       alias[list[i]] = s;
     }
 
