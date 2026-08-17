@@ -29,7 +29,11 @@
 > over the registry (≤6 steps, per-call confirm dialogs, visible trace; sandboxed
 > workspace file tools, NO bash by design); MCP CLIENT stdio+Streamable-HTTP
 > (initialize/tools-list/tools-call, session ids, curated 3-entry catalog, one-click add,
-> trusted/localSafe flags per server); EMAIL imapflow/mailparser/nodemailer (presets+app
+> trusted/localSafe flags per server; NODE RUNTIME auto-provisioned — official v24.19.0 LTS
+> hash-pinned in the runtime catalog, downloaded on demand INSIDE the app (no system
+> install/PATH/admin), system node preferred when present, npx resolved through npm's
+> npx-cli via our binary; catalog packages VERIFIED on the npm registry and version-pinned
+> — server-fetch was dropped, it is a PyPI package not npm); EMAIL imapflow/mailparser/nodemailer (presets+app
 > passwords, safeStorage-encrypted creds, inbox/read/summarize/draft via chat, send =
 > human click ONLY, never an agent tool); CALENDAR CalDAV stdlib (REPORT+PUT, minimal
 > VEVENT parse, presets). Suite 137 pass / 0 fail local. kai side: **SQLITE LEDGER LIVE** (ad421ae

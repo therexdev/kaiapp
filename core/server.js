@@ -366,7 +366,11 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
   registerEmailTools(registry, emailSvc);
   const calendarSvc = new CalendarService({ dataDir, safeStorage, onEvent: events });
   registerCalendarTools(registry, calendarSvc);
-  const mcp = new McpManager({ settings, registry, onEvent: events });
+  // Node runtime for npx-based MCP servers — provisioned on demand so
+  // "add a tool server" never dead-ends on "go install Node.js first".
+  const { NodeRuntime } = require("./lib/node-runtime");
+  const nodeRuntime = new NodeRuntime({ provisioner, runtimesDir: path.join(dataDir, "runtimes") });
+  const mcp = new McpManager({ settings, registry, nodeRuntime, onEvent: events });
   mcp.autoConnect().catch(() => {}); // reconnect servers the user used before
 
   // Local speech-to-text (§7: audio never leaves the machine). Engine+model
@@ -391,6 +395,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     tools: registry,
     memory,
     mcp,
+    nodeRuntime,
     email: emailSvc,
     calendar: calendarSvc,
     chats: new ChatStore(path.join(dataDir, "chats")),

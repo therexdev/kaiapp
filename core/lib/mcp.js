@@ -83,6 +83,9 @@ class McpConnection {
     this._child = spawn(cmd, [...baseArgs, ...(this.config.args || [])], {
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
+      // config.env carries the managed-Node PATH when the manager resolved
+      // an npx server onto Core's own runtime.
+      env: this.config.env || process.env,
     });
     this._child.stdout.on("data", (d) => {
       this._buf += d.toString();

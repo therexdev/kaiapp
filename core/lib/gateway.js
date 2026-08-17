@@ -67,10 +67,11 @@ function hasImageParts(messages) {
 }
 
 class Gateway {
-  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, earn, network, feedback, chats, docs, voice, tools, memory, mcp, email, calendar, onEvent }) {
+  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, earn, network, feedback, chats, docs, voice, tools, memory, mcp, nodeRuntime, email, calendar, onEvent }) {
     this.tools = tools || null; // unified tool registry (agents/MCP/memory/…)
     this.memory = memory || null; // cross-chat memory store
     this.mcp = mcp || null; // MCP server manager
+    this.nodeRuntime = nodeRuntime || null; // on-demand Node for npx tool servers
     this.email = email || null; // IMAP/SMTP service
     this.calendar = calendar || null; // CalDAV service
     this.voice = voice || null; // local speech-to-text (whisper)
@@ -342,7 +343,21 @@ class Gateway {
     // ---- MCP servers (manage; connecting is the user's explicit act) ----
     if (this.mcp && path === "/core/mcp" && req.method === "GET") {
       const { CATALOG } = require("./mcp-manager");
-      return this._json(res, 200, { ok: true, servers: this.mcp.servers(), catalog: CATALOG });
+      return this._json(res, 200, {
+        ok: true,
+        servers: this.mcp.servers(),
+        catalog: CATALOG,
+        // The UI turns this into a "Set up (≈N MB)" button instead of a
+        // dead-end "install Node.js yourself" message.
+        node: this.nodeRuntime ? this.nodeRuntime.status() : { available: false, installable: false },
+      });
+    }
+    if (this.nodeRuntime && path === "/core/mcp/runtime" && req.method === "POST") {
+      try {
+        return this._json(res, 200, { ok: true, node: await this.nodeRuntime.ensure() });
+      } catch (e) {
+        return this._json(res, 400, { ok: false, error: String(e.message) });
+      }
     }
     if (this.mcp && path === "/core/mcp" && req.method === "POST") {
       const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");

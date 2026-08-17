@@ -74,8 +74,40 @@
 
     const cat = $("mcp-catalog");
     cat.innerHTML = (mj.catalog || [])
-      .map((c) => `<option value="${esc(c.id)}">${esc(c.name)} — ${esc(c.description)}${c.requires === "node" ? " (needs Node.js installed)" : ""}</option>`)
+      .map((c) => `<option value="${esc(c.id)}">${esc(c.name)} — ${esc(c.description)}</option>`)
       .join("");
+
+    // Node runtime: most catalog servers are npm packages. If this machine
+    // has no Node, offer to set one up (managed, inside the app) rather than
+    // sending the user off to a website mid-task.
+    const nodeBox = $("mcp-node-note");
+    const node = mj.node || {};
+    nodeBox.innerHTML = "";
+    if (node.available) {
+      nodeBox.appendChild(el("span", "hint", node.source === "system"
+        ? `Tool runtime ready (using the Node.js already on this computer, ${node.version}).`
+        : "Tool runtime ready (managed by Koinos AI)."));
+    } else if (node.installable) {
+      const mb = Math.round((node.downloadBytes || 0) / 1e6);
+      nodeBox.appendChild(el("span", "hint", `Most tool servers need a small runtime (Node.js, ~${mb} MB, one time). It installs inside Koinos AI — no system changes.`));
+      const btn = el("button", "primary small", `Set up tool runtime (~${mb} MB)`);
+      btn.onclick = async () => {
+        btn.disabled = true;
+        btn.textContent = "Downloading…";
+        const r = await jfetch("/core/mcp/runtime", { method: "POST" });
+        if (!r.ok) {
+          btn.disabled = false;
+          btn.textContent = `Set up tool runtime (~${mb} MB)`;
+          alert(`Couldn't set up the runtime:\n${r.error}`);
+        }
+        render();
+      };
+      const row = el("div", "form-row");
+      row.appendChild(btn);
+      nodeBox.appendChild(row);
+    } else {
+      nodeBox.appendChild(el("span", "hint", "Tool servers that need Node.js aren't available for this platform yet — web-based (URL) servers still work."));
+    }
 
     // ---- memory ----
     const mem = await jfetch("/core/memory");
@@ -313,9 +345,26 @@
 
   // ---- wire the add buttons ----
   $("mcp-add-catalog")?.addEventListener("click", async () => {
+    const btn = $("mcp-add-catalog");
     const mj = await jfetch("/core/mcp");
     const entry = (mj.catalog || []).find((c) => c.id === $("mcp-catalog").value);
     if (!entry) return;
+    // If this server needs Node and the machine has none, offer to fetch it
+    // right here — adding a tool must never dead-end on a manual install.
+    if (entry.requires === "node" && !mj.node?.available) {
+      if (!mj.node?.installable) return alert("This tool server needs Node.js, which isn't available for this platform yet.");
+      const mb = Math.round((mj.node.downloadBytes || 0) / 1e6);
+      if (!confirm(`"${entry.name}" needs a small runtime to run (Node.js, about ${mb} MB).\n\nKoinos AI can set it up for you now — it installs inside the app, changes nothing else on your computer, and only needs doing once.\n\nSet it up and continue?`)) return;
+      btn.disabled = true;
+      btn.textContent = "Setting up runtime…";
+      const nr = await jfetch("/core/mcp/runtime", { method: "POST" });
+      btn.disabled = false;
+      btn.textContent = "Add";
+      if (!nr.ok) {
+        render();
+        return alert(`Couldn't set up the runtime:\n${nr.error}`);
+      }
+    }
     let args = entry.args || [];
     if (entry.argsPrompt) {
       const extra = prompt(entry.argsPrompt.label);
@@ -328,8 +377,12 @@
       body: JSON.stringify({ name: entry.name, transport: entry.transport, url: entry.url, command: entry.command, args }),
     });
     if (r.ok) {
+      btn.textContent = "Starting…";
       const c = await jfetch(`/core/mcp/${r.server.id}/connect`, { method: "POST" });
-      if (!c.ok) alert(`Added, but couldn't start it:\n${c.error}\n\n${entry.requires === "node" ? "This one needs Node.js installed (nodejs.org)." : ""}`);
+      btn.textContent = "Add";
+      // First run of an npm-based server downloads the package itself — say
+      // so instead of letting a 30s wait look like a hang.
+      if (!c.ok) alert(`Added, but couldn't start it:\n${c.error}`);
     } else alert(r.error || "couldn't add");
     render();
   });

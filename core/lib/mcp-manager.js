@@ -1,5 +1,7 @@
 "use strict";
 
+const path = require("path");
+
 const { McpConnection } = require("./mcp");
 
 /*
@@ -22,43 +24,75 @@ const { McpConnection } = require("./mcp");
 
 // Small, honest catalog: entries we can stand behind. requires:"node" means
 // npx must exist on the machine; the UI says so up front instead of failing.
+// Versions are PINNED, not "latest": a package that changes under us is a
+// silent code-execution change on the user's machine. Bump deliberately.
+// Every entry below was verified to exist on the npm registry — an entry
+// that 404s turns one-click into a dead end (field lesson: the reference
+// "fetch" server is a PYTHON package, not npm, so it is not listed here;
+// web fetching is a built-in tool anyway).
 const CATALOG = [
   {
-    id: "fetch",
-    name: "Web fetch (reference)",
-    description: "Fetch and read any web page as clean text — the MCP reference fetch server.",
-    transport: "stdio",
-    command: "npx",
-    args: ["-y", "@modelcontextprotocol/server-fetch"],
-    requires: "node",
-  },
-  {
     id: "filesystem",
-    name: "File access (pick folders)",
-    description: "Read and write files in folders YOU choose — the MCP reference filesystem server.",
+    name: "Your files (folders you pick)",
+    description: "Let the AI read and write files in folders you choose.",
     transport: "stdio",
     command: "npx",
-    args: ["-y", "@modelcontextprotocol/server-filesystem"],
-    argsPrompt: { label: "Folder the tools may access", appendAsArg: true },
+    args: ["-y", "@modelcontextprotocol/server-filesystem@2026.7.10"],
+    argsPrompt: { label: "Which folder may the AI use? (full path)", appendAsArg: true },
     requires: "node",
   },
   {
     id: "memory-graph",
     name: "Knowledge graph memory",
-    description: "A structured knowledge-graph memory — the MCP reference memory server.",
+    description: "A structured memory that links facts together — richer than plain notes.",
     transport: "stdio",
     command: "npx",
-    args: ["-y", "@modelcontextprotocol/server-memory"],
+    args: ["-y", "@modelcontextprotocol/server-memory@2026.7.4"],
+    requires: "node",
+  },
+  {
+    id: "sequential-thinking",
+    name: "Step-by-step thinking",
+    description: "Helps the AI break hard problems into checked steps before answering.",
+    transport: "stdio",
+    command: "npx",
+    args: ["-y", "@modelcontextprotocol/server-sequential-thinking@2026.7.4"],
+    requires: "node",
+  },
+  {
+    id: "everything",
+    name: "Demo toolbox (try it out)",
+    description: "A sample server with simple tools — good for checking that tools work.",
+    transport: "stdio",
+    command: "npx",
+    args: ["-y", "@modelcontextprotocol/server-everything@2026.7.4"],
     requires: "node",
   },
 ];
 
 class McpManager {
-  constructor({ settings, registry, onEvent }) {
+  constructor({ settings, registry, nodeRuntime = null, onEvent }) {
     this.settings = settings; // JsonStore
     this.registry = registry;
+    this.nodeRuntime = nodeRuntime; // provisions Node when a server needs npx
     this.onEvent = onEvent || (() => {});
     this._conns = new Map(); // id -> McpConnection
+  }
+
+  /** Rewrite an npx-based server so it runs on whichever Node we have —
+   *  the user's, or the copy Core provisioned. Non-npx commands pass
+   *  through untouched. */
+  _resolveCommand(s) {
+    const cmdParts = Array.isArray(s.command) ? s.command : String(s.command || "").split(" ").filter(Boolean);
+    const first = path.basename(String(cmdParts[0] || "")).toLowerCase();
+    if (!/^npx(\.cmd)?$/.test(first)) return s;
+    const resolved = this.nodeRuntime?.resolveNpx([...cmdParts.slice(1), ...(s.args || [])]);
+    if (!resolved) {
+      const err = new Error("This tool server needs the Node.js runtime — set it up in Tools & accounts (one click).");
+      err.needsNode = true;
+      throw err;
+    }
+    return { ...s, command: [resolved.command], args: resolved.args, env: resolved.env };
   }
 
   servers() {
@@ -75,7 +109,10 @@ class McpManager {
 
   addServer({ name, transport, url, command, args, localSafe = false }) {
     const list = this.settings.get("mcp.servers") || [];
-    const id = `srv${Date.now().toString(36)}`;
+    // Random suffix, not just a timestamp: two servers added in the same
+    // millisecond used to collide, and every later connect/remove then hit
+    // whichever one the lookup found first.
+    const id = `srv${Date.now().toString(36)}${require("crypto").randomBytes(3).toString("hex")}`;
     const entry = {
       id,
       name: String(name || "").slice(0, 60) || "Tool server",
@@ -117,7 +154,7 @@ class McpManager {
     const s = (this.settings.get("mcp.servers") || []).find((x) => x.id === id);
     if (!s) throw new Error("no such tool server");
     if (this._conns.has(id)) return this._conns.get(id).tools;
-    const conn = new McpConnection(s, this.onEvent);
+    const conn = new McpConnection(this._resolveCommand(s), this.onEvent);
     const tools = await conn.connect().catch((e) => {
       conn.close();
       throw e;
