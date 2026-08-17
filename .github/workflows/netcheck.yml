@@ -56,6 +56,15 @@ jobs:
           echo "== /scheduler/network/status body =="
           curl -sS --max-time 15 https://koinosai.com/scheduler/network/status | python3 -m json.tool || echo "(status endpoint unreachable)"
           echo
+          # §51 oracle state: `status` should read anchor (no feeds), live (feeds
+          # answering), or stale-hold (all feeds down, holding last price — NOT a
+          # snap back to the anchor). `usd` walks toward the market by at most
+          # maxStepPct per epoch; a jump larger than that means a breaker failed.
+          echo "== /scheduler/pricing -> oracle block =="
+          curl -sS --max-time 15 https://koinosai.com/scheduler/pricing \
+            | python3 -c "import json,sys; d=json.load(sys.stdin); print(json.dumps(d.get('oracle', '(no oracle block — old build?)'), indent=2))" \
+            || echo "(pricing endpoint unreachable)"
+          echo
           exit 0
       - name: ARM64 engine availability (Pi support — runtime catalog candidates)
         if: contains(github.event.head_commit.message, '[armcheck]')
