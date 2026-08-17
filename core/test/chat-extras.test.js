@@ -66,12 +66,17 @@ test("chat store: rename sticks and survives later autosaves; persona rides alon
   assert.throws(() => store.rename(id, "   "), /title required/);
 });
 
-test("chat store: favorite (pinned) survives autosaves, floats to the top, and toggles off", () => {
+test("chat store: favorite (pinned) survives autosaves, floats to the top, and toggles off", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-chatpin-"));
   const store = new ChatStore(dir);
+  // updatedAt has millisecond precision — on a fast machine two saves land in
+  // the same ms and the recency sort ties (CI flake). Space every save whose
+  // ORDER an assertion depends on.
+  const tick = () => new Promise((r) => setTimeout(r, 5));
   const a = store.save({ messages: [{ role: "user", content: "older chat" }] }).id;
-  // Ensure distinct updatedAt ordering: b is newer than a.
+  await tick(); // b must be strictly newer than a
   const b = store.save({ messages: [{ role: "user", content: "newer chat" }] }).id;
+  await tick();
 
   store.setPinned(a, true);
   assert.strictEqual(store.get(a).pinned, true, "pin persists");
@@ -89,6 +94,7 @@ test("chat store: favorite (pinned) survives autosaves, floats to the top, and t
   assert.strictEqual(Boolean(store.get(a).pinned), false, "unpin removes the flag");
   // Make b the most recent again (a's autosave above bumped its recency),
   // then confirm ordering is back to plain recency with no pin in play.
+  await tick(); // b's re-save must be strictly newer than a's autosave
   store.save({ id: b, messages: [{ role: "user", content: "newer chat" }, { role: "assistant", content: "yo" }] });
   assert.strictEqual(store.list()[0].id, b, "order returns to recency once unpinned");
 });
