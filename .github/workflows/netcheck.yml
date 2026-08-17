@@ -53,6 +53,16 @@ jobs:
           echo "== /api/health (restart forensics) =="
           curl -sS --max-time 15 https://koinosai.com/api/health | python3 -m json.tool || echo "(health unreachable)"
           echo
+          # Payout roster consumed by Free Koinos Node: FULL addresses of
+          # providers serving right now. `count` must track workersOnline in
+          # the status block below (one shared liveness rule), and no entry
+          # may contain "…" — a truncated address is not payable.
+          echo "== /scheduler/network/roster (Free Koinos Node payout list) =="
+          curl -sS --max-time 15 -D /tmp/roster.h https://koinosai.com/scheduler/network/roster -o /tmp/roster.json \
+            && grep -i '^cache-control:' /tmp/roster.h \
+            && python3 -c "import json;d=json.load(open('/tmp/roster.json'));w=d.get('workers',[]);print('count:',d.get('count'),'len:',len(w));print('truncated entries:',sum(1 for a in w if '\u2026' in a));print('unique:',len(set(w))==len(w));print(json.dumps(w[:5],indent=2))" \
+            || echo "(roster endpoint unreachable or not deployed yet)"
+          echo
           echo "== /scheduler/network/status body =="
           curl -sS --max-time 15 https://koinosai.com/scheduler/network/status | python3 -m json.tool || echo "(status endpoint unreachable)"
           echo
