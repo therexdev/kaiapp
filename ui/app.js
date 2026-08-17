@@ -182,7 +182,12 @@ async function webResearch(query, statusEl) {
   const body = extract ? `\n\nExtract from "${extract.title || extract.from.title}" (${extract.url}):\n${extract.text.slice(0, 1500)}` : "";
   const context =
     `🌐 Live web results for "${query.slice(0, 200)}" (fetched just now — prefer these over older knowledge; cite sources by number):\n${lines}${body}`;
-  setStatus("");
+  // The trace PERSISTS (field feedback: on slower network chats the flash of
+  // status vanished and the agent looked like it never ran). What it did
+  // stays on screen, above the reply, in every mode.
+  let readHost = "";
+  try { readHost = extract ? new URL(extract.url).hostname.replace(/^www\./, "") : ""; } catch { /* keep empty */ }
+  setStatus(`🌐 Searched the web — ${results.length} source${results.length === 1 ? "" : "s"}${readHost ? ` · read ${readHost}` : ""}`);
   return { context, citations: results.map((x) => ({ title: x.title, url: x.url })) };
 }
 
@@ -594,6 +599,9 @@ async function send(replayText) {
 
   const bubble = addMsg("assistant", "");
   bubble.classList.add("streaming");
+  // Three swelling dots until the first token lands — a blank bubble read as
+  // "stuck" during model load / network dispatch (field feedback).
+  bubble.innerHTML = '<span class="typing-dots" aria-label="thinking"><i></i><i></i><i></i></span>';
   state.chatting = true;
   $("btn-send").disabled = true;
   $("btn-stop").hidden = false;
@@ -620,6 +628,7 @@ async function send(replayText) {
     }
   }
 
+  const t0 = performance.now();
   try {
     const resp = await fetch("/core/chat/completions", {
       method: "POST",
@@ -642,10 +651,12 @@ async function send(replayText) {
     let servedBy = null;
     let servedModel = null;
     let lastPaint = 0;
+    let tFirst = null;
     for await (const { content, model, served } of sseDeltas(resp.body)) {
       if (model) servedBy = model;
       if (served) servedModel = served;
       if (content) {
+        if (tFirst == null) tFirst = performance.now();
         acc += content;
         // Markdown live during the stream, throttled so re-rendering
         // doesn't chew CPU the model needs.
@@ -677,6 +688,17 @@ async function send(replayText) {
       if (tag.textContent) bubble.appendChild(tag);
     }
     if (webCitations) renderCitations(bubble, webCitations);
+    // Speed transparency (field request): show how long the wait actually
+    // was and the delivered rate, so "slow" becomes a number we can chase.
+    if (acc && tFirst != null) {
+      const firstS = (tFirst - t0) / 1000;
+      const genS = Math.max(0.001, (performance.now() - tFirst) / 1000);
+      const tokPerSec = acc.length / 4 / genS; // ~4 chars/token estimate
+      const meta = document.createElement("div");
+      meta.className = "msg-meta";
+      meta.textContent = `first reply in ${firstS.toFixed(1)}s · ~${tokPerSec.toFixed(0)} tok/s`;
+      bubble.appendChild(meta);
+    }
     state.history.push({ role: "assistant", content: acc, ...(webCitations ? { citations: webCitations } : {}) });
     saveCurrentChat();
   } catch (e) {
@@ -1207,15 +1229,16 @@ function renderChatList() {
       (c) => `<div class="chat-row${c.id === state.chatId ? " active" : ""}${c.pinned ? " pinned" : ""}" data-id="${esc2(c.id)}" title="Double-click to rename">
         <button class="chat-pin${c.pinned ? " on" : ""}" data-id="${esc2(c.id)}" title="${c.pinned ? "Unfavorite" : "Favorite"}" aria-label="${c.pinned ? "Unfavorite chat" : "Favorite chat"}">${c.pinned ? "★" : "☆"}</button>
         <span class="chat-row-title">${esc2(c.title)}</span>
+        <button class="chat-edit" data-id="${esc2(c.id)}" title="Rename chat" aria-label="Rename chat">✎</button>
         <button class="chat-del" data-id="${esc2(c.id)}" title="Delete chat" aria-label="Delete chat">×</button>
       </div>`
     )
     .join("");
 }
 
-// Rename: double-click a chat row, type, Enter (Escape cancels).
-$("chat-list").addEventListener("dblclick", (e) => {
-  const row = e.target.closest(".chat-row");
+// Rename: the ✎ button or double-click swaps the title for an inline input;
+// Enter commits, Escape cancels.
+function startRename(row) {
   if (!row || row.querySelector("input")) return;
   const span = row.querySelector(".chat-row-title");
   const input = document.createElement("input");
@@ -1246,7 +1269,9 @@ $("chat-list").addEventListener("dblclick", (e) => {
     if (ev.key === "Escape") finish(false);
   });
   input.addEventListener("blur", () => finish(true));
-});
+}
+
+$("chat-list").addEventListener("dblclick", (e) => startRename(e.target.closest(".chat-row")));
 
 function rebuildMessages() {
   const box = $("messages");
@@ -1290,6 +1315,12 @@ $("chat-list").addEventListener("click", async (e) => {
     refreshChatList();
     return;
   }
+  const edit = e.target.closest(".chat-edit");
+  if (edit) {
+    e.stopPropagation();
+    startRename(edit.closest(".chat-row"));
+    return;
+  }
   const del = e.target.closest(".chat-del");
   if (del) {
     e.stopPropagation();
@@ -1300,6 +1331,14 @@ $("chat-list").addEventListener("click", async (e) => {
   }
   const row = e.target.closest(".chat-row");
   if (!row) return;
+  // Clicking the chat that's ALREADY open must not refetch + rebuild the
+  // list — the rebuild destroyed the row mid-double-click, which is why
+  // dblclick-rename never fired on the active chat (field finding).
+  if (row.dataset.id === state.chatId) {
+    state.view = "chat";
+    showView("chat");
+    return;
+  }
   try {
     const j = await coreGet(`/core/chats/${row.dataset.id}`);
     state.chatId = j.chat.id;

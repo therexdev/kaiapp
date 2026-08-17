@@ -345,8 +345,6 @@ button.primary:hover:not(:disabled) { box-shadow: 0 4px 16px rgba(109, 62, 240, 
 .chat-row.pinned .chat-row-title { font-weight: 600; }
 
 /* web search */
-#btn-web { opacity: 0.55; }
-#btn-web.on { opacity: 1; box-shadow: 0 0 0 1px var(--accent, #7e6cff) inset; border-radius: 8px; }
 .web-status { font-size: 12.5px; color: var(--text-dim); padding: 4px 2px 8px; }
 .citations { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .citation-chip {
@@ -427,8 +425,9 @@ button.primary:hover:not(:disabled) { box-shadow: 0 4px 16px rgba(109, 62, 240, 
 .model-offer.recommended { border-color: rgba(255, 212, 121, 0.35); }
 
 /* ---------- attachments ---------- */
-#btn-attach { border: 1px solid var(--border); background: var(--bg-input); color: var(--text); border-radius: 8px; padding: 9px 12px; font: inherit; cursor: pointer; }
-#btn-attach:hover { border-color: var(--violet); }
+#btn-attach, #btn-web { border: 1px solid var(--border); background: var(--bg-input); color: var(--text); border-radius: 8px; padding: 9px 12px; font: inherit; cursor: pointer; }
+#btn-attach:hover, #btn-web:hover { border-color: var(--violet); }
+#btn-web.on { border-color: var(--violet); background: rgba(139, 92, 246, 0.18); }
 #attach-chip-row { padding: 0 8% 12px; }
 #attach-chip { display: inline-flex; align-items: center; gap: 8px; font-size: 0.85em; border: 1px solid var(--violet); border-radius: 999px; padding: 4px 12px; background: rgba(139, 92, 246, 0.1); }
 #attach-remove { border: 0; background: none; color: var(--text-dim); font: inherit; cursor: pointer; }
@@ -513,14 +512,44 @@ button.primary:hover:not(:disabled) { box-shadow: 0 4px 16px rgba(109, 62, 240, 
 #status-text { overflow-wrap: anywhere; }
 .model-load-err { margin-top: 6px; font-size: 0.78em; color: var(--danger); overflow-wrap: anywhere; line-height: 1.45; }
 
-/* Small windows: the composer wraps — pickers on one row, the message box
-   full-width beneath them (field request). */
-@media (max-width: 860px) {
+/* Smaller windows: the composer wraps — pickers on one row, the message box
+   full-width beneath them. Breakpoint raised 860→1180 (field feedback: three
+   pickers + the message box + three buttons were squeezing long before 860). */
+@media (max-width: 1180px) {
   #composer { flex-wrap: wrap; }
   #composer #input { flex: 1 1 100%; order: 5; min-width: 0; }
-  #composer #btn-send, #composer #btn-stop, #composer #btn-attach { order: 6; }
+  #composer #btn-send, #composer #btn-stop, #composer #btn-attach, #composer #btn-web { order: 6; }
   #src-pick, #model-pick, #persona-pick { max-width: none; flex: 1 1 auto; }
 }
+
+/* Typing indicator: three dots swelling in sequence while the model thinks —
+   the blank-bubble wait read as "stuck" (field feedback). */
+.typing-dots { display: inline-flex; gap: 5px; align-items: center; padding: 4px 2px; }
+.typing-dots i {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent-2, #9d8cff); display: inline-block;
+  animation: dot-swell 1.15s ease-in-out infinite;
+}
+.typing-dots i:nth-child(2) { animation-delay: 0.18s; }
+.typing-dots i:nth-child(3) { animation-delay: 0.36s; }
+@keyframes dot-swell {
+  0%, 60%, 100% { transform: scale(0.66); opacity: 0.45; }
+  30% { transform: scale(1.25); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .typing-dots i { animation: none; opacity: 0.7; }
+}
+
+/* chat rename affordance (dblclick stays; the pencil makes it discoverable) */
+.chat-edit {
+  border: 0; background: none; color: var(--text-dim); font: inherit;
+  font-size: 0.9em; line-height: 1; padding: 0 2px; cursor: pointer; opacity: 0;
+}
+.chat-row:hover .chat-edit { opacity: 0.7; }
+.chat-edit:hover { color: var(--text); opacity: 1; }
+
+/* reply meta: who answered + how fast (speed transparency) */
+.msg-meta { margin-top: 8px; font-size: 11px; color: var(--text-dim); }
 
 /* ---------- Network status ---------- */
 .net-tiles { display: flex; gap: 12px; flex-wrap: wrap; }
