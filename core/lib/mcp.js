@@ -92,9 +92,11 @@ class McpConnection {
     this._child = spawn(cmd, [...baseArgs, ...(this.config.args || [])], {
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
-      // config.env carries the managed-Node PATH when the manager resolved
-      // an npx server onto Core's own runtime.
+      // config.env carries the resolved-Node PATH when the manager mapped an
+      // npx server onto a real node binary. config.shell is only set for the
+      // last-resort .cmd shim path (Windows refuses .cmd without a shell).
       env: this.config.env || process.env,
+      ...(this.config.shell ? { shell: true } : {}),
     });
     this._child.stdout.on("data", (d) => {
       this._buf += d.toString();

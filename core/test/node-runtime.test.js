@@ -56,10 +56,12 @@ test("node runtime: status reports availability and a real download size", () =>
 
 test("node runtime: resolveNpx uses the system node when present", () => {
   const nr = new NodeRuntime({ provisioner: null, runtimesDir: tmp() });
-  const r = nr.resolveNpx(["-y", "@modelcontextprotocol/server-fetch"]);
+  const r = nr.resolveNpx(["-y", "some-package"]);
   assert.ok(r, "resolves because this machine has node");
-  assert.match(path.basename(r.command), /^npx/);
-  assert.deepStrictEqual(r.args, ["-y", "@modelcontextprotocol/server-fetch"]);
+  // The package args always arrive intact, whichever route was taken.
+  assert.deepStrictEqual(r.args.slice(-2), ["-y", "some-package"]);
+  // And the route itself must be spawn-safe (see the EINVAL test below).
+  assert.ok(!/\.(cmd|bat)$/i.test(r.command) || r.shell === true);
 });
 
 test("node runtime: with NO system node, resolveNpx drives npm's npx-cli through OUR node", { skip: process.platform === "win32" ? "posix layout" : false }, () => {
@@ -139,4 +141,38 @@ test("mcp: the connect handshake gets a far more patient budget than tool calls"
   const src = fs.readFileSync(path.join(__dirname, "..", "lib", "mcp.js"), "utf8");
   assert.match(src, /"initialize",[\s\S]{0,240}CONNECT_TIMEOUT_MS/, "initialize uses the patient budget");
   assert.match(src, /"tools\/list", \{\}, \{ timeoutMs: CONNECT_TIMEOUT_MS \}/, "so does the first tools/list");
+});
+
+test("node runtime: NEVER hands back a .cmd shim to spawn (Windows EINVAL)", () => {
+  // Field report: with a SYSTEM node on Windows we returned "npx.cmd", and
+  // Node refuses to spawn .cmd/.bat without a shell (CVE-2024-27980
+  // hardening) — the user got `spawn EINVAL`. CI missed it because the
+  // nodecheck script forces the MANAGED path, which is a real .exe.
+  const nr = new NodeRuntime({ provisioner: null, runtimesDir: tmp() }); // real system probe
+  const r = nr.resolveNpx(["-y", "pkg"]);
+  assert.ok(r, "this machine has node, so it resolves");
+  if (/\.(cmd|bat)$/i.test(r.command)) {
+    assert.strictEqual(r.shell, true, "a shim command MUST carry shell:true or Windows throws EINVAL");
+  } else {
+    assert.strictEqual(path.basename(r.command).replace(/\.exe$/i, ""), "node", "resolves to the node binary itself");
+    assert.match(r.args[0], /npx-cli\.js$/, "…driving npm's npx entry point");
+  }
+});
+
+test("node runtime: system node resolves through its own npm install, not a shim", () => {
+  // Build a fake "system" node with npm beside it and assert we drive the
+  // JS entry point rather than the shim.
+  const dir = tmp();
+  const isWin = process.platform === "win32";
+  const nodeBin = path.join(dir, isWin ? "node.exe" : path.join("bin", "node"));
+  fs.mkdirSync(path.dirname(nodeBin), { recursive: true });
+  fs.writeFileSync(nodeBin, "");
+  const npmBin = isWin
+    ? path.join(dir, "node_modules", "npm", "bin")
+    : path.join(dir, "lib", "node_modules", "npm", "bin");
+  fs.mkdirSync(npmBin, { recursive: true });
+  fs.writeFileSync(path.join(npmBin, "npx-cli.js"), "");
+
+  const { npxCliFor } = require("../lib/node-runtime");
+  assert.strictEqual(npxCliFor(nodeBin), path.join(npmBin, "npx-cli.js"), "finds npm next to a node binary in both layouts");
 });

@@ -92,7 +92,7 @@ class McpManager {
       err.needsNode = true;
       throw err;
     }
-    return { ...s, command: [resolved.command], args: resolved.args, env: resolved.env };
+    return { ...s, command: [resolved.command], args: resolved.args, env: resolved.env, ...(resolved.shell ? { shell: true } : {}) };
   }
 
   servers() {

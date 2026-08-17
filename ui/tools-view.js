@@ -22,9 +22,22 @@
   const jfetch = (url, opts) => fetch(url, opts).then((r) => r.json().catch(() => ({ ok: false, error: `HTTP ${r.status}` })));
 
   let refreshTimer = null;
+  let busy = false; // an add/connect is in flight — never redraw under the user
 
-  async function render() {
+  /* The periodic refresh must never fight the person using the page. It used
+   * to rebuild every panel on a timer, which reset the catalog <select> back
+   * to the first entry mid-choice and would have wiped half-typed email
+   * credentials too (field report). Skip a redraw whenever the user is
+   * actually interacting. */
+  function userIsBusy() {
+    if (busy) return true;
+    const a = document.activeElement;
+    return Boolean(a && $("view-tools").contains(a) && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName));
+  }
+
+  async function render({ force = false } = {}) {
     if ($("view-tools").hidden) return;
+    if (!force && userIsBusy()) return;
 
     // ---- MCP servers ----
     const mj = await jfetch("/core/mcp");
@@ -72,10 +85,16 @@
     }
     if (!(mj.servers || []).length) list.appendChild(el("p", "hint", "No tool servers yet — add one below and your AI gains its abilities in Agent mode."));
 
+    // Rebuild the catalog list ONLY when its contents actually change, and
+    // always put the user's choice back — a blind innerHTML rewrite on the
+    // refresh timer is what kept snapping the picker to the first entry.
     const cat = $("mcp-catalog");
-    cat.innerHTML = (mj.catalog || [])
-      .map((c) => `<option value="${esc(c.id)}">${esc(c.name)} — ${esc(c.description)}</option>`)
-      .join("");
+    const wanted = (mj.catalog || []).map((c) => `<option value="${esc(c.id)}">${esc(c.name)} — ${esc(c.description)}</option>`).join("");
+    if (cat.innerHTML !== wanted) {
+      const keep = cat.value;
+      cat.innerHTML = wanted;
+      if (keep && [...cat.options].some((o) => o.value === keep)) cat.value = keep;
+    }
 
     // Node runtime: most catalog servers are npm packages. If this machine
     // has no Node, offer to set one up (managed, inside the app) rather than
@@ -346,8 +365,14 @@
   // ---- wire the add buttons ----
   $("mcp-add-catalog")?.addEventListener("click", async () => {
     const btn = $("mcp-add-catalog");
+    if (busy) return;
+    busy = true; // freeze the refresh timer for the whole add
+    const chosen = $("mcp-catalog").value; // read BEFORE any await
+    btn.disabled = true;
+    btn.textContent = "Checking…";
+    try {
     const mj = await jfetch("/core/mcp");
-    const entry = (mj.catalog || []).find((c) => c.id === $("mcp-catalog").value);
+    const entry = (mj.catalog || []).find((c) => c.id === chosen);
     if (!entry) return;
     // If this server needs Node and the machine has none, offer to fetch it
     // right here — adding a tool must never dead-end on a manual install.
@@ -387,7 +412,12 @@
       btn.textContent = "Add";
       if (!c.ok) alert(`Added, but couldn't start it:\n${c.error}\n\nIt stays in your list — press Connect to try again.`);
     } else alert(r.error || "couldn't add");
-    render();
+    } finally {
+      busy = false;
+      btn.disabled = false;
+      btn.textContent = "Add";
+      render({ force: true });
+    }
   });
 
   $("mcp-add-custom")?.addEventListener("click", async () => {
@@ -420,8 +450,8 @@
   const observer = new MutationObserver(() => {
     clearInterval(refreshTimer);
     if (!$("view-tools").hidden) {
-      render();
-      refreshTimer = setInterval(render, 20000);
+      render({ force: true });
+      refreshTimer = setInterval(() => render(), 20000);
     }
   });
   observer.observe($("view-tools"), { attributes: true, attributeFilter: ["hidden"] });

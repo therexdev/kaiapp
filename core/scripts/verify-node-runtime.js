@@ -86,6 +86,29 @@ async function main() {
   }
   mgr.closeAll();
 
+  // ---- second pass: the SYSTEM-node route ----
+  // This is the branch that shipped broken (Windows returned the npx.cmd
+  // shim and Node threw EINVAL). CI only ever ran the managed route, so it
+  // saw nothing. Run it explicitly whenever the runner has its own node.
+  const sysRt = new NodeRuntime({ provisioner, runtimesDir: path.join(dir, "runtimes") });
+  if (sysRt.status().source === "system") {
+    console.log("\n--- system-node route ---");
+    const sr = sysRt.resolveNpx(["-y", "x"]);
+    ok("system route resolves", Boolean(sr));
+    ok(
+      "never a bare .cmd/.bat shim (Windows spawn EINVAL)",
+      !/\.(cmd|bat)$/i.test(sr.command) || sr.shell === true,
+      sr.command
+    );
+    const mgr2 = new McpManager({ settings: new JsonStore(path.join(dir, "sys.json"), {}), registry: new ToolRegistry({ privacyMode: () => "network" }), nodeRuntime: sysRt, onEvent: () => {} });
+    const s2 = mgr2.addServer({ name: entry.name, transport: entry.transport, command: entry.command, args: entry.args });
+    const t2 = await mgr2.connect(s2.id).catch((e) => { ok("system-node server connects", false, e.message); return []; });
+    if (t2.length) ok("system-node server connects", true, `${t2.length} tools`);
+    mgr2.closeAll();
+  } else {
+    console.log("\n(no system node on this runner — system route not applicable)");
+  }
+
   console.log(process.exitCode ? "\nNODE RUNTIME CHECK FAILED" : "\nNODE RUNTIME CHECK PASSED");
 }
 
