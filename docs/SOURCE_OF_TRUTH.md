@@ -230,8 +230,11 @@ for dev/screenshots).
   `lib/runtime-log.js` records every exit's reason (host `signal:SIGTERM` vs code
   `uncaughtException`+stack) and surfaces `{bootCount, lastExit}` on `/api/health`. **When
   diagnosing a restart, read `/api/health` runtime first** — it tells you host-vs-code before
-  you theorize. Instance-id + bootAt changing across two `/network/status` samples = a restart;
-  perf counters (jobs/chal) reset with it. **RESOLVED**: three such unexplained host recycles in
+  you theorize. Instance-id + bootAt changing across two `/network/status` samples = a restart.
+  (Perf counters USED to reset with a restart — no longer: perf now persists to `perf.json`,
+  restored on boot / written at epoch close, kai `95a7b5b`, so routing quality + reputation
+  signals + token-inflation strikes survive deploys; a fresh instance-id with populated perf is
+  now normal.) **RESOLVED**: three such unexplained host recycles in
   one evening drove the move off Hostinger to a self-managed Vultr VPS (2026-08-16, §9). The
   forensics stay useful — but on the new box a restart is `Restart=always` doing its job, and
   the exit reason on `/api/health` still distinguishes a clean systemd restart from a crash.
