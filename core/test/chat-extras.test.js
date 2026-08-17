@@ -65,3 +65,56 @@ test("chat store: rename sticks and survives later autosaves; persona rides alon
 
   assert.throws(() => store.rename(id, "   "), /title required/);
 });
+
+test("chat store: favorite (pinned) survives autosaves, floats to the top, and toggles off", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-chatpin-"));
+  const store = new ChatStore(dir);
+  const a = store.save({ messages: [{ role: "user", content: "older chat" }] }).id;
+  // Ensure distinct updatedAt ordering: b is newer than a.
+  const b = store.save({ messages: [{ role: "user", content: "newer chat" }] }).id;
+
+  store.setPinned(a, true);
+  assert.strictEqual(store.get(a).pinned, true, "pin persists");
+
+  // save() rebuilds the doc — the pin must be carried forward like the title.
+  store.save({ id: a, messages: [{ role: "user", content: "older chat" }, { role: "assistant", content: "hi" }] });
+  assert.strictEqual(store.get(a).pinned, true, "pin outlives autosave");
+
+  const list = store.list();
+  assert.strictEqual(list[0].id, a, "pinned chat sorts above newer unpinned chats");
+  assert.strictEqual(list[0].pinned, true, "list projection carries pinned");
+  assert.strictEqual(list[1].id, b);
+
+  store.setPinned(a, false);
+  assert.strictEqual(Boolean(store.get(a).pinned), false, "unpin removes the flag");
+  // Make b the most recent again (a's autosave above bumped its recency),
+  // then confirm ordering is back to plain recency with no pin in play.
+  store.save({ id: b, messages: [{ role: "user", content: "newer chat" }, { role: "assistant", content: "yo" }] });
+  assert.strictEqual(store.list()[0].id, b, "order returns to recency once unpinned");
+});
+
+test("chat store: per-message citations round-trip saves, sanitized to http(s) title/url pairs", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-chatcite-"));
+  const store = new ChatStore(dir);
+  const { id } = store.save({
+    messages: [
+      { role: "user", content: "what is koinos?" },
+      {
+        role: "assistant",
+        content: "answer",
+        citations: [
+          { title: "Koinos site", url: "https://koinos.io" },
+          { title: "evil", url: "javascript:alert(1)" }, // must be dropped
+        ],
+      },
+    ],
+  });
+  const saved = store.get(id).messages[1];
+  assert.strictEqual(saved.citations.length, 1, "non-http(s) citation URLs are dropped");
+  assert.strictEqual(saved.citations[0].url, "https://koinos.io");
+
+  // And they survive a further autosave (the doc rebuild).
+  const again = store.get(id);
+  store.save({ id, messages: again.messages });
+  assert.strictEqual(store.get(id).messages[1].citations[0].title, "Koinos site", "citations outlive autosave");
+});

@@ -122,6 +122,88 @@ function updatePrivacyNote(mode) {
       : mode === "local-first"
         ? "Local when possible. If this machine<br />can't serve a chat, it overflows to<br />Koinos Network — and says so."
         : "Network mode on — chats sent to<br />Koinos Network leave this machine.";
+  // Web search is egress by definition, so the toggle only exists outside
+  // Local-Only — same contract as network chat, enforced again in Core.
+  const webBtn = document.getElementById("btn-web");
+  if (webBtn) {
+    webBtn.hidden = mode === "local-only";
+    if (mode === "local-only") setWebSearch(false);
+  }
+}
+
+// ---- web search toggle (persisted like other renderer prefs) ----
+function setWebSearch(on) {
+  state.webSearch = Boolean(on);
+  try { localStorage.setItem("kai-web-search", on ? "1" : "0"); } catch { /* private mode */ }
+  const b = document.getElementById("btn-web");
+  if (b) b.classList.toggle("on", state.webSearch);
+}
+setWebSearch((() => { try { return localStorage.getItem("kai-web-search") === "1"; } catch { return false; } })());
+document.getElementById("btn-web")?.addEventListener("click", () => setWebSearch(!state.webSearch));
+
+/** Multi-step research before answering: search → read the top result →
+ *  hand the model a bounded, cited context block. Deterministic on purpose —
+ *  reliable with 4k-context local models, no flaky model-driven tool calls.
+ *  Returns { context, citations } or null (caller answers from the model). */
+async function webResearch(query, statusEl) {
+  const setStatus = (t) => { if (statusEl) statusEl.textContent = t; };
+  setStatus("🌐 Searching the web…");
+  let search;
+  try {
+    const r = await fetch("/core/search", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ q: query }),
+    });
+    if (r.status === 403) { setWebSearch(false); setStatus("🌐 Web search is off in Local-Only mode."); return null; }
+    search = await r.json();
+  } catch { search = null; }
+  const results = search?.results || [];
+  if (!results.length) { setStatus("🌐 No web results — answering from the model."); return null; }
+
+  // Read the best page we can (top result, then second on failure) — the
+  // "multi-action" part: search, then fetch, then answer.
+  let extract = null;
+  for (const cand of results.slice(0, 2)) {
+    setStatus(`🌐 Reading ${cand.title || cand.url}…`);
+    try {
+      const r = await fetch("/core/fetch", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: cand.url }),
+      });
+      const j = await r.json();
+      if (j.ok && j.page?.text) { extract = { ...j.page, from: cand }; break; }
+    } catch { /* try the next result */ }
+  }
+
+  // Budget hard: every char here competes with history in a 4k context.
+  const lines = results.map((x, i) => `${i + 1}. ${x.title} — ${x.url}\n   ${x.snippet || ""}`).join("\n").slice(0, 1100);
+  const body = extract ? `\n\nExtract from "${extract.title || extract.from.title}" (${extract.url}):\n${extract.text.slice(0, 1500)}` : "";
+  const context =
+    `🌐 Live web results for "${query.slice(0, 200)}" (fetched just now — prefer these over older knowledge; cite sources by number):\n${lines}${body}`;
+  setStatus("");
+  return { context, citations: results.map((x) => ({ title: x.title, url: x.url })) };
+}
+
+/** Citation chips under an assistant message — plain links, renderer-safe. */
+function renderCitations(bubble, citations) {
+  if (!Array.isArray(citations) || !citations.length) return;
+  const div = document.createElement("div");
+  div.className = "citations";
+  for (const c of citations.slice(0, 8)) {
+    if (!/^https?:\/\//i.test(c.url || "")) continue;
+    const a = document.createElement("a");
+    a.href = c.url;
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.className = "citation-chip";
+    let host = "";
+    try { host = new URL(c.url).hostname.replace(/^www\./, ""); } catch { /* keep title only */ }
+    a.textContent = c.title ? `${c.title.slice(0, 60)}${host ? ` · ${host}` : ""}` : host || c.url;
+    div.appendChild(a);
+  }
+  if (div.children.length) bubble.appendChild(div);
 }
 
 let networkEligible = false;
@@ -419,6 +501,27 @@ async function send(replayText) {
   $("btn-stop").hidden = false;
   state.abort = new AbortController();
 
+  // 🌐 research first (search → read → answer). The web context is a
+  // TRANSIENT turn: it shapes THIS request but never enters state.history —
+  // persisting kilobytes of snippets would bloat every later request's
+  // 4k-token context. The citations persist on the assistant message.
+  let webCitations = null;
+  let reqHistory = state.history;
+  if (state.webSearch && !replayText) {
+    const status = document.createElement("div");
+    status.className = "web-status";
+    bubble.before(status);
+    try {
+      const research = await webResearch(text, status);
+      if (research) {
+        webCitations = research.citations;
+        reqHistory = [...state.history.slice(0, -1), { role: "user", content: research.context }, state.history[state.history.length - 1]];
+      }
+    } finally {
+      if (!status.textContent) status.remove();
+    }
+  }
+
   try {
     const resp = await fetch("/core/chat/completions", {
       method: "POST",
@@ -428,7 +531,7 @@ async function send(replayText) {
         model: chatModel,
         stream: true,
         // Persona rides as a system turn; history itself stays user/assistant.
-        messages: personaText() ? [{ role: "system", content: personaText() }, ...state.history] : state.history,
+        messages: personaText() ? [{ role: "system", content: personaText() }, ...reqHistory] : reqHistory,
       }),
     });
     if (!resp.ok) {
@@ -473,7 +576,8 @@ async function send(replayText) {
           : "";
       if (tag.textContent) bubble.appendChild(tag);
     }
-    state.history.push({ role: "assistant", content: acc });
+    if (webCitations) renderCitations(bubble, webCitations);
+    state.history.push({ role: "assistant", content: acc, ...(webCitations ? { citations: webCitations } : {}) });
     saveCurrentChat();
   } catch (e) {
     if (e.name === "AbortError") {
@@ -1000,7 +1104,8 @@ function renderChatList() {
   }
   host.innerHTML = rows
     .map(
-      (c) => `<div class="chat-row${c.id === state.chatId ? " active" : ""}" data-id="${esc2(c.id)}" title="Double-click to rename">
+      (c) => `<div class="chat-row${c.id === state.chatId ? " active" : ""}${c.pinned ? " pinned" : ""}" data-id="${esc2(c.id)}" title="Double-click to rename">
+        <button class="chat-pin${c.pinned ? " on" : ""}" data-id="${esc2(c.id)}" title="${c.pinned ? "Unfavorite" : "Favorite"}" aria-label="${c.pinned ? "Unfavorite chat" : "Favorite chat"}">${c.pinned ? "★" : "☆"}</button>
         <span class="chat-row-title">${esc2(c.title)}</span>
         <button class="chat-del" data-id="${esc2(c.id)}" title="Delete chat" aria-label="Delete chat">×</button>
       </div>`
@@ -1046,7 +1151,10 @@ $("chat-list").addEventListener("dblclick", (e) => {
 function rebuildMessages() {
   const box = $("messages");
   box.innerHTML = "";
-  for (const m of state.history) addMsg(m.role === "user" ? "user" : "assistant", m.content);
+  for (const m of state.history) {
+    const el = addMsg(m.role === "user" ? "user" : "assistant", m.content);
+    if (m.role === "assistant" && m.citations) renderCitations(el, m.citations);
+  }
   if (!state.history.length) {
     box.innerHTML = `<div id="chat-empty" class="chat-empty"><div class="chat-empty-mark" aria-hidden="true"></div><p>Ask anything. It runs on your machine —<br />private, free, even offline.</p></div>`;
   }
@@ -1067,6 +1175,20 @@ $("btn-new-chat").addEventListener("click", newChat);
 $("chat-search").addEventListener("input", renderChatList);
 
 $("chat-list").addEventListener("click", async (e) => {
+  const pin = e.target.closest(".chat-pin");
+  if (pin) {
+    e.stopPropagation();
+    const wasOn = pin.classList.contains("on");
+    try {
+      await fetch(`/core/chats/${pin.dataset.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pinned: !wasOn }),
+      });
+    } catch { /* toggle lost — list refresh shows truth */ }
+    refreshChatList();
+    return;
+  }
   const del = e.target.closest(".chat-del");
   if (del) {
     e.stopPropagation();

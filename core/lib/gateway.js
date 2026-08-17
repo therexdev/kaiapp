@@ -3,6 +3,7 @@
 const http = require("http");
 const fs = require("fs");
 const nodePath = require("path");
+const { searchWeb, fetchPage } = require("./websearch");
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -233,10 +234,41 @@ class Gateway {
         if (req.method === "DELETE") return this._json(res, 200, { ok: true, ...this.chats.remove(id) });
         if (req.method === "PATCH") {
           const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
-          return this._json(res, 200, { ok: true, ...this.chats.rename(id, body.title) });
+          // Rename and/or favorite in one call — each only when supplied.
+          const out = {};
+          if (body.title !== undefined) Object.assign(out, this.chats.rename(id, body.title));
+          if (body.pinned !== undefined) Object.assign(out, this.chats.setPinned(id, Boolean(body.pinned)));
+          return this._json(res, 200, { ok: true, ...out });
         }
       } catch (e) {
         return this._json(res, 404, { ok: false, error: String(e.message) });
+      }
+    }
+
+    // Web search + page fetch for chat (Core-side: the renderer's CSP blocks
+    // egress, and the query must never ride with an API key — there is none).
+    // §7 privacy gate FIRST, same contract as network chat: in Local-Only
+    // mode nothing leaves this machine, so both routes refuse before any
+    // network code runs. The UI only shows the toggle outside Local-Only.
+    if (path === "/core/search" && req.method === "POST") {
+      const mode = this.network ? this.network.status().privacyMode : "local-only";
+      if (mode === "local-only") {
+        return this._json(res, 403, { ok: false, error: "Privacy mode is Local-Only: web search is disabled on this machine" });
+      }
+      const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+      const out = await searchWeb(body.q);
+      return this._json(res, 200, { ok: true, ...out });
+    }
+    if (path === "/core/fetch" && req.method === "POST") {
+      const mode = this.network ? this.network.status().privacyMode : "local-only";
+      if (mode === "local-only") {
+        return this._json(res, 403, { ok: false, error: "Privacy mode is Local-Only: web fetch is disabled on this machine" });
+      }
+      const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+      try {
+        return this._json(res, 200, { ok: true, page: await fetchPage(body.url) });
+      } catch (e) {
+        return this._json(res, 400, { ok: false, error: String(e.message) });
       }
     }
 

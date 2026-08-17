@@ -38,6 +38,7 @@ class ChatStore {
         out.push({
           id: j.id,
           title: j.title || "Untitled chat",
+          pinned: Boolean(j.pinned),
           updatedAt: j.updatedAt || j.createdAt || null,
           messages: (j.messages || []).length,
           // Search blob: enough content to find a chat, small enough to list.
@@ -47,7 +48,8 @@ class ChatStore {
         /* skip a corrupt file rather than break the list */
       }
     }
-    return out.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+    // Favorites float above everything; within each group, newest first.
+    return out.sort((a, b) => (b.pinned - a.pinned) || String(b.updatedAt).localeCompare(String(a.updatedAt)));
   }
 
   get(id) {
@@ -60,11 +62,15 @@ class ChatStore {
     const file = this._file(id);
     let createdAt = new Date().toISOString();
     let keptTitle = null;
+    let keptPinned = false;
     try {
       const prev = JSON.parse(fs.readFileSync(file, "utf8"));
       createdAt = prev.createdAt || createdAt;
       // A user-chosen title (via rename) outlives autosaves.
       if (prev.renamed) keptTitle = prev.title;
+      // A favorite outlives autosaves the same way — save() rebuilds the doc,
+      // so every user-set flag must be explicitly carried forward.
+      keptPinned = Boolean(prev.pinned);
     } catch {
       /* new chat */
     }
@@ -73,15 +79,40 @@ class ChatStore {
       id,
       title: String(keptTitle || title || messages.find((m) => m.role === "user")?.content || "Untitled chat").slice(0, 80),
       renamed: Boolean(keptTitle),
+      ...(keptPinned ? { pinned: true } : {}),
       createdAt,
       updatedAt: new Date().toISOString(),
       // Persona/system prompt ride along so reopening a chat keeps its voice.
       ...(system ? { system: String(system).slice(0, 4000) } : {}),
       ...(persona ? { persona: String(persona).slice(0, 40) } : {}),
-      messages: messages.map((m) => ({ role: String(m.role), content: String(m.content) })),
+      messages: messages.map((m) => ({
+        role: String(m.role),
+        content: String(m.content),
+        // Web-search citations ride with the assistant message that used them
+        // (bounded + sanitized: title/url pairs only, http(s) only).
+        ...(Array.isArray(m.citations) && m.citations.length
+          ? {
+              citations: m.citations
+                .slice(0, 8)
+                .map((c) => ({ title: String(c?.title || "").slice(0, 120), url: String(c?.url || "").slice(0, 500) }))
+                .filter((c) => /^https?:\/\//i.test(c.url)),
+            }
+          : {}),
+      })),
     };
     fs.writeFileSync(file, JSON.stringify(doc));
     return { id };
+  }
+
+  setPinned(id, pinned) {
+    const file = this._file(id);
+    const doc = JSON.parse(fs.readFileSync(file, "utf8"));
+    if (pinned) doc.pinned = true;
+    else delete doc.pinned;
+    // Deliberately NOT bumping updatedAt: starring a chat shouldn't reorder
+    // the recency ranking underneath the pinned group.
+    fs.writeFileSync(file, JSON.stringify(doc));
+    return { id, pinned: Boolean(pinned) };
   }
 
   rename(id, title) {

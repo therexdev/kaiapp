@@ -335,6 +335,27 @@ button.primary:hover:not(:disabled) { box-shadow: 0 4px 16px rgba(109, 62, 240, 
 }
 .chat-row:hover .chat-del { opacity: 0.7; }
 .chat-del:hover { color: var(--danger); opacity: 1; }
+.chat-pin {
+  border: 0; background: none; color: var(--text-dim); font: inherit;
+  font-size: 1em; line-height: 1; padding: 0 2px; cursor: pointer; opacity: 0;
+}
+.chat-row:hover .chat-pin { opacity: 0.7; }
+.chat-pin:hover { color: #ffd479; opacity: 1; }
+.chat-pin.on { opacity: 1; color: #ffd479; }
+.chat-row.pinned .chat-row-title { font-weight: 600; }
+
+/* web search */
+#btn-web { opacity: 0.55; }
+#btn-web.on { opacity: 1; box-shadow: 0 0 0 1px var(--accent, #7e6cff) inset; border-radius: 8px; }
+.web-status { font-size: 12.5px; color: var(--text-dim); padding: 4px 2px 8px; }
+.citations { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.citation-chip {
+  font-size: 11.5px; padding: 3px 10px; border-radius: 999px;
+  border: 1px solid rgba(126, 108, 255, 0.35); background: rgba(126, 108, 255, 0.1);
+  color: var(--accent-2, #9d8cff); text-decoration: none;
+  max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.citation-chip:hover { background: rgba(126, 108, 255, 0.2); }
 .chat-list-empty { padding: 8px 10px; font-size: 0.8em; color: var(--text-dim); }
 
 /* ----- earn status light ----- */
