@@ -11,6 +11,7 @@ const $ = (id) => document.getElementById(id);
 
 const state = {
   view: "chat",
+  routed: false, // true once the user picks a view themselves
   alias: null, // the model alias we chat with
   ready: false, // runtime serving that alias
   chatting: false,
@@ -92,8 +93,13 @@ async function refresh() {
   $("status-model").textContent = entry ? entry.label.split(" (")[0] : "No models in catalog";
   updateModelPick(models.aliases);
 
-  // Route: onboarding until the model file is on disk.
-  showView(state.ready ? state.view : "onboarding", { navOnly: state.ready });
+  // Route: onboarding until the model file is on disk — but only until the user
+  // goes somewhere themselves. This poll runs every few seconds, and it used to
+  // slam the view back to onboarding each time, throwing anyone without a model
+  // off whatever screen they were on mid-keystroke. The Koinos node in
+  // particular needs no model at all.
+  const route = state.ready || state.routed ? state.view : "onboarding";
+  showView(route, { navOnly: state.ready });
   if (!state.ready && entry) renderOnboarding(entry);
 
   const busy = models.download || models.ensure?.state === "working";
@@ -428,19 +434,28 @@ function showView(name, { navOnly = false } = {}) {
   }
 }
 
+/** Switch to a view and draw it. Shared so anything that navigates the user
+ *  (the sidebar, the Koinos switch) goes through one path and leaves
+ *  `state.view` telling the truth. */
+function activateView(name) {
+  state.view = name;
+  state.routed = true; // they chose this; the boot poll must stop overriding it
+  showView(name);
+  if (name === "api") renderApi();
+  if (name === "earn") renderEarn();
+  if (name === "models") renderModels();
+  if (name === "compare") renderCompare();
+  if (name === "tasks") renderTasks();
+  if (name === "network") renderNetwork();
+  if (name === "docs") renderDocs();
+  // The node's own screens all render from one module.
+  if (name.startsWith("koinos") && window.KaiKoinosNode) window.KaiKoinosNode.refresh();
+}
+
 for (const b of document.querySelectorAll(".nav-item[data-view]")) {
   b.addEventListener("click", () => {
     if (b.disabled) return;
-    state.view = b.dataset.view;
-    showView(state.view);
-    if (state.view === "api") renderApi();
-    if (state.view === "earn") renderEarn();
-    if (state.view === "models") renderModels();
-    if (state.view === "compare") renderCompare();
-    if (state.view === "tasks") renderTasks();
-    if (state.view === "koinos" && window.KaiKoinos) window.KaiKoinos.refresh({ force: true });
-    if (state.view === "network") renderNetwork();
-    if (state.view === "docs") renderDocs();
+    activateView(b.dataset.view);
   });
 }
 

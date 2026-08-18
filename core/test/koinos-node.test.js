@@ -112,3 +112,38 @@ test("node: local machine facts are readable with no network and no Docker", asy
     assert.ok(info.networks.mainnet, "mainnet is configured");
   } finally { kn.stop(); }
 });
+
+test("node UI: every channel the screens call actually exists", async () => {
+  const { kn } = boot();
+  try {
+    const real = new Set(kn.list());
+    const src = fs.readFileSync(path.join(__dirname, "..", "..", "ui", "koinos-node-view.js"), "utf8");
+    const called = [...src.matchAll(/rpc\(\s*"([^"]+)"/g)].map((m) => m[1]);
+    assert.ok(called.length >= 20, `the screens call ${called.length} channels`);
+    // A renamed or mistyped channel is invisible until someone clicks the
+    // button, which is exactly the kind of break nobody finds before a release.
+    for (const ch of new Set(called)) {
+      assert.ok(real.has(ch), `ui calls ${ch}, which the node does not handle`);
+    }
+    // The one-click setup calls channels it reads out of the plan, not literals.
+    for (const ch of ["setup:installWsl", "setup:installDocker", "setup:startDocker", "setup:openDockerDocs", "setup:markWslReady", "setup:restart"]) {
+      assert.ok(real.has(ch), `${ch} is reachable from the guided setup`);
+    }
+  } finally { kn.stop(); }
+});
+
+test("node UI: the switch reveals every node menu, and each one has a screen", async () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "..", "ui", "index.html"), "utf8");
+  const view = fs.readFileSync(path.join(__dirname, "..", "..", "ui", "koinos-node-view.js"), "utf8");
+  const navs = [...html.matchAll(/class="nav-item koinos-nav" data-view="([^"]+)"/g)].map((m) => m[1]);
+  assert.strictEqual(navs.length, 7, "seven node menus");
+  for (const v of navs) {
+    assert.ok(html.includes(`id="view-${v}"`), `${v} has a view`);
+    assert.ok(html.includes(`id="${v}-body"`), `${v} has somewhere to render into`);
+    assert.ok(view.includes(`"${v}"`), `${v} has a renderer`);
+  }
+  // A button that says "Turn on" is a link pretending to be a switch. This is
+  // the control the owner asked for by name.
+  assert.match(html, /id="btn-koinos-toggle"[^>]*role="switch"/, "it is a real switch");
+  assert.ok(html.includes('class="nav-item koinos-nav" data-view="koinos" id="nav-koinos" hidden'), "and the menus start hidden");
+});

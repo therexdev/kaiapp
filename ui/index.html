@@ -44,7 +44,13 @@
         <button class="nav-item" data-view="tools">Tools</button>
         <button class="nav-item" data-view="api">Local API</button>
         <button class="nav-item" data-view="earn">Earn <span class="soon">alpha</span></button>
-        <button class="nav-item" data-view="koinos" id="nav-koinos" hidden>Koinos</button>
+        <button class="nav-item koinos-nav" data-view="koinos" id="nav-koinos" hidden>📊 Node dashboard</button>
+        <button class="nav-item koinos-nav" data-view="koinos-wallet" id="nav-koinos-wallet" hidden>💳 Wallet</button>
+        <button class="nav-item koinos-nav" data-view="koinos-fund" id="nav-koinos-fund" hidden>💵 Fund node</button>
+        <button class="nav-item koinos-nav" data-view="koinos-burn" id="nav-koinos-burn" hidden>🔥 Burn KOIN → VHP</button>
+        <button class="nav-item koinos-nav" data-view="koinos-node" id="nav-koinos-node" hidden>🖥️ Node</button>
+        <button class="nav-item koinos-nav" data-view="koinos-returns" id="nav-koinos-returns" hidden>♻️ Reward returns</button>
+        <button class="nav-item koinos-nav" data-view="koinos-settings" id="nav-koinos-settings" hidden>⚙️ Node settings</button>
       </nav>
       <div id="chats-pane">
         <div class="chats-head">
@@ -377,109 +383,36 @@
 
           <div class="koinos-toggle-row">
             <div>
-              <b>Koinos node tools</b>
+              <b>Run Koinos Node</b>
               <div class="hint" id="koinos-toggle-hint">
-                Look up any Koinos address, and connect to a Koinos node if you run one.
-                Reading only — nothing here can move funds.
+                Runs a real Koinos node on this machine, with a wallet, funding, swaps and
+                block-production rewards. Uses your existing Koinos AI wallet.
               </div>
             </div>
-            <button id="btn-koinos-toggle" class="linklike" aria-pressed="false">Turn on</button>
+            <button id="btn-koinos-toggle" class="switch" role="switch" aria-checked="false" aria-label="Run Koinos node">
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+            </button>
           </div>
-          <p class="hint" id="koinos-toggle-open" hidden>Koinos node tools are on — <b>open them in the Koinos tab</b>.</p>
+          <p class="hint" id="koinos-toggle-open" hidden>Koinos Node is on — its menus are in the sidebar.</p>
 
           <p class="error" id="earn-error" hidden></p>
         </div>
       </section>
 
       <!-- Local API -->
-      <section id="view-koinos" class="view" hidden>
-        <div class="api-card">
-          <h1>Koinos <span class="net-tag" id="koinos-net-tag">mainnet</span></h1>
-          <p class="lede">
-            Real Koinos mainnet — these are live balances, not test tokens.
-            Koinos AI can read the chain here; it cannot send anything.
-          </p>
+      <section id="view-koinos" class="view koinos-view" hidden><div class="api-card" id="koinos-body"></div></section>
 
-          <div class="koinos-card" id="koinos-card-balances">
-            <h2>Look up an address</h2>
-            <div class="row">
-              <input id="koinos-watch" type="text" spellcheck="false" placeholder="Koinos address (starts with 1…)" />
-              <button id="btn-koinos-watch" class="primary small">Look up</button>
-            </div>
-            <p class="hint" id="koinos-watch-hint">Any address — yours, your node's, or one you are keeping an eye on.</p>
-            <div id="koinos-balances" hidden>
-              <div class="koinos-tiles">
-                <div class="koinos-tile"><span class="k-label">KOIN</span><span class="k-value" id="koinos-koin">—</span></div>
-                <div class="koinos-tile"><span class="k-label">VHP</span><span class="k-value" id="koinos-vhp">—</span></div>
-                <div class="koinos-tile"><span class="k-label">Mana</span><span class="k-value" id="koinos-mana">—</span></div>
-              </div>
-              <p class="hint" id="koinos-mana-hint"></p>
-            </div>
-            <p class="error" id="koinos-watch-error" hidden></p>
-          </div>
+      <section id="view-koinos-wallet" class="view koinos-view" hidden><div class="api-card" id="koinos-wallet-body"></div></section>
 
-          <div class="koinos-card" id="koinos-card-node">
-            <h2>Your node</h2>
-            <div class="row">
-              <input id="koinos-rpc" type="text" spellcheck="false" placeholder="http://127.0.0.1:8080" />
-              <button id="btn-koinos-rpc" class="small">Connect</button>
-            </div>
-            <p class="hint">Leave this empty to read the chain through the public Koinos servers.</p>
-            <p id="koinos-node-state" class="koinos-state">Not checked yet.</p>
-          </div>
+      <section id="view-koinos-fund" class="view koinos-view" hidden><div class="api-card" id="koinos-fund-body"></div></section>
 
-          <div class="koinos-card" id="koinos-card-run">
-            <h2>Running a node</h2>
-            <p id="koinos-cap-verdict" class="koinos-state">Checking this computer…</p>
-            <p class="hint" id="koinos-cap-detail"></p>
-            <div class="row" id="koinos-companion-row" hidden>
-              <button id="btn-koinos-open" class="primary small" hidden>Open Koinos Node Desktop</button>
-              <button id="btn-koinos-get" class="small" hidden>Get Koinos Node Desktop</button>
-            </div>
-          </div>
+      <section id="view-koinos-burn" class="view koinos-view" hidden><div class="api-card" id="koinos-burn-body"></div></section>
 
-          <div class="koinos-card" id="koinos-card-burn">
-            <h2>Turn KOIN into VHP</h2>
-            <p class="hint">
-              Block production runs on VHP. Burning converts your KOIN into VHP <b>at your own address</b> —
-              it stays yours, nothing is sent anywhere. It also spends mana, which refills over about five days.
-            </p>
-            <div class="row">
-              <input id="koinos-burn-amount" type="text" spellcheck="false" placeholder="Amount in KOIN, e.g. 12.5" />
-              <input id="koinos-burn-pass" type="password" placeholder="Wallet password" />
-              <button id="btn-koinos-burn" class="primary small">Burn</button>
-            </div>
-            <p class="hint">Your password is asked every time — the wallet unlocks itself when the app starts, so being unlocked is not proof you are here.</p>
-            <p id="koinos-burn-state" class="koinos-state" hidden></p>
-          </div>
+      <section id="view-koinos-node" class="view koinos-view" hidden><div class="api-card" id="koinos-node-body"></div></section>
 
-          <div class="koinos-card" id="koinos-card-producer">
-            <h2>Register your node's key</h2>
-            <p class="hint">
-              Tells Koinos that your node's key produces blocks for your address. This moves no funds.
-              Your node writes the key to <code>public.key</code> when it starts.
-            </p>
-            <div class="row">
-              <input id="koinos-key" type="text" spellcheck="false" placeholder="Public key from your node" />
-              <input id="koinos-key-pass" type="password" placeholder="Wallet password" />
-              <button id="btn-koinos-key" class="small">Register</button>
-            </div>
-            <p id="koinos-key-state" class="koinos-state" hidden></p>
-          </div>
+      <section id="view-koinos-returns" class="view koinos-view" hidden><div class="api-card" id="koinos-returns-body"></div></section>
 
-          <div class="koinos-card" id="koinos-card-identity">
-            <h2>Your Koinos AI address</h2>
-            <p class="hint">
-              This is the address your machine earns with. It is an identity, not a place to send money —
-              Koinos AI has no way to send from it yet.
-            </p>
-            <div class="row">
-              <code id="koinos-own-address" class="koinos-addr">—</code>
-              <button id="btn-koinos-copy" class="small">Copy</button>
-            </div>
-          </div>
-        </div>
-      </section>
+      <section id="view-koinos-settings" class="view koinos-view" hidden><div class="api-card" id="koinos-settings-body"></div></section>
 
       <section id="view-api" class="view" hidden>
         <div class="api-card">
@@ -533,6 +466,7 @@
   <script src="app-extras.js"></script>
   <script src="docs-view.js"></script>
   <script src="koinos-view.js"></script>
+  <script src="koinos-node-view.js"></script>
 
 </body>
 </html>

@@ -2,18 +2,21 @@
 "use strict";
 
 /*
- * Drives the Koinos panel in a real browser against a real Core.
- *
- * Unit tests pin the service; this proves the parts only a browser can break:
- * that the toggle actually reveals the nav item and the view, that the panel
- * paints from live Core responses, that the capability verdict reaches the
- * screen, and — the one that matters most — that a machine which cannot run a
- * node is told so plainly instead of being offered a button.
+ * Drives the Koinos node UI in a real browser against a real Core.
  *
  *   node core/scripts/verify-koinos-ui.js
  *
- * No Docker, no network to Koinos, no funds. The chain client is stubbed at
- * the service boundary so the run is deterministic.
+ * Unit tests pin the service; this proves the parts only a browser can break:
+ * that the SWITCH reveals all seven node menus, that every screen paints from
+ * a channel response, that the guided setup renders the node's own one-click
+ * plan, and — the one that matters most — that every control which sends value
+ * to someone else carries the typed password to Core, while burning and
+ * automatic reburn do not.
+ *
+ * The 64 channels are answered here by a recorder that returns exactly the
+ * shapes core/lib/koinos-node.js returns, so this run needs no Docker, no
+ * mainnet and no funds. core/test/koinos-node.test.js is what pins the real
+ * handlers; this pins the wiring in front of them.
  */
 
 const fs = require("fs");
@@ -34,18 +37,114 @@ const ok = (label, cond, detail = "") => {
   if (!cond) failures += 1;
 };
 
-async function boot(hardware, privacyMode = "network") {
+const ADDR = "1K1AUovu5NjjPcaTxmde6wPB8Y8PQGFV3E";
+const ETH = "0x1d3f5AbC0000000000000000000000000000BeEf";
+
+/** Answers every channel the screens call, in the shapes the real handlers
+ *  return, and records what each one was called with. */
+function recorder({ platform = "linux", dockerInstalled = true, dockerRunning = true, nodeRunning = true } = {}) {
+  const calls = [];
+  const setupStatus = () => {
+    const steps = [];
+    if (platform === "win32") {
+      steps.push({ key: "wsl", title: "Enable WSL 2", detail: "One click installs the Windows Subsystem for Linux.", status: "active", action: { channel: "setup:installWsl", label: "Enable WSL" }, altAction: null });
+    }
+    steps.push(dockerInstalled
+      ? { key: "docker", title: "Docker Desktop is installed", detail: "The Docker Desktop app is installed.", status: "done", action: null, altAction: null }
+      : { key: "docker", title: "Install Docker Desktop", detail: "Downloads the official installer and launches it for you.", status: "active", action: { channel: "setup:installDocker", label: "Install Docker Desktop" }, altAction: null });
+    steps.push(dockerRunning
+      ? { key: "docker-start", title: "Docker is running", detail: "Docker Desktop is running and ready.", status: "done", action: null, altAction: null }
+      : { key: "docker-start", title: "Start Docker Desktop", detail: "Docker is installed but not running yet.", status: dockerInstalled ? "active" : "pending", action: dockerInstalled ? { channel: "setup:startDocker", label: "Start Docker" } : null, altAction: null });
+    return {
+      platform,
+      wsl: { installed: platform !== "win32" },
+      docker: { installed: dockerInstalled, running: dockerRunning, appPath: null, cli: dockerRunning ? "docker" : null },
+      ready: dockerInstalled && dockerRunning && platform !== "win32",
+      steps,
+      activeKey: steps.find((s) => s.action && s.status === "active")?.key ?? null,
+      op: null,
+    };
+  };
+
+  const map = {
+    "app:info": () => ({
+      version: "0.4.4", platform, userData: "/home/you/.koinos-ai/node", networks: {},
+      settings: { network: "mainnet", "customRpc.mainnet": "", keepLiquidKoin: "10", "node.autoRecover": true },
+      minPasswordLength: 8,
+    }),
+    "settings:update": () => ({ network: "mainnet" }),
+    "wallet:status": () => ({ exists: true, unlocked: true, address: ADDR, ethAddress: ETH, createdAt: 1 }),
+    "chain:balances": () => ({ address: ADDR, koin: "4308560000", vhp: "228813610000", mana: "3822790000", formatted: { koin: "43.0856", vhp: "2288.1361", mana: "38.2279" } }),
+    "chain:maxBurn": () => ({ maxSat: "3308560000", maxFormatted: "33.0856", manaLimited: true, manaFormatted: "38.2279" }),
+    "chain:burn": () => ({ txId: "0x1220burnburnburnburnburn", amountSat: "100000000", amountFormatted: "1" }),
+    "chain:send": () => ({ txId: "0x1220sendsendsendsendsend", amountSat: "100000000" }),
+    "dashboard:summary": () => ({
+      network: { id: "mainnet", label: "Mainnet", tokenSymbol: "KOIN", explorer: "" },
+      wallet: { exists: true, unlocked: true, address: ADDR },
+      node: { docker: { ok: true }, isRunning: nodeRunning, runningCount: 7, op: null },
+      sync: nodeRunning ? { inSync: true, local: { height: 38297044 }, remote: { height: 38297044 }, progressPct: 100 } : null,
+      balances: { koin: "4308560000", vhp: "228813610000", mana: "3822790000" },
+      stats: { available: true, windows: { last24h: "3120000", last7d: "21650000", last30d: "93480000", avgDailyProfit: "3116000" } },
+      rewards: { enabled: true, pct: 50, mode: "burn" },
+      returns: { reburnFraction: 0.5, yearlyReturnPct: 4.97, yearlyReturnReburnPct: 5.09 },
+    }),
+    "node:status": () => ({
+      network: "mainnet", docker: { ok: dockerRunning }, filesReady: true, services: [], runningCount: nodeRunning ? 7 : 0,
+      isRunning: nodeRunning, producerPublicKey: "pubkeyfromnode", op: null, dataDir: "/data", autoRecover: true,
+      memorySaver: false, health: { ok: true }, sync: null, setup: dockerRunning ? null : setupStatus(),
+    }),
+    "setup:status": setupStatus,
+    "setup:installDocker": () => ({ started: true }),
+    "setup:installWsl": () => ({ started: true }),
+    "setup:startDocker": () => ({ started: true }),
+    "node:start": () => ({ started: true }),
+    "node:stop": () => ({ stopped: true }),
+    "node:quickSync": () => ({ started: true }),
+    "node:setAutoRecover": () => ({ autoRecover: false }),
+    "node:logs": () => "koinos-chain  | block 38297044 applied\nkoinos-p2p    | 12 peers",
+    "producer:status": () => ({ address: ADDR, filePublicKey: "pubkeyfromnode", registeredPublicKey: null, matches: false }),
+    "producer:register": () => ({ txId: "0x1220reg" }),
+    "rewards:status": () => ({
+      config: { enabled: true, pct: 50, mode: "burn" }, running: true, nextRunAt: 1767225600000,
+      last: { time: 1767225000000, trigger: "timer", outcome: "burned" },
+      derived: { anchored: true, lifetimeRewards: "500000000", rewardsSinceEnable: "200000000", returned: "80000000", pending: "20000000", actions: 3 },
+      network: "mainnet", address: ADDR,
+    }),
+    "rewards:configure": () => ({ enabled: false, pct: 50, mode: "burn" }),
+    "rewards:runNow": () => ({ last: { outcome: "burned" } }),
+    "fund:status": () => ({ ethAddress: ETH, onrampEndpoint: "", onrampDefault: "https://example.invalid/api/session", onrampConfigured: true }),
+    "fund:ethBalance": () => ({ address: ETH, wei: "0x16345785d8a0000", eth: "0.1" }),
+    "fund:buyUrl": () => ({ url: "https://pay.coinbase.com/buy/select-asset?sessionToken=x" }),
+    "fund:routeCompare": () => ({
+      best: { id: "C" }, amountEth: "0.02", slippageBps: 150,
+      routes: [
+        { id: "B", label: "Bridge ETH, swap on KoinDX", steps: ["Bridge ETH → vETH (Vortex)", "Swap vETH → KOIN (KoinDX)"], koinOut: "1200000000", isBest: false, pctOfBest: 40, bestMultiple: 2.5, executable: true },
+        { id: "C", label: "Swap to vKOIN, bridge to KOIN", steps: ["Swap ETH → USDT → vKOIN (Uniswap)", "Bridge vKOIN → KOIN (Vortex, 1:1)"], koinOut: "3000000000", isBest: true, pctOfBest: 100, bestMultiple: null, executable: true },
+      ],
+    }),
+    "fund:routeMaxEth": () => ({ gasReserveEth: "0.004", balanceEth: "0.1" }),
+    "fund:bridgeStart": () => ({ status: "started" }),
+    "fund:routeCStart": () => ({ status: "started" }),
+    "fund:bridgeStatus": () => null,
+    "fund:routeCStatus": () => null,
+  };
+
+  return {
+    calls,
+    list: () => Object.keys(map),
+    async call(channel, payload) {
+      calls.push({ channel, payload });
+      if (!map[channel]) throw new Error(`Unknown channel: ${channel}`);
+      return map[channel](payload);
+    },
+  };
+}
+
+async function boot({ privacyMode = "network", node } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-koinos-ui-"));
   const settings = new JsonStore(path.join(dir, "settings.json"), {});
+  const hardware = { platform: "linux", arch: "x64", ramBytes: 32 * 1024 ** 3, diskFreeBytes: 400 * 1024 ** 3 };
   const koinos = new KoinosService({ settings, hardware, dataDir: dir, onEvent: () => {} });
-
-  // Stub the chain at the service boundary: deterministic, and this script
-  // must never depend on api.koinos.io being reachable from CI.
-  koinos.balances = async (address) => {
-    if (!/^1[1-9A-HJ-NP-Za-km-z]{25,40}$/.test(address)) throw new Error("That is not a valid Koinos address");
-    return { address, koin: "12.5", vhp: "3.25", mana: "12.5", sats: {} };
-  };
-  koinos.nodeProbe = async () => ({ url: "http://127.0.0.1:8080", connected: true, height: 9876543, behind: 0, synced: true });
 
   const gw = new Gateway({
     host: "127.0.0.1",
@@ -59,156 +158,205 @@ async function boot(hardware, privacyMode = "network") {
     network: { status: () => ({ privacyMode }) },
     uiDir: path.join(__dirname, "..", "..", "ui"),
     koinos,
+    koinosNode: node,
     onEvent: () => {},
   });
   await gw.listen();
   return { gw, base: `http://127.0.0.1:${gw.port}` };
 }
 
-async function run(label, hardware, fn, privacyMode) {
-  const { gw, base } = await boot(hardware, privacyMode);
+async function run(label, opts, fn) {
+  const node = opts.node || recorder(opts.machine || {});
+  const { gw, base } = await boot({ privacyMode: opts.privacyMode, node });
   const browser = await chromium.launch({ executablePath: CHROME });
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e.message)));
+  page.on("dialog", (d) => d.accept());
   await page.goto(base, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(700);
-  // The toggle lives at the bottom of Earn, and the app opens on Chat, so
+  // The switch lives at the bottom of Earn, and the app opens on Chat, so
   // every case starts by going where a user would go.
   await page.locator('.nav-item[data-view="earn"]').click();
   await page.waitForTimeout(400);
   console.log(`\n--- ${label} ---`);
   ok("the page loads with no script errors", errors.length === 0, errors[0] || "");
   try {
-    await fn(page);
+    await fn(page, node);
   } finally {
     await browser.close();
     await gw.close();
   }
 }
 
+const NAVS = ["nav-koinos", "nav-koinos-wallet", "nav-koinos-fund", "nav-koinos-burn", "nav-koinos-node", "nav-koinos-returns", "nav-koinos-settings"];
+
 (async () => {
-  // 1. An ordinary desktop that CAN run a node.
-  await run("x64 desktop, 32 GB RAM, 200 GB free", { platform: "linux", arch: "x64", ramBytes: 32 * 1024 ** 3, diskFreeBytes: 200 * 1024 ** 3 }, async (page) => {
-    ok("the Koinos nav item is hidden until asked for", await page.locator("#nav-koinos").isHidden());
-    ok("the toggle sits at the bottom of Earn", (await page.locator("#btn-koinos-toggle").count()) === 1);
-    ok("the toggle reads 'Turn on'", (await page.locator("#btn-koinos-toggle").textContent()).trim() === "Turn on");
+  // 1. The switch itself, and what it reveals.
+  await run("the switch", {}, async (page) => {
+    const sw = page.locator("#btn-koinos-toggle");
+    ok("it is a switch, not a link or a button that says 'Turn on'", (await sw.getAttribute("role")) === "switch");
+    ok("…and starts off", (await sw.getAttribute("aria-checked")) === "false");
+    ok("…with no text label pretending to be a link", (await sw.textContent()).trim() === "");
+    for (const id of NAVS) ok(`${id} is hidden until the switch is on`, await page.locator("#" + id).isHidden());
 
-    await page.locator("#btn-koinos-toggle").click();
-    await page.waitForTimeout(500);
-    ok("flipping it reveals the nav item", await page.locator("#nav-koinos").isVisible());
-    ok("…and the toggle now offers to turn it off", (await page.locator("#btn-koinos-toggle").textContent()).trim() === "Turn off");
+    await sw.click();
+    await page.waitForTimeout(700);
+    ok("flipping it reads as on", (await sw.getAttribute("aria-checked")) === "true");
+    for (const id of NAVS) ok(`${id} appears`, await page.locator("#" + id).isVisible());
+    ok("it lands on the dashboard so 'on' has somewhere to go", await page.locator("#view-koinos").isVisible());
 
-    await page.locator("#nav-koinos").click();
-    await page.waitForTimeout(600);
-    ok("the Koinos view opens", await page.locator("#view-koinos").isVisible());
-    const tag = (await page.locator("#koinos-net-tag").textContent()).trim();
-    ok("a standing mainnet tag sits in the heading", /mainnet/i.test(tag), tag);
-
-    const verdict = (await page.locator("#koinos-cap-verdict").textContent()).trim();
-    ok("it says this computer CAN run a node", /can run/i.test(verdict), verdict);
-    ok("and offers a way to get the node app", await page.locator("#btn-koinos-get").isVisible());
-
-    const node = (await page.locator("#koinos-node-state").textContent()).trim();
-    ok("the node card reports the connection", /Connected/i.test(node), node);
-
-    await page.locator("#koinos-watch").fill("1K1AUovu5NjjPcaTxmde6wPB8Y8PQGFV3E");
-    await page.locator("#btn-koinos-watch").click();
-    await page.waitForTimeout(500);
-    ok("balances paint for a looked-up address", (await page.locator("#koinos-koin").textContent()).trim() === "12.5");
-    ok("VHP too", (await page.locator("#koinos-vhp").textContent()).trim() === "3.25");
-    ok("mana is shown and explained", (await page.locator("#koinos-mana-hint").textContent()).includes("five days"));
-
-    await page.locator("#koinos-watch").fill("1K1AUovu5NjjPcaTxmde6wPB8Y8PQGFV3X");
-    await page.locator("#btn-koinos-watch").click();
-    await page.waitForTimeout(500);
-    ok("a mistyped address is refused, not silently accepted", await page.locator("#koinos-watch-error").isVisible());
-
-    // Turning it off must not strand the user on a view that just vanished.
+    // Off again: every menu goes, and the user is not stranded on a hidden view.
+    // Turning it on navigates to the dashboard, so go back to where the switch is.
     await page.locator('.nav-item[data-view="earn"]').click();
     await page.waitForTimeout(300);
-    await page.locator("#btn-koinos-toggle").click();
-    await page.waitForTimeout(500);
-    ok("turning it off hides the nav item again", await page.locator("#nav-koinos").isHidden());
-  });
-
-  // Stage 2 writes. Both sign; neither moves value to anyone else.
-  await run("writes: burn and register", { platform: "linux", arch: "x64", ramBytes: 32 * 1024 ** 3, diskFreeBytes: 200 * 1024 ** 3 }, async (page) => {
-    await page.locator("#btn-koinos-toggle").click();
-    await page.waitForTimeout(400);
-    await page.locator("#nav-koinos").click();
-    await page.waitForTimeout(500);
-
-    ok("a burn card exists", await page.locator("#koinos-card-burn").isVisible());
-    ok("…and asks for the password every time", await page.locator("#koinos-burn-pass").isVisible());
-    ok("a producer-key card exists", await page.locator("#koinos-card-producer").isVisible());
-    ok("…and asks for the password too", await page.locator("#koinos-key-pass").isVisible());
-
-    const burnCopy = (await page.locator("#koinos-card-burn").textContent());
-    ok("burn copy says the value STAYS at your own address", /at your own address/i.test(burnCopy));
-    ok("…and warns that mana is spent and refills slowly", /five days/i.test(burnCopy));
-
-    // Burning is deliberate: it asks before doing anything.
-    let asked = null;
-    page.on("dialog", (d) => { asked = d.message(); d.dismiss(); });
-    await page.locator("#koinos-burn-amount").fill("12.5");
-    await page.locator("#koinos-burn-pass").fill("whatever");
-    await page.locator("#btn-koinos-burn").click();
-    await page.waitForTimeout(400);
-    ok("burning asks for confirmation first", Boolean(asked), String(asked).split("\n")[0]);
-    ok("…and names the amount in the question", /12\.5 KOIN/.test(String(asked)));
-    ok("dismissing it does nothing at all", (await page.locator("#koinos-burn-state").isHidden()));
-
-    // Nothing anywhere offers to send KOIN to another address — that is stage 3.
-    const whole = await page.locator("#view-koinos").textContent();
-    ok("no send control exists yet", !/\bSend\b/.test(whole));
-  });
-
-  // 2. The Raspberry Pi — the case the design cares most about getting honest.
-  await run("arm64 Raspberry Pi, 8 GB RAM", { platform: "linux", arch: "arm64", ramBytes: 8 * 1024 ** 3, diskFreeBytes: 200 * 1024 ** 3 }, async (page) => {
-    await page.locator("#btn-koinos-toggle").click();
-    await page.waitForTimeout(400);
-    await page.locator("#nav-koinos").click();
+    await sw.click();
     await page.waitForTimeout(600);
-
-    const verdict = (await page.locator("#koinos-cap-verdict").textContent()).trim();
-    const detail = (await page.locator("#koinos-cap-detail").textContent()).trim();
-    ok("it says plainly that this computer can't run one", /can't run/i.test(verdict), verdict);
-    ok("…and blames the CHIP, not the speed", /doesn't exist for this chip/i.test(detail));
-    ok("no install button is offered on a machine that cannot use it", await page.locator("#btn-koinos-get").isHidden());
-    ok("no open button either", await page.locator("#btn-koinos-open").isHidden());
-    ok("it still points at what DOES work here", /watch a node running somewhere else/i.test(detail));
-
-    // The Pi is a first-class dashboard: everything else still functions.
-    await page.locator("#koinos-watch").fill("1K1AUovu5NjjPcaTxmde6wPB8Y8PQGFV3E");
-    await page.locator("#btn-koinos-watch").click();
-    await page.waitForTimeout(500);
-    ok("balances work fine on the Pi", (await page.locator("#koinos-koin").textContent()).trim() === "12.5");
+    for (const id of NAVS) ok(`${id} goes away again`, await page.locator("#" + id).isHidden());
+    ok("…and the user is put back on Earn, not left on a blank screen", await page.locator("#view-earn").isVisible());
   });
 
-  // 3. Local-Only. The sidebar promises nothing leaves this machine, so the
-  //    chain cards must go quiet and SAY why — not offer buttons that 403.
-  await run("x64 desktop, Privacy = Local-Only", { platform: "linux", arch: "x64", ramBytes: 32 * 1024 ** 3, diskFreeBytes: 200 * 1024 ** 3 }, async (page) => {
+  // 2. Every screen paints from a real channel response.
+  await run("the seven screens", {}, async (page, node) => {
     await page.locator("#btn-koinos-toggle").click();
-    await page.waitForTimeout(400);
-    await page.locator("#nav-koinos").click();
-    await page.waitForTimeout(600);
+    await page.waitForTimeout(700);
 
-    ok("the address box is disabled", await page.locator("#koinos-watch").isDisabled());
-    ok("…and so is its button", await page.locator("#btn-koinos-watch").isDisabled());
-    ok("the node field is disabled too", await page.locator("#koinos-rpc").isDisabled());
-    ok("the burn button is disabled", await page.locator("#btn-koinos-burn").isDisabled());
-    ok("the register button is disabled", await page.locator("#btn-koinos-key").isDisabled());
-    const hint = (await page.locator("#koinos-watch-hint").textContent()).trim();
-    ok("it names Local-Only as the reason", /Local-Only/.test(hint), hint);
+    const dash = await page.locator("#koinos-body").textContent();
+    ok("the dashboard formats satoshis, not raw integers", /43\.0856/.test(dash), dash.slice(0, 80));
+    ok("…shows the producing stake", /2288\.1361/.test(dash));
+    ok("…says the node is running", /Running · 7 services/.test(dash));
+    ok("…shows what it earned", /Last 24 hours/.test(dash) && /0\.0312/.test(dash));
+    ok("…and projects the return with reburn", /5\.1%/.test(dash), dash.match(/[\d.]+%/g)?.join(" ") || "");
+
+    await page.locator("#nav-koinos-wallet").click();
+    await page.waitForTimeout(500);
+    const wallet = await page.locator("#koinos-wallet-body").textContent();
+    ok("the wallet screen shows the Koinos AI address", wallet.includes(ADDR));
+    ok("…and the Ethereum address from the same key", wallet.includes(ETH));
+    ok("…and says plainly it is the same wallet", /same address you earn KAI with/i.test(wallet));
+    ok("a Send control exists", (await page.locator("#kn-send-to").count()) === 1);
+    ok("…and demands a password", (await page.locator("#kn-send-pw").getAttribute("type")) === "password");
+
+    await page.locator("#nav-koinos-fund").click();
+    await page.waitForTimeout(600);
+    const fund = await page.locator("#koinos-fund-body").textContent();
+    ok("the fund screen offers a card purchase", /Buy ETH with a card/.test(fund));
+    ok("…shows the ETH balance it fetched", /0\.1/.test(fund));
+    ok("…and asks for a password before bridging", (await page.locator("#kn-fund-pw").count()) === 1);
+
+    await page.locator("#nav-koinos-burn").click();
+    await page.waitForTimeout(500);
+    const burn = await page.locator("#koinos-burn-body").textContent();
+    ok("the burn screen shows the real ceiling", /33\.0856/.test(burn));
+    ok("…and says WHY it is capped", /limited by mana/i.test(burn));
+    ok("burning asks for no password — the value stays at your own address", (await page.locator("#koinos-burn-body input[type=password]").count()) === 0);
+
+    await page.locator("#nav-koinos-node").click();
+    await page.waitForTimeout(600);
+    const nodeText = await page.locator("#koinos-node-body").textContent();
+    ok("the node screen reports Docker", /Docker/.test(nodeText) && /Running/.test(nodeText));
+    ok("…offers to stop the running node", (await page.locator("#koinos-node-body button", { hasText: "Stop node" }).count()) === 1);
+    ok("…offers quick sync instead of a days-long resync", /Quick sync/.test(nodeText));
+    ok("…and offers to register the key the node made", /Register this key/.test(nodeText));
+    ok("…and shows the log", /peers/.test(nodeText));
+
+    await page.locator("#nav-koinos-returns").click();
+    await page.waitForTimeout(500);
+    const ret = await page.locator("#koinos-returns-body").textContent();
+    ok("returns shows what has gone back in", /0\.8 KOIN/.test(ret), ret.slice(0, 120));
+    ok("…and states it never needs the password", /never asks for your password/i.test(ret));
+    ok("automatic reburn asks for no password", (await page.locator("#koinos-returns-body input[type=password]").count()) === 0);
+
+    await page.locator("#nav-koinos-settings").click();
+    await page.waitForTimeout(500);
+    const set = await page.locator("#koinos-settings-body").textContent();
+    ok("settings names the network it is on", /mainnet/.test(set));
+    ok("…and offers auto-restart", /auto-restart/i.test(set));
+  });
+
+  // 3. The money paths carry the typed password to Core. This is the check the
+  //    owner asked for by name: same wallet, password before funds go out.
+  await run("password before funds leave", {}, async (page, node) => {
+    await page.locator("#btn-koinos-toggle").click();
+    await page.waitForTimeout(700);
+
+    await page.locator("#nav-koinos-wallet").click();
+    await page.waitForTimeout(500);
+    await page.locator("#kn-send-to").fill(ADDR);
+    await page.locator("#kn-send-amt").fill("1");
+    await page.locator("#kn-send-pw").fill("hunter2-typed-by-a-person");
+    await page.locator("#koinos-wallet-body button", { hasText: "Send" }).click();
+    await page.waitForTimeout(700);
+    const send = node.calls.filter((c) => c.channel === "chain:send").pop();
+    ok("sending reaches Core", Boolean(send));
+    ok("…carrying the password the person typed", send?.payload?.password === "hunter2-typed-by-a-person");
+    ok("…and the password box is emptied afterwards", (await page.locator("#kn-send-pw").inputValue()) === "");
+
+    await page.locator("#nav-koinos-fund").click();
+    await page.waitForTimeout(600);
+    await page.locator("#kn-fund-amt").fill("0.02");
+    await page.locator("#kn-fund-pw").fill("hunter2-typed-by-a-person");
+    await page.locator("#koinos-fund-body button", { hasText: "Price both routes" }).click();
+    await page.waitForTimeout(700);
+    const fundText = await page.locator("#koinos-fund-body").textContent();
+    ok("both routes are priced", /Route B/.test(fundText) && /Route C/.test(fundText));
+    ok("…the better one is marked", /best right now/.test(fundText));
+    ok("…and the worse one says how much is being left on the table", /2\.5× more/.test(fundText));
+
+    await page.locator("#koinos-fund-body button", { hasText: "Use route C" }).click();
+    await page.waitForTimeout(700);
+    const started = node.calls.filter((c) => c.channel === "fund:routeCStart").pop();
+    ok("picking a route starts THAT route", Boolean(started));
+    ok("…with the password", started?.payload?.password === "hunter2-typed-by-a-person");
+    ok("…and the amount", started?.payload?.amountEth === "0.02");
+
+    await page.locator("#nav-koinos-burn").click();
+    await page.waitForTimeout(500);
+    await page.locator("#kn-burn-amt").fill("1");
+    await page.locator("#koinos-burn-body button", { hasText: "Burn" }).click();
+    await page.waitForTimeout(600);
+    const burned = node.calls.filter((c) => c.channel === "chain:burn").pop();
+    ok("burning still works with no password at all", Boolean(burned) && burned.payload.password === undefined);
+  });
+
+  // 4. A machine with nothing installed: the one-click setup the owner asked for.
+  await run("a machine with no Docker", { machine: { dockerInstalled: false, dockerRunning: false, nodeRunning: false } }, async (page, node) => {
+    await page.locator("#btn-koinos-toggle").click();
+    await page.waitForTimeout(700);
+    await page.locator("#nav-koinos-node").click();
+    await page.waitForTimeout(700);
+
+    const text = await page.locator("#koinos-node-body").textContent();
+    ok("it says Docker is missing", /Not installed/.test(text));
+    ok("…and offers to install it in one click", (await page.locator("#koinos-node-body button", { hasText: "Install Docker Desktop" }).count()) === 1);
+    ok("…promising no terminal and no hunting for a download", /No terminal, nothing to download by hand/.test(text));
+    ok("the step that can't run yet is disabled, not misleading", await page.locator("#koinos-node-body .kn-step-pending button").first().isDisabled().catch(() => true));
+
+    await page.locator("#koinos-node-body button", { hasText: "Install Docker Desktop" }).click();
+    await page.waitForTimeout(600);
+    ok("clicking it actually asks Core to install Docker", node.calls.some((c) => c.channel === "setup:installDocker"));
+  });
+
+  // 5. Windows, where WSL comes first.
+  await run("Windows without WSL", { machine: { platform: "win32", dockerInstalled: false, dockerRunning: false, nodeRunning: false } }, async (page, node) => {
+    await page.locator("#btn-koinos-toggle").click();
+    await page.waitForTimeout(700);
+    await page.locator("#nav-koinos-node").click();
+    await page.waitForTimeout(700);
+    const text = await page.locator("#koinos-node-body").textContent();
+    ok("WSL 2 is the first step on Windows", /WSL 2/.test(text));
+    await page.locator("#koinos-node-body button", { hasText: "Enable WSL" }).click();
+    await page.waitForTimeout(600);
+    ok("…and it installs in one click", node.calls.some((c) => c.channel === "setup:installWsl"));
+  });
+
+  // 6. Local-Only. The sidebar promises nothing leaves this machine, and a node
+  //    is nothing but network — so say so instead of failing screen by screen.
+  await run("Privacy = Local-Only", { privacyMode: "local-only" }, async (page) => {
+    const hint = await page.locator("#koinos-toggle-hint").textContent();
+    ok("the switch says why it will not work", /Local-Only/.test(hint), hint.trim().slice(0, 90));
     ok("…and says how to change it", /Settings/.test(hint));
-    const node = (await page.locator("#koinos-node-state").textContent()).trim();
-    ok("the node card says the same", /Local-Only/.test(node), node);
-
-    // The local half still works: hardware truth needs no network.
-    const verdict = (await page.locator("#koinos-cap-verdict").textContent()).trim();
-    ok("the hardware verdict still works — it needs no network", /can run/i.test(verdict), verdict);
-  }, "local-only");
+  });
 
   console.log(failures ? `\nKOINOS UI CHECK FAILED (${failures})` : "\nKOINOS UI CHECK PASSED");
   process.exit(failures ? 1 : 0);
