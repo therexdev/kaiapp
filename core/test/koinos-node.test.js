@@ -113,37 +113,53 @@ test("node: local machine facts are readable with no network and no Docker", asy
   } finally { kn.stop(); }
 });
 
-test("node UI: every channel the screens call actually exists", async () => {
+test("node UI: every channel the vendored renderer calls actually exists", async () => {
   const { kn } = boot();
   try {
     const real = new Set(kn.list());
-    const src = fs.readFileSync(path.join(__dirname, "..", "..", "ui", "koinos-node-view.js"), "utf8");
-    const called = [...src.matchAll(/rpc\(\s*"([^"]+)"/g)].map((m) => m[1]);
-    assert.ok(called.length >= 20, `the screens call ${called.length} channels`);
-    // A renamed or mistyped channel is invisible until someone clicks the
-    // button, which is exactly the kind of break nobody finds before a release.
+    const src = fs.readFileSync(path.join(__dirname, "..", "..", "ui", "knode", "renderer.js"), "utf8");
+    const called = [...src.matchAll(/call\(\s*"([^"]+)"/g)].map((m) => m[1]);
+    assert.ok(called.length >= 40, `the renderer calls ${called.length} channels`);
+    // The bridge satisfies the clipboard itself; everything else must land on
+    // a real handler, or a button in the vendored UI dies only when clicked.
     for (const ch of new Set(called)) {
-      assert.ok(real.has(ch), `ui calls ${ch}, which the node does not handle`);
-    }
-    // The one-click setup calls channels it reads out of the plan, not literals.
-    for (const ch of ["setup:installWsl", "setup:installDocker", "setup:startDocker", "setup:openDockerDocs", "setup:markWslReady", "setup:restart"]) {
-      assert.ok(real.has(ch), `${ch} is reachable from the guided setup`);
+      if (ch === "util:copy") continue;
+      assert.ok(real.has(ch), `renderer calls ${ch}, which Core does not handle`);
     }
   } finally { kn.stop(); }
 });
 
-test("node UI: the switch reveals every node menu, and each one has a screen", async () => {
+test("node UI: the bridge's password gate covers exactly Core's outbound channels", async () => {
+  const bridge = fs.readFileSync(path.join(__dirname, "..", "..", "ui", "knode", "bridge.js"), "utf8");
+  // The six channels Core refuses without a proved password. If a new
+  // outbound channel appears in Core, it must appear here too, or its button
+  // in the vendored UI will fail with "password required" and no way to give one.
+  const outbound = ["chain:send", "fund:bridgeStart", "fund:routeCStart", "fund:ethSend", "fund:usdtSend", "fund:vkoinSend"];
+  for (const ch of outbound) {
+    assert.ok(bridge.includes(`"${ch}"`), `${ch} is password-gated in the bridge`);
+  }
+  const coreSrc = fs.readFileSync(path.join(__dirname, "..", "lib", "koinos-node.js"), "utf8");
+  // The definition is an arrow (`requirePassword = (`), so these five are the
+  // five call sites: bridgeStart, routeCStart, ethSend, usdtSend, vkoinSend.
+  const gated = coreSrc.match(/requirePassword\(password\)/g)?.length ?? 0;
+  assert.strictEqual(gated, 5, "Core still gates five channels via requirePassword");
+  assert.match(coreSrc, /chain\.transfer\(wallet\.signerFor\(password\)/, "and chain:send proves the password via signerFor");
+});
+
+test("node UI: the switch reveals every node menu, and the embedded app is wired in", async () => {
   const html = fs.readFileSync(path.join(__dirname, "..", "..", "ui", "index.html"), "utf8");
-  const view = fs.readFileSync(path.join(__dirname, "..", "..", "ui", "koinos-node-view.js"), "utf8");
+  const knodeHtml = fs.readFileSync(path.join(__dirname, "..", "..", "ui", "knode", "index.html"), "utf8");
+  const hostView = fs.readFileSync(path.join(__dirname, "..", "..", "ui", "koinos-node-view.js"), "utf8");
   const navs = [...html.matchAll(/class="nav-item koinos-nav" data-view="([^"]+)"/g)].map((m) => m[1]);
   assert.strictEqual(navs.length, 7, "seven node menus");
-  for (const v of navs) {
-    assert.ok(html.includes(`id="view-${v}"`), `${v} has a view`);
-    assert.ok(html.includes(`id="${v}-body"`), `${v} has somewhere to render into`);
-    assert.ok(view.includes(`"${v}"`), `${v} has a renderer`);
-  }
+  for (const v of navs) assert.ok(hostView.includes(`"${v}"`), `${v} maps to an embedded view`);
+  assert.ok(html.includes('id="koinos-frame-host"'), "the koinos view hosts the iframe");
   // A button that says "Turn on" is a link pretending to be a switch. This is
   // the control the owner asked for by name.
   assert.match(html, /id="btn-koinos-toggle"[^>]*role="switch"/, "it is a real switch");
   assert.ok(html.includes('class="nav-item koinos-nav" data-view="koinos" id="nav-koinos" hidden'), "and the menus start hidden");
+  // The vendored page loads the bridge before the renderer, and its CSP
+  // permits the fetches the bridge makes in place of Electron IPC.
+  assert.ok(knodeHtml.indexOf("bridge.js") < knodeHtml.indexOf("renderer.js"), "bridge loads first");
+  assert.match(knodeHtml, /connect-src 'self'/, "CSP allows same-origin fetch + SSE");
 });

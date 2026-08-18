@@ -372,7 +372,19 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
   // The FULL node stack — Docker lifecycle, guided WSL/Docker setup, onramp,
   // bridge, swaps, rewards. It uses THIS wallet; there is no second one.
   const { createKoinosNode } = require("./lib/koinos-node");
-  const koinosNodeSvc = createKoinosNode({ dataDir, wallet, appVersion: VERSION, onEvent: events });
+  const koinosNodeSvc = createKoinosNode({
+    dataDir,
+    wallet,
+    appVersion: VERSION,
+    // Logged like everything else, and pushed live to the node UI over
+    // /core/koinos/events — the stream Electron IPC carried in the
+    // standalone app. `gateway` is created below; by the first event it exists.
+    onEvent: (e) => {
+      events(e);
+      // A boot-time event can fire before the const below initialises (TDZ).
+      try { gateway?.pushKoinosEvent(e); } catch { /* not up yet; the log has it */ }
+    },
+  });
   registerCalendarTools(registry, calendarSvc);
   // Node runtime for npx-based MCP servers — provisioned on demand so
   // "add a tool server" never dead-ends on "go install Node.js first".

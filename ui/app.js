@@ -427,8 +427,12 @@ function setStatus(kind, text) {
 // ---------- views ----------
 
 function showView(name, { navOnly = false } = {}) {
+  // All seven koinos-* entries share one physical view (the embedded node
+  // app); the highlight still follows the entry itself. Mapped HERE because
+  // every caller — clicks and the boot poll alike — comes through this door.
+  const phys = name.startsWith("koinos") ? "koinos" : name;
   for (const v of document.querySelectorAll(".view")) v.hidden = true;
-  $(`view-${name}`).hidden = false;
+  $(`view-${phys}`).hidden = false;
   for (const b of document.querySelectorAll(".nav-item")) {
     b.classList.toggle("active", b.dataset.view === name);
   }
@@ -441,6 +445,11 @@ function activateView(name) {
   state.view = name;
   state.routed = true; // they chose this; the boot poll must stop overriding it
   showView(name);
+  if (name.startsWith("koinos")) {
+    // The embedded node app switches its own screens.
+    if (window.KaiKoinosNode) window.KaiKoinosNode.show(name);
+    return;
+  }
   if (name === "api") renderApi();
   if (name === "earn") renderEarn();
   if (name === "models") renderModels();
@@ -448,8 +457,6 @@ function activateView(name) {
   if (name === "tasks") renderTasks();
   if (name === "network") renderNetwork();
   if (name === "docs") renderDocs();
-  // The node's own screens all render from one module.
-  if (name.startsWith("koinos") && window.KaiKoinosNode) window.KaiKoinosNode.refresh();
 }
 
 for (const b of document.querySelectorAll(".nav-item[data-view]")) {

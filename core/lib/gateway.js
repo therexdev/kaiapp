@@ -430,6 +430,16 @@ class Gateway {
     if (this.koinosNode && path === "/core/koinos/channels" && req.method === "GET") {
       return this._json(res, 200, { ok: true, channels: this.koinosNode.list() });
     }
+    // The node's app:event stream (toasts, bridge/route progress, recovery
+    // notices), pushed the way Electron IPC pushed it in the standalone app.
+    if (this.koinosNode && path === "/core/koinos/events" && req.method === "GET") {
+      res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
+      res.write(": connected\n\n");
+      this._koinosEventClients ??= new Set();
+      this._koinosEventClients.add(res);
+      req.on("close", () => this._koinosEventClients.delete(res));
+      return;
+    }
 
     // ---- writes. Both sign; NEITHER moves value to another address ----
     // burn converts your KOIN into your own VHP; registering a key moves
@@ -1151,6 +1161,15 @@ class Gateway {
       };
     }
     return v;
+  }
+
+  /** Fan a Koinos node event out to every open /core/koinos/events stream. */
+  pushKoinosEvent(evt) {
+    if (!this._koinosEventClients?.size) return;
+    const line = `data: ${JSON.stringify(evt)}\n\n`;
+    for (const res of this._koinosEventClients) {
+      try { res.write(line); } catch { this._koinosEventClients.delete(res); }
+    }
   }
 
   /** Serve the bundled desktop UI (localhost only; no traversal, no listing). */

@@ -703,31 +703,8 @@ button.linklike.danger { color: var(--danger); }
 .nav-item.koinos-nav:not([hidden]) ~ .nav-item:not(.koinos-nav) { margin-top: 6px; }
 #nav-koinos:not([hidden]) { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 10px; }
 
-/* ----- node views ----- */
-.koinos-view .api-card { max-width: 940px; }
-.kn-grid { display: flex; flex-wrap: wrap; gap: 12px; margin: 14px 0; }
-.kn-stat {
-  flex: 1 1 150px; padding: 12px 14px; border-radius: 10px;
-  background: var(--bg-input); border: 1px solid var(--border);
-  display: flex; flex-direction: column; gap: 4px;
-}
-.kn-stat .k-label { font-size: 0.72em; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim); }
-.kn-stat .k-value { font-size: 1.3em; font-weight: 650; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.kn-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 10px 0; }
-.kn-row input[type="text"], .kn-row input[type="password"] { flex: 1 1 200px; min-width: 0; }
-.kn-note { color: var(--text-dim); font-size: 0.88em; margin: 8px 0; }
-.kn-ok { color: var(--emerald, #10b981); }
-.kn-warn { color: #f0b35e; }
-.kn-bad { color: #ef6b6b; }
-.kn-step { padding: 10px 0; border-bottom: 1px solid var(--border); }
-.kn-step:last-child { border-bottom: 0; }
-.kn-step-done { opacity: 0.62; }
-.kn-step-done > b::after { content: " ✓"; color: var(--emerald, #10b981); }
-.kn-step-pending { opacity: 0.5; }
-.kn-routes { margin: 6px 0 2px; }
-.kn-routes .kn-step:first-child { border-top: 1px solid var(--border); padding-top: 12px; }
-.kn-log {
-  max-height: 260px; overflow: auto; white-space: pre-wrap; word-break: break-word;
-  background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px;
-  padding: 10px 12px; font-size: 0.82em; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-}
+/* ----- the embedded Koinos Node app ----- */
+/* One iframe, full-bleed: everything inside it is the node app's own UI. */
+#koinos-frame-host { flex: 1; display: flex; min-height: 0; }
+#koinos-frame { flex: 1; width: 100%; border: 0; background: #0b0e14; }
+

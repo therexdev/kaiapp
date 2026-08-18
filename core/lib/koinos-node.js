@@ -261,8 +261,44 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
   handle("setup:startDocker", () => setup.startDocker());
   handle("setup:markWslReady", () => setup.markWslReady());
   handle("setup:openDockerDocs", () => {
-    shell.openExternal(setup.dockerDocsUrl());
-    return true;
+    // Core is headless: hand the URL back and the bridge's window opens it.
+    // (The old body called Electron's shell here, which does not exist in
+    // Core — a ReferenceError waiting on this button.)
+    return { openUrl: setup.dockerDocsUrl() };
+  });
+
+  // ----- Electron-only utilities, re-homed -----
+  // The standalone app served these from its main process. Core runs on the
+  // same machine as the user, so the OS openers do the same job; the
+  // clipboard (util:copy) stays in the page, where it belongs.
+  const opener = () =>
+    process.platform === "win32" ? ["cmd", ["/c", "start", '""']] :
+    process.platform === "darwin" ? ["open", []] : ["xdg-open", []];
+  handle("util:openExternal", ({ url } = {}) => {
+    const u = String(url || "");
+    if (!/^https?:\/\/\S+$/.test(u)) throw new Error("Only http(s) links can be opened");
+    // Returned as well as spawned: in the browser build the bridge's own
+    // window.open is the one that reliably lands in front of the user.
+    const [cmd, args] = opener();
+    try {
+      const child = require("child_process").spawn(cmd, [...args, u], { detached: true, stdio: "ignore" });
+      child.on("error", () => {}); // no opener on this box; the bridge still opens it
+      child.unref();
+    } catch { /* same */ }
+    return { openUrl: u };
+  });
+  handle("util:openPath", ({ which } = {}) => {
+    // A fixed menu, never a caller-supplied path — this route is reachable
+    // from any same-origin page.
+    const dir =
+      which === "nodeData" ? nodeMgr.dirs(chain.network().id).root :
+      which === "userData" ? userData : null;
+    if (!dir) throw new Error(`Unknown folder: ${which}`);
+    const [cmd, args] = opener();
+    const child = require("child_process").spawn(cmd, [...args, dir], { detached: true, stdio: "ignore" });
+    child.on("error", () => {}); // a headless box has no file manager; nothing to do
+    child.unref();
+    return { opened: dir };
   });
 
   handle("node:start", async ({ produce }) => {

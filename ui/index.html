@@ -400,19 +400,10 @@
       </section>
 
       <!-- Local API -->
-      <section id="view-koinos" class="view koinos-view" hidden><div class="api-card" id="koinos-body"></div></section>
-
-      <section id="view-koinos-wallet" class="view koinos-view" hidden><div class="api-card" id="koinos-wallet-body"></div></section>
-
-      <section id="view-koinos-fund" class="view koinos-view" hidden><div class="api-card" id="koinos-fund-body"></div></section>
-
-      <section id="view-koinos-burn" class="view koinos-view" hidden><div class="api-card" id="koinos-burn-body"></div></section>
-
-      <section id="view-koinos-node" class="view koinos-view" hidden><div class="api-card" id="koinos-node-body"></div></section>
-
-      <section id="view-koinos-returns" class="view koinos-view" hidden><div class="api-card" id="koinos-returns-body"></div></section>
-
-      <section id="view-koinos-settings" class="view koinos-view" hidden><div class="api-card" id="koinos-settings-body"></div></section>
+      <!-- Koinos Node Desktop, whole, in an iframe: ui/knode/ is that app's
+           own renderer + styles, verbatim, speaking to the same handlers in
+           Core. The seven sidebar entries above select its views. -->
+      <section id="view-koinos" class="view koinos-view" hidden><div id="koinos-frame-host"></div></section>
 
       <section id="view-api" class="view" hidden>
         <div class="api-card">
