@@ -25,9 +25,15 @@ jobs:
           node-version: 22
       - run: node core/scripts/pin-model.js google_gemma-3-4b-it-q4_k_m@1 --mmproj-only
   netcheck:
-    # Push-triggered only when the commit message opts in with [netcheck]
-    # (same pattern as [bench] / [pin-verify]); dispatch always runs.
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[netcheck]')
+    # Push-triggered only when the commit message opts in; dispatch always
+    # runs. [armcheck] and [pricecheck] are STEPS inside this job, so the job
+    # gate has to accept them too — a commit tagged [pricecheck] alone once
+    # skipped the whole job and silently ran nothing.
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || contains(github.event.head_commit.message, '[netcheck]')
+      || contains(github.event.head_commit.message, '[pricecheck]')
+      || contains(github.event.head_commit.message, '[armcheck]')
     runs-on: ubuntu-latest
     steps:
       - name: Public network status
