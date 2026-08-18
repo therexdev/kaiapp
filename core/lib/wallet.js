@@ -64,7 +64,12 @@ class WalletService {
    * never stored.
    */
   get ethAddress() {
-    return this._ethAddress ?? this.readKeystore()?.ethAddress ?? null;
+    // The last arm self-heals: a keystore from before funding existed has no
+    // ethAddress on disk, but if the signer is open (however it was opened),
+    // the address can be derived and backfilled right now. Field report: old
+    // installs auto-resume their session at boot and then every funding
+    // screen said "unlock your wallet" to a wallet that was already unlocked.
+    return this._ethAddress ?? this.readKeystore()?.ethAddress ?? this._ensureEthAddress();
   }
 
   ethPrivateKey() {
@@ -281,6 +286,7 @@ class WalletService {
       // silently signing with a key the file no longer represents.
       if (ks?.address && signer.getAddress() !== ks.address) return false;
       this._signer = signer;
+      this._ensureEthAddress(); // resume is how existing installs open; backfill here too
       return true;
     } catch {
       return false;

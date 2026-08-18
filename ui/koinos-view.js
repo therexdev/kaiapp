@@ -86,11 +86,9 @@
   });
 
   function refresh() {
-    return loadStatus()
-      .then(function () {
-        if (state.enabled && onKoinosView() && window.KaiKoinosNode) return window.KaiKoinosNode.refresh();
-      })
-      .catch(function () {});
+    // Status only. The embedded app runs its own heartbeat; navigating it
+    // from this poll is what made screens jump back to the dashboard.
+    return loadStatus().catch(function () {});
   }
 
   // Self-rescheduling, so a slow poll never stacks up behind itself.

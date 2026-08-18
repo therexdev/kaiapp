@@ -50,7 +50,10 @@
   window.KaiKoinosNode = {
     show: show,
     views: Object.keys(VIEWS),
-    // Kept for the switch controller: flipping the toggle on lands here.
-    refresh: function () { show("koinos"); },
+    // Field report: this used to navigate to the dashboard, and the Earn
+    // toggle's ten-second poll called it — so the Fund or Node screen yanked
+    // back to the dashboard mid-click. Only a sidebar click navigates now;
+    // this just keeps the iframe alive.
+    refresh: function () { ensure(); },
   };
 })();

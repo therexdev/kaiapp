@@ -278,12 +278,28 @@ const NAVS = ["nav-koinos", "nav-koinos-wallet", "nav-koinos-fund", "nav-koinos-
     ok("…with its funding links and routes on the page", /ETH/.test(fund), fund.slice(0, 120));
   });
 
-  // 5. No Docker: the node tab shows the app's own setup card.
-  await run("a machine without Docker gets the guided setup", { machine: { dockerInstalled: false, nodeRunning: false } }, async (page, app) => {
+  // 5. No Docker: the node tab shows the app's own setup card, its buttons
+  //    reach Core, and — field report — the screen STAYS PUT across the Earn
+  //    toggle's ten-second status poll instead of yanking back to the dashboard.
+  await run("a machine without Docker gets the guided setup, and screens stay put", { machine: { dockerInstalled: false, nodeRunning: false } }, async (page, app, node) => {
     await page.locator("#nav-koinos-node").click();
     await page.waitForTimeout(1200);
     const text = await app.locator("#view-node").textContent();
     ok("the setup card renders", /Install Docker|Docker isn't available|Install guide/.test(text), text.slice(0, 140));
+
+    await app.locator('[data-setup-action="openDockerDocs"]').first().click();
+    await page.waitForTimeout(600);
+    ok("its button reaches Core's setup channel",
+      node.calls.some((c) => c.channel.startsWith("setup:")),
+      node.calls.filter((c) => c.channel.startsWith("setup:")).map((c) => c.channel).join(","));
+
+    // Outlast the 10s poll in ui/koinos-view.js. Before the fix this view
+    // was back on the dashboard by now.
+    await page.waitForTimeout(11500);
+    ok("11 seconds later the node view is still the node view",
+      await app.locator("#view-node").evaluate((e) => e.classList.contains("active")));
+    ok("…not the dashboard",
+      !(await app.locator("#view-dashboard").evaluate((e) => e.classList.contains("active"))));
   });
 
   console.log(failures ? `\nKOINOS UI CHECK FAILED (${failures})` : "\nKOINOS UI CHECK PASSED");

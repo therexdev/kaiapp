@@ -163,3 +163,39 @@ test("node UI: the switch reveals every node menu, and the embedded app is wired
   assert.ok(knodeHtml.indexOf("bridge.js") < knodeHtml.indexOf("renderer.js"), "bridge loads first");
   assert.match(knodeHtml, /connect-src 'self'/, "CSP allows same-origin fetch + SSE");
 });
+
+test("wallet: a pre-funding keystore gets its ETH address on session resume (field report)", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-oldwallet-"));
+  const secret = "os-held-machine-secret";
+  const w1 = new WalletService(path.join(dir, "wallet"));
+  w1.create({ password: PW });
+  w1.saveSession(secret);
+
+  // Age the keystore: installs from before funding existed have no ethAddress.
+  const ksPath = path.join(dir, "wallet", "wallet.json");
+  const ks = JSON.parse(fs.readFileSync(ksPath, "utf8"));
+  delete ks.ethAddress;
+  fs.writeFileSync(ksPath, JSON.stringify(ks));
+
+  // A fresh boot resumes the session — the only open most users ever do.
+  const w2 = new WalletService(path.join(dir, "wallet"));
+  assert.strictEqual(w2.ethAddress, null, "aged keystore starts with no ETH address");
+  assert.ok(w2.tryResumeSession(secret), "session resumes");
+  assert.match(String(w2.ethAddress), /^0x[0-9a-fA-F]{40}$/, "resume backfills the ETH address");
+  assert.strictEqual(
+    JSON.parse(fs.readFileSync(ksPath, "utf8")).ethAddress,
+    w2.ethAddress,
+    "…and persists it, so it shows even while locked from now on"
+  );
+
+  // And the node surface built on top now offers funding instead of asking
+  // for an unlock that is nowhere to be found.
+  const kn = createKoinosNode({ dataDir: dir, wallet: w2, appVersion: "test", onEvent: () => {} });
+  try {
+    const f = await kn.call("fund:status");
+    assert.strictEqual(f.ethAddress, w2.ethAddress);
+    const st = await kn.call("wallet:status");
+    assert.strictEqual(st.ethAddress, w2.ethAddress);
+    assert.strictEqual(st.unlocked, true);
+  } finally { kn.stop(); }
+});
