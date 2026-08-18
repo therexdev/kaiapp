@@ -199,3 +199,36 @@ test("wallet: a pre-funding keystore gets its ETH address on session resume (fie
     assert.strictEqual(st.unlocked, true);
   } finally { kn.stop(); }
 });
+
+test("setup: Start Docker installs Docker Desktop when the app is missing (field report)", async () => {
+  const { SetupService } = require("../lib/koinos/setup");
+  const { JsonStore } = require("../lib/store");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-setup-"));
+  const events = [];
+  const setup = new SetupService({
+    platform: "win32",
+    arch: "x64",
+    downloadDir: path.join(dir, "dl"),
+    state: new JsonStore(path.join(dir, "state.json"), {}),
+    onEvent: (e) => events.push(e),
+  });
+  // The field case: a leftover docker CLI made Docker look installed, but the
+  // Desktop app is gone. The old code answered "Install it first." — thrown
+  // at the person pressing the install-shaped button.
+  setup._dockerAppInstalled = () => null;
+  let installs = 0;
+  setup.installDocker = async () => { installs += 1; return { started: true }; };
+
+  const r = await setup.startDocker(); // old code: throws here
+  assert.strictEqual(r.installing, true, "the button cascades into the install");
+  assert.strictEqual(installs, 1, "…exactly once");
+  assert.ok(events.some((e) => /downloading it now/i.test(e.message || "")), "…and says so");
+
+  // With the app present, it starts it rather than reinstalling. The spawn
+  // target does not exist here, which is exactly why the ENOENT guard on
+  // these spawns must hold.
+  setup._dockerAppInstalled = () => path.join(dir, "Docker Desktop.exe");
+  const started = await setup.startDocker().catch((e) => ({ error: e.message }));
+  assert.strictEqual(started.started, true, String(started.error || ""));
+  assert.strictEqual(installs, 1, "no second install");
+});

@@ -320,6 +320,30 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
       producerAddress = wallet.address;
       if (!producerAddress) throw new Error("Create a wallet first to enable block production");
     }
+    // One click means the WHOLE chain (field report: this button answered
+    // "install Docker first"). Docker missing → start its download and say
+    // so; Docker stopped → start it and wait for the engine, then carry on
+    // into the actual node start.
+    let docker = await nodeMgr.dockerInfo();
+    if (!docker.ok) {
+      if (process.platform === "linux") throw new Error(docker.error);
+      const r = await setup.startDocker(); // installs Docker Desktop itself when missing
+      if (r?.installing) {
+        throw new Error(
+          "Docker Desktop isn't installed yet — downloading it for you now (progress shows on this page). Follow its installer, then press Start node again."
+        );
+      }
+      const deadline = Date.now() + 60000;
+      while (!docker.ok && Date.now() < deadline) {
+        await new Promise((res) => setTimeout(res, 3000));
+        docker = await nodeMgr.dockerInfo();
+      }
+      if (!docker.ok) {
+        throw new Error(
+          "Docker is starting — first launch can take a couple of minutes. Press Start node again once its whale icon settles."
+        );
+      }
+    }
     return nodeMgr.start(networkId, producerAddress);
   });
 

@@ -102,6 +102,13 @@ function instrument(real, { dockerInstalled = true, nodeRunning = true } = {}) {
     "setup:openDockerDocs": () => ({ openUrl: "https://docs.docker.com/engine/install/" }),
     "node:logs": () => "koinos-chain  | block 38297044 applied\nkoinos-p2p    | 12 peers",
     "node:quickSyncInfo": () => ({ available: true, sizeBytes: 9e9, freeBytes: 4e11, updatedAt: "2026-08-17" }),
+    // Never let a test reach the real start: a CI runner with real Docker
+    // would otherwise pull the node's images and bring the stack up.
+    "node:start": () => ({ started: true }),
+    "node:stop": () => ({ stopping: true }),
+    "node:quickSync": () => ({ started: true }),
+    "setup:installDocker": () => ({ started: true }),
+    "setup:startDocker": () => ({ started: true }),
     "fund:ethBalance": () => ({ address: real.ethAddress, wei: "0x16345785d8a0000", eth: "0.1" }),
     "fund:routeMaxEth": () => ({ gasReserveEth: "0.004", balanceEth: "0.1", maxEth: "0.05" }),
     "fund:routeCompare": () => ({

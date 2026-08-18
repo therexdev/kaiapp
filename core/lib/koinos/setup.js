@@ -328,24 +328,42 @@ class SetupService {
   }
 
   async _launchInstaller(asset, dest) {
+    const launch = (cmd, args, opts = {}) => {
+      const child = spawn(cmd, args, { detached: true, stdio: "ignore", ...opts });
+      child.on("error", (e) => this.onEvent({ type: "setup", level: "error", message: `Couldn't launch the installer: ${e.message}` }));
+      child.unref();
+    };
     if (this.platform === "win32") {
       // The installer self-elevates and shows its own UI.
-      spawn(dest, [], { detached: true, stdio: "ignore", windowsHide: false }).unref();
+      launch(dest, [], { windowsHide: false });
     } else if (this.platform === "darwin") {
-      spawn("open", [dest], { detached: true, stdio: "ignore" }).unref();
+      launch("open", [dest]);
     }
   }
 
   async startDocker() {
-    if (this.platform === "win32") {
-      const exe = this._dockerAppInstalled();
-      if (!exe) throw new Error("Docker Desktop isn't installed yet. Install it first.");
-      spawn(exe, [], { detached: true, stdio: "ignore" }).unref();
-    } else if (this.platform === "darwin") {
-      spawn("open", ["-a", "Docker"], { detached: true, stdio: "ignore" }).unref();
-    } else {
+    if (this.platform === "linux") {
       throw new Error("Start the Docker service with your init system, e.g. `sudo systemctl start docker`.");
     }
+    const app = this._dockerAppInstalled();
+    if (!app) {
+      // Field report: a leftover docker CLI can make Docker look installed
+      // while the Desktop app is gone, and this button answered "install it
+      // first" — to the person pressing the install-shaped button. Doing the
+      // install IS this button's job, so cascade into it.
+      this.onEvent({ type: "setup", message: "Docker Desktop isn't installed — downloading it now." });
+      const r = await this.installDocker();
+      return { ...r, installing: true };
+    }
+    // spawn ENOENT arrives as an async "error" event; unhandled, it would
+    // crash Core outright if the app vanished between detection and click.
+    const launch = (cmd, args) => {
+      const child = spawn(cmd, args, { detached: true, stdio: "ignore" });
+      child.on("error", (e) => this.onEvent({ type: "setup", level: "error", message: `Couldn't launch Docker: ${e.message}` }));
+      child.unref();
+    };
+    if (this.platform === "win32") launch(app, []);
+    else launch("open", ["-a", "Docker"]);
     this.onEvent({ type: "setup", message: "Starting Docker — this can take a minute on first launch." });
     return { started: true };
   }
