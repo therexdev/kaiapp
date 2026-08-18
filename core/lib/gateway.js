@@ -198,6 +198,26 @@ class Gateway {
     return ours.has(String(origin));
   }
 
+  /*
+   * §7 egress gate. Local-Only means nothing leaves this machine — it is the
+   * promise printed in the sidebar, so a feature that quietly reaches the
+   * internet in that mode is a broken promise, not a missing nicety.
+   *
+   * Deliberately ONE function rather than a seventh independently retyped
+   * copy of the same `if (mode === "local-only")` block. Returns true when it
+   * has already answered the request.
+   */
+  _blockedByPrivacy(res, feature) {
+    const mode = this.network ? this.network.status().privacyMode : "local-only";
+    if (mode !== "local-only") return false;
+    this._json(res, 403, {
+      ok: false,
+      localOnly: true,
+      error: `${feature} needs to read the Koinos network, and Privacy is set to Local-Only. Switch to Local-First or Network to use it.`,
+    });
+    return true;
+  }
+
   async _route(req, res) {
     const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
     const path = url.pathname;
@@ -364,7 +384,10 @@ class Gateway {
     // is off, status answers {enabled:false} and the rest refuse — the service
     // never builds a Provider or touches the network.
     if (this.koinos && path === "/core/koinos" && req.method === "GET") {
-      return this._json(res, 200, await this.koinos.status());
+      const mode = this.network ? this.network.status().privacyMode : "local-only";
+      // Advertised, not discovered: the panel greys its chain cards out and
+      // says why, rather than showing buttons that 403.
+      return this._json(res, 200, { ...(await this.koinos.status()), chainReadsAllowed: mode !== "local-only", privacyMode: mode });
     }
     if (this.koinos && path === "/core/koinos/config" && req.method === "POST") {
       const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
@@ -378,6 +401,7 @@ class Gateway {
       }
     }
     if (this.koinos && path === "/core/koinos/balances" && req.method === "GET") {
+      if (this._blockedByPrivacy(res, "Looking up a Koinos address")) return;
       // Any address, not just the user's own: that is what makes this useful
       // on a machine that cannot run a node but wants to watch one elsewhere.
       const address = url.searchParams.get("address") || "";
@@ -388,6 +412,7 @@ class Gateway {
       }
     }
     if (this.koinos && path === "/core/koinos/node" && req.method === "GET") {
+      if (this._blockedByPrivacy(res, "Checking your Koinos node")) return;
       try {
         return this._json(res, 200, { ok: true, ...(await this.koinos.nodeProbe()) });
       } catch (e) {

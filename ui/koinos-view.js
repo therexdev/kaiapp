@@ -19,7 +19,7 @@
   if (!$("view-koinos")) return; // markup absent: do nothing rather than throw
 
   var POLL_MS = 10000;
-  var state = { enabled: false, busy: false, timer: null };
+  var state = { enabled: false, chainReads: true, busy: false, timer: null };
 
   function jget(path) {
     return fetch(path).then(function (r) { return r.json(); });
@@ -69,6 +69,8 @@
       state.enabled = Boolean(s && s.enabled);
       paintToggle();
       if (!state.enabled) return s;
+      state.chainReads = s.chainReadsAllowed !== false;
+      paintPrivacy(s);
       paintNetwork(s);
       paintCapability(s.capability, s.companion);
       var rpc = $("koinos-rpc");
@@ -77,6 +79,24 @@
       if (watch && document.activeElement !== watch && s.watchAddress) watch.value = s.watchAddress;
       return s;
     });
+  }
+
+  /* Local-Only means nothing leaves the machine — including chain reads. Say
+   * so on the cards and disable their controls, rather than leaving buttons
+   * that answer 403 and look like a bug. */
+  function paintPrivacy(s) {
+    var blocked = s.chainReadsAllowed === false;
+    var ids = ["btn-koinos-watch", "koinos-watch", "btn-koinos-rpc", "koinos-rpc"];
+    for (var i = 0; i < ids.length; i++) {
+      var el = $(ids[i]);
+      if (el) el.disabled = blocked;
+    }
+    if (blocked) {
+      setText("koinos-watch-hint", "Privacy is set to Local-Only, so Koinos AI will not read the chain. Switch to Local-First or Network in Settings to look up addresses.");
+      setState("koinos-node-state", "Not checked — Privacy is set to Local-Only.", "bad");
+    } else {
+      setText("koinos-watch-hint", "Any address — yours, your node's, or one you are keeping an eye on.");
+    }
   }
 
   function paintNetwork(s) {
@@ -164,7 +184,7 @@
   // ---- card B: is a node answering ----
 
   function probeNode() {
-    if (!state.enabled) return Promise.resolve();
+    if (!state.enabled || state.chainReads === false) return Promise.resolve();
     return jget("/core/koinos/node")
       .then(function (n) {
         if (!n || n.ok === false) { setState("koinos-node-state", (n && n.error) || "Could not check.", "bad"); return; }

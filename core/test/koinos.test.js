@@ -132,3 +132,111 @@ test("koinos: the requirements are DATA, so a hardware fact is one edit", () => 
     ["arch", "minFreeGbForQuickSync", "minFreeGbToRun", "minRamGb", "releasesUrl", "verifiedOn"]);
   assert.match(NODE_REQUIREMENTS.verifiedOn, /^\d{4}-\d{2}-\d{2}$/);
 });
+
+/* ---------------- §7: Local-Only must mean local ---------------- */
+
+const { Gateway } = require("../lib/gateway");
+const { ModelManager } = require("../lib/model-manager");
+const { ApiKeys } = require("../lib/keys");
+
+async function gatewayWith(privacyMode, { enabled = true } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-kng-"));
+  const settings = new JsonStore(path.join(dir, "settings.json"), {});
+  const koinos = new KoinosService({ settings, hardware: hw(), dataDir: dir, onEvent: () => {} });
+  koinos.setEnabled(enabled);
+  const gw = new Gateway({
+    host: "127.0.0.1", port: 0,
+    models: new ModelManager({ catalogPath: path.join(__dirname, "..", "models", "catalog.json"), modelsDir: path.join(dir, "m"), state: new JsonStore(path.join(dir, "st.json"), {}), onEvent: () => {} }),
+    keys: new ApiKeys(new JsonStore(path.join(dir, "k.json"), {})),
+    runtime: { status: () => ({ running: false }) },
+    coreInfo: () => ({ version: "t" }),
+    network: { status: () => ({ privacyMode }) },
+    koinos, onEvent: () => {},
+  });
+  await gw.listen();
+  return { gw, base: `http://127.0.0.1:${gw.port}` };
+}
+
+/** Run fn with global fetch replaced by a spy that THROWS if the chain is
+ *  touched — the only way to prove "no egress" rather than assert it. */
+async function withFetchTrap(fn) {
+  const real = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = (...args) => {
+    const target = String(args[0] ?? "");
+    if (!/^http:\/\/127\.0\.0\.1:/.test(target)) {
+      calls.push(target);
+      throw new Error("EGRESS in local-only: " + target);
+    }
+    return real(...args);
+  };
+  try {
+    await fn(calls);
+  } finally {
+    globalThis.fetch = real;
+  }
+}
+
+test("koinos: Local-Only means LOCAL — the chain is never reached", async () => {
+  const { gw, base } = await gatewayWith("local-only");
+  try {
+    await withFetchTrap(async (calls) => {
+      const bal = await fetch(`${base}/core/koinos/balances?address=1K1AUovu5NjjPcaTxmde6wPB8Y8PQGFV3E`);
+      assert.strictEqual(bal.status, 403, "an address lookup is refused, not attempted");
+      const b = await bal.json();
+      assert.strictEqual(b.localOnly, true);
+      assert.match(b.error, /Local-Only/, "and it says WHY, so the user can fix it");
+
+      const node = await fetch(`${base}/core/koinos/node`);
+      assert.strictEqual(node.status, 403, "so is probing a node");
+
+      assert.deepStrictEqual(calls, [], "nothing left this machine — the promise in the sidebar");
+    });
+  } finally {
+    await gw.close();
+  }
+});
+
+test("koinos: status still answers in Local-Only, and says the cards are off", async () => {
+  const { gw, base } = await gatewayWith("local-only");
+  try {
+    // Status is local: settings, hardware, a filesystem probe. It must keep
+    // working, or the panel cannot EXPLAIN the refusal — it just looks broken.
+    const s = await (await fetch(`${base}/core/koinos`)).json();
+    assert.strictEqual(s.ok, true);
+    assert.strictEqual(s.enabled, true);
+    assert.strictEqual(s.chainReadsAllowed, false, "advertised up front, not discovered by a 403");
+    assert.strictEqual(s.privacyMode, "local-only");
+    assert.ok(s.capability, "the hardware verdict is local and still useful");
+  } finally {
+    await gw.close();
+  }
+});
+
+test("koinos: outside Local-Only the chain routes are allowed through", async () => {
+  const { gw, base } = await gatewayWith("local-first");
+  try {
+    const s = await (await fetch(`${base}/core/koinos`)).json();
+    assert.strictEqual(s.chainReadsAllowed, true);
+    // Not asserting a successful chain read — that would need the network.
+    // What matters is that the PRIVACY gate is not what stops it.
+    const bal = await fetch(`${base}/core/koinos/balances?address=not-an-address`);
+    assert.notStrictEqual(bal.status, 403, "refused on the address, not on privacy");
+  } finally {
+    await gw.close();
+  }
+});
+
+test("koinos: switched off, every mode answers the same inert shape", async () => {
+  for (const mode of ["local-only", "local-first", "network"]) {
+    const { gw, base } = await gatewayWith(mode, { enabled: false });
+    try {
+      const s = await (await fetch(`${base}/core/koinos`)).json();
+      assert.strictEqual(s.enabled, false, `${mode}: off`);
+      assert.strictEqual(s.capability, undefined, `${mode}: nothing else is computed or leaked`);
+      assert.strictEqual(s.companion, undefined, `${mode}: no filesystem probe either`);
+    } finally {
+      await gw.close();
+    }
+  }
+});

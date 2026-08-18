@@ -34,7 +34,7 @@ const ok = (label, cond, detail = "") => {
   if (!cond) failures += 1;
 };
 
-async function boot(hardware) {
+async function boot(hardware, privacyMode = "network") {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-koinos-ui-"));
   const settings = new JsonStore(path.join(dir, "settings.json"), {});
   const koinos = new KoinosService({ settings, hardware, dataDir: dir, onEvent: () => {} });
@@ -54,6 +54,9 @@ async function boot(hardware) {
     keys: new ApiKeys(new JsonStore(path.join(dir, "k.json"), {})),
     runtime: { status: () => ({ running: false }) },
     coreInfo: () => ({ version: "test" }),
+    // Without this the gateway fails CLOSED to local-only — correct, but it
+    // would mean this script never exercised the normal case.
+    network: { status: () => ({ privacyMode }) },
     uiDir: path.join(__dirname, "..", "..", "ui"),
     koinos,
     onEvent: () => {},
@@ -62,8 +65,8 @@ async function boot(hardware) {
   return { gw, base: `http://127.0.0.1:${gw.port}` };
 }
 
-async function run(label, hardware, fn) {
-  const { gw, base } = await boot(hardware);
+async function run(label, hardware, fn, privacyMode) {
+  const { gw, base } = await boot(hardware, privacyMode);
   const browser = await chromium.launch({ executablePath: CHROME });
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   const errors = [];
@@ -150,6 +153,28 @@ async function run(label, hardware, fn) {
     await page.waitForTimeout(500);
     ok("balances work fine on the Pi", (await page.locator("#koinos-koin").textContent()).trim() === "12.5");
   });
+
+  // 3. Local-Only. The sidebar promises nothing leaves this machine, so the
+  //    chain cards must go quiet and SAY why — not offer buttons that 403.
+  await run("x64 desktop, Privacy = Local-Only", { platform: "linux", arch: "x64", ramBytes: 32 * 1024 ** 3, diskFreeBytes: 200 * 1024 ** 3 }, async (page) => {
+    await page.locator("#btn-koinos-toggle").click();
+    await page.waitForTimeout(400);
+    await page.locator("#nav-koinos").click();
+    await page.waitForTimeout(600);
+
+    ok("the address box is disabled", await page.locator("#koinos-watch").isDisabled());
+    ok("…and so is its button", await page.locator("#btn-koinos-watch").isDisabled());
+    ok("the node field is disabled too", await page.locator("#koinos-rpc").isDisabled());
+    const hint = (await page.locator("#koinos-watch-hint").textContent()).trim();
+    ok("it names Local-Only as the reason", /Local-Only/.test(hint), hint);
+    ok("…and says how to change it", /Settings/.test(hint));
+    const node = (await page.locator("#koinos-node-state").textContent()).trim();
+    ok("the node card says the same", /Local-Only/.test(node), node);
+
+    // The local half still works: hardware truth needs no network.
+    const verdict = (await page.locator("#koinos-cap-verdict").textContent()).trim();
+    ok("the hardware verdict still works — it needs no network", /can run/i.test(verdict), verdict);
+  }, "local-only");
 
   console.log(failures ? `\nKOINOS UI CHECK FAILED (${failures})` : "\nKOINOS UI CHECK PASSED");
   process.exit(failures ? 1 : 0);
