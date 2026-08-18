@@ -240,3 +240,101 @@ test("koinos: switched off, every mode answers the same inert shape", async () =
     }
   }
 });
+
+/* ---------------- stage 2: writes that sign but move nothing away ---------- */
+
+const { WalletService } = require("../lib/wallet");
+const { ChainWrite, MANA_CUSHION } = require("../lib/chain-write");
+
+const PASSWORD = "a real password here";
+function walletWith() {
+  const w = new WalletService(fs.mkdtempSync(path.join(os.tmpdir(), "kai-kw-")));
+  const made = w.create({ password: PASSWORD });
+  return { wallet: w, address: made.address };
+}
+
+test("stage 2: the password is proved on EVERY call, not once at unlock", async () => {
+  const { wallet } = walletWith();
+  const k = new KoinosService({ settings: store(), hardware: hw(), wallet });
+  k.setEnabled(true);
+  // The wallet is unlocked right now — create() leaves it so, exactly as the
+  // app does when it resumes a session from the OS keychain at boot.
+  assert.strictEqual(wallet.status().unlocked, true, "precondition: unlocked, with no human present");
+
+  await assert.rejects(() => k.burn({ amountKoin: "1", password: "" }), /Enter your wallet password/,
+    "an unlocked wallet does NOT excuse a missing password");
+  await assert.rejects(() => k.burn({ amountKoin: "1", password: "not it" }), /does not match/,
+    "nor a wrong one");
+  await assert.rejects(() => k.registerKey({ publicKey: "abcdefghijklmnopqrstuvwx", password: "not it" }), /does not match/);
+});
+
+test("stage 2: a one-shot signer never aliases the earn worker's", () => {
+  const { wallet, address } = walletWith();
+  const a = wallet.signerFor(PASSWORD);
+  const b = wallet.signerFor(PASSWORD);
+  assert.strictEqual(a.getAddress(), address);
+  assert.notStrictEqual(a, b, "each call gets its own object");
+  assert.notStrictEqual(a, wallet.signer, "and none of them is the singleton");
+
+  // koilib's Contract does `signer.provider = p`. If chain code were handed
+  // the singleton, that assignment would land on the object core/lib/worker.js
+  // signs earn receipts with.
+  a.provider = { sentinel: true };
+  assert.strictEqual(wallet.signer.provider, undefined, "mutating the derived signer does not reach the wallet's");
+});
+
+test("stage 2: burn amounts are parsed exactly, never through a float", async () => {
+  const { wallet } = walletWith();
+  const k = new KoinosService({ settings: store(), hardware: hw(), wallet });
+  k.setEnabled(true);
+  for (const bad of ["", "abc", "-1", "1.234567890", "1e8", "  "]) {
+    await assert.rejects(() => k.burn({ amountKoin: bad, password: PASSWORD }), /amount in KOIN/, `refused: ${JSON.stringify(bad)}`);
+  }
+});
+
+test("stage 2: mana cushion refuses the burn that reverts on chain", () => {
+  const w = new ChainWrite(store());
+  const KOIN = 100000000n;
+  assert.strictEqual(w.burnableFromMana((10n * KOIN).toString()), (9n * KOIN).toString(), "one KOIN is held back for the transaction's own cost");
+  assert.strictEqual(w.burnableFromMana((KOIN / 2n).toString()), "0", "below the cushion, nothing is burnable");
+  assert.strictEqual(MANA_CUSHION, KOIN);
+
+  // The exact failure koinos-node hit: a burn sized at the mana limit is
+  // accepted by the app and then reverts with an opaque "could not burn KOIN".
+  assert.throws(() => w._assertMana((10n * KOIN).toString(), (10n * KOIN).toString()), /Not enough mana/);
+  assert.doesNotThrow(() => w._assertMana((9n * KOIN).toString(), (10n * KOIN).toString()));
+});
+
+test("stage 2: burning credits the SAME address — it is not a transfer in disguise", () => {
+  // burn_address and vhp_address are hardcoded to the signer's own address and
+  // are deliberately not parameterised. The moment VHP could be minted
+  // elsewhere this becomes a send, and would need the send rules.
+  const src = fs.readFileSync(path.join(__dirname, "..", "lib", "chain-write.js"), "utf8");
+  assert.match(src, /burn_address: address/);
+  assert.match(src, /vhp_address: address/);
+  assert.ok(!/vhpAddress/.test(src), "no caller-supplied VHP destination exists");
+});
+
+test("stage 2: still no way to send KOIN anywhere", () => {
+  const w = new ChainWrite(store());
+  for (const m of ["transfer", "send"]) assert.strictEqual(typeof w[m], "undefined", `${m}() is stage 3`);
+  const gw = fs.readFileSync(path.join(__dirname, "..", "lib", "gateway.js"), "utf8");
+  assert.ok(!/koinos\/send/.test(gw), "and no route offers it");
+});
+
+test("stage 2: writes are refused in Local-Only, like the reads", async () => {
+  const { gw, base } = await gatewayWith("local-only");
+  try {
+    for (const p of ["/core/koinos/burn", "/core/koinos/register-key"]) {
+      const r = await fetch(`${base}${p}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ amountKoin: "1", publicKey: "abcdefghijklmnopqrstuvwx", password: PASSWORD }),
+      });
+      assert.strictEqual(r.status, 403, `${p} is gated`);
+      assert.strictEqual((await r.json()).localOnly, true);
+    }
+  } finally {
+    await gw.close();
+  }
+});

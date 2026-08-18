@@ -5,6 +5,7 @@ const os = require("os");
 const path = require("path");
 
 const { ChainRead } = require("./chain-read");
+const { ChainWrite } = require("./chain-write");
 const { NETWORKS, NODE_REQUIREMENTS } = require("./chain-constants");
 
 /*
@@ -69,12 +70,14 @@ function findCompanion() {
 }
 
 class KoinosService {
-  constructor({ settings, hardware = null, dataDir = null, onEvent = () => {} }) {
+  constructor({ settings, hardware = null, dataDir = null, wallet = null, onEvent = () => {} }) {
     this.settings = settings;
+    this.wallet = wallet; // for signerFor(password) only — never its unlocked singleton
     this.hardware = hardware; // the object core/lib/hardware.js detect() returned
     this.dataDir = dataDir;
     this.onEvent = onEvent;
     this._chain = null;
+    this._write = null;
     this._cache = new Map(); // key -> { at, value }
   }
 
@@ -96,6 +99,7 @@ class KoinosService {
     this.settings.set("koinos.enabled", Boolean(on));
     if (!on) {
       this._chain = null; // drop the Provider; off is inert
+      this._write = null;
       this._cache.clear();
     }
     return this.enabled();
@@ -181,6 +185,99 @@ class KoinosService {
       companion: this.companion(),
     };
   }
+
+  writer() {
+
+    if (!this._write) this._write = new ChainWrite(this.settings, this.chain());
+
+    return this._write;
+
+  }
+
+
+  /**
+
+   * Derive a one-shot signer for ONE operation.
+
+   *
+
+   * The password is required on every call even though the wallet is almost
+
+   * always unlocked — core/server.js resumes it at boot from a secret the OS
+
+   * holds, so "unlocked" never means a human is present. The signer this
+
+   * returns is a fresh object; koilib mutates signers, and the earn worker's
+
+   * must never be the one handed to chain code.
+
+   */
+
+  _signerFor(password) {
+
+    if (!this.wallet) throw new Error("No wallet is available");
+
+    return this.wallet.signerFor(password);
+
+  }
+
+
+  _requireOn() {
+
+    if (!this.enabled()) throw new Error("Koinos node tools are switched off");
+
+  }
+
+
+  /** KOIN -> VHP at the SAME address. Value never leaves the wallet, which is
+
+   *  why an unattended reburn is allowed to do this without a password —
+
+   *  but a person clicking Burn still confirms it deliberately. */
+
+  async burn({ amountKoin, password, dryRun = false }) {
+
+    this._requireOn();
+
+    const amount = String(amountKoin ?? "").trim();
+
+    if (!/^\d+(\.\d{1,8})?$/.test(amount)) throw new Error("Enter an amount in KOIN, like 12.5");
+
+    const [whole, frac = ""] = amount.split(".");
+
+    const sats = (BigInt(whole) * 100000000n + BigInt((frac + "00000000").slice(0, 8))).toString();
+
+    const signer = this._signerFor(password);
+
+    const r = await this.writer().burn(signer, sats, { dryRun });
+
+    this._cache.clear();
+
+    if (!dryRun) this.onEvent({ type: "koinos:burned", detail: `${amount} KOIN` });
+
+    return r;
+
+  }
+
+
+  /** Tell the chain which key produces blocks for this address. Moves no
+
+   *  value at all — but it signs, so it proves the password like the rest. */
+
+  async registerKey({ publicKey, password, dryRun = false }) {
+
+    this._requireOn();
+
+    const signer = this._signerFor(password);
+
+    const r = await this.writer().registerProducerKey(signer, publicKey, { dryRun });
+
+    if (!dryRun) this.onEvent({ type: "koinos:key-registered", detail: r.address });
+
+    return r;
+
+  }
+
 
   async balances(address) {
     if (!this.enabled()) throw new Error("Koinos node tools are switched off");

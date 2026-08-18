@@ -252,6 +252,43 @@ class WalletService {
   }
 
   /** §17 receipt primitive: recoverable signature over a sha256 hash. */
+  /**
+   * A ONE-SHOT signer, derived from the password, for a single operation that
+   * moves value on chain.
+   *
+   * Two problems, one primitive.
+   *
+   * The password one: core/server.js resumes an unlocked wallet at boot from a
+   * secret the OS holds, so the app starts unlocked with no human present.
+   * "Unlocked" therefore never means "someone is at the keyboard", and a check
+   * at unlock time protects nothing. Anything that moves value has to prove the
+   * password AT THE MOMENT it moves it. Same reasoning as revealWif() below.
+   *
+   * The aliasing one: koilib's Contract mutates the signer it is handed
+   * (signer.provider = p). `this._signer` is the object core/lib/worker.js signs
+   * earn receipts with, so chain code must never be given it. This returns a
+   * FRESH Signer that nothing else holds a reference to; the caller may mutate
+   * it freely and it is garbage once the operation finishes.
+   *
+   * Never caches, never stores the password, never touches this._signer.
+   */
+  signerFor(password) {
+    if (!this.exists()) throw new Error("No wallet found");
+    const typed = String(password ?? "");
+    if (!typed) throw new Error("Enter your wallet password to confirm this");
+    // Same forgiving variants unlock() accepts — a password that opens the
+    // wallet must also confirm an operation, or the rule reads as a bug.
+    const variants = [...new Set([typed, typed.normalize("NFC"), typed.trim(), typed.normalize("NFC").trim()])];
+    for (const candidate of variants) {
+      try {
+        return this._signerFromKeystore(candidate);
+      } catch (e) {
+        if (!/Incorrect password/.test(String(e.message))) throw e;
+      }
+    }
+    throw new Error("That password does not match this wallet");
+  }
+
   async signHash(hashBuffer) {
     const sig = await this.signer.signHash(hashBuffer);
     return Buffer.from(sig).toString("base64");

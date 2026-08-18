@@ -86,7 +86,9 @@
    * that answer 403 and look like a bug. */
   function paintPrivacy(s) {
     var blocked = s.chainReadsAllowed === false;
-    var ids = ["btn-koinos-watch", "koinos-watch", "btn-koinos-rpc", "koinos-rpc"];
+    var ids = ["btn-koinos-watch", "koinos-watch", "btn-koinos-rpc", "koinos-rpc",
+                 "btn-koinos-burn", "koinos-burn-amount", "koinos-burn-pass",
+                 "btn-koinos-key", "koinos-key", "koinos-key-pass"];
     for (var i = 0; i < ids.length; i++) {
       var el = $(ids[i]);
       if (el) el.disabled = blocked;
@@ -278,6 +280,72 @@
       // aim this at an arbitrary binary.
       if (window.kai && window.kai.openCompanion) window.kai.openCompanion();
       else window.open("https://github.com/therexdev/koinos-node/releases", "_blank");
+    });
+  }
+
+  /* Writes. Both sign, neither sends anything to anyone else — burning keeps
+   * the value at your own address, registering a key moves nothing. The
+   * password still travels on every call: the wallet unlocks itself at start-up
+   * from an OS-held secret, so "unlocked" is not evidence a person is here. */
+  function doWrite(opts) {
+    var amountEl = opts.amount ? $(opts.amount) : null;
+    var passEl = $(opts.pass);
+    var btn = $(opts.btn);
+    var body = { password: passEl ? passEl.value : "" };
+    if (opts.amount) body.amountKoin = amountEl ? amountEl.value.trim() : "";
+    if (opts.keyField) body.publicKey = ($(opts.keyField) || {}).value.trim();
+
+    if (opts.confirm && !window.confirm(opts.confirm(body))) return;
+
+    state.busy = true;
+    if (btn) btn.disabled = true;
+    setState(opts.stateId, "Working…", "");
+    show(opts.stateId, true);
+    jpost(opts.path, body)
+      .then(function (r) {
+        if (!r || r.ok === false) throw new Error((r && r.error) || "That did not go through");
+        setState(opts.stateId, opts.done(r), "good");
+        if (passEl) passEl.value = ""; // never leave a password sitting in the DOM
+        if (amountEl) amountEl.value = "";
+        return refresh({ force: true });
+      })
+      .catch(function (e) { setState(opts.stateId, String(e.message || e), "warn"); })
+      .then(function () {
+        state.busy = false;
+        if (btn) btn.disabled = false;
+      });
+  }
+
+  var burnBtn = $("btn-koinos-burn");
+  if (burnBtn) {
+    burnBtn.addEventListener("click", function () {
+      doWrite({
+        path: "/core/koinos/burn",
+        amount: "koinos-burn-amount",
+        pass: "koinos-burn-pass",
+        btn: "btn-koinos-burn",
+        stateId: "koinos-burn-state",
+        confirm: function (b) {
+          return "Burn " + (b.amountKoin || "0") + " KOIN into VHP at your own address?\n\n" +
+            "The KOIN becomes VHP and stays yours. This cannot be undone directly — " +
+            "VHP converts back to KOIN gradually as your node produces blocks.";
+        },
+        done: function (r) { return "Burned " + (Number(r.amountSat) / 1e8) + " KOIN. Transaction " + String(r.txId).slice(0, 16) + "…"; },
+      });
+    });
+  }
+
+  var keyBtn = $("btn-koinos-key");
+  if (keyBtn) {
+    keyBtn.addEventListener("click", function () {
+      doWrite({
+        path: "/core/koinos/register-key",
+        keyField: "koinos-key",
+        pass: "koinos-key-pass",
+        btn: "btn-koinos-key",
+        stateId: "koinos-key-state",
+        done: function (r) { return "Registered for " + r.address + "."; },
+      });
     });
   }
 

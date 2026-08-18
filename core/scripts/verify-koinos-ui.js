@@ -132,6 +132,38 @@ async function run(label, hardware, fn, privacyMode) {
     ok("turning it off hides the nav item again", await page.locator("#nav-koinos").isHidden());
   });
 
+  // Stage 2 writes. Both sign; neither moves value to anyone else.
+  await run("writes: burn and register", { platform: "linux", arch: "x64", ramBytes: 32 * 1024 ** 3, diskFreeBytes: 200 * 1024 ** 3 }, async (page) => {
+    await page.locator("#btn-koinos-toggle").click();
+    await page.waitForTimeout(400);
+    await page.locator("#nav-koinos").click();
+    await page.waitForTimeout(500);
+
+    ok("a burn card exists", await page.locator("#koinos-card-burn").isVisible());
+    ok("…and asks for the password every time", await page.locator("#koinos-burn-pass").isVisible());
+    ok("a producer-key card exists", await page.locator("#koinos-card-producer").isVisible());
+    ok("…and asks for the password too", await page.locator("#koinos-key-pass").isVisible());
+
+    const burnCopy = (await page.locator("#koinos-card-burn").textContent());
+    ok("burn copy says the value STAYS at your own address", /at your own address/i.test(burnCopy));
+    ok("…and warns that mana is spent and refills slowly", /five days/i.test(burnCopy));
+
+    // Burning is deliberate: it asks before doing anything.
+    let asked = null;
+    page.on("dialog", (d) => { asked = d.message(); d.dismiss(); });
+    await page.locator("#koinos-burn-amount").fill("12.5");
+    await page.locator("#koinos-burn-pass").fill("whatever");
+    await page.locator("#btn-koinos-burn").click();
+    await page.waitForTimeout(400);
+    ok("burning asks for confirmation first", Boolean(asked), String(asked).split("\n")[0]);
+    ok("…and names the amount in the question", /12\.5 KOIN/.test(String(asked)));
+    ok("dismissing it does nothing at all", (await page.locator("#koinos-burn-state").isHidden()));
+
+    // Nothing anywhere offers to send KOIN to another address — that is stage 3.
+    const whole = await page.locator("#view-koinos").textContent();
+    ok("no send control exists yet", !/\bSend\b/.test(whole));
+  });
+
   // 2. The Raspberry Pi — the case the design cares most about getting honest.
   await run("arm64 Raspberry Pi, 8 GB RAM", { platform: "linux", arch: "arm64", ramBytes: 8 * 1024 ** 3, diskFreeBytes: 200 * 1024 ** 3 }, async (page) => {
     await page.locator("#btn-koinos-toggle").click();
@@ -165,6 +197,8 @@ async function run(label, hardware, fn, privacyMode) {
     ok("the address box is disabled", await page.locator("#koinos-watch").isDisabled());
     ok("…and so is its button", await page.locator("#btn-koinos-watch").isDisabled());
     ok("the node field is disabled too", await page.locator("#koinos-rpc").isDisabled());
+    ok("the burn button is disabled", await page.locator("#btn-koinos-burn").isDisabled());
+    ok("the register button is disabled", await page.locator("#btn-koinos-key").isDisabled());
     const hint = (await page.locator("#koinos-watch-hint").textContent()).trim();
     ok("it names Local-Only as the reason", /Local-Only/.test(hint), hint);
     ok("…and says how to change it", /Settings/.test(hint));

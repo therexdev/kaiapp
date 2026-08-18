@@ -368,7 +368,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
   // Koinos node tools. Constructed always, INERT until the Earn toggle flips
   // it on: nothing here opens a Provider or touches the network while off.
   const { KoinosService } = require("./lib/koinos");
-  const koinosSvc = new KoinosService({ settings, hardware: hw, dataDir, onEvent: events });
+  const koinosSvc = new KoinosService({ settings, hardware: hw, dataDir, wallet, onEvent: events });
   registerCalendarTools(registry, calendarSvc);
   // Node runtime for npx-based MCP servers — provisioned on demand so
   // "add a tool server" never dead-ends on "go install Node.js first".

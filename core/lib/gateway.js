@@ -411,6 +411,31 @@ class Gateway {
         return this._json(res, 400, { ok: false, error: String(e.message) });
       }
     }
+    // ---- writes. Both sign; NEITHER moves value to another address ----
+    // burn converts your KOIN into your own VHP; registering a key moves
+    // nothing at all. Sending is not here and is not implemented anywhere in
+    // this codebase. Both demand the wallet password IN THE BODY on every
+    // call, because core/server.js resumes an unlocked wallet at boot from an
+    // OS-held secret — "unlocked" never means a human is at the keyboard.
+    if (this.koinos && path === "/core/koinos/burn" && req.method === "POST") {
+      if (this._blockedByPrivacy(res, "Burning KOIN")) return;
+      const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+      try {
+        return this._json(res, 200, { ok: true, ...(await this.koinos.burn(body)) });
+      } catch (e) {
+        return this._json(res, 400, { ok: false, error: String(e.message) });
+      }
+    }
+    if (this.koinos && path === "/core/koinos/register-key" && req.method === "POST") {
+      if (this._blockedByPrivacy(res, "Registering a producer key")) return;
+      const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+      try {
+        return this._json(res, 200, { ok: true, ...(await this.koinos.registerKey(body)) });
+      } catch (e) {
+        return this._json(res, 400, { ok: false, error: String(e.message) });
+      }
+    }
+
     if (this.koinos && path === "/core/koinos/node" && req.method === "GET") {
       if (this._blockedByPrivacy(res, "Checking your Koinos node")) return;
       try {
