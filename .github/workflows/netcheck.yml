@@ -34,8 +34,14 @@ jobs:
       || contains(github.event.head_commit.message, '[netcheck]')
       || contains(github.event.head_commit.message, '[pricecheck]')
       || contains(github.event.head_commit.message, '[armcheck]')
+      || contains(github.event.head_commit.message, '[chaincheck]')
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        if: contains(github.event.head_commit.message, '[chaincheck]')
+      - name: Koinos RPC + DEX probe (chain constants live in kai lib/chain.js)
+        if: contains(github.event.head_commit.message, '[chaincheck]')
+        run: node core/scripts/chain-probe.js
       - name: Public network status
         run: |
           # Tolerant: never abort on the first slow endpoint — probe ALL of
