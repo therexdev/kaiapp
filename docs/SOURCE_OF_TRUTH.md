@@ -5,12 +5,14 @@
 > boot settlement repair, charge-time spend durability, firstSeen backfill; INERT owner
 > flags: `KAI_REPUTATION_ENFORCE=1` arms the anti-Sybil gate, `KAI_STORE=sqlite` cuts over
 > the transactional ledger — 22-agent adversarial review, 14 findings fixed pre-deploy).
-> App **v0.26.1 PUBLIC and SIGNED** (2026-08-17 16:17Z): VOICE INPUT shipped — push-to-talk
+> App **v0.27.5 PUBLIC and SIGNED** (see the workspace-sprint block below for what v0.27.x
+> added). v0.26.1 brought VOICE INPUT — push-to-talk
 > mic → on-device whisper.cpp v1.9.2 (pinned engine 8 MB + base.en model 148 MB, opt-in
 > setup, llama crash-guards reused, runner E2E-verified). Windows-first; ubuntu tarball
-> binPath already discovered for Linux follow-up. Release NOTE: v0.26.0 tag is DEBRIS
-> (create-release race shipped it linux-only; dist jobs now serialized in ci.yml —
-> build-windows needs build-linux; owner can delete the v0.26.0 release in the web UI).
+> binPath already discovered for Linux follow-up. Release NOTE: the v0.26.0 create-release
+> RACE (both dist jobs raced to create the release; windows 422'd and it shipped linux-only)
+> is FIXED — ci.yml serializes build-windows behind build-linux. The broken v0.26.0 release
+> was deleted by the owner 2026-08-17.
 > Previously v0.25.11 (2026-08-17 13:00Z; first Azure-signed release —
 > installer/portable/uninstaller/elevate all carry Authenticode, verified on the published
 > asset). Feature state (shipped v0.25.9→.11): chat FAVORITES + rename; WEB SEARCH in chat
@@ -20,7 +22,7 @@
 > (client-downscaled, content-parts on vision models only, clean refusals elsewhere, 👁
 > picker marker, graceful text-only degradation); READ-ALOUD via OS voices; typing-dots
 > loading animation + first-reply/tok-s meta; Linux/ARM engines (Pi) with RAM-gate parity.
-> **WORKSPACE SPRINT (dev branch, unreleased)**: unified TOOL LAYER in Core (/core/tools —
+> **WORKSPACE SPRINT (SHIPPED v0.27.x)**: unified TOOL LAYER in Core (/core/tools —
 > one registry + one policy point: egress tools refused in Local-Only, sensitive tools
 > require confirmed:true server-side, HTTP 428 contract); MEMORY across chats (all-local
 > TF-IDF store, 📌 Remember, auto-injection, Tools-view management); composer MODES
@@ -58,9 +60,10 @@
 > deployed 17:15Z; /api/health reports `store.mode=sqlite`, no `degraded`; bootCount 13→14,
 > clean SIGTERM, 3 workers back in <16s, job counts and ageDays carried through the
 > migration — proof the ledgers survived). Delivered by the repo-carried env channel
-> (deploy/app.env; on-box env always wins; no secrets). **Oracle rehearsal COMMITTED at
-> 4c31a1c on the kai dev branch, NOT yet deployed** — production push needs owner go
-> (permission gate); on deploy, /scheduler/pricing walks anchor→live over epochs.** This is the living record of what is
+> (deploy/app.env; on-box env always wins; no secrets). **Oracle rehearsal DEPLOYED**
+> (4c31a1c) — /scheduler/pricing walked anchor→live and has since been observed in
+> `stale-hold` (both aggregators unreachable 2026-08-17 23:30Z, holding $0.008345 rather
+> than snapping to the anchor: the designed behaviour, but the feeds need re-checking).** This is the living record of what is
 > BUILT, how it deploys, and the operational rules learned in the field. Spec authority
 > remains *Koinos AI — Master Source of Truth* Part I (owner's `.docx`); `§` references
 > point there. Planning history: `docs/V1_PLAN.md`, `docs/M2_PLAN.md`. When this doc and
@@ -390,6 +393,15 @@ for dev/screenshots).
      weights, shadow length, fingerprint binding. Two review fixes already applied to the shadow
      build (firstSeen type-hardening; paid-demand counts only genuinely-paid chats, not free-tier).
 5. ~~Public stats page~~ — SHIPPED 2026-08-16: `koinosai.com/network`.
+5b. **Public payout roster** — SHIPPED 2026-08-17 (kai `3b20c3f`):
+   `GET /scheduler/network/roster` returns FULL, de-duplicated addresses of live providers for
+   Free Koinos Node's community distribution (it pays them on chain, so a truncated address is
+   useless). Liveness is shared with `/network/status` via `_liveWorkers()` so the two can never
+   disagree. **This publishes every active provider's address — a deliberate owner decision
+   2026-08-17, reversing the truncation stance for this surface only.** `/network/status` still
+   truncates; do NOT "fix" the asymmetry. Probe: kai `scripts/probe-roster.js` (25 assertions,
+   fails on old code); live probe in the kaiapp netcheck job. Verified live: count 3, 0 truncated,
+   unique, `Cache-Control: no-store`, matching `workersOnline: 3`.
 6. **Economics (owner decisions MADE + deployed 2026-08-16, §4.11)**: bootstrap pool 1,500
    KAI/day, daily free tier + 1M/day global ceiling — LIVE. Still owner-gated: `KAI_TREASURY_ADDR`
    to activate splits (§F8); oracle live-source — **runbook ready** (`docs/oracle-rehearsal.md`),
@@ -404,10 +416,12 @@ for dev/screenshots).
 7. **Ops hardening (mainnet)** — SHIPPED: rotating state backups + operator export; `kai`
    scheduled monitor (issue/email on real failure); restart forensics on `/api/health` (§5).
    **Migrated koinosai.com to a self-managed Vultr VPS (§9)** — this fixed the mystery host
-   recycles AND the ~6-min deploy blackout (systemd restart is now sub-second). Remaining:
-   (a) re-establish an auto-deploy on the new box (branch push no longer ships — §9 "DEPLOY
-   MODEL CHANGED"); (b) move JSON ledgers to something with real durability; (c) decommission
-   the dormant Hostinger app once Vultr has proven stable (keep the plan for email DNS).
+   recycles AND the ~6-min deploy blackout (systemd restart is now sub-second).
+   ~~(a) re-establish auto-deploy~~ **DONE** — 1-min systemd timer polls the production branch
+   (`deploy/deploy.sh`), verified live repeatedly since. ~~(b) durable ledgers~~ **DONE** —
+   `KAI_STORE=sqlite` live since ad421ae, `/api/health` reports `store.mode=sqlite`, job counts
+   and ageDays carried through the migration. Remaining: (c) decommission the dormant Hostinger
+   app once Vultr has proven stable (keep the plan for email DNS).
 8. Parked: async self-test (spawn vs spawnSync), Compare presets, deep-research surface,
    Microsoft Store distribution, kaiapp scheduler-mirror resync-or-retire (§5).
 
