@@ -10,6 +10,32 @@ const crypto = require("crypto");
  * the loop checks a flag between polls and in-flight work finishes cleanly.
  */
 class Worker {
+  /**
+   * §7.4 anti-Sybil signal #3 — a deterministic DEVICE fingerprint: the hash
+   * of hardware facts that don't change between runs (chip, cores, memory,
+   * GPUs, platform). Two wallets on one machine hash the same; a fleet of
+   * clones on identical VMs also hashes the same — which is exactly the
+   * point: fingerprint collisions are a SIGNAL for the reputation shadow,
+   * never an automatic verdict. Self-reported and spoofable by a modified
+   * client, like every other single signal — the gate design stacks them.
+   * Coarse by construction: nothing here identifies a person or a serial
+   * number, and it never leaves the machine except toward the scheduler
+   * the user opted into earning with.
+   */
+  static fingerprint(hw) {
+    const crypto = require("crypto");
+    const parts = [
+      hw?.platform ?? "",
+      hw?.arch ?? "",
+      hw?.cpu?.model ?? "",
+      String(hw?.cpu?.cores ?? ""),
+      // Rounded GB, not bytes: byte counts wobble with firmware/OS carve-outs.
+      String(hw?.ramBytes ? Math.round(hw.ramBytes / 1e9) : ""),
+      ...(Array.isArray(hw?.gpus) ? hw.gpus.map((g) => g?.name ?? g?.model ?? "").sort() : []),
+    ];
+    return crypto.createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 16);
+  }
+
   constructor({ schedulerUrl, wallet, runtime, hardware, models, onEvent }) {
     this.schedulerUrl = String(schedulerUrl || "").replace(/\/$/, "");
     this.wallet = wallet; // WalletService (unlocked)
@@ -79,6 +105,9 @@ class Worker {
           // or modified clients.
           capabilities: { ...(this.hardware?.capabilities ?? {}), ...(ramGb ? { ramGb: Math.round(ramGb) } : {}) },
           models: ready,
+          // §7.4 anti-Sybil signal #3 (SHADOW): many wallets on one device —
+          // or one device image cloned across a fleet — collide here.
+          fingerprint: Worker.fingerprint(this.hardware),
         }),
       });
       const j = await r.json();
