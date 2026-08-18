@@ -69,5 +69,38 @@ async function rpc(url, method, params = {}) {
     console.log(`DEX tradekoinos.com unreachable — ${String(e.message || e).slice(0, 100)}`);
   }
 
+  // The KAI settlement contract production is configured against
+  // (foundation testnet, id 149Yv…). Read-only koilib calls: token identity,
+  // supply, and whether recent epochs' Merkle roots actually landed on-chain
+  // — the difference between "settlement works" and "settlement fails
+  // quietly every epoch".
+  try {
+    const { Provider, Contract } = require("koilib");
+    const abi = JSON.parse(require("fs").readFileSync("contracts/kai/abi/kai-abi.json", "utf8"));
+    for (const m of Object.values(abi.methods)) {
+      m.entry_point = m.entry_point ?? m.entryPoint;
+      m.argument = m.argument ?? m.input;
+      m.return = m.return ?? m.output;
+      m.read_only = m.read_only ?? m.readOnly ?? false;
+    }
+    const provider = new Provider(["https://testnet.koinosfoundation.org/jsonrpc"]);
+    const kai = new Contract({ id: "149YvYQfj4MNaFecd7Rm3Z2rK6y2fkPYXz", abi, provider });
+    const read = async (fn, args = {}) => (await kai.functions[fn](args)).result;
+    const name = await read("name");
+    const symbol = await read("symbol");
+    const supply = await read("total_supply");
+    console.log(`KAI CONTRACT name=${name?.value} symbol=${symbol?.value} total_supply=${supply?.value ?? "0"}`);
+
+    // Which epoch is production on? Then check the last few for roots.
+    const cur = await fetch("https://koinosai.com/scheduler/epoch/current", { signal: AbortSignal.timeout(10000) }).then((r) => r.json());
+    console.log(`SCHEDULER epoch=${cur.epoch} receipts=${cur.receipts}`);
+    for (let e = Math.max(1, cur.epoch - 5); e < cur.epoch; e++) {
+      const root = await read("get_root", { epoch: String(e) }).catch((err) => ({ error: String(err.message).slice(0, 80) }));
+      console.log(`ROOT epoch=${e} ${root?.error ? "ERR " + root.error : root?.value ? "ON-CHAIN " + Buffer.from(root.value, "base64url").toString("hex").slice(0, 16) + "…" : "MISSING"}`);
+    }
+  } catch (e) {
+    console.log(`KAI CONTRACT read failed — ${String(e.message || e).slice(0, 140)}`);
+  }
+
   console.log(`CHAINCHECK ${live ? "OK" : "NO-LIVE-RPC"} live=${live}`);
 })();

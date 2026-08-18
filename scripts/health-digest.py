@@ -37,13 +37,23 @@ print(f"STATE bootAt={rt.get('bootAt')} bootCount={rt.get('bootCount')} lastExit
 _, _, s = get("/scheduler/network/status")
 ws = s.get("workers", [])
 check(s.get("workersOnline", 0) > 0, "workers online", str(s.get("workersOnline")))
-check(all(w.get("perf") for w in ws), "perf populated on every worker")
+# A worker that JOINED MINUTES AGO legitimately has perf=null until its first
+# job lands (field event 2026-08-18: a fresh 4th worker crashed this script
+# and failed the perf check). New = under ~2.4h old; established workers with
+# no perf still FAIL.
+def is_new(w):
+    age = (w.get("reputation") or {}).get("ageDays")
+    return age is not None and age < 0.1
+seasoned = [w for w in ws if not is_new(w)]
+fresh = [w for w in ws if is_new(w)]
+check(all(w.get("perf") for w in seasoned), "perf populated on every established worker",
+      f"{len(fresh)} brand-new worker(s) excused" if fresh else "")
 ages = [(w["address"], w.get("reputation", {}).get("ageDays")) for w in ws]
 check(all(a is not None and a > 0 for _, a in ages), "ageDays accumulating on ALL workers",
       " ".join(f"{a}:{d}" for a, d in ages))
 check(s.get("queueDepth", 0) < 50, "queue not backed up", f"queue={s.get('queueDepth')} pending={s.get('pendingJobs')}")
 print("STATE instance=%s epoch_jobs=%s" % (s.get("instance"), [w.get("jobsThisEpoch") for w in ws]))
-print("STATE perf_jobs=%s" % [w.get("perf", {}).get("jobs") for w in ws])
+print("STATE perf_jobs=%s" % [(w.get("perf") or {}).get("jobs") for w in ws])
 print("STATE ageDays=%s" % [d for _, d in ages])
 
 rst, rhdr, r = get("/scheduler/network/roster")
