@@ -82,6 +82,13 @@ jobs:
             || echo "(pricing endpoint unreachable)"
           echo
           exit 0
+      - uses: actions/checkout@v4
+      - name: Health digest (assertions run HERE, not in a reader's head)
+        # The raw dumps above are for forensics. This step does the actual
+        # scheduled-stability assertions on the runner and prints ~25 lines,
+        # so a check is read at a glance instead of by scrolling 300 lines of
+        # JSON. STATE lines carry the values worth diffing between checks.
+        run: python3 scripts/health-digest.py
       - name: ARM64 engine availability (Pi support — runtime catalog candidates)
         if: contains(github.event.head_commit.message, '[armcheck]')
         run: |

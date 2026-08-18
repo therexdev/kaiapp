@@ -1,0 +1,66 @@
+import json, sys, urllib.request, datetime
+
+B = "https://koinosai.com"
+def get(p, raw=False):
+    with urllib.request.urlopen(B + p, timeout=20) as r:
+        body = r.read().decode()
+        return (r.status, dict(r.headers), body if raw else json.loads(body))
+
+fails, warns = [], []
+def check(cond, label, detail=""):
+    (print if cond else print)(f"{'PASS' if cond else 'FAIL'}  {label}{' — ' + detail if detail else ''}")
+    if not cond: fails.append(label)
+def warn(cond, label, detail=""):
+    if not cond:
+        print(f"WARN  {label}{' — ' + detail if detail else ''}"); warns.append(label)
+    else: print(f"PASS  {label}{' — ' + detail if detail else ''}")
+
+now = datetime.datetime.now(datetime.timezone.utc)
+def age_min(iso):
+    t = datetime.datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    return (now - t).total_seconds() / 60
+
+st, hdr, _ = get("/", raw=True)
+check(st == 200, "site answers 200", f"HTTP {st}")
+check("caddy" in str(hdr.get("Via", "")).lower() or "caddy" in str(hdr.get("Server", "")).lower(),
+      "served by Caddy (Vultr origin)", str(hdr.get("Via") or hdr.get("Server")))
+
+_, _, h = get("/api/health")
+rt = h.get("runtime", {}); store = h.get("store", {}); lx = rt.get("lastExit") or {}
+check(h.get("ok") is True, "health ok")
+check(store.get("mode") == "sqlite", "store.mode", store.get("mode"))
+check("degraded" not in store, "store NOT degraded", str(store.get("degraded", "")))
+check(isinstance(rt.get("bootCount"), int) and 0 < rt["bootCount"] < 10000, "bootCount sane", str(rt.get("bootCount")))
+check("uncaughtException" not in str(lx.get("reason", "")), "clean last exit", str(lx.get("reason")))
+print(f"STATE bootAt={rt.get('bootAt')} bootCount={rt.get('bootCount')} lastExit={lx.get('reason')}@{lx.get('at')}")
+
+_, _, s = get("/scheduler/network/status")
+ws = s.get("workers", [])
+check(s.get("workersOnline", 0) > 0, "workers online", str(s.get("workersOnline")))
+check(all(w.get("perf") for w in ws), "perf populated on every worker")
+ages = [(w["address"], w.get("reputation", {}).get("ageDays")) for w in ws]
+check(all(a is not None and a > 0 for _, a in ages), "ageDays accumulating on ALL workers",
+      " ".join(f"{a}:{d}" for a, d in ages))
+check(s.get("queueDepth", 0) < 50, "queue not backed up", f"queue={s.get('queueDepth')} pending={s.get('pendingJobs')}")
+print("STATE instance=%s epoch_jobs=%s" % (s.get("instance"), [w.get("jobsThisEpoch") for w in ws]))
+print("STATE perf_jobs=%s" % [w.get("perf", {}).get("jobs") for w in ws])
+print("STATE ageDays=%s" % [d for _, d in ages])
+
+rst, rhdr, r = get("/scheduler/network/roster")
+r = json.loads(r) if isinstance(r, str) else r
+check(r.get("count") == s.get("workersOnline"), "roster count tracks workersOnline",
+      f"{r.get('count')} vs {s.get('workersOnline')}")
+check(not any("…" in a for a in r.get("workers", [])), "no truncated address on the payout roster")
+check(rhdr.get("Cache-Control") == "no-store", "roster is no-store", rhdr.get("Cache-Control"))
+
+_, _, p = get("/scheduler/pricing")
+o = p.get("oracle", {}); sm = o.get("smoothing", {})
+warn(o.get("status") == "live", "oracle status", o.get("status"))
+check(sm.get("floorUsd", 0) <= o.get("usd", 0) <= sm.get("ceilUsd", 0), "price inside floor/ceil", str(o.get("usd")))
+warn(age_min(o["updatedAt"]) < 20, "oracle fresh", f"{age_min(o['updatedAt']):.1f} min old")
+check(o.get("sources", 0) >= 2, "two price sources configured", str(o.get("sources")))
+print(f"STATE oracle={o.get('status')} usd={o.get('usd')} median={o.get('lastMedian')} updatedAt={o.get('updatedAt')}")
+
+print(f"\nDIGEST {'FAIL' if fails else ('WARN' if warns else 'HEALTHY')} fails={len(fails)} warns={len(warns)}")
+if fails: print("FAILING: " + "; ".join(fails))
+if warns: print("WARNING: " + "; ".join(warns))
