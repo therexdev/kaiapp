@@ -67,7 +67,10 @@
     ]
   },
   "dependencies": {
+    "@noble/hashes": "^1.8.0",
+    "@noble/secp256k1": "^1.7.2",
     "electron-updater": "^6.8.9",
+    "ethers": "^6.17.0",
     "imapflow": "^1.7.1",
     "koilib": "^9.3.0",
     "mailparser": "^3.9.15",

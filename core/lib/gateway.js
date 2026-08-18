@@ -67,7 +67,7 @@ function hasImageParts(messages) {
 }
 
 class Gateway {
-  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, earn, network, feedback, chats, docs, voice, tools, memory, mcp, nodeRuntime, email, calendar, koinos, onEvent }) {
+  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, earn, network, feedback, chats, docs, voice, tools, memory, mcp, nodeRuntime, email, calendar, koinos, koinosNode, onEvent }) {
     this.tools = tools || null; // unified tool registry (agents/MCP/memory/…)
     this.memory = memory || null; // cross-chat memory store
     this.mcp = mcp || null; // MCP server manager
@@ -75,6 +75,7 @@ class Gateway {
     this.email = email || null; // IMAP/SMTP service
     this.calendar = calendar || null; // CalDAV service
     this.koinos = koinos || null; // Koinos node tools — off unless the user flips the Earn toggle
+    this.koinosNode = koinosNode || null; // the full node stack: Docker, setup, onramp, swaps
     this.voice = voice || null; // local speech-to-text (whisper)
     this.feedback = feedback || null; // relay to the project's feedback inbox
     this.chats = chats || null; // local chat history store
@@ -411,6 +412,25 @@ class Gateway {
         return this._json(res, 400, { ok: false, error: String(e.message) });
       }
     }
+    // ---- the Koinos node, in full ----
+    // One route carrying Koinos Node Desktop's entire handler surface (64
+    // channels: docker node lifecycle, guided WSL/Docker setup, wallet, burn,
+    // producer registration, rewards, the onramp, the bridge and the swap
+    // path). Hand-writing 64 routes would have been 64 chances to drop one.
+    // Money still moves only where the password is proved — see koinos-node.js.
+    if (this.koinosNode && path === "/core/koinos/rpc" && req.method === "POST") {
+      if (this._blockedByPrivacy(res, "The Koinos node")) return;
+      const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+      try {
+        return this._json(res, 200, { ok: true, data: await this.koinosNode.call(body.channel, body.payload) });
+      } catch (e) {
+        return this._json(res, 400, { ok: false, error: String(e.message) });
+      }
+    }
+    if (this.koinosNode && path === "/core/koinos/channels" && req.method === "GET") {
+      return this._json(res, 200, { ok: true, channels: this.koinosNode.list() });
+    }
+
     // ---- writes. Both sign; NEITHER moves value to another address ----
     // burn converts your KOIN into your own VHP; registering a key moves
     // nothing at all. Sending is not here and is not implemented anywhere in

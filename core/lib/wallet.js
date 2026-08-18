@@ -20,6 +20,7 @@ class WalletService {
     this.walletDir = walletDir;
     this.keystorePath = path.join(walletDir, "wallet.json");
     this._signer = null;
+    this._ethAddress = null;
   }
 
   readKeystore() {
@@ -40,6 +41,7 @@ class WalletService {
       exists: !!ks,
       unlocked: !!this._signer,
       address: this._signer ? this._signer.getAddress() : (ks?.address ?? null),
+      ethAddress: this.ethAddress,
       createdAt: ks?.createdAt ?? null,
     };
   }
@@ -47,6 +49,50 @@ class WalletService {
   get signer() {
     if (!this._signer) throw new Error("Wallet is locked");
     return this._signer;
+  }
+
+  /*
+   * The SAME key, seen from Ethereum.
+   *
+   * The Vortex bridge and the swap route run on Ethereum, so funding needs an
+   * ETH address — but not a second wallet. Both are derived from this one
+   * secp256k1 private key, so one backup code still restores everything and
+   * there is exactly one thing for a user to lose.
+   *
+   * The address is cached in the keystore because it is public and useful to
+   * show while the wallet is locked. The private key is derived on demand and
+   * never stored.
+   */
+  get ethAddress() {
+    return this._ethAddress ?? this.readKeystore()?.ethAddress ?? null;
+  }
+
+  ethPrivateKey() {
+    if (!this._signer) throw new Error("Wallet is locked");
+    const { deriveEthPrivateKey } = require("./koinos/eth");
+    return deriveEthPrivateKey(this._koinosPrivHex(this._signer));
+  }
+
+  _koinosPrivHex(signer) {
+    return String(signer.getPrivateKey("hex")).replace(/^0x/i, "").padStart(64, "0");
+  }
+
+  /** Fill in the ETH address for a wallet created before funding existed, so
+   *  nobody has to re-import to use the onramp. */
+  _ensureEthAddress() {
+    if (this._ethAddress || !this._signer) return this._ethAddress;
+    try {
+      const { deriveEthAddress } = require("./koinos/eth");
+      this._ethAddress = deriveEthAddress(this._koinosPrivHex(this._signer));
+      const ks = this.readKeystore();
+      if (ks && ks.ethAddress !== this._ethAddress) {
+        ks.ethAddress = this._ethAddress;
+        fs.writeFileSync(this.keystorePath, JSON.stringify(ks, null, 2), { mode: 0o600 });
+      }
+    } catch {
+      /* funding is optional; never let it break unlocking */
+    }
+    return this._ethAddress;
   }
 
   get address() {
@@ -102,6 +148,7 @@ class WalletService {
     }
     this._persist(signer, password);
     this._signer = signer;
+    this._ensureEthAddress();
     // WIF returned once so the user can write down a backup (Advanced flow).
     return { address: signer.getAddress(), wif: signer.getPrivateKey("wif") };
   }
@@ -124,6 +171,7 @@ class WalletService {
     const signer = this._signerFromWif(wif);
     this._persist(signer, password);
     this._signer = signer;
+    this._ensureEthAddress();
     return { address: signer.getAddress() };
   }
 
@@ -140,6 +188,7 @@ class WalletService {
     }
     this._persist(signer, password);
     this._signer = signer;
+    this._ensureEthAddress();
     return { address: signer.getAddress(), restored: true };
   }
 
@@ -164,6 +213,7 @@ class WalletService {
     for (const candidate of variants) {
       try {
         this._signer = this._signerFromKeystore(candidate);
+        this._ensureEthAddress();
         return { address: this._signer.getAddress() };
       } catch (e) {
         lastErr = e;

@@ -369,6 +369,10 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
   // it on: nothing here opens a Provider or touches the network while off.
   const { KoinosService } = require("./lib/koinos");
   const koinosSvc = new KoinosService({ settings, hardware: hw, dataDir, wallet, onEvent: events });
+  // The FULL node stack — Docker lifecycle, guided WSL/Docker setup, onramp,
+  // bridge, swaps, rewards. It uses THIS wallet; there is no second one.
+  const { createKoinosNode } = require("./lib/koinos-node");
+  const koinosNodeSvc = createKoinosNode({ dataDir, wallet, appVersion: VERSION, onEvent: events });
   registerCalendarTools(registry, calendarSvc);
   // Node runtime for npx-based MCP servers — provisioned on demand so
   // "add a tool server" never dead-ends on "go install Node.js first".
@@ -403,6 +407,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     email: emailSvc,
     calendar: calendarSvc,
     koinos: koinosSvc,
+    koinosNode: koinosNodeSvc,
     chats: new ChatStore(path.join(dataDir, "chats")),
     docs: new (require("./lib/docs").DocStore)(path.join(dataDir, "docs")),
     coreInfo: () => ({ version: VERSION, dataDir, hardware: hw }),
