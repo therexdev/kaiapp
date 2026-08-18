@@ -98,6 +98,17 @@ async function rpc(url, method, params = {}) {
       const root = await read("get_root", { epoch: String(e) }).catch((err) => ({ error: String(err.message).slice(0, 80) }));
       console.log(`ROOT epoch=${e} ${root?.error ? "ERR " + root.error : root?.value ? "ON-CHAIN " + Buffer.from(root.value, "base64url").toString("hex").slice(0, 16) + "…" : "MISSING"}`);
     }
+    // Contract id == operator address (Koinos uploads to the signer), so the
+    // account paying for settlement can be checked for fuel: recent roots all
+    // MISSING with a LIVE RPC smells like an operator out of testnet mana.
+    const { utils } = require("koilib");
+    const rc = await rpc("https://testnet.koinosfoundation.org/jsonrpc", "chain.get_account_rc", {
+      account: utils.decodeBase58("149YvYQfj4MNaFecd7Rm3Z2rK6y2fkPYXz").toString("base64url"),
+    });
+    console.log(`OPERATOR rc(mana)=${rc.result?.rc ?? "0"} ${rc.error ? "err=" + rc.error : ""}`);
+    const tkoin = new Contract({ id: "1FaSvLjQJsCJKq5ybmGsMMQs8RQYyVv8ju", abi: utils.tokenAbi, provider });
+    const bal = (await tkoin.functions.balanceOf({ owner: "149YvYQfj4MNaFecd7Rm3Z2rK6y2fkPYXz" })).result;
+    console.log(`OPERATOR tKOIN balance=${bal?.value ?? "0"}`);
   } catch (e) {
     console.log(`KAI CONTRACT read failed — ${String(e.message || e).slice(0, 140)}`);
   }
