@@ -804,6 +804,7 @@ function createKoinosNode({ dataDir, wallet, appVersion, onEvent = () => {} }) {
       clearInterval(bridgeTimer);
       clearInterval(routeCTimer);
       try { rewards.stop(); } catch { /* already stopped */ }
+      try { setup.stopWatchers(); } catch { /* none armed */ }
     },
   };
 }

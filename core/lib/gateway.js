@@ -837,12 +837,19 @@ class Gateway {
         return this._json(res, 400, { error: { message: "Body must be JSON", type: "invalid_request_error" } });
       }
       let endpoint;
+      let releaseHold = () => {};
       try {
-        endpoint = await this.runtime.ensure(alias);
+        if (this.runtime.acquireFor) {
+          const hold = await this.runtime.acquireFor(alias);
+          endpoint = hold.endpoint;
+          releaseHold = hold.release;
+        } else {
+          endpoint = await this.runtime.ensure(alias);
+        }
       } catch (e) {
         return this._json(res, 400, { error: { message: String(e.message), type: "invalid_request_error" } });
       }
-      return this._proxy(endpoint, "/v1/embeddings", raw, req, res);
+      return this._proxy(endpoint, "/v1/embeddings", raw, req, res).finally(releaseHold);
     }
 
     if (path.startsWith("/v1/")) {
@@ -945,8 +952,18 @@ class Gateway {
     }
 
     let endpoint;
+    // Hold the engine for the life of this response: without the hold, a
+    // network job for another model class stops the llama-server this chat
+    // is still streaming from, and the answer dies mid-sentence.
+    let releaseHold = () => {};
     try {
-      endpoint = await this.runtime.ensure(alias);
+      if (this.runtime.acquireFor) {
+        const hold = await this.runtime.acquireFor(alias);
+        endpoint = hold.endpoint;
+        releaseHold = hold.release;
+      } else {
+        endpoint = await this.runtime.ensure(alias);
+      }
     } catch (e) {
       // §7 routing order: privacy → spending → capability. Capability just
       // failed locally; the network is used only when the privacy mode
@@ -977,7 +994,7 @@ class Gateway {
               costMicro: 0,
             })
         : null,
-    });
+    }).finally(releaseHold);
   }
 
   /**

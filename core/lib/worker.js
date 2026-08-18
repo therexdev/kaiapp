@@ -288,7 +288,19 @@ class Worker {
     if (job.type !== "inference-eval" && job.type !== "chat") {
       throw new Error(`Unapproved job type: ${job.type}`);
     }
-    const endpoint = await this.runtime.ensure(job.model);
+    // Hold the engine for the whole stream: a job for another model class
+    // switching engines mid-generation is what cut network answers off.
+    const hold = this.runtime.acquireFor
+      ? await this.runtime.acquireFor(job.model)
+      : { endpoint: await this.runtime.ensure(job.model), release: () => {} };
+    try {
+      return await this._executeOn(hold.endpoint, job, onDelta);
+    } finally {
+      hold.release();
+    }
+  }
+
+  async _executeOn(endpoint, job, onDelta) {
     const served = this.runtime.servedModelName?.() ?? job.model;
     // chat = a relayed consumer request (§46.5); eval = protocol-funded (§16).
     const messages = job.type === "chat" && Array.isArray(job.messages)

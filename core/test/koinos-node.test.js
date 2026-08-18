@@ -232,3 +232,63 @@ test("setup: Start Docker installs Docker Desktop when the app is missing (field
   assert.strictEqual(started.started, true, String(started.error || ""));
   assert.strictEqual(installs, 1, "no second install");
 });
+
+test("setup: when the installer finishes, Docker is detected and started unprompted (field report)", async () => {
+  const { SetupService } = require("../lib/koinos/setup");
+  const { JsonStore } = require("../lib/store");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-postinstall-"));
+  const events = [];
+  const setup = new SetupService({
+    platform: "win32",
+    arch: "x64",
+    downloadDir: path.join(dir, "dl"),
+    state: new JsonStore(path.join(dir, "state.json"), {}),
+    onEvent: (e) => events.push(e),
+  });
+  setup._installPollMs = 30; // fast polls for the test
+  setup._dockerAppFromRegistry = async () => null;
+
+  // The field timeline: watcher armed while the installer's UI is still up…
+  let appOnDisk = null;
+  let started = 0;
+  setup._dockerAppInstalled = () => appOnDisk;
+  setup.startDocker = async () => { started += 1; return { started: true }; };
+  setup._watchInstallDone();
+
+  await new Promise((r) => setTimeout(r, 120));
+  assert.strictEqual(started, 0, "nothing starts while the installer is still running");
+
+  // …then the installer finishes and Docker Desktop lands on disk.
+  appOnDisk = path.join(dir, "Docker Desktop.exe");
+  await new Promise((r) => setTimeout(r, 200));
+  assert.strictEqual(started, 1, "Docker is started without the user doing anything");
+  assert.ok(events.some((e) => /installed — starting it now/i.test(e.message || "")), "…and the app says so");
+
+  setup.stopWatchers();
+});
+
+test("setup: the Windows registry finds a Docker Desktop installed anywhere (field report)", async () => {
+  const { SetupService } = require("../lib/koinos/setup");
+  const { JsonStore } = require("../lib/store");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-reg-"));
+  const exe = path.join(dir, "Docker Desktop.exe");
+  fs.writeFileSync(exe, "");
+  const setup = new SetupService({
+    platform: "win32",
+    arch: "x64",
+    downloadDir: path.join(dir, "dl"),
+    state: new JsonStore(path.join(dir, "state.json"), {}),
+    onEvent: () => {},
+  });
+  // Custom install location: none of the hardcoded paths exist, only the
+  // uninstall registry entry knows where it went.
+  setup._dockerAppInstalled = () => null;
+  setup._exec = async (bin, args) =>
+    bin === "reg" && args[1].startsWith("HKLM")
+      ? { ok: true, stdout: `\n    InstallLocation    REG_SZ    ${dir}\n`, stdoutRaw: Buffer.from(`\n    InstallLocation    REG_SZ    ${dir}\n`) }
+      : { ok: false, stdout: "", stderr: "", stdoutRaw: Buffer.alloc(0) };
+
+  assert.strictEqual(await setup._dockerApp(), exe, "the registry locates the install");
+  const d = await setup.detectDocker().catch(() => null);
+  assert.ok(d && d.installed && d.appPath === exe, "detectDocker reports it installed there");
+});

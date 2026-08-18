@@ -25,6 +25,9 @@ class RuntimeManager {
     this._testedBins = new Set(); // self-test once per binary per session
     this._failedTests = new Map(); // binPath -> error message: a crash is remembered, never re-run
     this._llamaDead = false; // full ladder failure this session: go straight to the fallback
+    this._inflight = 0; // generations currently streaming from the active runtime
+    this._drainWaiters = []; // switches parked until the count reaches zero
+    this.drainMaxMs = 120000; // a switch never waits longer than this on a stream
   }
 
   /** Name the active runtime serves the model under (null = passthrough). */
@@ -101,6 +104,54 @@ class RuntimeManager {
     }
   }
 
+  /**
+   * ensure() plus a hold on the runtime: while the hold is open, a model
+   * switch WAITS instead of stopping the engine. Field report: answers cut
+   * off mid-sentence while serving the network — a job for another class
+   * called ensure(), which stopped the llama-server the previous answer was
+   * still streaming from. Every serving path takes a hold now.
+   */
+  async acquireFor(alias) {
+    for (;;) {
+      const endpoint = await this.ensure(alias);
+      // ensure() awaited — but a switch may have won the race in between.
+      // The check-and-increment below is synchronous, so once it passes,
+      // _load()'s drain sees this hold.
+      if (this.activeAlias === alias && this.runtime?.status().running) {
+        this._inflight += 1;
+        let done = false;
+        return {
+          endpoint,
+          release: () => {
+            if (done) return; // release() in a finally can run twice
+            done = true;
+            this._inflight -= 1;
+            if (this._inflight <= 0) {
+              this._inflight = 0;
+              for (const w of this._drainWaiters.splice(0)) w();
+            }
+          },
+        };
+      }
+    }
+  }
+
+  /** Wait until nothing is streaming, or the cap runs out — a switch must
+   *  never hang forever behind an abandoned connection. */
+  async _drain() {
+    if (this._inflight <= 0) return;
+    this.onEvent({ type: "runtime:draining", inflight: this._inflight });
+    await new Promise((resolve) => {
+      // NOT unref'd: this bounded timer is the switch's only guaranteed
+      // exit, so it must keep the event loop alive until it fires.
+      const timer = setTimeout(resolve, this.drainMaxMs);
+      this._drainWaiters.push(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  }
+
   async _load(alias) {
     const resolved = this.models.resolveAlias(alias);
     const modelPath = await this.models.ensurePackage(resolved.packageId);
@@ -135,6 +186,9 @@ class RuntimeManager {
     }
 
     if (this.runtime) {
+      // Let whatever is still streaming from this engine finish first —
+      // stopping it here is what cut answers off mid-sentence.
+      await this._drain();
       this.onEvent({ type: "runtime:switching", from: this.activeAlias, to: alias });
       this.runtime.stop();
       this.runtime = null;
@@ -240,13 +294,22 @@ class RuntimeManager {
           const badReason = typeof bad === "string" ? bad : bad?.reason; // pre-0.22.1 entries were plain strings
           const badVersion = typeof bad === "string" ? null : bad?.appVersion;
           if (badReason && badVersion === (this.appVersion || null)) {
-            rungErrors.push(`[${cap}] skipped — crashed self-test on this machine before (${badReason})`);
+            rungErrors.push(`[${cap}] skipped — crashed on this machine before (${badReason})`);
             continue;
           }
           return await boot(binPath, cap === "cpu" ? 0 : 999, cap);
         } catch (e) {
           rungErrors.push(`[${cap}] ${String(e.message)}`);
-          if (this.state && /self-test failed/i.test(String(e.message)) && cap !== "cpu") {
+          // Two machine-stable signatures are worth remembering: a crashed
+          // self-test, and a HARD crash at real startup (Windows access
+          // violations arrive as 32212xxxxx exit codes; POSIX as SIGSEGV/
+          // SIGILL). Field log: the Vulkan build passed its self-test and
+          // then died with 0xC0000005 on EVERY model switch, riding the
+          // crash-then-fallback ladder several times a minute. A plain
+          // "exited during startup" without those codes stays retryable —
+          // port conflicts and OOM are transient.
+          const hardCrash = /exit code 32212\d+|SIGSEGV|SIGILL/i.test(String(e.message));
+          if (this.state && (hardCrash || /self-test failed/i.test(String(e.message))) && cap !== "cpu") {
             const bad = this.state.get("badBuilds", {});
             try {
               bad[await this.provisioner.ensure(kind, { cap })] = {
