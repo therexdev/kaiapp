@@ -166,9 +166,50 @@ class Gateway {
     return Buffer.concat(chunks);
   }
 
+  /*
+   * Cross-site guard for the control plane.
+   *
+   * /core/* has no API key by design — it IS the app talking to itself — and
+   * bodies are JSON.parsed without a content-type check. That combination was
+   * exploitable: `content-type: text/plain` is CORS-safelisted, so a POST from
+   * ANY page the user happened to be visiting was a "simple request", sent
+   * without a preflight, and parsed as JSON. The attacker cannot read the
+   * reply, but the side effect already happened — including /core/tools/call,
+   * whose `confirmed` flag comes straight off the request body and would have
+   * walked through the confirm-before-use gate.
+   *
+   * The rule has to admit three legitimate callers and refuse the browser:
+   *   · the renderer, which Electron loads FROM this server (main.js:110), so
+   *     its Origin is our own;
+   *   · the Electron main process, whose Node fetch sends no Origin at all;
+   *   · local scripts and other apps on the machine — likewise no Origin.
+   * A browser is the only caller that stamps a foreign Origin, and it cannot
+   * lie about it. So: absent Origin passes, matching Origin passes, anything
+   * else is refused. Sec-Fetch-Site is belt and braces — browsers always set
+   * it, non-browsers never do.
+   */
+  _sameSite(req) {
+    const site = String(req.headers["sec-fetch-site"] || "");
+    if (site && site !== "same-origin" && site !== "none") return false;
+    const origin = req.headers.origin;
+    if (!origin) return true; // not a browser fetch
+    const ours = new Set([`http://127.0.0.1:${this.port}`, `http://localhost:${this.port}`]);
+    return ours.has(String(origin));
+  }
+
   async _route(req, res) {
     const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
     const path = url.pathname;
+
+    // The control plane is for this app only. /v1/* is deliberately left open
+    // to local callers (that is the point of an OpenAI-compatible endpoint)
+    // and is guarded by an API key once one exists.
+    if (path.startsWith("/core/") && !this._sameSite(req)) {
+      return this._json(res, 403, {
+        ok: false,
+        error: "Refused: this endpoint only answers Koinos AI itself, not another site.",
+      });
+    }
 
     // ----- control plane -----
     if (path === "/core/health" && req.method === "GET") {
