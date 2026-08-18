@@ -198,7 +198,12 @@ test("runtime manager falls back to CPU when the CUDA path fails", async () => {
     hardware: { capabilities: { cudaEligible: true } },
     onEvent: () => {},
   });
-  const rtPort = 41234;
+  // A FIXED port made this test collide with itself: node --test runs files
+  // concurrently, so a neighbouring suite grabbing the same port failed this
+  // one with EADDRINUSE — a red suite with nothing to do with the code under
+  // test. Use a random high port; listen(0) is no help here because
+  // address() only becomes valid after the async 'listening' event.
+  const rtPort = 42000 + Math.floor(Math.random() * 20000);
   const rm = new RuntimeManager({
     models: new ModelManager({ catalogPath: mcat, modelsDir: path.join(dir, "models"), state: new JsonStore(path.join(dir, "s.json"), {}), onEvent: () => {} }),
     hardware: { capabilities: { cudaEligible: true } },

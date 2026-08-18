@@ -34,14 +34,10 @@ body {
 
 /* ----- sidebar ----- */
 #sidebar {
-  width: 220px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  padding: 18px 14px;
-  border-right: 1px solid var(--border);
-  background: var(--bg-raised);
+  width: 220px; flex-shrink: 0;
+  display: flex; flex-direction: column;
+  gap: 14px; padding: 14px;
+  border-right: 1px solid var(--border); background: var(--bg-raised);
 }
 
 .brand { display: flex; align-items: center; gap: 10px; padding: 2px 6px; }
@@ -51,9 +47,14 @@ body {
 }
 .brand-name { font-weight: 700; letter-spacing: 0.01em; }
 
-#nav { display: flex; flex-direction: column; gap: 4px; }
+#nav {
+  display: flex; flex-direction: column; gap: 2px;
+  flex: 0 1 auto; min-height: 0; overflow-y: auto;
+  overscroll-behavior: contain; scrollbar-width: thin;
+}
 .nav-item {
-  text-align: left; padding: 9px 12px; border: 0; border-radius: 8px;
+  text-align: left; padding: 7px 12px; border: 0; border-radius: 8px;
+  flex: 0 0 auto;
   background: none; color: var(--text-dim); font: inherit; cursor: pointer;
 }
 .nav-item:hover:not(:disabled) { background: var(--bg-input); color: var(--text); }
@@ -312,7 +313,10 @@ button.primary:hover:not(:disabled) { box-shadow: 0 4px 16px rgba(109, 62, 240, 
 }
 
 /* ----- sidebar chat history ----- */
-#chats-pane { display: flex; flex-direction: column; gap: 8px; min-height: 0; flex: 1; }
+#chats-pane {
+  display: flex; flex-direction: column; gap: 6px;
+  flex: 1 1 auto; min-height: 148px;
+}
 .chats-head { display: flex; align-items: baseline; justify-content: space-between; padding: 0 6px; }
 .chats-title { font-size: 0.72em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.09em; color: var(--text-dim); }
 #chat-search {
@@ -594,3 +598,18 @@ button.primary:hover:not(:disabled) { box-shadow: 0 4px 16px rgba(109, 62, 240, 
 button.linklike.danger { color: var(--danger); }
 #mcp-advanced { margin: 8px 0; }
 #view-tools .net-h { margin-top: 22px; }
+
+
+/* ----- short windows: protect the chat list before anything else -----------
+   Measured before this block: a 720px-tall window (an ordinary 1366x768
+   laptop) rendered the chat list at 0px — every conversation unreachable.
+   The nav yields first; these then give back the least load-bearing pixels.
+   The privacy wording also appears in Settings, so hiding it loses nothing. */
+@media (max-height: 820px) {
+  #sidebar { gap: 10px; }
+  #privacy-note { display: none; }
+  #status-pane { padding: 8px 10px; }
+}
+@media (max-height: 700px) {
+  #status-pane .status-sub { display: none; }
+}
