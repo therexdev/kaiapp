@@ -365,6 +365,10 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
   const emailSvc = new EmailService({ dataDir, safeStorage, onEvent: events });
   registerEmailTools(registry, emailSvc);
   const calendarSvc = new CalendarService({ dataDir, safeStorage, onEvent: events });
+  // Koinos node tools. Constructed always, INERT until the Earn toggle flips
+  // it on: nothing here opens a Provider or touches the network while off.
+  const { KoinosService } = require("./lib/koinos");
+  const koinosSvc = new KoinosService({ settings, hardware: hw, dataDir, onEvent: events });
   registerCalendarTools(registry, calendarSvc);
   // Node runtime for npx-based MCP servers — provisioned on demand so
   // "add a tool server" never dead-ends on "go install Node.js first".
@@ -398,6 +402,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     nodeRuntime,
     email: emailSvc,
     calendar: calendarSvc,
+    koinos: koinosSvc,
     chats: new ChatStore(path.join(dataDir, "chats")),
     docs: new (require("./lib/docs").DocStore)(path.join(dataDir, "docs")),
     coreInfo: () => ({ version: VERSION, dataDir, hardware: hw }),

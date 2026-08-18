@@ -67,13 +67,14 @@ function hasImageParts(messages) {
 }
 
 class Gateway {
-  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, earn, network, feedback, chats, docs, voice, tools, memory, mcp, nodeRuntime, email, calendar, onEvent }) {
+  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, earn, network, feedback, chats, docs, voice, tools, memory, mcp, nodeRuntime, email, calendar, koinos, onEvent }) {
     this.tools = tools || null; // unified tool registry (agents/MCP/memory/…)
     this.memory = memory || null; // cross-chat memory store
     this.mcp = mcp || null; // MCP server manager
     this.nodeRuntime = nodeRuntime || null; // on-demand Node for npx tool servers
     this.email = email || null; // IMAP/SMTP service
     this.calendar = calendar || null; // CalDAV service
+    this.koinos = koinos || null; // Koinos node tools — off unless the user flips the Earn toggle
     this.voice = voice || null; // local speech-to-text (whisper)
     this.feedback = feedback || null; // relay to the project's feedback inbox
     this.chats = chats || null; // local chat history store
@@ -354,6 +355,43 @@ class Gateway {
           error: String(e.message),
           ...(e.needsConfirmation ? { needsConfirmation: true } : {}),
         });
+      }
+    }
+
+    // ---- Koinos node tools (§ optional mode behind the Earn toggle) ----
+    // Every route here is a READ. Nothing signs, nothing spends, so none of
+    // them needs the password prompt or the confirm contract. When the toggle
+    // is off, status answers {enabled:false} and the rest refuse — the service
+    // never builds a Provider or touches the network.
+    if (this.koinos && path === "/core/koinos" && req.method === "GET") {
+      return this._json(res, 200, await this.koinos.status());
+    }
+    if (this.koinos && path === "/core/koinos/config" && req.method === "POST") {
+      const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+      try {
+        if (body.enabled !== undefined) this.koinos.setEnabled(body.enabled);
+        if (body.rpcUrl !== undefined) this.koinos.setRpcUrl(body.rpcUrl);
+        if (body.watchAddress !== undefined) this.koinos.setWatchAddress(body.watchAddress);
+        return this._json(res, 200, await this.koinos.status());
+      } catch (e) {
+        return this._json(res, 400, { ok: false, error: String(e.message) });
+      }
+    }
+    if (this.koinos && path === "/core/koinos/balances" && req.method === "GET") {
+      // Any address, not just the user's own: that is what makes this useful
+      // on a machine that cannot run a node but wants to watch one elsewhere.
+      const address = url.searchParams.get("address") || "";
+      try {
+        return this._json(res, 200, { ok: true, ...(await this.koinos.balances(address)) });
+      } catch (e) {
+        return this._json(res, 400, { ok: false, error: String(e.message) });
+      }
+    }
+    if (this.koinos && path === "/core/koinos/node" && req.method === "GET") {
+      try {
+        return this._json(res, 200, { ok: true, ...(await this.koinos.nodeProbe()) });
+      } catch (e) {
+        return this._json(res, 400, { ok: false, error: String(e.message) });
       }
     }
 
