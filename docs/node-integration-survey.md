@@ -189,3 +189,51 @@ Options, none of them free:
 
 This is the same question the account/wallet-auth design is circling from the
 other side, and the two answers should not be decided independently.
+
+---
+
+## OWNER DECISION 2026-08-18: one wallet, the Koinos AI earn wallet
+
+> "I want it to be the same wallet account ad the Koinos AI wallet that is
+> generated for KAI earnings."
+
+The node section uses `core/lib/wallet.js` — the keystore already created at
+Earn opt-in. Not a second wallet, not an import from Koinos Node.
+
+This settles the keystore-type question above by making it moot: nothing needs
+to read Koinos Node's file, so `KEYSTORE_TYPE` stays as it is and no widening of
+what the app will open is required. Koinos Node keeps its own separate wallet;
+they are different programs and that is fine.
+
+It also **rules out the companion-app integration strategy**. A separate
+Koinos-Node process would use its own keystore; making two processes share one
+wallet file is worse than either alternative. The choice is now between
+vendoring the modules and extracting a shared library.
+
+### The consequence, traced end to end
+
+    core/lib/wallet.js          one random secp256k1 key -> one address
+      -> core/lib/worker.js:43  registers THAT address with the scheduler
+      -> kai lib/scheduler.js   /scheduler/network/roster publishes it IN FULL,
+                                publicly, no auth (shipped 2026-08-17 23:29Z)
+      -> this decision          the same address now holds real mainnet KOIN
+
+So anyone can read the public payout roster, paste a provider's address into
+koinosblocks.com, and see their KOIN balance and every transaction they have
+ever made — tied to their identity as a Koinos AI provider.
+
+Neither decision was wrong on its own. The roster is public so Free Koinos Node
+can pay providers directly, and one wallet is obviously simpler than two. The
+combination is what makes every provider's finances public, and it was not
+visible when either was decided.
+
+Not a blocker — public addresses are ordinary in crypto, and a provider opting
+into a payout roster has some reason to expect it. But it should be *chosen*,
+and providers should be told at the moment it starts being true, rather than
+discovering it. The app should say so plainly where the node/wallet features are
+switched on, in the same breath as "this is real money now".
+
+Related and still unresolved: the keystore password and the WIF backup were
+designed when this key guarded testnet earnings. Under this decision they guard
+real money, and `core/lib/worker.js` keeps the wallet unlocked in memory for the
+whole time a machine is earning.
