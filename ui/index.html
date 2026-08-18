@@ -44,6 +44,7 @@
         <button class="nav-item" data-view="tools">Tools</button>
         <button class="nav-item" data-view="api">Local API</button>
         <button class="nav-item" data-view="earn">Earn <span class="soon">alpha</span></button>
+        <button class="nav-item" data-view="koinos" id="nav-koinos" hidden>Koinos</button>
       </nav>
       <div id="chats-pane">
         <div class="chats-head">
@@ -354,7 +355,7 @@
 
           <div id="earn-ready" hidden>
             <div class="earn-status"><span id="earn-dot" class="dot"></span><span id="earn-state">Offline</span></div>
-            <p id="earn-standby-note" class="hint" hidden style="color:#f0b35e"></p>
+            <p id="earn-standby-note" class="hint" hidden></p>
             <div class="hw-summary" id="earn-stats"></div>
             <div class="form-row">
               <input id="earn-sched" type="text" placeholder="Scheduler URL (from the project)" />
@@ -374,11 +375,83 @@
             </div>
           </div>
 
+          <div class="koinos-toggle-row">
+            <div>
+              <b>Koinos node tools</b>
+              <div class="hint" id="koinos-toggle-hint">
+                Look up any Koinos address, and connect to a Koinos node if you run one.
+                Reading only — nothing here can move funds.
+              </div>
+            </div>
+            <button id="btn-koinos-toggle" class="linklike" aria-pressed="false">Turn on</button>
+          </div>
+          <p class="hint" id="koinos-toggle-open" hidden>Koinos node tools are on — <b>open them in the Koinos tab</b>.</p>
+
           <p class="error" id="earn-error" hidden></p>
         </div>
       </section>
 
       <!-- Local API -->
+      <section id="view-koinos" class="view" hidden>
+        <div class="api-card">
+          <h1>Koinos <span class="net-tag" id="koinos-net-tag">mainnet</span></h1>
+          <p class="lede">
+            Real Koinos mainnet — these are live balances, not test tokens.
+            Koinos AI can read the chain here; it cannot send anything.
+          </p>
+
+          <div class="koinos-card" id="koinos-card-balances">
+            <h2>Look up an address</h2>
+            <div class="row">
+              <input id="koinos-watch" type="text" spellcheck="false" placeholder="Koinos address (starts with 1…)" />
+              <button id="btn-koinos-watch" class="primary small">Look up</button>
+            </div>
+            <p class="hint" id="koinos-watch-hint">Any address — yours, your node's, or one you are keeping an eye on.</p>
+            <div id="koinos-balances" hidden>
+              <div class="koinos-tiles">
+                <div class="koinos-tile"><span class="k-label">KOIN</span><span class="k-value" id="koinos-koin">—</span></div>
+                <div class="koinos-tile"><span class="k-label">VHP</span><span class="k-value" id="koinos-vhp">—</span></div>
+                <div class="koinos-tile"><span class="k-label">Mana</span><span class="k-value" id="koinos-mana">—</span></div>
+              </div>
+              <p class="hint" id="koinos-mana-hint"></p>
+            </div>
+            <p class="error" id="koinos-watch-error" hidden></p>
+          </div>
+
+          <div class="koinos-card" id="koinos-card-node">
+            <h2>Your node</h2>
+            <div class="row">
+              <input id="koinos-rpc" type="text" spellcheck="false" placeholder="http://127.0.0.1:8080" />
+              <button id="btn-koinos-rpc" class="small">Connect</button>
+            </div>
+            <p class="hint">Leave this empty to read the chain through the public Koinos servers.</p>
+            <p id="koinos-node-state" class="koinos-state">Not checked yet.</p>
+          </div>
+
+          <div class="koinos-card" id="koinos-card-run">
+            <h2>Running a node</h2>
+            <p id="koinos-cap-verdict" class="koinos-state">Checking this computer…</p>
+            <p class="hint" id="koinos-cap-detail"></p>
+            <div class="row" id="koinos-companion-row" hidden>
+              <button id="btn-koinos-open" class="primary small" hidden>Open Koinos Node Desktop</button>
+              <button id="btn-koinos-get" class="small" hidden>Get Koinos Node Desktop</button>
+            </div>
+          </div>
+
+          <div class="koinos-card" id="koinos-card-identity">
+            <h2>Your Koinos AI address</h2>
+            <p class="hint">
+              This is the address your machine earns with. It is an identity, not a place to send money —
+              Koinos AI has no way to send from it yet.
+            </p>
+            <div class="row">
+              <code id="koinos-own-address" class="koinos-addr">—</code>
+              <button id="btn-koinos-copy" class="small">Copy</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section id="view-api" class="view" hidden>
         <div class="api-card">
           <h1>Your local OpenAI-compatible API</h1>
@@ -430,6 +503,7 @@
   <script src="tools-view.js"></script>
   <script src="app-extras.js"></script>
   <script src="docs-view.js"></script>
+  <script src="koinos-view.js"></script>
 
 </body>
 </html>

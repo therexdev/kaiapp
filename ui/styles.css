@@ -613,3 +613,61 @@ button.linklike.danger { color: var(--danger); }
 @media (max-height: 700px) {
   #status-pane .status-sub { display: none; }
 }
+
+
+/* ----- Koinos node tools (optional, behind the Earn toggle) --------------- */
+
+/* #view-earn could not scroll, so anything added to the bottom of it was
+   simply unreachable on a short window. */
+#view-earn, #view-koinos { overflow-y: auto; }
+
+.koinos-toggle-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border);
+}
+.koinos-toggle-row .hint { margin-top: 3px; max-width: 46ch; }
+
+/* This is REAL MONEY sitting in an app whose Earn tab says "rewards are test
+   tokens". The tag is not decoration — it is the standing answer to "is this
+   number real?", so it never scrolls away with the sentence that explained it. */
+.net-tag {
+  display: inline-block; vertical-align: middle; margin-left: 10px;
+  padding: 3px 9px; border-radius: 999px;
+  font-size: 0.5em; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+  background: rgba(16, 185, 129, 0.16); color: var(--emerald, #10b981);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+
+.koinos-card {
+  margin-top: 20px; padding: 16px 18px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-raised);
+}
+.koinos-card h2 { margin: 0 0 10px; font-size: 1.02em; }
+.koinos-card .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.koinos-card .row input[type="text"] { flex: 1 1 240px; min-width: 0; }
+
+.koinos-tiles { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+.koinos-tile {
+  flex: 1 1 120px; padding: 12px 14px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--bg-input);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.k-label { font-size: 0.75em; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim); }
+.k-value { font-size: 1.35em; font-weight: 650; font-variant-numeric: tabular-nums; }
+
+.koinos-state { margin: 10px 0 0; }
+.koinos-state.good { color: var(--emerald, #10b981); }
+.koinos-state.warn { color: #f0b35e; }
+.koinos-state.bad  { color: var(--text-dim); }
+
+.koinos-addr {
+  flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere;
+  padding: 8px 10px; border-radius: 8px;
+  background: var(--bg-input); border: 1px solid var(--border);
+  font-size: 0.9em;
+}
+
+/* Was an inline style attribute, which this app's CSP (style-src 'self') has
+   been silently dropping — the note has rendered unstyled all along. */
+#earn-standby-note { color: #f0b35e; }
