@@ -237,3 +237,62 @@ Related and still unresolved: the keystore password and the WIF backup were
 designed when this key guarded testnet earnings. Under this decision they guard
 real money, and `core/lib/worker.js` keeps the wallet unlocked in memory for the
 whole time a machine is earning.
+
+---
+
+## OWNER DECISION 2026-08-18: the password authorises value LEAVING the wallet
+
+> "Lets require the password any time that funds are being sent from the wallet.
+> It has to be unlocked regularly if they have a reburn on the node
+> functionality as well so it may be unlocked regularly anyways and that would
+> be a good security I think."
+
+The reasoning is right and it is worth stating explicitly, because it inverts
+the usual assumption: since the wallet is unlocked for long stretches — the earn
+worker needs it, and reburn needs it — **being unlocked is the normal state, so
+unlocking is not the security boundary**. The boundary has to sit at the moment
+value moves.
+
+### The line, drawn where it can actually be checked
+
+Password required whenever value goes to an address the user does not control.
+That is checkable in one comparison, not a judgement call:
+
+| operation | destination | password |
+|---|---|---|
+| `burn()` — KOIN → VHP | `burn_address` and `vhp_address` both default to the wallet's own address | **no** — runs unattended, which is what makes reburn possible |
+| `transfer(to)` | someone else, always (sending to yourself is pointless) | **yes, every time** |
+| `burn({vhpAddress})` with a foreign address | someone else | **yes** — crosses the same line |
+
+Verified in `/workspace/therexdev/koinos-node/electron/lib/chain.js:246-277`:
+burn pushes `burn_address: address, vhp_address: vhpAddress || address`, and
+**no caller anywhere passes `vhpAddress`** — `rewards.js:291` (the automatic
+reburn) and `main.js:317` (the manual one) both call `chain.burn(signer, amount)`
+with no options. So today every burn is a self-conversion and nothing leaves the
+user's control. The parameter is dead code; if it is ever wired to a UI field it
+moves into the password column.
+
+### One case that needs care: multi-step onramp flows
+
+`bridge-orchestrator.js` and `route-c-orchestrator.js` run on 15s and 8s timers
+and sign unattended, and they DO move real value (ETH across the bridge, swaps
+to KOIN). Prompting per signature would break them; never prompting would put an
+outbound path behind no boundary at all.
+
+The rule that keeps both properties: **the password authorises an intent, not a
+signature**. One prompt when the user starts "bring my ETH across and swap it to
+KOIN"; the advancer then completes the steps of a flow already authorised. The
+prompt names the amount and the destination, so what was authorised is what
+happens. Detail to be confirmed against those two orchestrators when they are
+read properly — flagged here rather than assumed.
+
+### Implementation constraints that follow
+
+  · The password is never cached. It re-derives the key for the operation and
+    the derived material is dropped immediately after.
+  · A wrong password fails the operation, never falls through to "well, the
+    wallet is unlocked anyway" — which is exactly the bug this prevents.
+  · Because the wallet stays unlocked for earning, anything that can drive the
+    renderer can already reach the signer. The password prompt is therefore the
+    only thing standing between a compromised UI and an emptied wallet, and it
+    must be verified in Core, never in the renderer.
