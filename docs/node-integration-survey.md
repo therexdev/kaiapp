@@ -145,3 +145,47 @@
 - `util:openPath` (renderer.js:1070 node data folder, :2601 userData folder) is the only one of the three util channels with no kaiapp path — clipboard maps to `navigator.clipboard.writeText` and external links to `window.open` via main.js:105-106. It needs a new `window.koinosShell` capability or a Core route, and kaiapp's preload is deliberately minimal (its own comment at electron/preload.js:5-8 says the renderer gets capabilities, never Node), so widening it is a policy decision, not a mechanical one.
 - `esc()` differs subtly and collides silently (function declarations don't error). renderer.js:31 guards nullish (`String(s ?? "")`), app.js:920 does not (`String(s)`), so `esc(undefined)` renders the literal text "undefined" into the DOM. renderer.js relies on the guard inconsistently — e.g. renderer.js:2582 guards, renderer.js:388 doesn't. Keep renderer's `esc` local to the IIFE.
 - Scope reality check before estimating: 1621 of renderer.js's 2742 lines (59%) are Docker-only (node view, 501) or ETH/onramp-only (fund view 878 + the ETH/USDT/vKOIN half of the wallet view, renderer.js:524-765, 242 lines). The dashboard's 226 lines are also split — roughly 90 are the node status card / start-stop toggle / sync bar and only ~135 (tiles, return tiles, activity feed) work on a public RPC. What ports cleanly against api.koinos.io alone is closer to 800-900 lines, not 2742.
+
+---
+
+## Verified directly (not from a survey agent)
+
+Two survey claims underpin the whole port plan, so they were checked by diff
+rather than trusted.
+
+**`store.js` really is the same file.** `diff core/lib/store.js
+/workspace/therexdev/koinos-node/electron/lib/store.js` differs by exactly two
+comment lines. Koinos-Node's `ChainService` takes one constructor argument — a
+settings object whose only method is `get(key, fallback)` — so it can be handed
+kaiapp's `JsonStore` unmodified.
+
+**`keystore.js` differs by 10 lines**: the `KEYSTORE_TYPE` string, and kaiapp's
+added `pwHint` block (password length plus a 2-byte salted fingerprint, so a
+failed unlock can say whether the length or a character differs).
+
+### Consequence the design has to answer: the two wallets cannot see each other
+
+    core/lib/keystore.js:9   KEYSTORE_TYPE = "koinos-ai-keystore"
+    koinos-node .../keystore.js:9  KEYSTORE_TYPE = "koinos-node-desktop-keystore"
+
+Both enforce it on read — `core/lib/keystore.js:61` and its counterpart at :53
+throw unless `keystore.type` matches exactly. The encryption either side of that
+check is identical (same scrypt parameters, same AES-256-GCM construction).
+
+So a user who runs **both** Koinos AI and Koinos Node today has **two unrelated
+wallets** — two addresses, two balances, two backup codes — and neither app can
+open the other's file. Nothing about that is accidental, but it collides head-on
+with "the same wallet everywhere", and it is one string away from being
+otherwise.
+
+Options, none of them free:
+  · **Accept both type strings on read in kaiapp.** One line. Means Koinos AI
+    silently adopts a wallet created by another program — convenient, and a
+    widening of what the app will open. Worth a deliberate yes, not a default.
+  · **Explicit import.** The user chooses "import my Koinos Node wallet"; the
+    app re-encrypts under its own type. Slower, and honest about what happened.
+  · **Leave them separate** and say so plainly in the UI, so nobody discovers it
+    by finding an empty balance.
+
+This is the same question the account/wallet-auth design is circling from the
+other side, and the two answers should not be decided independently.
