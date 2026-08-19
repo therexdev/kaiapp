@@ -109,17 +109,29 @@ which is the thing Beta is supposed to measure.
 
 ## 4. Blocked on the owner
 
-1. **Deploy the kai production branch.** The claims endpoint + chain
-   presets + fingerprint shadow are committed on the dev branch
-   (`8ca8cb8`, `7ab8d38`, `475de9a`) and cherry-picked ready at local
-   branch state — but this session's harness refuses pushes to
-   `claude/kai-production-website-fqx4pf` (only the designated dev branch
-   is allowed). Owner options: merge the dev branch into the production
-   branch on GitHub (the §20 treasury commit d718501 rides along but is
-   INERT — the box env, not the repo, controls activation), or grant the
-   push permission. The box auto-deploys within a minute of the branch
-   updating.
-2. **Settlement diagnosis** (runbook §1) — 10 minutes on the box.
-3. **The four gate decisions** (unchanged): R_GATE hardness, weights,
-   shadow length, fingerprint binding policy.
-4. **Mainnet listing rehearsal decision** (§1) when Beta starts.
+1. **Merge the kai dev branch into the production branch** (compare page:
+   base `claude/kai-production-website-fqx4pf`, compare
+   `claude/koinos-ai-takeover-co25fw` — verified clean, no conflicts).
+   Ships the claims endpoint, chain presets, fingerprint shadow, stress
+   harness, and the §20 paid-only splits fix (`e3a5340`). NOTE the
+   correction from an earlier revision of this doc: the treasury address
+   travels in git (`deploy/app.env`), so the merge itself ACTIVATES §20
+   splits — that is now safe and owner-approved (2026-08-19) because
+   splits divide PAID chat value only; free-tier emission passes through
+   whole (pinned by `scripts/probe-splits.js` §6). The box auto-deploys
+   within a minute; expect ONE scheduler restart.
+2. **Settlement diagnosis** — after the merge, read `settlement.error`
+   from `/scheduler/claims?address=…` (no box access needed), or run
+   runbook §1 on the box (10 minutes).
+
+### Decided 2026-08-19 (no longer blocking)
+
+- **Anti-Sybil gates**: fingerprint binding enforces first; reputation
+  gate stays at the shipped 0.45 default; two weeks of clean shadow from
+  the production deploy of the fingerprint signal before anything arms.
+  Recorded beside the flags in kai `deploy/app.env`.
+- **§20 treasury**: activate, with the paid-only split semantics above.
+- **Mainnet listing rehearsal** (§1): plan approved — deploy the same
+  wasm to mainnet behind the kill switch with claims disabled, list on
+  tradekoinos, verify dust trades, open claims at launch. Executes once
+  testnet settlement is proven end-to-end.
