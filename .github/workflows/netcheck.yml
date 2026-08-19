@@ -89,6 +89,15 @@ jobs:
             | python3 -c "import json,sys; d=json.load(sys.stdin); print(json.dumps(d.get('oracle', '(no oracle block — old build?)'), indent=2))" \
             || echo "(pricing endpoint unreachable)"
           echo
+          # Claim packets + per-epoch settlement outcome (live since the kai
+          # production merge 3205141). settlement.error on recent epochs is
+          # THE diagnosis for roots quietly not landing on the testnet
+          # contract; proofs are elided here — the digest below checks them.
+          echo "== /scheduler/claims (settlement diagnosis) =="
+          curl -sS --max-time 15 "https://koinosai.com/scheduler/claims?address=1EXvuuW5HMrYRPdkraSi5Z4TBd4djyMj6E&limit=8" \
+            | python3 -c "import json,sys; d=json.load(sys.stdin); [c.pop('proof', None) for c in d.get('claims', [])]; print(json.dumps(d, indent=2))" \
+            || echo "(claims endpoint unreachable or not deployed)"
+          echo
           exit 0
       - uses: actions/checkout@v4
       - name: Health digest (assertions run HERE, not in a reader's head)
