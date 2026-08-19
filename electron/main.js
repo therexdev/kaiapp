@@ -87,6 +87,17 @@ async function start() {
     return r.canceled ? null : r.filePaths[0];
   });
 
+  // Tool servers that take a folder ("Your files"): a native picker is the
+  // only honest way to choose one — window.prompt() does not exist in
+  // Electron, which is why the old flow died silently (field report).
+  ipcMain.handle("dialog:pick-folder", async (_e, title) => {
+    const r = await dialog.showOpenDialog(win, {
+      title: typeof title === "string" && title ? title : "Choose a folder",
+      properties: ["openDirectory"],
+    });
+    return r.canceled ? null : r.filePaths[0];
+  });
+
   ipcMain.on("win:minimize", () => win?.minimize());
   ipcMain.on("win:toggle-maximize", () => {
     if (!win) return;

@@ -20,4 +20,6 @@ contextBridge.exposeInMainWorld("koinosShell", {
   // Model import: a native picker is the only way a sandboxed renderer
   // can learn a file's real on-disk path.
   pickModelFile: () => ipcRenderer.invoke("dialog:pick-gguf"),
+  // Folder-scoped tool servers ("Your files"): same reasoning, for folders.
+  pickFolder: (title) => ipcRenderer.invoke("dialog:pick-folder", title),
 });

@@ -88,13 +88,23 @@
     // Rebuild the catalog list ONLY when its contents actually change, and
     // always put the user's choice back — a blind innerHTML rewrite on the
     // refresh timer is what kept snapping the picker to the first entry.
+    // An entry that is ALREADY INSTALLED leaves the menu (field report:
+    // offering "Your files" again after it was added reads as broken).
+    // Catalog adds are named after their entry, so name is the join key.
     const cat = $("mcp-catalog");
-    const wanted = (mj.catalog || []).map((c) => `<option value="${esc(c.id)}">${esc(c.name)} — ${esc(c.description)}</option>`).join("");
+    const installedNames = new Set((mj.servers || []).map((sv) => sv.name));
+    const available = (mj.catalog || []).filter((c) => !installedNames.has(c.name));
+    const wanted = available.length
+      ? available.map((c) => `<option value="${esc(c.id)}">${esc(c.name)} — ${esc(c.description)}</option>`).join("")
+      : `<option value="">Everything from the catalog is already added</option>`;
     if (cat.innerHTML !== wanted) {
       const keep = cat.value;
       cat.innerHTML = wanted;
       if (keep && [...cat.options].some((o) => o.value === keep)) cat.value = keep;
     }
+    cat.disabled = !available.length;
+    const addBtn = $("mcp-add-catalog");
+    if (addBtn && !busy) addBtn.disabled = !available.length;
 
     // Node runtime: most catalog servers are npm packages. If this machine
     // has no Node, offer to set one up (managed, inside the app) rather than
@@ -392,8 +402,28 @@
     }
     let args = entry.args || [];
     if (entry.argsPrompt) {
-      const extra = prompt(entry.argsPrompt.label);
-      if (!extra) return;
+      // window.prompt() DOES NOT EXIST in Electron — it returns null without
+      // ever showing anything, which made this exact button "do nothing"
+      // (field report). In the app, use the native folder picker; in a plain
+      // browser (dev, tests), fall back to the inline text box.
+      let extra = null;
+      if (window.koinosShell?.pickFolder) {
+        extra = await window.koinosShell.pickFolder(entry.argsPrompt.label);
+      } else {
+        const inline = $("mcp-catalog-arg");
+        extra = inline ? inline.value.trim() : "";
+        if (!extra) {
+          if (inline) {
+            inline.hidden = false;
+            inline.placeholder = entry.argsPrompt.label;
+            inline.focus();
+          }
+          alert(entry.argsPrompt.label);
+          return;
+        }
+        if (inline) { inline.value = ""; inline.hidden = true; }
+      }
+      if (!extra) return; // picker cancelled — nothing to add
       args = [...args, extra];
     }
     const r = await jfetch("/core/mcp", {
