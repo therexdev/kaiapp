@@ -380,6 +380,32 @@
               <input id="earn-reveal-pass" type="password" placeholder="Wallet password (required to reveal)" />
               <button id="btn-earn-reveal-go" class="primary small">Reveal</button>
             </div>
+
+            <h2>Wallet — send &amp; receive on Koinos mainnet</h2>
+            <p class="hint">
+              Your Koinos AI wallet is a real Koinos address: share it to receive KOIN or VHP,
+              and send either with your wallet password. This is real mainnet value — check the
+              recipient address character by character. Works on every machine, node or not.
+            </p>
+            <div class="form-row">
+              <input id="wallet-address" type="text" readonly aria-label="Your Koinos address" />
+              <button id="btn-wallet-copy" class="small">Copy address</button>
+              <button id="btn-wallet-balances" class="small">Show balances</button>
+            </div>
+            <div class="hw-summary" id="wallet-balances"></div>
+            <div class="form-row">
+              <select id="wallet-send-token" aria-label="Token to send">
+                <option value="koin">KOIN</option>
+                <option value="vhp">VHP</option>
+              </select>
+              <input id="wallet-send-to" type="text" placeholder="Recipient address (1…)" spellcheck="false" />
+              <input id="wallet-send-amt" type="number" min="0" step="0.00000001" placeholder="Amount" />
+            </div>
+            <div class="form-row">
+              <input id="wallet-send-pass" type="password" placeholder="Wallet password (required to send)" />
+              <button id="btn-wallet-send" class="primary small">Send</button>
+            </div>
+            <p class="hint" id="wallet-msg" hidden></p>
           </div>
 
           <div class="koinos-toggle-row">

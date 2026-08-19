@@ -1046,6 +1046,8 @@ async function renderEarn() {
       ],
     ];
     $("earn-stats").innerHTML = rows.map(([k, v]) => `<span class="k">${k}</span><span>${esc(v)}</span>`).join("");
+    // The wallet card's receive address — same wallet the worker earns with.
+    if ($("wallet-address") && s.wallet.address) $("wallet-address").value = s.wallet.address;
     $("btn-earn-toggle").textContent = s.worker.running ? "Stop Earning" : "Start Earning";
     $("btn-earn-toggle").dataset.running = s.worker.running ? "1" : "";
   }
@@ -1188,6 +1190,97 @@ $("btn-earn-lock").addEventListener("click", async () => {
     await earnPost("/core/earn/lock");
     renderEarn();
   } catch { /* error shown */ }
+});
+
+/* ---- Wallet: send & receive KOIN/VHP on mainnet (Pi request 2026-08-19).
+ * Rides the node bridge's chain:balances / chain:send channels, which work
+ * on every build — no node required. Nothing here polls: balances load only
+ * when asked (off means inert), and send needs the password every time. */
+function walletMsg(text, ok) {
+  const el = $("wallet-msg");
+  el.hidden = !text;
+  el.textContent = text || "";
+  el.style.color = ok ? "var(--ok, #3dbf7a)" : "";
+}
+
+async function walletRpc(channel, payload) {
+  const r = await fetch("/core/koinos/rpc", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ channel, payload: payload || {} }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.ok) {
+    throw new Error(
+      j.localOnly
+        ? "Privacy is set to Local-Only, so nothing reaches the chain. Switch to Local-First or Network in Settings to use the wallet."
+        : j.error || `HTTP ${r.status}`
+    );
+  }
+  return j.data;
+}
+
+$("btn-wallet-copy").addEventListener("click", async () => {
+  const addr = $("wallet-address").value;
+  if (!addr) return;
+  try {
+    await navigator.clipboard.writeText(addr);
+    walletMsg("Address copied — share it to receive KOIN or VHP.", true);
+  } catch {
+    $("wallet-address").select();
+    walletMsg("Copy blocked by the browser — the address is selected, press Ctrl/Cmd-C.");
+  }
+});
+
+$("btn-wallet-balances").addEventListener("click", async () => {
+  walletMsg("");
+  $("btn-wallet-balances").disabled = true;
+  try {
+    const b = await walletRpc("chain:balances");
+    const rows = [
+      ["KOIN", b.formatted?.koin ?? "0"],
+      ["VHP", b.formatted?.vhp ?? "0"],
+      ["Mana", b.formatted?.mana ?? "0"],
+    ];
+    $("wallet-balances").innerHTML = rows.map(([k, v]) => `<span class="k">${k}</span><span>${esc(v)}</span>`).join("");
+  } catch (e) {
+    walletMsg(e.message);
+  } finally {
+    $("btn-wallet-balances").disabled = false;
+  }
+});
+
+// Two clicks to move real money: the first arms and repeats the exact
+// amount/token/recipient back; only the second sends.
+let walletSendArmed = null;
+$("btn-wallet-send").addEventListener("click", async () => {
+  const token = $("wallet-send-token").value;
+  const to = $("wallet-send-to").value.trim();
+  const amount = $("wallet-send-amt").value.trim();
+  const password = $("wallet-send-pass").value;
+  walletMsg("");
+  if (!to || !amount) return walletMsg("Fill in the recipient address and the amount.");
+  if (!password) return walletMsg("Your wallet password is required to send.");
+  const key = `${token}|${to}|${amount}`;
+  if (walletSendArmed !== key) {
+    walletSendArmed = key;
+    walletMsg(`About to send ${amount} ${token.toUpperCase()} to ${to} on MAINNET. Click Send again to confirm.`, true);
+    return;
+  }
+  walletSendArmed = null;
+  const btn = $("btn-wallet-send");
+  btn.disabled = true;
+  try {
+    const r = await walletRpc("chain:send", { to, amount, token, password });
+    $("wallet-send-to").value = "";
+    $("wallet-send-amt").value = "";
+    walletMsg(`Sent. Transaction ${r.txId || "submitted"} — balances update once the block settles.`, true);
+  } catch (e) {
+    walletMsg(e.message);
+  } finally {
+    $("wallet-send-pass").value = "";
+    btn.disabled = false;
+  }
 });
 
 $("btn-earn-show-restore").addEventListener("click", () => {

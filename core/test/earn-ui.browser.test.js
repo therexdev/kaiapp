@@ -97,3 +97,61 @@ test("earn wallet UI: create -> lock -> unlock -> restore -> unlock (real browse
     await core.stop();
   }
 });
+
+test("wallet card: receive address shown, sends demand a password and a second confirming click", { skip: !available, timeout: 120000 }, async () => {
+  const { chromium } = require("playwright-core");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-walletui-"));
+  fs.mkdirSync(path.join(dir, "models"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "models", "smollm2-135m-instruct-q8_0.gguf"), "weights");
+
+  const { createCore } = require("../server");
+  const core = await createCore({ dataDir: dir, port: 0, llamaBin: FAKE_BIN, onEvent: () => {} });
+  const base = `http://127.0.0.1:${await core.start()}`;
+  const PW = "correct horse 9";
+  // Wallet by API — this test is about the wallet CARD, not creation.
+  const made = await (await fetch(`${base}/core/earn/wallet`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ password: PW }),
+  })).json();
+  assert.ok(made.address, "wallet created");
+
+  const browser = await chromium.launch({ executablePath: CHROMIUM });
+  try {
+    const page = await browser.newPage();
+    await page.goto(base);
+    await page.waitForSelector("#view-chat:not([hidden])");
+    await page.click('.nav-item[data-view="earn"]');
+    await page.waitForSelector("#earn-ready:not([hidden])");
+
+    // Receive: the card carries this wallet's real address.
+    await page.waitForFunction(
+      (addr) => document.getElementById("wallet-address")?.value === addr,
+      made.address
+    );
+
+    // Sending without a password is refused client-side, with words.
+    await page.type("#wallet-send-to", "1K1AUovu5NjjPcaTxmde6wPB8Y8PQGFV3E");
+    await page.type("#wallet-send-amt", "1");
+    await page.click("#btn-wallet-send");
+    assert.match(await page.textContent("#wallet-msg"), /password is required/);
+
+    // With a password, the FIRST click only arms: it repeats the exact
+    // amount, token and recipient and asks for a confirming second click.
+    // Nothing has touched the chain yet.
+    await page.type("#wallet-send-pass", PW);
+    await page.click("#btn-wallet-send");
+    const armed = await page.textContent("#wallet-msg");
+    assert.match(armed, /About to send 1 KOIN to 1K1AUovu5NjjPcaTxmde6wPB8Y8PQGFV3E/);
+    assert.match(armed, /MAINNET/);
+    assert.match(armed, /Click Send again to confirm/);
+
+    // Changing the amount DISARMS: the next click must arm again, not send.
+    await page.fill("#wallet-send-amt", "2");
+    await page.click("#btn-wallet-send");
+    assert.match(await page.textContent("#wallet-msg"), /About to send 2 KOIN/);
+  } finally {
+    await browser.close();
+    await core.stop();
+  }
+});
