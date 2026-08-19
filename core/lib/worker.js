@@ -53,7 +53,15 @@ class Worker {
   }
 
   status() {
-    return { running: this.running, scheduler: this.schedulerUrl || null, ...this.stats };
+    return {
+      running: this.running,
+      scheduler: this.schedulerUrl || null,
+      // Per-model advertise verdicts from the last registration (null before
+      // one happens) — the UI's answer to "why isn't my model serving?".
+      modelGate: this.modelGate ?? null,
+      ramGb: this.ramGb ?? null,
+      ...this.stats,
+    };
   }
 
   async _register() {
@@ -83,16 +91,33 @@ class Worker {
       // was named for — while the scheduler, receiving the ROUNDED ramGb,
       // would have accepted it. One fit rule, both sides).
       const fits = (a) => ramGb == null || !a.minRamGb || a.minRamGb <= Math.round(ramGb);
-      const ready = this.models
-        ? this.models.aliases().filter((a) => a.status === "ready" && !a.custom && !a.dev && fits(a)).map((a) => a.alias)
+      // Per-model verdicts, kept on the worker so the UI can always answer
+      // "why is my model not on the network?" with the actual rule that
+      // fired (Pi field finding 2026-08-19: the machine sat online with an
+      // empty advertisement and nothing anywhere said why).
+      this.modelGate = this.models
+        ? this.models.aliases().filter((a) => a.status === "ready").map((a) => ({
+            alias: a.alias,
+            advertised: !a.custom && !a.dev && fits(a),
+            reason: a.custom
+              ? "private import — never advertised"
+              : a.dev
+                ? "dev build — never advertised"
+                : fits(a)
+                  ? null
+                  : `needs ${a.minRamGb} GB RAM — this machine reports ${Math.round(ramGb)} GB`,
+          }))
         : [];
+      this.ramGb = ramGb == null ? null : Math.round(ramGb);
+      const ready = this.modelGate.filter((g) => g.advertised).map((g) => g.alias);
       // Every downloaded model is too big for this machine: say so instead
       // of silently earning nothing (the empty advertisement is correct —
       // this machine has nothing it can serve the network comfortably).
-      if (this.models && ready.length === 0 && this.models.aliases().some((a) => a.status === "ready" && !a.custom && !a.dev)) {
+      if (this.models && ready.length === 0 && this.modelGate.some((g) => !g.advertised && g.reason?.includes("GB RAM"))) {
+        const short = this.modelGate.filter((g) => g.reason?.includes("GB RAM")).map((g) => `${g.alias} (${g.reason})`).join("; ");
         this.onEvent({
           type: "worker:no-servable-models",
-          message: "The models on this machine need more RAM than it has — download a smaller model (like Koinos Fast) to serve and earn.",
+          message: `No model on this machine fits its RAM, so nothing is offered to the network: ${short}. Download a smaller model (like Koinos Fast) to serve and earn.`,
         });
       }
       const r = await fetch(`${this.schedulerUrl}/worker/register`, {

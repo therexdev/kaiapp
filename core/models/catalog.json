@@ -6,7 +6,7 @@
       "label": "Koinos Fast",
       "blurb": "Quick answers on any machine · 1 GB",
       "package": "qwen2.5-1.5b-instruct-q4_k_m@1",
-      "minRamGb": 4
+      "minRamGb": 3
     },
     "koinos-balanced": {
       "label": "Koinos Balanced",

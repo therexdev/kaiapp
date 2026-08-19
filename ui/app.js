@@ -1011,6 +1011,21 @@ async function renderEarn() {
       ["Account", s.wallet.address ?? "—"],
       ["Jobs completed", String(s.worker.jobsDone ?? 0)],
       ["Receipts accepted", String(s.worker.receiptsAccepted ?? 0)],
+      [
+        // Which models this machine offers the network, and — when one is
+        // held back — the exact rule that held it (Pi field finding: an
+        // empty advertisement used to be invisible from the app).
+        "Serving models",
+        s.worker.modelGate?.length
+          ? (s.worker.modelGate.filter((g) => g.advertised).map((g) => g.alias).join(", ") || "none") +
+            (s.worker.modelGate.some((g) => !g.advertised && g.reason)
+              ? ` · not offered: ${s.worker.modelGate
+                  .filter((g) => !g.advertised && g.reason)
+                  .map((g) => `${g.alias} — ${g.reason}`)
+                  .join("; ")}`
+              : "")
+          : "—",
+      ],
       ["KAI balance", earnErrMsg ? earnErrMsg : s.earnings?.kai != null ? `${s.earnings.kai} KAI` : "—"],
       ["Prepaid balance", s.earnings?.balanceUsd != null ? `$${Number(s.earnings.balanceUsd).toFixed(4)}` : "—"],
       [
