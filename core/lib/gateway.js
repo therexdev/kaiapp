@@ -67,7 +67,7 @@ function hasImageParts(messages) {
 }
 
 class Gateway {
-  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, earn, network, feedback, chats, docs, voice, tools, memory, mcp, nodeRuntime, email, calendar, koinos, koinosNode, onEvent }) {
+  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, earn, network, feedback, chats, docs, voice, tools, memory, mcp, nodeRuntime, email, calendar, koinos, koinosNode, teams, onEvent }) {
     this.tools = tools || null; // unified tool registry (agents/MCP/memory/…)
     this.memory = memory || null; // cross-chat memory store
     this.mcp = mcp || null; // MCP server manager
@@ -76,6 +76,7 @@ class Gateway {
     this.calendar = calendar || null; // CalDAV service
     this.koinos = koinos || null; // Koinos node tools — off unless the user flips the Earn toggle
     this.koinosNode = koinosNode || null; // the full node stack: Docker, setup, onramp, swaps
+    this.teams = teams || null; // AI Teams runner (task #58) — role pipelines, Core-side
     this.voice = voice || null; // local speech-to-text (whisper)
     this.feedback = feedback || null; // relay to the project's feedback inbox
     this.chats = chats || null; // local chat history store
@@ -804,6 +805,37 @@ class Gateway {
     // app's built-in chat out (localhost control plane is the UI's surface).
     if (path === "/core/chat/completions" && req.method === "POST") {
       return this._chat(req, res);
+    }
+
+    // ---- AI Teams (task #58): role pipelines over the tool registry ----
+    if (this.teams && path === "/core/teams" && req.method === "GET") {
+      return this._json(res, 200, { ok: true, templates: this.teams.templates() });
+    }
+    if (this.teams && path === "/core/teams/run" && req.method === "POST") {
+      let body;
+      try {
+        body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+      } catch {
+        return this._json(res, 400, { ok: false, error: "Body must be JSON" });
+      }
+      // SSE: one event per trace entry, then a terminal done event. The
+      // sensitive-tool consent arrives as an explicit boolean from the
+      // caller (the UI asks the human up front; API callers state it).
+      res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
+      const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+      try {
+        const r = await this.teams.run({
+          template: String(body.template || ""),
+          question: String(body.question || ""),
+          model: String(body.model || ""),
+          allowSensitive: body.allowSensitive === true,
+          onTrace: (e) => send({ trace: e }),
+        });
+        send({ done: true, answer: r.answer, modelCalls: r.modelCalls });
+      } catch (e) {
+        send({ done: true, error: String(e.message) });
+      }
+      return res.end();
     }
 
     // ----- OpenAI-compatible surface -----

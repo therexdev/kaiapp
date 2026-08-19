@@ -392,6 +392,27 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
   });
   registerCalendarTools(registry, calendarSvc);
   const mcp = new McpManager({ settings, registry, nodeRuntime, onEvent: events });
+  // AI Teams (task #58): the runner lives in Core so headless API users and
+  // the Pi get teams without a window. Completions loop back through the
+  // gateway's own chat lane, so teams inherit EVERY routing rule — local
+  // engine acquisition, network consume, privacy modes — instead of
+  // re-implementing any of it. (`gateway` is created below; teams only run
+  // after listen, when its port exists.)
+  const { TeamRunner } = require("./lib/teams");
+  const teams = new TeamRunner({
+    registry,
+    onEvent: events,
+    chatFn: async ({ model, messages, maxTokens }) => {
+      const r = await fetch(`http://127.0.0.1:${gateway.port}/core/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ model, messages, stream: false, max_tokens: maxTokens }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j?.error?.message || `chat failed (${r.status})`);
+      return j?.choices?.[0]?.message?.content ?? "";
+    },
+  });
   mcp.autoConnect().catch(() => {}); // reconnect servers the user used before
 
   // Local speech-to-text (§7: audio never leaves the machine). Engine+model
@@ -421,6 +442,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     calendar: calendarSvc,
     koinos: koinosSvc,
     koinosNode: koinosNodeSvc,
+    teams,
     chats: new ChatStore(path.join(dataDir, "chats")),
     docs: new (require("./lib/docs").DocStore)(path.join(dataDir, "docs")),
     coreInfo: () => ({ version: VERSION, dataDir, hardware: hw }),
