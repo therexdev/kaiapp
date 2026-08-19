@@ -37,17 +37,19 @@ print(f"STATE bootAt={rt.get('bootAt')} bootCount={rt.get('bootCount')} lastExit
 _, _, s = get("/scheduler/network/status")
 ws = s.get("workers", [])
 check(s.get("workersOnline", 0) > 0, "workers online", str(s.get("workersOnline")))
-# A worker that JOINED MINUTES AGO legitimately has perf=null until its first
-# job lands (field event 2026-08-18: a fresh 4th worker crashed this script
-# and failed the perf check). New = under ~2.4h old; established workers with
-# no perf still FAIL.
-def is_new(w):
+# perf=null is a SCHEDULER fault only when a worker that ADVERTISES models
+# never receives work. Two innocent cases are excused (both field events):
+# a worker that joined minutes ago (2026-08-18: crashed this script), and a
+# worker advertising ZERO models (2026-08-19: a tester machine whose models
+# don't fit its RAM idled 20h online — the scheduler correctly gives it
+# nothing, and the app tells that user to download a smaller model).
+def excused(w):
     age = (w.get("reputation") or {}).get("ageDays")
-    return age is not None and age < 0.1
-seasoned = [w for w in ws if not is_new(w)]
-fresh = [w for w in ws if is_new(w)]
-check(all(w.get("perf") for w in seasoned), "perf populated on every established worker",
-      f"{len(fresh)} brand-new worker(s) excused" if fresh else "")
+    return (age is not None and age < 0.1) or not w.get("models")
+serving = [w for w in ws if not excused(w)]
+idle = [w for w in ws if excused(w)]
+check(all(w.get("perf") for w in serving), "perf populated on every model-advertising worker",
+      f"{len(idle)} excused (new or no servable models)" if idle else "")
 ages = [(w["address"], w.get("reputation", {}).get("ageDays")) for w in ws]
 check(all(a is not None and a > 0 for _, a in ages), "ageDays accumulating on ALL workers",
       " ".join(f"{a}:{d}" for a, d in ages))
