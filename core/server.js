@@ -357,7 +357,12 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
   const registry = new ToolRegistry({ privacyMode: () => settings.get("network.privacyMode") || "local-only" });
   const memory = new MemoryStore(dataDir);
   registerMemoryTools(registry, memory);
-  registerBuiltinTools(registry, { dataDir });
+  // Node runtime for npx-based MCP servers AND the run_code sandbox —
+  // constructed before the builtin tools so run_code can probe which node
+  // binary (and which permission flag) this machine actually has.
+  const { NodeRuntime } = require("./lib/node-runtime");
+  const nodeRuntime = new NodeRuntime({ provisioner, runtimesDir: path.join(dataDir, "runtimes") });
+  registerBuiltinTools(registry, { dataDir, nodeRuntime });
   // Electron's safeStorage encrypts account credentials with the OS keychain;
   // absent (tests, headless) the services fall back to a 0600 file and say so.
   let safeStorage = null;
@@ -386,10 +391,6 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     },
   });
   registerCalendarTools(registry, calendarSvc);
-  // Node runtime for npx-based MCP servers — provisioned on demand so
-  // "add a tool server" never dead-ends on "go install Node.js first".
-  const { NodeRuntime } = require("./lib/node-runtime");
-  const nodeRuntime = new NodeRuntime({ provisioner, runtimesDir: path.join(dataDir, "runtimes") });
   const mcp = new McpManager({ settings, registry, nodeRuntime, onEvent: events });
   mcp.autoConnect().catch(() => {}); // reconnect servers the user used before
 

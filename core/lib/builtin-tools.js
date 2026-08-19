@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 
 const { searchWeb, fetchPage } = require("./websearch");
+const { CodeRunner } = require("./code-runner");
 
 /*
  * Built-in agent tools. Two design lines drawn on purpose (documented for
@@ -13,7 +14,11 @@ const { searchWeb, fetchPage } = require("./websearch");
  *     workspace). No path escapes, no exec, no reads of the user's real
  *     documents. A consumer app handing a 4B-parameter model the whole
  *     disk is how trust dies; a scratch folder is how work gets done.
- *   - There is no shell tool at all in v1.
+ *   - There is still no shell tool. run_code (task #58) is NOT one: it
+ *     executes Node.js scripts under Node's permission model, jailed to the
+ *     SAME workspace folder the file tools use, with no child processes, no
+ *     fs outside the jail, the network patched out, and sensitive:true so
+ *     the code is shown and confirmed before it runs.
  */
 
 function workspaceRoot(dataDir) {
@@ -30,8 +35,9 @@ function safePath(root, name) {
   return full;
 }
 
-function registerBuiltinTools(registry, { dataDir }) {
+function registerBuiltinTools(registry, { dataDir, nodeRuntime = null }) {
   const root = workspaceRoot(dataDir);
+  const runner = new CodeRunner({ workspaceDir: root, nodeRuntime });
 
   registry.register({
     name: "web_search",
@@ -96,7 +102,23 @@ function registerBuiltinTools(registry, { dataDir }) {
     },
   });
 
-  return { workspaceRoot: root };
+  registry.register({
+    name: "run_code",
+    description:
+      "Run a short Node.js script in a sandbox and get its output. The script can require built-in modules " +
+      "(fs, path, crypto, …) and read/write ONLY the agent workspace folder — the same folder the file tools " +
+      "use, so it can process files you saved there. No network, no other programs, 30s limit. " +
+      "Print (console.log) whatever you need to see.",
+    params: { code: "the JavaScript source to run", timeoutSec: "optional seconds before the run is killed (max 120)" },
+    egress: false, // network is patched out inside the sandbox
+    // Model-written code is the trust boundary of the whole feature: it is
+    // ALWAYS shown to the user and confirmed before it executes, no matter
+    // how trusted the rest of the session is.
+    sensitive: true,
+    handler: ({ code, timeoutSec }) => runner.run(code, { timeoutSec }),
+  });
+
+  return { workspaceRoot: root, codeRunner: runner };
 }
 
 module.exports = { registerBuiltinTools, safePath };
