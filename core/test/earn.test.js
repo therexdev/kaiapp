@@ -167,6 +167,15 @@ test("earn loop: register -> job -> local inference -> signed receipt -> epoch r
     assert.equal(summary.totals[address], "200000000", "2 eval receipts = 2 KAI bootstrap subsidy, in satoshis");
     assert.match(summary.root, /^[0-9a-f]{64}$/);
     assert.ok(fs.existsSync(path.join(dir, "sched", "epoch-1.json")), "epoch persisted");
+    // The worker learns its receipt was accepted from the RESPONSE to its
+    // result post — which resolves a beat after the scheduler records the
+    // receipt. The receipts.length wait above can therefore pass while the
+    // worker's own counter is still 1 (CI flake, 2026-08-19): give the
+    // counter the same bounded wait the receipts got.
+    const counterDeadline = Date.now() + 5000;
+    while (worker.status().receiptsAccepted < 2 && Date.now() < counterDeadline) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
     assert.equal(worker.status().receiptsAccepted, 2);
   } finally {
     await worker.stop();
