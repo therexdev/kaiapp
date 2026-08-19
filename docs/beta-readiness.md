@@ -23,18 +23,20 @@ wrong**, live-probed 2026-08-18:
   roots are all MISSING on-chain, while the RPC answers and the operator
   holds ~100 tKOIN (balance probed on-chain — fuel is NOT the cause).
 
-### Diagnosing the quiet failure (next concrete steps)
+### Diagnosing the quiet failure — RESOLVED 2026-08-19 (production merge 3205141)
 
-The failure reason is recorded per-epoch in `summary.settlement.error`,
-which the NEW public endpoint exposes:
-
-    GET https://koinosai.com/scheduler/claims?address=<any worker address>
-
-Each claim entry carries `settlement.rootTx / claim tx / error`. **This is
-deployed the moment the kai production branch is updated** (see §4 —
-blocked on the owner). Likeliest suspects once the error is visible: an
-env override on the box (`KAI_RPC_URL` pointing somewhere dead), a koilib
-`wait()` timeout being treated as failure, or nonce contention.
+The claims endpoint went live with the owner's merge and answered the
+question the same evening (Netcheck run 32302699733): settlement is
+WORKING. 7 of the 8 most recent epochs for `1EXvuu…Mj6E` carry both
+`settlement.rootTx` and `settlement.claim.tx` with `error: null` — roots
+and claim mints are landing on the Foundation-testnet contract. The old
+"missing roots" window predated the deploy; the chain-preset commit
+(`8ca8cb8`, live defaults pointing at the working RPC) is the likely
+cure. ONE epoch — `29786174`, closed during the deploy's restart window
+(~20:29Z) — shows `settlement: null`; watch whether the resume logic
+back-settles it, and if not it is one bounded 5.47-KAI casualty of the
+restart, not a live fault. The Netcheck workflow now prints this claims
+view every run (settlement stays observable without box access).
 
 ### Owner runbook — testnet KAI verification (10 minutes, on the box)
 
@@ -109,20 +111,26 @@ which is the thing Beta is supposed to measure.
 
 ## 4. Blocked on the owner
 
-1. **Merge the kai dev branch into the production branch** (compare page:
-   base `claude/kai-production-website-fqx4pf`, compare
-   `claude/koinos-ai-takeover-co25fw` — verified clean, no conflicts).
-   Ships the claims endpoint, chain presets, fingerprint shadow, stress
-   harness, and the §20 paid-only splits fix (`e3a5340`). NOTE the
-   correction from an earlier revision of this doc: the treasury address
-   travels in git (`deploy/app.env`), so the merge itself ACTIVATES §20
-   splits — that is now safe and owner-approved (2026-08-19) because
-   splits divide PAID chat value only; free-tier emission passes through
-   whole (pinned by `scripts/probe-splits.js` §6). The box auto-deploys
-   within a minute; expect ONE scheduler restart.
-2. **Settlement diagnosis** — after the merge, read `settlement.error`
-   from `/scheduler/claims?address=…` (no box access needed), or run
-   runbook §1 on the box (10 minutes).
+1. **Merge the kai dev branch into production A SECOND TIME.** The
+   2026-08-19 merge (PR #2, `3205141`) landed at `475de9a` — BEFORE four
+   commits that were pushed the same evening, so production is currently
+   running the §20 splits with the treasury ACTIVE but WITHOUT the
+   paid-only fix: free-tier emission is losing 10% to the treasury on
+   chat receipts, which is exactly what the owner ruled against. Bounded
+   today (eval receipts dominate and both sides are owner wallets) but
+   wrong, and every epoch anchors it on-chain. Same compare page, same
+   one click; the second merge ships:
+   - `e3a5340` — §20 splits divide PAID value only (the money fix)
+   - `4fb8dd2` — accounts: email/passkey/Google sign-in + device link +
+     wallet attach (passkeys work immediately; email needs SMTP_HOST on
+     the box — already set if waitlist mail works; Google needs
+     GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET)
+   - `3a4be6e` — koinos-fast fits a 4GB Pi + per-worker `ram` in status
+   - `2a9ae38` — anti-Sybil rollout order recorded beside the flags
+   Expect ONE more scheduler restart on deploy.
+2. ~~Settlement diagnosis~~ — RESOLVED, see §1: settlements are landing;
+   only epoch `29786174` (deploy-restart window) is unsettled — check it
+   once after the second merge.
 
 ### Decided 2026-08-19 (no longer blocking)
 
