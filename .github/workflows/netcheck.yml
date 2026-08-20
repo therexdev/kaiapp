@@ -100,6 +100,10 @@ jobs:
           curl -sS --max-time 15 -o /dev/null -w 'docs shell  HTTP %{http_code} (%{size_download} bytes)\n' https://koinosai.com/docs/
           curl -sS --max-time 15 -o /dev/null -w 'docs page   HTTP %{http_code} (%{size_download} bytes)\n' https://koinosai.com/docs/content/earn.md
           curl -sS --max-time 15 -o /dev/null -w 'docs image  HTTP %{http_code} (%{size_download} bytes)\n' https://koinosai.com/docs/img/earn.png
+          # The developer-track additions (v0.29.0 docs deploy): the newest
+          # page and its screenshot — a partial docs deploy shows up here.
+          curl -sS --max-time 15 -o /dev/null -w 'docs kcode  HTTP %{http_code} (%{size_download} bytes)\n' https://koinosai.com/docs/content/koinos-code.md
+          curl -sS --max-time 15 -o /dev/null -w 'docs devimg HTTP %{http_code} (%{size_download} bytes)\n' https://koinosai.com/docs/img/api-dev.png
           echo
           echo "== /scheduler/claims (settlement diagnosis) =="
           curl -sS --max-time 15 "https://koinosai.com/scheduler/claims?address=1EXvuuW5HMrYRPdkraSi5Z4TBd4djyMj6E&limit=8" \
