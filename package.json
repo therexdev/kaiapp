@@ -15,9 +15,13 @@
   ],
   "scripts": {
     "core": "node core/server.js",
+    "code": "node cli/koinos-code.js",
     "test": "node --test \"core/test/*.test.js\"",
     "start": "electron .",
     "dist": "electron-builder"
+  },
+  "bin": {
+    "koinos-code": "cli/koinos-code.js"
   },
   "devDependencies": {
     "electron": "^43.4.0",
@@ -35,6 +39,7 @@
       "electron/**",
       "core/**",
       "ui/**",
+      "cli/**",
       "!core/test/**",
       "package.json"
     ],

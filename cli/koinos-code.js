@@ -1,0 +1,450 @@
+#!/usr/bin/env node
+"use strict";
+
+/*
+ * Koinos Code (task #60) — a coding agent in the terminal, in the mold of
+ * Claude Code, running entirely on the Koinos AI stack. The model is whatever
+ * the local gateway serves (a local GGUF, or the network class when privacy
+ * mode allows); the loop and action grammar are the app's own (ui/agents.js,
+ * UMD precisely so Node can require it). Design: docs/koinos-code-design.md.
+ *
+ * Permission model, one sentence: reads are free inside the project, writes
+ * show a diff and ask, commands always ask.
+ *   --yes             pre-approves file edits (scripted use)
+ *   --allow-commands  lets run_cmd execute without a prompt (CI use)
+ * There is deliberately no flag that silences both gates at once.
+ */
+
+const fs = require("fs");
+const path = require("path");
+const readline = require("readline");
+const { exec } = require("child_process");
+
+const { buildAgentSystem, parseAgentAction, trimConvo } = require(path.join(__dirname, "..", "ui", "agents"));
+
+const PREAMBLE =
+  "You are Koinos Code, a careful coding agent working inside the person's project directory. " +
+  "Read the relevant files before changing them. Make the smallest change that accomplishes the task, " +
+  "matching the project's existing style. Never invent file contents you have not read.";
+
+const OBS_MAX_CHARS = 4000; // what one observation may feed back into the context
+const READ_WINDOW = 120; // lines per read_file call — big files are windowed
+const SEARCH_MAX_HITS = 40;
+const DIFF_MAX_LINES = 160;
+const CMD_TIMEOUT_MS = 60000;
+
+/* ----------------------------------------------------------- plumbing ---- */
+
+const useColor = process.stdout.isTTY && !process.env.NO_COLOR;
+const dim = (s) => (useColor ? `\x1b[2m${s}\x1b[0m` : s);
+const red = (s) => (useColor ? `\x1b[31m${s}\x1b[0m` : s);
+const green = (s) => (useColor ? `\x1b[32m${s}\x1b[0m` : s);
+const print = (s) => process.stdout.write(s + "\n");
+
+let rl = null;
+function getRl() {
+  if (!rl) rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  return rl;
+}
+function closeRl() {
+  if (rl) rl.close();
+  rl = null;
+}
+function askYesNo(q) {
+  return new Promise((res) => getRl().question(`${q} [y/N] `, (ans) => res(/^y(es)?$/i.test(ans.trim()))));
+}
+
+function usage() {
+  print(
+    [
+      "koinos-code — a coding agent on your own Koinos AI (local model or network)",
+      "",
+      'usage: koinos-code [options] ["task…"]      one task, then exit',
+      "       koinos-code [options]                 interactive session",
+      "",
+      "options:",
+      "  --dir <path>        project directory (default: current directory)",
+      "  --url <base>        Core gateway (default: $KAI_CODE_URL or http://127.0.0.1:41100)",
+      "  --model <alias>     model to use (default: first model the gateway lists)",
+      "  --key <secret>      API key, if you created keys in the app ($KAI_API_KEY)",
+      "  -y, --yes           pre-approve file edits (commands still ask)",
+      "  --allow-commands    let run_cmd execute without a prompt (for CI)",
+      "  --max-steps <n>     tool-step budget per task (default 25, max 50)",
+    ].join("\n")
+  );
+}
+
+function parseArgs(argv) {
+  const opts = {
+    dir: process.cwd(),
+    url: process.env.KAI_CODE_URL || "http://127.0.0.1:41100",
+    model: "",
+    key: process.env.KAI_API_KEY || "",
+    yes: false,
+    allowCommands: false,
+    maxSteps: 25,
+    task: "",
+    help: false,
+  };
+  const rest = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === "--dir") opts.dir = argv[++i];
+    else if (a === "--url") opts.url = argv[++i];
+    else if (a === "--model") opts.model = argv[++i];
+    else if (a === "--key") opts.key = argv[++i];
+    else if (a === "--yes" || a === "-y") opts.yes = true;
+    else if (a === "--allow-commands") opts.allowCommands = true;
+    else if (a === "--max-steps") opts.maxSteps = Math.max(1, Math.min(50, Number(argv[++i]) || 25));
+    else if (a === "--help" || a === "-h") opts.help = true;
+    else rest.push(a);
+  }
+  opts.task = rest.join(" ").trim();
+  opts.dir = path.resolve(String(opts.dir || "."));
+  return opts;
+}
+
+/** Resolve p inside root, or null when it escapes — the jail every tool uses. */
+function jailed(root, p) {
+  const abs = path.resolve(root, String(p || ""));
+  if (abs !== root && !abs.startsWith(root + path.sep)) return null;
+  return abs;
+}
+
+/** Minimal unified-ish diff: changed lines with 2 lines of context. */
+function unifiedDiff(oldText, newText, cap = DIFF_MAX_LINES) {
+  const a = String(oldText).split("\n");
+  const b = String(newText).split("\n");
+  if (a.length > 400 || b.length > 400) {
+    // LCS on huge files is not worth the memory; summarize honestly instead.
+    return `(large change: ${a.length} -> ${b.length} lines — diff omitted, review the file after)`;
+  }
+  const m = a.length;
+  const n = b.length;
+  const dp = Array.from({ length: m + 1 }, () => new Uint16Array(n + 1));
+  for (let i = m - 1; i >= 0; i--) {
+    for (let j = n - 1; j >= 0; j--) {
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  const ops = [];
+  let i = 0;
+  let j = 0;
+  while (i < m && j < n) {
+    if (a[i] === b[j]) {
+      ops.push([" ", a[i]]);
+      i++;
+      j++;
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      ops.push(["-", a[i++]]);
+    } else {
+      ops.push(["+", b[j++]]);
+    }
+  }
+  while (i < m) ops.push(["-", a[i++]]);
+  while (j < n) ops.push(["+", b[j++]]);
+  const keep = new Set();
+  ops.forEach((op, k) => {
+    if (op[0] === " ") return;
+    for (let d = -2; d <= 2; d++) keep.add(k + d);
+  });
+  const out = [];
+  let last = -2;
+  for (let k = 0; k < ops.length; k++) {
+    if (!keep.has(k)) continue;
+    if (k > last + 1) out.push("  ⋯");
+    out.push(`${ops[k][0]} ${ops[k][1]}`);
+    last = k;
+  }
+  if (!out.length) return "(no changes)";
+  if (out.length > cap) return out.slice(0, cap).concat([`  ⋯ (${out.length - cap} more diff lines)`]).join("\n");
+  return out.join("\n");
+}
+
+function paintDiff(diff) {
+  if (!useColor) return diff;
+  return diff
+    .split("\n")
+    .map((l) => (l.startsWith("+") ? green(l) : l.startsWith("-") ? red(l) : dim(l)))
+    .join("\n");
+}
+
+/* -------------------------------------------------------------- tools ---- */
+
+const IGNORE_DIRS = new Set(["node_modules", ".git", "dist", ".runs", "__pycache__"]);
+
+function isTextFile(abs) {
+  let fd;
+  try {
+    fd = fs.openSync(abs, "r");
+    const buf = Buffer.alloc(512);
+    const n = fs.readSync(fd, buf, 0, 512, 0);
+    return !buf.subarray(0, n).includes(0);
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
+function walkFiles(root, dir, acc, depth = 0) {
+  if (depth > 8 || acc.length > 500) return;
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const e of entries) {
+    if (e.name.startsWith(".") && e.name !== ".env.example") continue;
+    if (e.isDirectory()) {
+      if (!IGNORE_DIRS.has(e.name)) walkFiles(root, path.join(dir, e.name), acc, depth + 1);
+    } else if (e.isFile()) {
+      acc.push(path.relative(root, path.join(dir, e.name)));
+      if (acc.length > 500) return;
+    }
+  }
+}
+
+function makeTools(root, opts) {
+  const interactive = Boolean(process.stdin.isTTY);
+  return [
+    {
+      name: "list_files",
+      description: "List the project's files as relative paths.",
+      params: { dir: "optional sub-directory" },
+      handler: ({ dir }) => {
+        const start = jailed(root, dir || ".");
+        if (!start) return "refused: path escapes the project directory";
+        const acc = [];
+        walkFiles(root, start, acc);
+        if (!acc.length) return "(no files)";
+        return acc.slice(0, 500).join("\n") + (acc.length > 500 ? "\n⋯ (more files not shown)" : "");
+      },
+    },
+    {
+      name: "read_file",
+      description: "Read a text file with line numbers. Long files are windowed; pass from (a line number) to continue.",
+      params: { path: "file path", from: "start line, optional" },
+      handler: ({ path: p, from }) => {
+        const abs = jailed(root, p);
+        if (!abs) return "refused: path escapes the project directory";
+        let text;
+        try {
+          text = fs.readFileSync(abs, "utf8");
+        } catch (e) {
+          return `cannot read ${p}: ${e.code || e.message}`;
+        }
+        const lines = text.split("\n");
+        const start = Math.max(1, Number(from) || 1);
+        const slice = lines.slice(start - 1, start - 1 + READ_WINDOW);
+        const body = slice.map((l, k) => `${start + k}\t${l}`).join("\n");
+        const end = start - 1 + slice.length;
+        const tail = end < lines.length ? `\n⋯ (lines ${start}–${end} of ${lines.length} — pass from: ${end + 1} for more)` : "";
+        return body + tail;
+      },
+    },
+    {
+      name: "search_files",
+      description: "Find lines containing a text, case-insensitive, across the project's text files.",
+      params: { query: "text to find" },
+      handler: ({ query }) => {
+        const q = String(query || "").toLowerCase();
+        if (!q) return "give a query";
+        const files = [];
+        walkFiles(root, root, files);
+        const hits = [];
+        for (const rel of files) {
+          const abs = path.join(root, rel);
+          let st;
+          try {
+            st = fs.statSync(abs);
+          } catch {
+            continue;
+          }
+          if (st.size > 512 * 1024 || !isTextFile(abs)) continue;
+          const lines = fs.readFileSync(abs, "utf8").split("\n");
+          for (let k = 0; k < lines.length && hits.length < SEARCH_MAX_HITS; k++) {
+            if (lines[k].toLowerCase().includes(q)) hits.push(`${rel}:${k + 1}: ${lines[k].trim().slice(0, 160)}`);
+          }
+          if (hits.length >= SEARCH_MAX_HITS) break;
+        }
+        return hits.length ? hits.join("\n") : "(no matches)";
+      },
+    },
+    {
+      name: "write_file",
+      description: "Create or replace a file with new content. The person sees a diff and approves first.",
+      params: { path: "file path", content: "full new file content" },
+      handler: async ({ path: p, content }) => {
+        const abs = jailed(root, p);
+        if (!abs) return "refused: path escapes the project directory";
+        const next = String(content ?? "");
+        let old = "";
+        try {
+          old = fs.readFileSync(abs, "utf8");
+        } catch {
+          /* new file */
+        }
+        if (old === next) return `no change: ${p} already has that content`;
+        print(`\n--- ${p} ---`);
+        print(paintDiff(unifiedDiff(old, next)));
+        let approved = false;
+        if (opts.yes) approved = true;
+        else if (interactive) approved = await askYesNo(`apply this edit to ${p}?`);
+        if (!approved) {
+          return interactive
+            ? "the user declined this edit"
+            : "edit declined: no terminal to ask on — the person must pass --yes to pre-approve edits";
+        }
+        fs.mkdirSync(path.dirname(abs), { recursive: true });
+        fs.writeFileSync(abs, next);
+        print(dim(`  wrote ${p}`));
+        return `wrote ${p} (${Buffer.byteLength(next)} bytes)`;
+      },
+    },
+    {
+      name: "run_cmd",
+      description: "Run one shell command in the project directory. The person approves every command.",
+      params: { cmd: "the command" },
+      handler: async ({ cmd }) => {
+        const command = String(cmd || "").trim();
+        if (!command) return "give a command";
+        let approved = false;
+        if (opts.allowCommands) approved = true;
+        else if (interactive) approved = await askYesNo(`run: ${command} ?`);
+        if (!approved) {
+          return interactive
+            ? "the user declined this command"
+            : "command declined: no terminal to ask on — the person must pass --allow-commands to allow commands";
+        }
+        return await new Promise((res) => {
+          exec(command, { cwd: root, timeout: CMD_TIMEOUT_MS, maxBuffer: 512 * 1024 }, (err, stdout, stderr) => {
+            const code = err ? (err.killed ? "timeout" : err.code ?? 1) : 0;
+            res(`exit ${code}\n${String(stdout).slice(0, 2000)}${stderr ? `\nstderr:\n${String(stderr).slice(0, 1000)}` : ""}`);
+          });
+        });
+      },
+    },
+  ];
+}
+
+/* ------------------------------------------------------------ gateway ---- */
+
+async function gw(opts, pathname, body) {
+  const headers = { "content-type": "application/json" };
+  if (opts.key) headers.authorization = `Bearer ${opts.key}`;
+  let r;
+  try {
+    r = await fetch(opts.url.replace(/\/$/, "") + pathname, {
+      method: body ? "POST" : "GET",
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    throw new Error(`cannot reach the Koinos AI gateway at ${opts.url} — is the app (or \`npm run core\`) running?`);
+  }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j?.error?.message || j?.error || `gateway answered ${r.status} for ${pathname}`);
+  return j;
+}
+
+async function pickModel(opts) {
+  if (opts.model) return opts.model;
+  const j = await gw(opts, "/v1/models");
+  const ids = (j.data || []).map((d) => d.id);
+  if (!ids.length) throw new Error("the gateway lists no models — download one in the Koinos AI app first");
+  return ids[0];
+}
+
+async function complete(opts, messages) {
+  const j = await gw(opts, "/v1/chat/completions", { model: opts.model, messages, stream: false, max_tokens: 900 });
+  return String(j?.choices?.[0]?.message?.content ?? "");
+}
+
+/* --------------------------------------------------------- agent loop ---- */
+
+async function runTask(opts, tools, convo, task) {
+  const names = tools.map((t) => t.name);
+  // A fresh system prompt per task keeps the tool menu tuned to the question.
+  convo[0] = { role: "system", content: `${PREAMBLE}\n\n${buildAgentSystem(tools, { question: task, allNames: names })}` };
+  convo.push({ role: "user", content: task });
+  for (let step = 0; step < opts.maxSteps; step++) {
+    const out = await complete(opts, trimConvo(convo));
+    const action = parseAgentAction(out, names);
+    if (!action) {
+      // No parsable action: with small models that IS the final answer.
+      convo.push({ role: "assistant", content: out });
+      return out.trim();
+    }
+    if (action.answer) {
+      convo.push({ role: "assistant", content: out });
+      convo.push({ role: "user", content: "Give the final answer to the task now, as plain text." });
+      const fin = await complete(opts, trimConvo(convo));
+      convo.push({ role: "assistant", content: fin });
+      return fin.trim();
+    }
+    const tool = tools.find((t) => t.name === action.tool);
+    print(dim(`» ${action.tool} ${JSON.stringify(action.args).slice(0, 140)}`));
+    let obs;
+    try {
+      obs = String(await tool.handler(action.args || {}));
+    } catch (e) {
+      obs = `tool error: ${e.message}`;
+    }
+    obs = obs.slice(0, OBS_MAX_CHARS);
+    print(dim(`  ${obs.split("\n")[0].slice(0, 160)}`));
+    convo.push({ role: "assistant", content: out });
+    convo.push({ role: "user", content: `Observation:\n${obs}\n\nContinue with the task. Use another tool, or reply {"answer": true} when done.` });
+  }
+  return "(step budget exhausted — the task may be incomplete)";
+}
+
+/* ---------------------------------------------------------------- main ---- */
+
+async function main() {
+  const opts = parseArgs(process.argv.slice(2));
+  if (opts.help) {
+    usage();
+    return;
+  }
+  if (!fs.existsSync(opts.dir) || !fs.statSync(opts.dir).isDirectory()) {
+    throw new Error(`project directory does not exist: ${opts.dir}`);
+  }
+  opts.model = await pickModel(opts);
+  print(dim(`Koinos Code — ${opts.model} via ${opts.url}`));
+  print(dim(`project: ${opts.dir}`));
+  const tools = makeTools(opts.dir, opts);
+  const convo = [{ role: "system", content: "" }];
+
+  if (opts.task) {
+    const answer = await runTask(opts, tools, convo, opts.task);
+    print(`\n${answer}`);
+    closeRl();
+    return;
+  }
+
+  print(dim('Interactive session — type a task, or "exit".'));
+  for (;;) {
+    const line = await new Promise((res) => getRl().question("koinos-code> ", res));
+    const t = String(line).trim();
+    if (!t) continue;
+    if (/^(exit|quit)$/i.test(t)) break;
+    try {
+      const answer = await runTask(opts, tools, convo, t);
+      print(`\n${answer}\n`);
+    } catch (e) {
+      print(`error: ${e.message}`);
+    }
+  }
+  closeRl();
+}
+
+module.exports = { parseArgs, jailed, unifiedDiff, makeTools };
+
+if (require.main === module) {
+  main().catch((e) => {
+    console.error(`koinos-code: ${e.message}`);
+    process.exit(1);
+  });
+}
