@@ -342,6 +342,20 @@ class Worker {
     if (job.type !== "inference-eval" && job.type !== "chat") {
       throw new Error(`Unapproved job type: ${job.type}`);
     }
+    // Cold engine swap ahead: acquiring a NON-resident model blocks through
+    // the whole load (A40 field report: 166s cold for a 32B vs a 60s eval
+    // lease — 8 timeout strikes with zero failed challenges). Tell the
+    // scheduler BEFORE we go quiet so the lease gets a one-time warming
+    // grace instead of blaming honest hardware. Fire-and-forget: an old
+    // scheduler 404s and everything behaves exactly as before.
+    if (this.runtime.activeAlias !== undefined && this.runtime.activeAlias !== job.model) {
+      this.onEvent({ type: "worker:model-warming", jobId: job.id, model: job.model });
+      fetch(`${this.schedulerUrl}/worker/warming?token=${this.token}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", connection: "close" },
+        body: JSON.stringify({ jobId: job.id }),
+      }).catch(() => {});
+    }
     // Hold the engine for the whole stream: a job for another model class
     // switching engines mid-generation is what cut network answers off.
     const hold = this.runtime.acquireFor

@@ -411,7 +411,12 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
   const loopbackChat = async ({ model, messages, maxTokens }) => {
     const r = await fetch(`http://127.0.0.1:${gateway.port}/core/chat/completions`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        // Headless deployments gate /core/* behind KAI_CORE_TOKEN — the
+        // engine's own internal calls carry it so teams/bench keep working.
+        ...(process.env.KAI_CORE_TOKEN ? { authorization: `Bearer ${process.env.KAI_CORE_TOKEN}` } : {}),
+      },
       body: JSON.stringify({ model, messages, stream: false, max_tokens: maxTokens }),
     });
     const j = await r.json().catch(() => ({}));

@@ -96,6 +96,22 @@ class Gateway {
     this.onEvent = onEvent || (() => {});
     this.server = null;
     this._ensureJob = null; // background model-load kicked off by the UI
+    // Headless hardening (A40 field report, pre-server-edition): when
+    // KAI_CORE_TOKEN is set, every /core/* call must present it as a bearer.
+    // Off by default — the desktop app's loopback trust model is unchanged,
+    // and the served UI does not carry the token, so this is for deployments
+    // driven programmatically (proxies, fleet scripts), not the window.
+    this.coreToken = process.env.KAI_CORE_TOKEN || null;
+  }
+
+  _coreAuthed(req) {
+    if (!this.coreToken) return true;
+    const h = String(req.headers.authorization || "");
+    if (!h.startsWith("Bearer ")) return false;
+    const crypto = require("crypto");
+    const a = crypto.createHash("sha256").update(h.slice(7)).digest();
+    const b = crypto.createHash("sha256").update(this.coreToken).digest();
+    return crypto.timingSafeEqual(a, b);
   }
 
   listen() {
@@ -236,6 +252,12 @@ class Gateway {
         error: "Refused: this endpoint only answers Koinos AI itself, not another site.",
       });
     }
+    // _sameSite deliberately trusts header-less callers (local scripts are
+    // legitimate); on a shared or proxied deployment that trust is too wide —
+    // KAI_CORE_TOKEN closes it (see constructor).
+    if (path.startsWith("/core/") && !this._coreAuthed(req)) {
+      return this._json(res, 401, { ok: false, error: "This deployment requires a core token: Authorization: Bearer <KAI_CORE_TOKEN>." });
+    }
 
     // ----- control plane -----
     if (path === "/core/health" && req.method === "GET") {
@@ -286,6 +308,19 @@ class Gateway {
           job.error = String(e.message);
         });
       return this._json(res, 200, { ok: true, started: true, alias });
+    }
+    // The escape hatch cancelDownload() always had but never a route to (A40
+    // field report): abort the in-flight model download. The ensure job then
+    // rejects and frees its slot — no restart needed to un-wedge a bad mirror.
+    if (path === "/core/models/download/cancel" && req.method === "POST") {
+      const r = this.models.cancelDownload();
+      const rt = this.runtime.provisioner?.cancelDownload?.() ?? null;
+      if (this._ensureJob?.state === "working" && !r.cancelled && !rt?.cancelled) {
+        // Loading but not downloading (engine spawn, disk copy): nothing we
+        // can safely abort — say so instead of pretending.
+        return this._json(res, 200, { ok: true, cancelled: false, note: "no download in flight — the current load step is not cancellable" });
+      }
+      return this._json(res, 200, { ok: true, cancelled: Boolean(r.cancelled || rt?.cancelled) });
     }
     if (path === "/core/keys" && req.method === "GET") {
       return this._json(res, 200, { ok: true, required: this.keys.required(), keys: this.keys.list() });

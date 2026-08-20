@@ -468,7 +468,8 @@
           <p class="lede">Point any OpenAI SDK or tool at this machine. No cloud, no per-token bill.</p>
           <pre id="api-snippet" class="snippet"></pre>
           <h2>Network &amp; privacy</h2>
-          <p class="hint">Local-Only is the default: requests can never leave this machine. Local-First and Network unlock the “Koinos Network” model — requests overflow to network providers through the scheduler.</p>
+          <p class="hint">Local-Only is the default: requests can never leave this machine. Local-First and Network unlock the “Koinos Network” model — requests overflow to network providers through the scheduler.
+            <b>Network requests run on other people's computers: the provider serving your request can read what it contains</b> — nothing is stored by the serving path, but treat anything sent off this machine as visible to that provider.</p>
           <div class="form-row">
             <select id="privacy-pick">
               <option value="local-only">Local-Only (nothing leaves this machine)</option>
