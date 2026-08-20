@@ -424,6 +424,27 @@ for dev/screenshots).
    app once Vultr has proven stable (keep the plan for email DNS).
 8. Parked: async self-test (spawn vs spawnSync), Compare presets, deep-research surface,
    Microsoft Store distribution, kaiapp scheduler-mirror resync-or-retire (§5).
+9. **Developer track (owner ask 2026-08-19: "toggle switch for developer tools… in the API
+   section") — SHIPPED 2026-08-20** as three releases in one night:
+   - **v0.28.9**: `dev.tools` switch in Local API (default OFF). With it on:
+     `POST /core/teams/run` accepts full JSON team specs (`core/lib/teams.js
+     normalizeSpec` — specs can only REMOVE stages / NARROW tools / LOWER budgets, role
+     prompts APPEND to the built-ins so the planner/critic contracts survive), and
+     `/core/bench` runs a fixed 10-case objective suite (`core/lib/bench.js`, mechanical
+     checks only, report saved to `bench-last.json`). The switch reveals capability, never
+     permission — `run_code` in a spec still needs its own upfront confirm.
+   - **v0.29.0**: **Koinos Code** (task #60) — coding-agent CLI in the Claude Code mold on
+     our stack: `cli/koinos-code.js`, zero deps, drives any project dir through `/v1/*`
+     using ui/agents.js's grammar. Permission model in one sentence: reads free inside the
+     project, writes show a diff and ask, commands always ask (`--yes` = edits only,
+     `--allow-commands` = commands only, no both-flag). `docs/koinos-code-design.md`;
+     scripted-gateway tests pin write flow / path jail / command gate / answer handshake.
+   - **v0.29.1**: visual team-spec builder in the dev panel (form → writes the JSON; the
+     JSON stays the source of truth).
+   - Tester docs updated live same night (kai PR #6+#7, verified by netcheck curls:
+     `docs kcode` + `docs devimg` HTTP 200): local-api.md documents the toggle/specs/bench,
+     new koinos-code.md page. NOTE: the docs markdown renderer has NO table support —
+     lists only (learned by rendering the options table as literal pipes; fixed in PR #7).
 
 ## 8. Working with the owner
 
