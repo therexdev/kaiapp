@@ -28,6 +28,61 @@ const MAX_ACTIONS_PER_WORK = 4;
 const MAX_MODEL_CALLS = 24; // absolute ceiling per run, all stages combined
 const MAX_NOTE_CHARS = 2500; // what a work stage may hand forward
 const MAX_STAGE_TOKENS = 700;
+const MAX_PROMPT_CHARS = 2000; // per-role extra instructions in a custom spec
+
+/*
+ * Custom specs (task #61, phase B — the developer track): a JSON team
+ * definition POSTed to /core/teams/run instead of a template id. The spec can
+ * REMOVE stages, NARROW tools, LOWER budgets, and APPEND role instructions —
+ * it can never raise a budget above the template ceilings or touch the
+ * permission model. Role prompts are appended to the built-in ones rather
+ * than replacing them, so the machine-readable contracts (the planner's
+ * numbered list, the critic's PASS) survive whatever a spec says.
+ */
+const STAGE_ORDER = ["plan", "work", "write", "critique", "revise"];
+const SPEC_ROLES = ["planner", "worker", "writer", "critic", "reviser"];
+
+function clampBudget(v, ceiling) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return ceiling;
+  return Math.max(1, Math.min(ceiling, Math.floor(n)));
+}
+
+function normalizeSpec(raw, knownTools = null) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("team spec must be a JSON object");
+  const stagesIn = Array.isArray(raw.stages) && raw.stages.length ? raw.stages.map(String) : STAGE_ORDER;
+  for (const s of stagesIn) {
+    if (!STAGE_ORDER.includes(s)) throw new Error(`unknown stage "${s}" — valid stages: ${STAGE_ORDER.join(", ")}`);
+  }
+  // Stored in canonical pipeline order whatever order the spec listed them in.
+  const stages = STAGE_ORDER.filter((s) => stagesIn.includes(s));
+  if (!stages.includes("write")) throw new Error('a team spec needs the "write" stage — something must produce the answer');
+  const tools = (Array.isArray(raw.tools) ? raw.tools : []).map(String);
+  if (knownTools) {
+    for (const t of tools) {
+      if (!knownTools.includes(t)) throw new Error(`unknown tool "${t}" — this machine has: ${knownTools.join(", ") || "(none)"}`);
+    }
+  }
+  const prompts = {};
+  if (raw.prompts && typeof raw.prompts === "object" && !Array.isArray(raw.prompts)) {
+    for (const role of SPEC_ROLES) {
+      if (raw.prompts[role] === undefined) continue;
+      const p = String(raw.prompts[role]).trim().slice(0, MAX_PROMPT_CHARS);
+      if (p) prompts[role] = p;
+    }
+  }
+  return {
+    id: "custom",
+    label: String(raw.label || "Custom team").slice(0, 80),
+    tools,
+    stages,
+    prompts,
+    workGoal: String(raw.workGoal || "Work on this sub-task with the tools.").slice(0, MAX_PROMPT_CHARS),
+    maxSubtasks: clampBudget(raw.maxSubtasks, MAX_SUBTASKS),
+    maxActionsPerWork: clampBudget(raw.maxActionsPerWork, MAX_ACTIONS_PER_WORK),
+    maxModelCalls: clampBudget(raw.maxModelCalls, MAX_MODEL_CALLS),
+  };
+}
 
 const TEMPLATES = [
   {
@@ -75,13 +130,28 @@ class TeamRunner {
 
   /**
    * Run one team. Returns { answer, trace, modelCalls }.
+   * `template` names a built-in; `spec` (a raw JSON team definition) takes
+   * precedence when given — the developer track, budget-clamped above.
    * onTrace(entry) fires per step for live streaming.
    */
-  async run({ template, question, model, allowSensitive = false, onTrace = () => {} }) {
-    const spec = TEMPLATES.find((t) => t.id === String(template || ""));
-    if (!spec) throw new Error(`unknown team template: ${template}`);
+  async run({ template, spec: rawSpec, question, model, allowSensitive = false, onTrace = () => {} }) {
+    let spec;
+    if (rawSpec !== undefined && rawSpec !== null) {
+      spec = normalizeSpec(rawSpec, this.registry ? this.registry.list().map((t) => t.name) : null);
+    } else {
+      spec = TEMPLATES.find((t) => t.id === String(template || ""));
+      if (!spec) throw new Error(`unknown team template: ${template}`);
+    }
     const q = String(question || "").trim();
     if (!q) throw new Error("the team needs a question or task");
+    // Templates run at the ceilings; a custom spec may only have lowered them.
+    const budget = {
+      subtasks: spec.maxSubtasks ?? MAX_SUBTASKS,
+      actions: spec.maxActionsPerWork ?? MAX_ACTIONS_PER_WORK,
+      calls: spec.maxModelCalls ?? MAX_MODEL_CALLS,
+    };
+    // Spec role prompts are APPENDED to the built-in ones (see normalizeSpec).
+    const extra = (role) => (spec.prompts?.[role] ? `\n\nExtra instructions from the team spec:\n${spec.prompts[role]}` : "");
 
     const state = { calls: 0, trace: [] };
     const emit = (entry) => {
@@ -90,7 +160,7 @@ class TeamRunner {
       try { onTrace(e); } catch { /* a broken listener must not kill the run */ }
     };
     const ask = async (role, messages) => {
-      if (state.calls >= MAX_MODEL_CALLS) throw new Error("team budget exhausted (model calls)");
+      if (state.calls >= budget.calls) throw new Error("team budget exhausted (model calls)");
       state.calls += 1;
       const content = String((await this.chatFn({ model, messages, maxTokens: MAX_STAGE_TOKENS })) ?? "");
       emit({ stage: role, type: "model", detail: content.slice(0, 400) });
@@ -106,8 +176,9 @@ class TeamRunner {
         {
           role: "system",
           content:
-            `You are the planner of a small team. Break the user's task into at most ${MAX_SUBTASKS} concrete, ` +
-            "independent sub-tasks. Reply with ONLY a numbered list, one sub-task per line, nothing else.",
+            `You are the planner of a small team. Break the user's task into at most ${budget.subtasks} concrete, ` +
+            "independent sub-tasks. Reply with ONLY a numbered list, one sub-task per line, nothing else." +
+            extra("planner"),
         },
         { role: "user", content: q },
       ]);
@@ -115,7 +186,7 @@ class TeamRunner {
         .split("\n")
         .map((l) => l.replace(/^\s*(?:\d+[.)]|[-*])\s*/, "").trim())
         .filter((l) => l.length > 3);
-      if (lines.length) subtasks = lines.slice(0, MAX_SUBTASKS);
+      if (lines.length) subtasks = lines.slice(0, budget.subtasks);
       emit({ stage: "planner", type: "note", detail: `plan: ${subtasks.length} sub-task(s)` });
     }
 
@@ -123,7 +194,7 @@ class TeamRunner {
     const notes = [];
     if (spec.stages.includes("work")) {
       for (const [i, sub] of subtasks.entries()) {
-        const note = await this._workStage({ spec, sub, model, allowSensitive, ask, emit, index: i });
+        const note = await this._workStage({ spec, sub, model, allowSensitive, ask, emit, index: i, actionCap: budget.actions, extra });
         notes.push(`Sub-task ${i + 1}: ${sub}\n${note}`);
       }
     }
@@ -136,7 +207,8 @@ class TeamRunner {
         content:
           "You are the team's writer. Produce the final answer to the user's task" +
           (notes.length ? " USING ONLY the team notes provided — cite nothing the notes do not support." : ".") +
-          " Be complete but not padded.",
+          " Be complete but not padded." +
+          extra("writer"),
       },
       { role: "user", content: `${q}${context ? `\n\n${context}` : ""}` },
     ]);
@@ -149,7 +221,8 @@ class TeamRunner {
           content:
             "You are the team's critic. Review the draft against the task" +
             (notes.length ? " and the team notes" : "") +
-            '. If it is accurate and complete reply with exactly "PASS". Otherwise list the concrete problems, briefly.',
+            '. If it is accurate and complete reply with exactly "PASS". Otherwise list the concrete problems, briefly.' +
+            extra("critic"),
         },
         { role: "user", content: `Task: ${q}\n\nDraft:\n${draft}${context ? `\n\n${context}` : ""}` },
       ]);
@@ -158,7 +231,7 @@ class TeamRunner {
         draft = await ask("reviser", [
           {
             role: "system",
-            content: "You are the team's reviser. Rewrite the draft to fix the critic's points. Output only the revised answer.",
+            content: "You are the team's reviser. Rewrite the draft to fix the critic's points. Output only the revised answer." + extra("reviser"),
           },
           { role: "user", content: `Task: ${q}\n\nDraft:\n${draft}\n\nCritique:\n${critique}${context ? `\n\n${context}` : ""}` },
         ]);
@@ -172,20 +245,20 @@ class TeamRunner {
   }
 
   /** One bounded ReAct loop: the same JSON-action grammar as the solo agent. */
-  async _workStage({ spec, sub, model, allowSensitive, ask, emit, index }) {
+  async _workStage({ spec, sub, model, allowSensitive, ask, emit, index, actionCap = MAX_ACTIONS_PER_WORK, extra = () => "" }) {
     const role = `worker${index + 1}`;
     const available = (this.registry ? this.registry.list() : []).filter((t) => spec.tools.includes(t.name));
     if (!available.length) return "(no tools available — nothing gathered)";
     const names = available.map((t) => t.name);
     const system =
-      `${spec.workGoal || "Work on this sub-task with the tools."}\n\n` +
+      `${spec.workGoal || "Work on this sub-task with the tools."}${extra("worker")}\n\n` +
       buildAgentSystem(available, { question: sub, allNames: names });
     let convo = [
       { role: "system", content: system },
       { role: "user", content: sub },
     ];
     const findings = [];
-    for (let step = 0; step < MAX_ACTIONS_PER_WORK; step++) {
+    for (let step = 0; step < actionCap; step++) {
       const out = await ask(role, trimConvo(convo));
       const action = parseAgentAction(out, names);
       if (!action || action.answer) break;
@@ -214,4 +287,4 @@ class TeamRunner {
   }
 }
 
-module.exports = { TeamRunner, TEMPLATES };
+module.exports = { TeamRunner, TEMPLATES, normalizeSpec };

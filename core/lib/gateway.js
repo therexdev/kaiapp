@@ -67,7 +67,7 @@ function hasImageParts(messages) {
 }
 
 class Gateway {
-  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, earn, network, feedback, chats, docs, voice, tools, memory, mcp, nodeRuntime, email, calendar, koinos, koinosNode, teams, account, onEvent }) {
+  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, earn, network, feedback, chats, docs, voice, tools, memory, mcp, nodeRuntime, email, calendar, koinos, koinosNode, teams, account, dev, bench, onEvent }) {
     this.tools = tools || null; // unified tool registry (agents/MCP/memory/…)
     this.memory = memory || null; // cross-chat memory store
     this.mcp = mcp || null; // MCP server manager
@@ -78,6 +78,8 @@ class Gateway {
     this.koinosNode = koinosNode || null; // the full node stack: Docker, setup, onramp, swaps
     this.teams = teams || null; // AI Teams runner (task #58) — role pipelines, Core-side
     this.account = account || null; // Koinos AI account client (task #49) — device link + wallet attach
+    this.dev = dev || null; // developer-tools switch (task #61) — gates custom specs + bench
+    this.bench = bench || null; // objective model benchmark (task #61)
     this.voice = voice || null; // local speech-to-text (whisper)
     this.feedback = feedback || null; // relay to the project's feedback inbox
     this.chats = chats || null; // local chat history store
@@ -849,6 +851,12 @@ class Gateway {
       } catch {
         return this._json(res, 400, { ok: false, error: "Body must be JSON" });
       }
+      // Custom JSON specs are a developer-tools feature (task #61): same
+      // budgets and permissions as the templates, but behind the explicit
+      // switch so the surprise surface stays away from non-developers.
+      if (body.spec !== undefined && !(this.dev && this.dev.status().enabled)) {
+        return this._json(res, 403, { ok: false, error: "Custom team specs need Developer tools on (Local API → Developer tools)." });
+      }
       // SSE: one event per trace entry, then a terminal done event. The
       // sensitive-tool consent arrives as an explicit boolean from the
       // caller (the UI asks the human up front; API callers state it).
@@ -857,12 +865,56 @@ class Gateway {
       try {
         const r = await this.teams.run({
           template: String(body.template || ""),
+          spec: body.spec,
           question: String(body.question || ""),
           model: String(body.model || ""),
           allowSensitive: body.allowSensitive === true,
           onTrace: (e) => send({ trace: e }),
         });
         send({ done: true, answer: r.answer, modelCalls: r.modelCalls });
+      } catch (e) {
+        send({ done: true, error: String(e.message) });
+      }
+      return res.end();
+    }
+
+    // ---- Developer tools (task #61): one explicit switch, stored in settings ----
+    if (this.dev && path === "/core/dev" && req.method === "GET") {
+      return this._json(res, 200, { ok: true, ...this.dev.status() });
+    }
+    if (this.dev && path === "/core/dev" && req.method === "POST") {
+      let body;
+      try {
+        body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+      } catch {
+        return this._json(res, 400, { ok: false, error: "Body must be JSON" });
+      }
+      return this._json(res, 200, { ok: true, ...this.dev.configure({ enabled: body.enabled === true }) });
+    }
+
+    // ---- Bench (task #61): fixed objective suite, scored mechanically ----
+    if (this.bench && path === "/core/bench" && req.method === "GET") {
+      return this._json(res, 200, { ok: true, suites: this.bench.suites(), enabled: this.dev ? this.dev.status().enabled : false });
+    }
+    if (this.bench && path === "/core/bench/run" && req.method === "POST") {
+      if (!(this.dev && this.dev.status().enabled)) {
+        return this._json(res, 403, { ok: false, error: "The benchmark needs Developer tools on (Local API → Developer tools)." });
+      }
+      let body;
+      try {
+        body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+      } catch {
+        return this._json(res, 400, { ok: false, error: "Body must be JSON" });
+      }
+      res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
+      const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+      try {
+        const r = await this.bench.run({
+          suite: String(body.suite || "core"),
+          model: String(body.model || ""),
+          onCase: (row) => send({ case: row }),
+        });
+        send({ done: true, summary: r.summary });
       } catch (e) {
         send({ done: true, error: String(e.message) });
       }

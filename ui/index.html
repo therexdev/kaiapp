@@ -487,6 +487,48 @@
             <pre class="snippet" id="new-key-value"></pre>
           </div>
           <ul id="key-list"></ul>
+
+          <div class="koinos-toggle-row">
+            <div>
+              <b>Developer tools</b>
+              <div class="hint">
+                Custom AI-team specs (JSON) and a model benchmark, for people building on the API.
+                Everything here obeys the same privacy and permission rules as the rest of the app.
+              </div>
+            </div>
+            <button id="btn-dev-toggle" class="switch" role="switch" aria-checked="false" aria-label="Developer tools">
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+            </button>
+          </div>
+
+          <div id="dev-panel" hidden>
+            <h2>Custom team (JSON spec)</h2>
+            <p class="hint">
+              Define your own pipeline — stages, tools, budgets, extra role instructions — and run it once here.
+              Budgets are capped at the built-in ceilings (4 sub-tasks, 4 actions per worker, 24 model calls)
+              no matter what the spec asks. Apps can POST the same spec to <code>/core/teams/run</code>.
+            </p>
+            <textarea id="dev-spec" rows="11" spellcheck="false"></textarea>
+            <input id="dev-question" placeholder="Task for the team" />
+            <div class="form-row">
+              <button id="btn-dev-run" class="primary small">Run team</button>
+              <span id="dev-run-status" class="meta"></span>
+            </div>
+            <pre id="dev-team-out" class="snippet" hidden></pre>
+
+            <h2>Benchmark</h2>
+            <p class="hint">
+              Scores the current model on a fixed suite of objective tasks — arithmetic, instruction
+              following, JSON output, extraction, and a tool-using agent case. Same tasks every run,
+              so scores compare across models and app versions. Also at <code>/core/bench/run</code>.
+            </p>
+            <div class="form-row">
+              <button id="btn-dev-bench" class="primary small">Run benchmark</button>
+              <span id="dev-bench-status" class="meta"></span>
+            </div>
+            <pre id="dev-bench-out" class="snippet" hidden></pre>
+            <p class="error" id="dev-error" hidden></p>
+          </div>
         </div>
       </section>
     </main>

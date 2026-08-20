@@ -405,20 +405,34 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
   // re-implementing any of it. (`gateway` is created below; teams only run
   // after listen, when its port exists.)
   const { TeamRunner } = require("./lib/teams");
-  const teams = new TeamRunner({
-    registry,
-    onEvent: events,
-    chatFn: async ({ model, messages, maxTokens }) => {
-      const r = await fetch(`http://127.0.0.1:${gateway.port}/core/chat/completions`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ model, messages, stream: false, max_tokens: maxTokens }),
-      });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j?.error?.message || `chat failed (${r.status})`);
-      return j?.choices?.[0]?.message?.content ?? "";
+  // One loopback completion through the gateway's own chat lane — teams AND
+  // bench inherit every routing rule (privacy modes, budgets, kill switch)
+  // instead of re-implementing any of it.
+  const loopbackChat = async ({ model, messages, maxTokens }) => {
+    const r = await fetch(`http://127.0.0.1:${gateway.port}/core/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model, messages, stream: false, max_tokens: maxTokens }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j?.error?.message || `chat failed (${r.status})`);
+    return j?.choices?.[0]?.message?.content ?? "";
+  };
+  const teams = new TeamRunner({ registry, onEvent: events, chatFn: loopbackChat });
+  // Developer tools (task #61): ONE explicit switch in Local API. Off by
+  // default; while off, custom team specs and the bench routes refuse. The
+  // switch reveals capability, never permissions — sensitive tools still
+  // need their own upfront yes with it on.
+  const dev = {
+    status: () => ({ enabled: settings.get("dev.tools", false) === true }),
+    configure: ({ enabled }) => {
+      settings.set("dev.tools", enabled === true);
+      events({ type: "dev:tools", message: enabled === true ? "on" : "off" });
+      return dev.status();
     },
-  });
+  };
+  const { BenchRunner } = require("./lib/bench");
+  const bench = new BenchRunner({ chatFn: loopbackChat, teams, dataDir });
   mcp.autoConnect().catch(() => {}); // reconnect servers the user used before
 
   // Local speech-to-text (§7: audio never leaves the machine). Engine+model
@@ -450,6 +464,8 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     koinosNode: koinosNodeSvc,
     teams,
     account,
+    dev,
+    bench,
     chats: new ChatStore(path.join(dataDir, "chats")),
     docs: new (require("./lib/docs").DocStore)(path.join(dataDir, "docs")),
     coreInfo: () => ({ version: VERSION, dataDir, hardware: hw }),
