@@ -67,7 +67,7 @@ function hasImageParts(messages) {
 }
 
 class Gateway {
-  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, earn, network, feedback, chats, docs, voice, tools, memory, mcp, nodeRuntime, email, calendar, koinos, koinosNode, teams, onEvent }) {
+  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, earn, network, feedback, chats, docs, voice, tools, memory, mcp, nodeRuntime, email, calendar, koinos, koinosNode, teams, account, onEvent }) {
     this.tools = tools || null; // unified tool registry (agents/MCP/memory/…)
     this.memory = memory || null; // cross-chat memory store
     this.mcp = mcp || null; // MCP server manager
@@ -77,6 +77,7 @@ class Gateway {
     this.koinos = koinos || null; // Koinos node tools — off unless the user flips the Earn toggle
     this.koinosNode = koinosNode || null; // the full node stack: Docker, setup, onramp, swaps
     this.teams = teams || null; // AI Teams runner (task #58) — role pipelines, Core-side
+    this.account = account || null; // Koinos AI account client (task #49) — device link + wallet attach
     this.voice = voice || null; // local speech-to-text (whisper)
     this.feedback = feedback || null; // relay to the project's feedback inbox
     this.chats = chats || null; // local chat history store
@@ -805,6 +806,36 @@ class Gateway {
     // app's built-in chat out (localhost control plane is the UI's surface).
     if (path === "/core/chat/completions" && req.method === "POST") {
       return this._chat(req, res);
+    }
+
+    // ---- Koinos AI account (task #49): device link + wallet attach ----
+    // All egress: refused in Local-Only before the client is touched.
+    if (this.account && path.startsWith("/core/account")) {
+      if (this._blockedByPrivacy(res, "Your Koinos AI account")) return;
+      try {
+        if (path === "/core/account" && req.method === "GET") {
+          return this._json(res, 200, { ok: true, ...(await this.account.status()) });
+        }
+        if (path === "/core/account/link/start" && req.method === "POST") {
+          return this._json(res, 200, { ok: true, ...(await this.account.linkStart()) });
+        }
+        if (path === "/core/account/link/poll" && req.method === "POST") {
+          return this._json(res, 200, { ok: true, ...(await this.account.linkPoll()) });
+        }
+        if (path === "/core/account/logout" && req.method === "POST") {
+          await this.account.signOut();
+          return this._json(res, 200, { ok: true });
+        }
+        if (path === "/core/account/wallet" && req.method === "POST") {
+          return this._json(res, 200, { ok: true, account: await this.account.linkWallet() });
+        }
+        if (path === "/core/account/wallet/unlink" && req.method === "POST") {
+          const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+          return this._json(res, 200, { ok: true, account: await this.account.unlinkWallet(body.address) });
+        }
+      } catch (e) {
+        return this._json(res, 400, { ok: false, error: String(e.message) });
+      }
     }
 
     // ---- AI Teams (task #58): role pipelines over the tool registry ----

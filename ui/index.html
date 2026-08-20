@@ -102,10 +102,13 @@
           </div>
         </div>
         <form id="composer">
-          <select id="mode-pick" title="How to answer: plain chat, multi-step web research, or an agent that uses tools">
+          <select id="mode-pick" title="How to answer: plain chat, multi-step web research, an agent that uses tools, or a whole AI team">
             <option value="chat">💬 Chat</option>
             <option value="research">🔬 Research</option>
             <option value="agent">🛠 Agent</option>
+            <option value="team:research">👥 Research team</option>
+            <option value="team:analyst">👥 Analyst team (code)</option>
+            <option value="team:review">👥 Write &amp; review team</option>
           </select>
           <select id="src-pick" title="Run on this machine, or on the network"></select>
           <select id="model-pick" title="Which model answers"></select>
@@ -406,6 +409,33 @@
               <button id="btn-wallet-send" class="primary small">Send</button>
             </div>
             <p class="hint" id="wallet-msg" hidden></p>
+
+            <h2>Koinos AI account</h2>
+            <p class="hint">
+              One account across your devices: sign in once, link this wallet, and your balance
+              and claims follow you. Sign-in happens at koinosai.com with a passkey, email code,
+              or Google — the app never asks for a password, it just shows a short code.
+            </p>
+            <div id="account-signedout" hidden>
+              <button id="btn-account-signin" class="primary small">Sign in / create account</button>
+              <div id="account-code-row" hidden>
+                <p class="hint">
+                  On any device, open
+                  <a id="account-verify-link" href="https://koinosai.com/link" target="_blank" rel="noopener">koinosai.com/link</a>,
+                  sign in, and type this code:
+                </p>
+                <div id="account-code" class="mono" style="font-size:24px;letter-spacing:4px;margin:6px 0"></div>
+                <p class="hint" id="account-poll-status">Waiting for approval…</p>
+              </div>
+            </div>
+            <div id="account-signedin" hidden>
+              <div class="hw-summary" id="account-stats"></div>
+              <div class="form-row">
+                <button id="btn-account-linkwallet" class="primary small">Link this wallet</button>
+                <button id="btn-account-signout" class="small">Sign out on this device</button>
+              </div>
+            </div>
+            <p class="hint" id="account-msg" hidden></p>
           </div>
 
           <div class="koinos-toggle-row">

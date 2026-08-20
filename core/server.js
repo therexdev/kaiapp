@@ -392,6 +392,12 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
   });
   registerCalendarTools(registry, calendarSvc);
   const mcp = new McpManager({ settings, registry, nodeRuntime, onEvent: events });
+  // Koinos AI account (task #49): device-link sign-in + wallet attach. The
+  // bearer token is stored like email credentials (OS keychain when
+  // available); the wallet's unlocked signer produces the link proof — it
+  // moves no value, same trust class as receipt signing.
+  const { AccountService } = require("./lib/account");
+  const account = new AccountService({ dataDir, settings, wallet, safeStorage, onEvent: events });
   // AI Teams (task #58): the runner lives in Core so headless API users and
   // the Pi get teams without a window. Completions loop back through the
   // gateway's own chat lane, so teams inherit EVERY routing rule — local
@@ -443,6 +449,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     koinos: koinosSvc,
     koinosNode: koinosNodeSvc,
     teams,
+    account,
     chats: new ChatStore(path.join(dataDir, "chats")),
     docs: new (require("./lib/docs").DocStore)(path.join(dataDir, "docs")),
     coreInfo: () => ({ version: VERSION, dataDir, hardware: hw }),

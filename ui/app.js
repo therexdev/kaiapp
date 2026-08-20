@@ -700,6 +700,77 @@ async function send(replayText) {
   let webCitations = null;
   let reqHistory = state.history;
   const answerMode = replayText ? "chat" : getChatMode();
+
+  // 👥 AI Teams (task #58): the team produces the FINAL answer itself —
+  // plan, tool-using workers, writer, critic — streamed as a live trace.
+  // No second completion pass happens; this branch owns the whole turn.
+  if (answerMode.startsWith("team:")) {
+    const template = answerMode.slice(5);
+    const trace = document.createElement("div");
+    trace.className = "web-status";
+    bubble.before(trace);
+    try {
+      // Code-running teams get ONE upfront, explicit consent for the run —
+      // the same trust boundary as confirming a sensitive tool, stated in
+      // plain words before anything executes.
+      let allowSensitive = false;
+      if (template === "analyst") {
+        allowSensitive = confirm(
+          "The Analyst team writes and runs code in the sandbox (its own scratch folder, no network, no other programs). Allow for this run?"
+        );
+      }
+      const resp = await fetch("/core/teams/run", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        signal: state.abort.signal,
+        body: JSON.stringify({ template, question: text, model: chatModel, allowSensitive }),
+      });
+      if (!resp.ok || !resp.body) throw new Error(`teams endpoint answered ${resp.status}`);
+      const decoder = new TextDecoder();
+      let buf = "";
+      let done = null;
+      for await (const chunk of resp.body) {
+        buf += decoder.decode(chunk, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf("\n\n")) !== -1) {
+          const line = buf.slice(0, idx).trim();
+          buf = buf.slice(idx + 2);
+          if (!line.startsWith("data: ")) continue;
+          const ev = JSON.parse(line.slice(6));
+          if (ev.trace) trace.textContent = `👥 ${ev.trace.stage}: ${String(ev.trace.detail).slice(0, 140)}`;
+          if (ev.done) done = ev;
+        }
+      }
+      if (!done) throw new Error("the team stream ended without an answer");
+      if (done.error) throw new Error(done.error);
+      trace.textContent = `👥 team finished in ${done.modelCalls} model calls`;
+      bubble.innerHTML = mdToHtml(done.answer);
+      attachMsgActions(bubble);
+      state.history.push({ role: "assistant", content: done.answer });
+      saveCurrentChat();
+    } catch (e) {
+      if (e.name === "AbortError") {
+        trace.remove();
+        state.history.push({ role: "assistant", content: "(team run stopped)" });
+        bubble.textContent = "(team run stopped)";
+        saveCurrentChat();
+      } else {
+        trace.remove();
+        bubble.remove();
+        state.history.pop();
+        addMsg("error", String(e.message));
+        $("input").value = text;
+      }
+    } finally {
+      bubble.classList.remove("streaming");
+      state.chatting = false;
+      $("btn-send").disabled = false;
+      $("btn-stop").hidden = true;
+      state.abort = null;
+    }
+    return;
+  }
+
   if (answerMode !== "chat") {
     // Research / Agent phase: gather first (multi-round, tool calls), then
     // the final answer streams through the normal path below. The gathered
@@ -1048,6 +1119,8 @@ async function renderEarn() {
     $("earn-stats").innerHTML = rows.map(([k, v]) => `<span class="k">${k}</span><span>${esc(v)}</span>`).join("");
     // The wallet card's receive address — same wallet the worker earns with.
     if ($("wallet-address") && s.wallet.address) $("wallet-address").value = s.wallet.address;
+    // Account card — self-throttled to one status fetch per 30s (egress).
+    renderAccount();
     $("btn-earn-toggle").textContent = s.worker.running ? "Stop Earning" : "Start Earning";
     $("btn-earn-toggle").dataset.running = s.worker.running ? "1" : "";
   }
@@ -1248,6 +1321,141 @@ $("btn-wallet-balances").addEventListener("click", async () => {
   } finally {
     $("btn-wallet-balances").disabled = false;
   }
+});
+
+/* ---- Koinos AI account (task #49): device-link sign-in + wallet attach.
+ * The app never shows a login form: Sign in fetches a short code, the user
+ * approves it at <site>/link in any browser, and the app polls until its own
+ * session arrives. All calls go through Core, which refuses them in
+ * Local-Only privacy mode with words. */
+let accountFetchedAt = 0;
+let accountPolling = false;
+
+function accountMsg(text, ok) {
+  const el = $("account-msg");
+  el.hidden = !text;
+  el.textContent = text || "";
+  el.style.color = ok ? "var(--ok, #3dbf7a)" : "";
+}
+
+async function renderAccount(force) {
+  if (!force && Date.now() - accountFetchedAt < 30000) return; // egress — don't ride the 2s earn timer
+  accountFetchedAt = Date.now();
+  const so = $("account-signedout");
+  const si = $("account-signedin");
+  let j = {};
+  try {
+    const r = await fetch("/core/account");
+    j = await r.json();
+    if (!r.ok || !j.ok) throw new Error(j.localOnly ? "Privacy is set to Local-Only — accounts need network access (Local API → Network & privacy)." : j.error || `HTTP ${r.status}`);
+  } catch (e) {
+    so.hidden = true;
+    si.hidden = true;
+    return accountMsg(e.message);
+  }
+  accountMsg("");
+  if (j.verifyUrl || j.site) {
+    const link = $("account-verify-link");
+    const url = (j.site || "https://koinosai.com") + "/link";
+    link.href = url;
+    link.textContent = url.replace(/^https:\/\//, "");
+  }
+  if (j.signedIn) {
+    so.hidden = true;
+    si.hidden = false;
+    const a = j.account;
+    const methods = [
+      a.email ? "email" : null,
+      a.google ? "Google" : null,
+      a.passkeys?.length ? `${a.passkeys.length} passkey${a.passkeys.length > 1 ? "s" : ""}` : null,
+    ].filter(Boolean);
+    const rows = [
+      ["Signed in as", a.email || a.id],
+      ["Sign-in methods", methods.join(", ") || "none yet — add a passkey on the account page"],
+      ["Linked wallets", String(a.wallets?.length ?? 0)],
+      ["This wallet", j.thisWalletLinked ? "✓ linked to your account" : "not linked yet"],
+    ];
+    $("account-stats").innerHTML = rows.map(([k, v]) => `<span class="k">${k}</span><span>${esc(v)}</span>`).join("");
+    $("btn-account-linkwallet").hidden = Boolean(j.thisWalletLinked);
+  } else {
+    si.hidden = true;
+    so.hidden = false;
+    if (j.pendingCode) {
+      $("account-code-row").hidden = false;
+      $("account-code").textContent = j.pendingCode;
+      startAccountPoll();
+    }
+  }
+}
+
+function startAccountPoll() {
+  if (accountPolling) return;
+  accountPolling = true;
+  const tick = async () => {
+    try {
+      const r = await fetch("/core/account/link/poll", { method: "POST" });
+      const j = await r.json();
+      if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      if (j.pending) {
+        setTimeout(tick, 3000);
+        return;
+      }
+      accountPolling = false;
+      $("account-code-row").hidden = true;
+      accountMsg("Signed in.", true);
+      renderAccount(true);
+    } catch (e) {
+      accountPolling = false;
+      $("account-code-row").hidden = true;
+      accountMsg(e.message);
+      $("btn-account-signin").disabled = false;
+    }
+  };
+  setTimeout(tick, 3000);
+}
+
+$("btn-account-signin").addEventListener("click", async () => {
+  const btn = $("btn-account-signin");
+  btn.disabled = true;
+  accountMsg("");
+  try {
+    const r = await fetch("/core/account/link/start", { method: "POST" });
+    const j = await r.json();
+    if (!r.ok || !j.ok) throw new Error(j.localOnly ? "Privacy is set to Local-Only — switch it in Local API → Network & privacy first." : j.error || `HTTP ${r.status}`);
+    $("account-code-row").hidden = false;
+    $("account-code").textContent = j.userCode;
+    $("account-poll-status").textContent = "Waiting for approval… this updates by itself.";
+    startAccountPoll();
+  } catch (e) {
+    accountMsg(e.message);
+    btn.disabled = false;
+  }
+});
+
+$("btn-account-linkwallet").addEventListener("click", async () => {
+  const btn = $("btn-account-linkwallet");
+  btn.disabled = true;
+  accountMsg("");
+  try {
+    const r = await fetch("/core/account/wallet", { method: "POST" });
+    const j = await r.json();
+    if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    accountMsg("Wallet linked — it now shows on your account everywhere.", true);
+    renderAccount(true);
+  } catch (e) {
+    accountMsg(e.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+$("btn-account-signout").addEventListener("click", async () => {
+  try {
+    await fetch("/core/account/logout", { method: "POST" });
+  } catch { /* signing out locally regardless */ }
+  $("btn-account-signin").disabled = false;
+  accountMsg("Signed out on this device.", true);
+  renderAccount(true);
 });
 
 // Two clicks to move real money: the first arms and repeats the exact

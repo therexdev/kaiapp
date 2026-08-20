@@ -155,3 +155,67 @@ test("wallet card: receive address shown, sends demand a password and a second c
     await core.stop();
   }
 });
+
+test("account card: signed-out state renders, and Local-Only privacy is explained in words", { skip: !available, timeout: 120000 }, async () => {
+  const { chromium } = require("playwright-core");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-accountui-"));
+  fs.mkdirSync(path.join(dir, "models"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "models", "smollm2-135m-instruct-q8_0.gguf"), "weights");
+  const { createCore } = require("../server");
+  const core = await createCore({ dataDir: dir, port: 0, llamaBin: FAKE_BIN, onEvent: () => {} });
+  const base = `http://127.0.0.1:${await core.start()}`;
+  await fetch(`${base}/core/earn/wallet`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ password: "account ui 1" }),
+  });
+  const browser = await chromium.launch({ executablePath: CHROMIUM });
+  try {
+    const page = await browser.newPage();
+    await page.goto(base);
+    await page.waitForSelector("#view-chat:not([hidden])");
+    await page.click('.nav-item[data-view="earn"]');
+    await page.waitForSelector("#earn-ready:not([hidden])");
+    // Default privacy is Local-Only: the card must say so, in words, instead
+    // of showing a broken sign-in button.
+    await page.waitForFunction(() => {
+      const el = document.getElementById("account-msg");
+      return el && !el.hidden && /Local-Only/.test(el.textContent);
+    });
+  } finally {
+    await browser.close();
+    await core.stop();
+  }
+});
+
+test("team mode: 'Write & review' runs through the real engine and lands a final answer in the chat", { skip: !available, timeout: 120000 }, async () => {
+  const { chromium } = require("playwright-core");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-teamui-"));
+  fs.mkdirSync(path.join(dir, "models"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "models", "smollm2-135m-instruct-q8_0.gguf"), "weights");
+  const { createCore } = require("../server");
+  const core = await createCore({ dataDir: dir, port: 0, llamaBin: FAKE_BIN, onEvent: () => {} });
+  const base = `http://127.0.0.1:${await core.start()}`;
+  const browser = await chromium.launch({ executablePath: CHROMIUM });
+  try {
+    const page = await browser.newPage();
+    await page.goto(base);
+    await page.waitForSelector("#view-chat:not([hidden])");
+    await page.selectOption("#mode-pick", "team:review");
+    await page.type("#input", "say hello");
+    await page.click("#btn-send");
+    // The fake model answers identically each stage; the critic's non-PASS
+    // forces one revision — writer + critic + reviser = 3 calls, and the
+    // final answer text lands in the assistant bubble.
+    await page.waitForFunction(
+      () => [...document.querySelectorAll(".msg.assistant, [class*='assistant']")].some((el) => /Hello from fake llama/.test(el.textContent)),
+      undefined,
+      { timeout: 60000 }
+    );
+    const trace = await page.textContent("body");
+    assert.match(trace, /team finished in 3 model calls/);
+  } finally {
+    await browser.close();
+    await core.stop();
+  }
+});
