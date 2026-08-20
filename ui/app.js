@@ -1035,10 +1035,52 @@ async function renderDev() {
     $("btn-dev-toggle").setAttribute("aria-checked", String(on));
     $("dev-panel").hidden = !on;
     if (on && !$("dev-spec").value.trim()) $("dev-spec").value = DEV_SPEC_EXAMPLE;
+    if (on) renderDevBuilderTools();
   } catch {
     /* core not up yet — the next renderApi retries */
   }
 }
+
+// The builder's tool checkboxes come from the live registry, so what's
+// offered is exactly what this machine has (built-ins + connected MCP).
+let devToolsLoaded = false;
+async function renderDevBuilderTools() {
+  if (devToolsLoaded) return;
+  try {
+    const j = await coreGet("/core/tools");
+    const host = $("devb-tools");
+    host.innerHTML = "";
+    for (const t of j.tools || []) {
+      const label = document.createElement("label");
+      label.className = "check";
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.dataset.tool = t.name;
+      label.appendChild(box);
+      label.appendChild(document.createTextNode(` ${t.name}${t.sensitive ? " ⚠" : ""}`));
+      host.appendChild(label);
+    }
+    devToolsLoaded = true;
+  } catch {
+    /* registry not up — the next renderDev retries */
+  }
+}
+
+$("btn-devb-apply").addEventListener("click", () => {
+  const stages = [...document.querySelectorAll("#devb-stages input:checked")].map((el) => el.dataset.stage);
+  const tools = [...document.querySelectorAll("#devb-tools input:checked")].map((el) => el.dataset.tool);
+  const spec = {
+    label: $("devb-label").value.trim() || "Custom team",
+    stages,
+    tools,
+    maxSubtasks: Number($("devb-subtasks").value) || 4,
+    maxActionsPerWork: Number($("devb-actions").value) || 4,
+    maxModelCalls: Number($("devb-calls").value) || 24,
+  };
+  const goal = $("devb-workgoal").value.trim();
+  if (goal) spec.workGoal = goal;
+  $("dev-spec").value = JSON.stringify(spec, null, 2);
+});
 
 $("btn-dev-toggle").addEventListener("click", async () => {
   const on = $("btn-dev-toggle").getAttribute("aria-checked") === "true";

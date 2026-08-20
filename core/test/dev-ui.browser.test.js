@@ -54,6 +54,20 @@ test("developer tools UI: toggle reveals panel, a custom JSON spec runs to an an
     const prefill = await page.$eval("#dev-spec", (el) => el.value);
     assert.doesNotThrow(() => JSON.parse(prefill), "the example spec is valid JSON as shipped");
 
+    // The visual builder writes valid JSON into the box: registry tools
+    // appear as checkboxes, and the form round-trips into a runnable spec.
+    await page.waitForSelector('#devb-tools input[data-tool="write_file"]');
+    await page.uncheck('#devb-stages input[data-stage="plan"]');
+    await page.check('#devb-tools input[data-tool="read_file"]');
+    await page.fill("#devb-label", "built by form");
+    await page.click("#btn-devb-apply");
+    const built = JSON.parse(await page.$eval("#dev-spec", (el) => el.value));
+    assert.strictEqual(built.label, "built by form");
+    assert.ok(!built.stages.includes("plan"), "unchecked stage left out");
+    assert.ok(built.stages.includes("write"), "write always survives (disabled checkbox)");
+    assert.deepStrictEqual(built.tools, ["read_file"]);
+    assert.strictEqual(built.maxSubtasks, 2, "budget fields carried through");
+
     // Run a write-only custom spec end-to-end through the real stack.
     await page.fill("#dev-spec", JSON.stringify({ label: "ui spec", stages: ["write"] }));
     await page.fill("#dev-question", "say hello");

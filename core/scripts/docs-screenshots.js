@@ -69,6 +69,12 @@ async function main() {
     await shot("earn-wallet", null, { scrollTo: "#wallet-address" });
     await shot("tools", "tools");
     await shot("api", "api");
+    // Developer tools (task #61): flip the switch so the docs show the
+    // revealed panel — custom spec box prefilled, bench button visible.
+    await page.click("#btn-dev-toggle");
+    await page.waitForSelector("#dev-panel:not([hidden])");
+    await shot("api-dev", null, { scrollTo: "#dev-spec" });
+    await page.click("#btn-dev-toggle"); // leave the app in its default state
     await shot("tasks", "tasks");
     await shot("compare", "compare");
   } finally {
