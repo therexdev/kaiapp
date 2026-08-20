@@ -174,7 +174,9 @@ h2 { font-size: 1.05em; }
 }
 .form-row input:focus { outline: 1px solid var(--violet); }
 
-#src-pick, #model-pick, #persona-pick, #privacy-pick, #mode-pick {
+/* #privacy-pick deliberately NOT here: its labels run to ~86 chars and the
+   200px cap clipped them mid-word (UI audit) — .api-card select skins it. */
+#src-pick, #model-pick, #persona-pick, #mode-pick {
   background: var(--bg-input); color: var(--text); border: 1px solid var(--border);
   border-radius: 8px; padding: 9px 10px; font: inherit; max-width: 200px;
 }
@@ -516,12 +518,15 @@ button.primary:hover:not(:disabled) { box-shadow: 0 4px 16px rgba(109, 62, 240, 
 #status-text { overflow-wrap: anywhere; }
 .model-load-err { margin-top: 6px; font-size: 0.78em; color: var(--danger); overflow-wrap: anywhere; line-height: 1.45; }
 
-/* Smaller windows: the composer wraps — pickers on one row, the message box
-   full-width beneath them. Breakpoint raised 860→1180 (field feedback: three
-   pickers + the message box + three buttons were squeezing long before 860). */
+/* The composer wraps WHENEVER the message box would be crushed — no media
+   query, because a viewport breakpoint ignores the sidebar and side padding
+   (UI audit: a 1280px window sat in a dead zone where three pickers squeezed
+   the box to ~40px and the placeholder clipped). The 320px basis + 240px
+   floor make the box claim its own row the moment the pickers crowd it. */
+#composer { flex-wrap: wrap; }
+#composer #input { flex: 1 1 320px; min-width: 240px; }
 @media (max-width: 1180px) {
-  #composer { flex-wrap: wrap; }
-  #composer #input { flex: 1 1 100%; order: 5; min-width: 0; }
+  #composer #input { flex: 1 1 100%; order: 5; }
   #composer #btn-send, #composer #btn-stop, #composer #btn-attach, #composer #btn-web, #composer #btn-mic { order: 6; }
   #src-pick, #model-pick, #persona-pick, #mode-pick { max-width: none; flex: 1 1 auto; }
 }
@@ -620,6 +625,13 @@ button.linklike.danger { color: var(--danger); }
 /* #view-earn could not scroll, so anything added to the bottom of it was
    simply unreachable on a short window. */
 #view-earn, #view-koinos { overflow-y: auto; }
+/* Every card view breathes and scrolls like #view-api does — headings were
+   sitting flush against the window edge, and long content was unreachable
+   (UI audit; #view-koinos stays scroll-only, it hosts a full-bleed iframe). */
+#view-tasks, #view-network, #view-tools, #view-models, #view-devtools, #view-earn {
+  overflow-y: auto; padding: 34px 8%;
+}
+#view-earn h2 { margin-top: 18px; }
 
 .koinos-toggle-row {
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
@@ -723,20 +735,29 @@ button.small:disabled { opacity: 0.5; cursor: default; }
 .check input[type="checkbox"] { accent-color: var(--violet); }
 .check input[type="number"] {
   width: 64px; flex: 0 0 auto; background: var(--bg-input); color: var(--text);
-  border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; font: inherit;
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px 6px; font: inherit;
 }
 .form-row { flex-wrap: wrap; align-items: center; }
 
-.api-card textarea {
+/* Scoped to the developer tabs: the JSON boxes are code, the Tasks prompt
+   is prose — an .api-card-wide rule was silently restyling the task form
+   into small monospace (UI audit). */
+.devtab textarea {
   width: 100%; background: var(--bg-input); color: var(--text); border: 1px solid var(--border);
   border-radius: 8px; padding: 9px 10px; font: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.85em; line-height: 1.5; resize: vertical; margin: 8px 0;
 }
-.api-card textarea:focus { outline: 1px solid var(--violet); }
+.devtab textarea:focus { outline: 1px solid var(--violet); }
 .api-card select {
   background: var(--bg-input); color: var(--text); border: 1px solid var(--border);
   border-radius: 8px; padding: 9px 10px; font: inherit; max-width: 100%;
+  text-overflow: ellipsis; padding-right: 26px;
 }
+/* An oversized select (long catalog labels) shrinks to share its row
+   instead of pushing the button beside it onto its own line (UI audit). */
+.form-row select { flex: 0 1 auto; min-width: 0; }
+/* Small buttons paired with full-height inputs fill the row height. */
+.form-row button.small, .task-form-row button.small { align-self: stretch; }
 
 /* sub-menu tabs, node-style */
 .subtabs { display: flex; gap: 6px; margin: 14px 0 16px; border-bottom: 1px solid var(--border); }
