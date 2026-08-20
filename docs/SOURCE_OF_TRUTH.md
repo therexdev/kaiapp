@@ -445,6 +445,25 @@ for dev/screenshots).
      `docs kcode` + `docs devimg` HTTP 200): local-api.md documents the toggle/specs/bench,
      new koinos-code.md page. NOTE: the docs markdown renderer has NO table support —
      lists only (learned by rendering the options table as literal pipes; fixed in PR #7).
+   - **v0.30.0 (owner ask 2026-08-20, task #64)**: Developer Tools moved OUT of Local API
+     into its OWN sidebar view (node pattern — the switch stays in Local API, the content
+     moved), sub-menu: Multi-agent / Playground / Pipelines / Benchmark. NEW ENGINE
+     `core/lib/groupchat.js` — full AutoGen parity: named agents, one shared transcript,
+     round_robin/selector/handoff floor control, humans as PAUSING agents (input-request
+     over SSE, `/core/agents/input` resumes, timeout ends honestly), termination = end
+     phrase / message cap / 120-call absolute ceiling; budgets HARD, specs only lower
+     them; tools via the ONE registry, run_code still confirmed upfront. Saved defs CRUD
+     at `/core/agents/defs` (validated on save). Docs page developer-tools.md (kai PR #9).
+   - **UI audit (owner report 2026-08-20, task #65)**: workflow-driven screenshot audit
+     found 9 root-caused defects — composer crushed at 1280px (viewport breakpoint ignored
+     the sidebar; now wraps intrinsically), #privacy-pick clipped by a 200px cap meant for
+     composer pickers, card-wide textarea rule silently restyling the Tasks form,
+     #dev-question unstyled, small buttons not matching row heights, SIX views with no
+     padding/scroll, select overflow, number-input mismatch. All fixed in v0.30.0.
+10. **Moderation/AUP — owner-DEFERRED 2026-08-20**: owner agrees with the A40 reporter's
+    finding but explicitly wants it on the future plan ("easier to understand the
+    implications... with more nodes and network usage"). Design in kaiapp
+    docs/moderation-aup-design.md. Do NOT implement until the owner re-opens it.
 
 ## 8. Working with the owner
 
