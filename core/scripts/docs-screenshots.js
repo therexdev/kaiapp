@@ -69,12 +69,19 @@ async function main() {
     await shot("earn-wallet", null, { scrollTo: "#wallet-address" });
     await shot("tools", "tools");
     await shot("api", "api");
-    // Developer tools (task #61): flip the switch so the docs show the
-    // revealed panel — custom spec box prefilled, bench button visible.
+    // Developer Tools (task #64): the switch reveals its own sidebar view —
+    // capture each sub-menu. api-dev.png keeps its name (the docs reference
+    // it) but now shows the Multi-agent builder.
     await page.click("#btn-dev-toggle");
-    await page.waitForSelector("#dev-panel:not([hidden])");
-    await shot("api-dev", null, { scrollTo: "#dev-spec" });
-    await page.click("#btn-dev-toggle"); // leave the app in its default state
+    await page.waitForSelector("#nav-devtools:not([hidden])");
+    await page.click("#nav-devtools");
+    await page.waitForSelector("#view-devtools:not([hidden])");
+    await page.waitForFunction(() => document.getElementById("ag-json").value.trim().length > 0);
+    await shot("api-dev", null);
+    await page.click('.subtab[data-tab="playground"]');
+    await shot("devtools-playground", null);
+    await page.click('.subtab[data-tab="pipelines"]');
+    await shot("devtools-pipelines", null);
     await shot("tasks", "tasks");
     await shot("compare", "compare");
   } finally {

@@ -67,7 +67,7 @@ function hasImageParts(messages) {
 }
 
 class Gateway {
-  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, earn, network, feedback, chats, docs, voice, tools, memory, mcp, nodeRuntime, email, calendar, koinos, koinosNode, teams, account, dev, bench, onEvent }) {
+  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, earn, network, feedback, chats, docs, voice, tools, memory, mcp, nodeRuntime, email, calendar, koinos, koinosNode, teams, account, dev, bench, agents, onEvent }) {
     this.tools = tools || null; // unified tool registry (agents/MCP/memory/…)
     this.memory = memory || null; // cross-chat memory store
     this.mcp = mcp || null; // MCP server manager
@@ -80,6 +80,7 @@ class Gateway {
     this.account = account || null; // Koinos AI account client (task #49) — device link + wallet attach
     this.dev = dev || null; // developer-tools switch (task #61) — gates custom specs + bench
     this.bench = bench || null; // objective model benchmark (task #61)
+    this.agents = agents || null; // multi-agent group chats (task #64) — runner + saved defs
     this.voice = voice || null; // local speech-to-text (whisper)
     this.feedback = feedback || null; // relay to the project's feedback inbox
     this.chats = chats || null; // local chat history store
@@ -954,6 +955,87 @@ class Gateway {
         send({ done: true, error: String(e.message) });
       }
       return res.end();
+    }
+
+    // ---- Multi-agent group chats (task #64): the full-AutoGen track ----
+    if (this.agents && path.startsWith("/core/agents/")) {
+      if (!(this.dev && this.dev.status().enabled)) {
+        return this._json(res, 403, { ok: false, error: "Multi-agent teams need Developer tools on (Local API → Developer tools)." });
+      }
+      if (path === "/core/agents/defs" && req.method === "GET") {
+        return this._json(res, 200, { ok: true, defs: this.agents.defs.list() });
+      }
+      if (path === "/core/agents/defs" && req.method === "POST") {
+        let body;
+        try {
+          body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+        } catch {
+          return this._json(res, 400, { ok: false, error: "Body must be JSON" });
+        }
+        try {
+          const known = this.agents.registry ? this.agents.registry.list().map((t) => t.name) : null;
+          const entry = this.agents.defs.save({ id: body.id, spec: body.spec }, known);
+          return this._json(res, 200, { ok: true, def: entry });
+        } catch (e) {
+          return this._json(res, 400, { ok: false, error: String(e.message) });
+        }
+      }
+      const del = path.match(/^\/core\/agents\/defs\/([\w-]+)$/);
+      if (del && req.method === "DELETE") {
+        return this._json(res, 200, { ok: true, removed: this.agents.defs.remove(del[1]) });
+      }
+      if (path === "/core/agents/input" && req.method === "POST") {
+        let body;
+        try {
+          body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+        } catch {
+          return this._json(res, 400, { ok: false, error: "Body must be JSON" });
+        }
+        const took = this.agents.runner.provideInput(String(body.inputId || ""), String(body.text ?? ""));
+        return this._json(res, took ? 200 : 404, took ? { ok: true } : { ok: false, error: "no such pending input — it may have timed out" });
+      }
+      if (path === "/core/agents/stop" && req.method === "POST") {
+        let body;
+        try {
+          body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+        } catch {
+          return this._json(res, 400, { ok: false, error: "Body must be JSON" });
+        }
+        return this._json(res, 200, { ok: true, stopped: this.agents.runner.stop(String(body.runId || "")) });
+      }
+      if (path === "/core/agents/run" && req.method === "POST") {
+        let body;
+        try {
+          body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+        } catch {
+          return this._json(res, 400, { ok: false, error: "Body must be JSON" });
+        }
+        let spec = body.spec;
+        if (!spec && body.defId) {
+          const def = this.agents.defs.get(body.defId);
+          if (!def) return this._json(res, 404, { ok: false, error: "no saved team with that id" });
+          spec = def.spec;
+        }
+        // SSE with input-request events: the run PAUSES on human agents and
+        // resumes when /core/agents/input answers. Consent for sensitive
+        // tools arrives upfront, exactly like teams.
+        res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
+        const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+        try {
+          const r = await this.agents.runner.run({
+            spec,
+            task: String(body.task || ""),
+            model: String(body.model || ""),
+            allowSensitive: body.allowSensitive === true,
+            onTrace: (e) => send({ trace: e }),
+          });
+          send({ done: true, transcript: r.transcript, modelCalls: r.modelCalls, reason: r.reason });
+        } catch (e) {
+          send({ done: true, error: String(e.message) });
+        }
+        return res.end();
+      }
+      return this._json(res, 404, { ok: false, error: "unknown /core/agents route" });
     }
 
     // ----- OpenAI-compatible surface -----

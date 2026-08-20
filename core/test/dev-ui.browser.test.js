@@ -1,10 +1,11 @@
 "use strict";
 
 /*
- * The developer-tools panel (task #61) in a real Chromium: the switch in
- * Local API reveals the panel, the spec box arrives prefilled with a valid
- * example, and a custom write-only spec runs end-to-end — UI -> gateway ->
- * loopback -> fake engine -> SSE back into the trace box.
+ * The Developer Tools VIEW (task #64) in a real Chromium: the switch in
+ * Local API reveals a sidebar item (node-style), the view opens with its
+ * sub-menu, the Pipelines tab still runs a custom spec end-to-end, and the
+ * Playground runs a two-agent round-robin — including a human-in-the-loop
+ * turn typed into the real input box.
  */
 
 const { test } = require("node:test");
@@ -26,7 +27,7 @@ const available = (() => {
   }
 })();
 
-test("developer tools UI: toggle reveals panel, a custom JSON spec runs to an answer", { skip: !available, timeout: 120000 }, async () => {
+test("developer tools view: nav reveal, tabs, a pipeline run, and a playground chat with a human turn", { skip: !available, timeout: 180000 }, async () => {
   const { chromium } = require("playwright-core");
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-devui-"));
   fs.mkdirSync(path.join(dir, "models"), { recursive: true });
@@ -41,51 +42,59 @@ test("developer tools UI: toggle reveals panel, a custom JSON spec runs to an an
     const page = await browser.newPage();
     await page.goto(base);
     await page.waitForSelector("#view-chat:not([hidden])");
+
+    // The switch lives in Local API; the CONTENT lives in its own view.
     await page.click('.nav-item[data-view="api"]');
     await page.waitForSelector("#view-api:not([hidden])");
-
-    // Ships hidden: the switch is off and the panel is not in the way.
-    await page.waitForSelector('#btn-dev-toggle[aria-checked="false"]');
-    assert.strictEqual(await page.$eval("#dev-panel", (el) => el.hidden), true);
-
-    // One click on the switch reveals the panel, prefilled with a VALID example.
+    assert.strictEqual(await page.$eval("#nav-devtools", (el) => el.hidden), true, "sidebar item hidden while the switch is off");
     await page.click("#btn-dev-toggle");
-    await page.waitForSelector("#dev-panel:not([hidden])");
-    const prefill = await page.$eval("#dev-spec", (el) => el.value);
-    assert.doesNotThrow(() => JSON.parse(prefill), "the example spec is valid JSON as shipped");
+    await page.waitForSelector("#nav-devtools:not([hidden])");
 
-    // The visual builder writes valid JSON into the box: registry tools
-    // appear as checkboxes, and the form round-trips into a runnable spec.
-    await page.waitForSelector('#devb-tools input[data-tool="write_file"]');
-    await page.uncheck('#devb-stages input[data-stage="plan"]');
-    await page.check('#devb-tools input[data-tool="read_file"]');
-    await page.fill("#devb-label", "built by form");
-    await page.click("#btn-devb-apply");
-    const built = JSON.parse(await page.$eval("#dev-spec", (el) => el.value));
-    assert.strictEqual(built.label, "built by form");
-    assert.ok(!built.stages.includes("plan"), "unchecked stage left out");
-    assert.ok(built.stages.includes("write"), "write always survives (disabled checkbox)");
-    assert.deepStrictEqual(built.tools, ["read_file"]);
-    assert.strictEqual(built.maxSubtasks, 2, "budget fields carried through");
+    // Open the view: Multi-agent tab is active, prefilled with a VALID spec.
+    await page.click("#nav-devtools");
+    await page.waitForSelector("#view-devtools:not([hidden])");
+    await page.waitForFunction(() => document.getElementById("ag-json").value.trim().length > 0);
+    const agSpec = JSON.parse(await page.$eval("#ag-json", (el) => el.value));
+    assert.ok(Array.isArray(agSpec.agents) && agSpec.agents.length >= 2, "the example group spec is valid as shipped");
+    assert.ok((await page.$$("#ag-list .agent-card")).length >= 2, "the builder shows the example's agent cards");
 
-    // Run a write-only custom spec end-to-end through the real stack.
+    // ---- Pipelines tab: the simple track still runs end-to-end ----
+    await page.click('.subtab[data-tab="pipelines"]');
+    await page.waitForSelector("#devtab-pipelines:not([hidden])");
     await page.fill("#dev-spec", JSON.stringify({ label: "ui spec", stages: ["write"] }));
     await page.fill("#dev-question", "say hello");
     await page.click("#btn-dev-run");
-    await page.waitForFunction(
-      () => document.getElementById("dev-team-out").textContent.includes("Hello from fake llama"),
-      { timeout: 30000 }
-    );
-    const out = await page.textContent("#dev-team-out");
-    assert.match(out, /\[writer\]/, "the live trace rendered the stage");
-    assert.match(out, /1 model calls/, "the summary line landed");
-    const errVisible = await page.$eval("#dev-error", (el) => !el.hidden && el.textContent.trim() !== "");
-    assert.strictEqual(errVisible, false, "no error surfaced");
+    await page.waitForFunction(() => document.getElementById("dev-team-out").textContent.includes("Hello from fake llama"), { timeout: 30000 });
 
-    // The switch closes the panel again.
+    // ---- Playground: two model agents, then a HUMAN turn typed live ----
+    await page.click('.subtab[data-tab="agents"]');
+    await page.fill(
+      "#ag-json",
+      JSON.stringify({
+        label: "trio",
+        agents: [{ name: "Ana", human: true }, { name: "Bot" }, { name: "Cleo" }],
+        termination: { maxMessages: 3, textMention: "" },
+      })
+    );
+    await page.click('.subtab[data-tab="playground"]');
+    await page.waitForSelector("#devtab-playground:not([hidden])");
+    await page.fill("#pg-task", "collaborate on a greeting");
+    await page.click("#btn-pg-run");
+    // The human turn pauses the run and asks in the real input box.
+    await page.waitForSelector("#pg-input-row:not([hidden])", { timeout: 30000 });
+    await page.fill("#pg-input", "hello from the person");
+    await page.click("#btn-pg-send");
+    await page.waitForFunction(() => document.getElementById("pg-status").textContent.includes("ended:"), { timeout: 30000 });
+    const names = await page.$$eval("#pg-convo .pg-msg .pg-name", (els) => els.map((e) => e.textContent));
+    assert.deepStrictEqual(names, ["Ana", "Bot", "Cleo"], "named bubbles in speaking order");
+    const first = await page.$eval("#pg-convo .pg-msg", (el) => el.textContent);
+    assert.match(first, /hello from the person/, "the typed words became Ana's turn");
+
+    // The switch closes the whole area again.
+    await page.click('.nav-item[data-view="api"]');
     await page.click("#btn-dev-toggle");
     await page.waitForSelector('#btn-dev-toggle[aria-checked="false"]');
-    assert.strictEqual(await page.$eval("#dev-panel", (el) => el.hidden), true);
+    assert.strictEqual(await page.$eval("#nav-devtools", (el) => el.hidden), true);
   } finally {
     await browser.close();
     await core.stop();

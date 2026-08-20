@@ -451,6 +451,7 @@ function activateView(name) {
     return;
   }
   if (name === "api") renderApi();
+  if (name === "devtools") window.KaiDevTools?.render();
   if (name === "earn") renderEarn();
   if (name === "models") renderModels();
   if (name === "compare") renderCompare();
@@ -1010,77 +1011,21 @@ $("btn-new-key").addEventListener("click", async () => {
   renderApi();
 });
 
-// ---------- developer tools (task #61) ----------
-
-// A working example, not lorem ipsum: valid as-is, shows every knob.
-const DEV_SPEC_EXAMPLE = JSON.stringify(
-  {
-    label: "My research team",
-    stages: ["plan", "work", "write", "critique", "revise"],
-    tools: ["web_search", "read_page"],
-    workGoal: "Research this sub-question and gather concrete facts with sources.",
-    prompts: { writer: "Write for a technical reader. Cite sources inline." },
-    maxSubtasks: 2,
-    maxActionsPerWork: 3,
-    maxModelCalls: 16,
-  },
-  null,
-  2
-);
+// ---------- developer tools (task #61/#64) ----------
+// The CONTENT lives in its own sidebar view now (ui/devtools-view.js) —
+// what stays here is the switch in Local API and the nav reveal, the same
+// pattern as the Koinos Node toggle.
 
 async function renderDev() {
   try {
     const d = await coreGet("/core/dev");
     const on = d.enabled === true;
     $("btn-dev-toggle").setAttribute("aria-checked", String(on));
-    $("dev-panel").hidden = !on;
-    if (on && !$("dev-spec").value.trim()) $("dev-spec").value = DEV_SPEC_EXAMPLE;
-    if (on) renderDevBuilderTools();
+    $("nav-devtools").hidden = !on;
   } catch {
     /* core not up yet — the next renderApi retries */
   }
 }
-
-// The builder's tool checkboxes come from the live registry, so what's
-// offered is exactly what this machine has (built-ins + connected MCP).
-let devToolsLoaded = false;
-async function renderDevBuilderTools() {
-  if (devToolsLoaded) return;
-  try {
-    const j = await coreGet("/core/tools");
-    const host = $("devb-tools");
-    host.innerHTML = "";
-    for (const t of j.tools || []) {
-      const label = document.createElement("label");
-      label.className = "check";
-      const box = document.createElement("input");
-      box.type = "checkbox";
-      box.dataset.tool = t.name;
-      label.appendChild(box);
-      label.appendChild(document.createTextNode(` ${t.name}${t.sensitive ? " ⚠" : ""}`));
-      host.appendChild(label);
-    }
-    devToolsLoaded = true;
-  } catch {
-    /* registry not up — the next renderDev retries */
-  }
-}
-
-$("btn-devb-apply").addEventListener("click", () => {
-  const stages = [...document.querySelectorAll("#devb-stages input:checked")].map((el) => el.dataset.stage);
-  const tools = [...document.querySelectorAll("#devb-tools input:checked")].map((el) => el.dataset.tool);
-  const spec = {
-    label: $("devb-label").value.trim() || "Custom team",
-    stages,
-    tools,
-    maxSubtasks: Number($("devb-subtasks").value) || 4,
-    maxActionsPerWork: Number($("devb-actions").value) || 4,
-    maxModelCalls: Number($("devb-calls").value) || 24,
-  };
-  const goal = $("devb-workgoal").value.trim();
-  if (goal) spec.workGoal = goal;
-  $("dev-spec").value = JSON.stringify(spec, null, 2);
-});
 
 $("btn-dev-toggle").addEventListener("click", async () => {
   const on = $("btn-dev-toggle").getAttribute("aria-checked") === "true";
@@ -1092,117 +1037,6 @@ $("btn-dev-toggle").addEventListener("click", async () => {
   renderDev();
 });
 
-// Shared SSE reader for the two developer streams (same wire format as the
-// composer's team branch).
-async function devReadSse(resp, onEvent) {
-  const decoder = new TextDecoder();
-  let buf = "";
-  for await (const chunk of resp.body) {
-    buf += decoder.decode(chunk, { stream: true });
-    let idx;
-    while ((idx = buf.indexOf("\n\n")) !== -1) {
-      const line = buf.slice(0, idx).trim();
-      buf = buf.slice(idx + 2);
-      if (line.startsWith("data: ")) onEvent(JSON.parse(line.slice(6)));
-    }
-  }
-}
-
-$("btn-dev-run").addEventListener("click", async () => {
-  const errEl = $("dev-error");
-  errEl.hidden = true;
-  const out = $("dev-team-out");
-  let spec;
-  try {
-    spec = JSON.parse($("dev-spec").value);
-  } catch (e) {
-    errEl.textContent = `The spec is not valid JSON: ${e.message}`;
-    errEl.hidden = false;
-    return;
-  }
-  const question = $("dev-question").value.trim();
-  if (!question) {
-    errEl.textContent = "Give the team a task first.";
-    errEl.hidden = false;
-    return;
-  }
-  // run_code in a custom spec gets the same upfront human yes as the Analyst
-  // template — the developer toggle reveals capability, never permission.
-  let allowSensitive = false;
-  if (Array.isArray(spec.tools) && spec.tools.includes("run_code")) {
-    allowSensitive = confirm(
-      "This spec includes run_code — the team may write and run code in the sandbox (its own scratch folder, no network, no other programs). Allow for this run?"
-    );
-  }
-  out.hidden = false;
-  out.textContent = "";
-  $("btn-dev-run").disabled = true;
-  $("dev-run-status").textContent = "running…";
-  try {
-    const resp = await fetch("/core/teams/run", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ spec, question, model: state.alias ?? "dev-tiny", allowSensitive }),
-    });
-    if (!resp.ok || !resp.body) {
-      const j = await resp.json().catch(() => ({}));
-      throw new Error(j.error || `teams endpoint answered ${resp.status}`);
-    }
-    let done = null;
-    await devReadSse(resp, (ev) => {
-      if (ev.trace) out.textContent += `[${ev.trace.stage}] ${String(ev.trace.detail)}\n`;
-      if (ev.done) done = ev;
-    });
-    if (!done) throw new Error("the team stream ended without an answer");
-    if (done.error) throw new Error(done.error);
-    out.textContent += `\n=== answer (${done.modelCalls} model calls) ===\n${done.answer}\n`;
-  } catch (e) {
-    errEl.textContent = String(e.message);
-    errEl.hidden = false;
-  } finally {
-    $("btn-dev-run").disabled = false;
-    $("dev-run-status").textContent = "";
-  }
-});
-
-$("btn-dev-bench").addEventListener("click", async () => {
-  const errEl = $("dev-error");
-  errEl.hidden = true;
-  const out = $("dev-bench-out");
-  out.hidden = false;
-  out.textContent = "";
-  $("btn-dev-bench").disabled = true;
-  $("dev-bench-status").textContent = "running…";
-  try {
-    const resp = await fetch("/core/bench/run", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ suite: "core", model: state.alias ?? "dev-tiny" }),
-    });
-    if (!resp.ok || !resp.body) {
-      const j = await resp.json().catch(() => ({}));
-      throw new Error(j.error || `bench endpoint answered ${resp.status}`);
-    }
-    let done = null;
-    await devReadSse(resp, (ev) => {
-      if (ev.case) {
-        const c = ev.case;
-        out.textContent += `${c.pass ? "✓" : "✗"} ${c.id}  (${c.ms} ms, ${c.modelCalls} call${c.modelCalls === 1 ? "" : "s"})${c.pass ? "" : ` — ${c.why}`}\n`;
-      }
-      if (ev.done) done = ev;
-    });
-    if (!done) throw new Error("the bench stream ended without a summary");
-    if (done.error) throw new Error(done.error);
-    const s = done.summary;
-    out.textContent += `\nScore: ${s.passed}/${s.total} on "${s.suite}" with ${s.model} — ${(s.ms / 1000).toFixed(1)}s, ${s.modelCalls} model calls\n`;
-  } catch (e) {
-    errEl.textContent = String(e.message);
-    errEl.hidden = false;
-  } finally {
-    $("btn-dev-bench").disabled = false;
-    $("dev-bench-status").textContent = "";
-  }
-});
 
 // ---------- utils / start ----------
 

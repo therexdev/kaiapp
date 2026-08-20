@@ -438,6 +438,16 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
   };
   const { BenchRunner } = require("./lib/bench");
   const bench = new BenchRunner({ chatFn: loopbackChat, teams, dataDir });
+  // Multi-agent group chats (task #64) — the full-AutoGen developer track:
+  // named agents, one shared transcript, round-robin/selector/handoff turn
+  // order, humans as pausing agents. Same loopback, same registry, same
+  // permission policy; saved definitions live beside the other app state.
+  const { GroupChatRunner, GroupDefs } = require("./lib/groupchat");
+  const agents = {
+    runner: new GroupChatRunner({ chatFn: loopbackChat, registry, onEvent: events }),
+    defs: new GroupDefs(path.join(dataDir, "agent-teams.json")),
+    registry,
+  };
   mcp.autoConnect().catch(() => {}); // reconnect servers the user used before
 
   // Local speech-to-text (§7: audio never leaves the machine). Engine+model
@@ -471,6 +481,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     account,
     dev,
     bench,
+    agents,
     chats: new ChatStore(path.join(dataDir, "chats")),
     docs: new (require("./lib/docs").DocStore)(path.join(dataDir, "docs")),
     coreInfo: () => ({ version: VERSION, dataDir, hardware: hw }),

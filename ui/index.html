@@ -44,6 +44,7 @@
         <button class="nav-item" data-view="tools">Tools</button>
         <button class="nav-item" data-view="api">Local API</button>
         <button class="nav-item" data-view="earn">Earn <span class="soon">alpha</span></button>
+        <button class="nav-item" data-view="devtools" id="nav-devtools" hidden>Developer Tools</button>
         <button class="nav-item koinos-nav" data-view="koinos" id="nav-koinos" hidden>Node dashboard</button>
         <button class="nav-item koinos-nav" data-view="koinos-wallet" id="nav-koinos-wallet" hidden>Wallet</button>
         <button class="nav-item koinos-nav" data-view="koinos-fund" id="nav-koinos-fund" hidden>Fund node</button>
@@ -493,25 +494,92 @@
             <div>
               <b>Developer tools</b>
               <div class="hint">
-                Custom AI-team specs (JSON) and a model benchmark, for people building on the API.
-                Everything here obeys the same privacy and permission rules as the rest of the app.
+                Adds a <b>Developer Tools</b> section to the sidebar: build your own multi-agent
+                systems, custom pipelines, and a model benchmark. Everything there obeys the same
+                privacy and permission rules as the rest of the app.
               </div>
             </div>
             <button id="btn-dev-toggle" class="switch" role="switch" aria-checked="false" aria-label="Developer tools">
               <span class="switch-track"><span class="switch-thumb"></span></span>
             </button>
           </div>
+        </div>
+      </section>
 
-          <div id="dev-panel" hidden>
-            <h2>Custom team (JSON spec)</h2>
+      <!-- Developer Tools (task #64): its own view, revealed by the switch in
+           Local API — node-style. Sub-menu tabs: the full multi-agent track
+           (AutoGen parity), a playground, the simple pipelines that shipped
+           first, and the benchmark. -->
+      <section id="view-devtools" class="view" hidden>
+        <div class="api-card">
+          <h1>Developer Tools</h1>
+          <p class="lede">Build and run your own agent systems on this machine's API — from a one-line pipeline to a team of named agents that talk, use tools, and ask you questions.</p>
+          <nav id="devtools-tabs" class="subtabs" aria-label="Developer tools sections">
+            <button class="subtab active" data-tab="agents">Multi-agent</button>
+            <button class="subtab" data-tab="playground">Playground</button>
+            <button class="subtab" data-tab="pipelines">Pipelines</button>
+            <button class="subtab" data-tab="bench">Benchmark</button>
+          </nav>
+
+          <div id="devtab-agents" class="devtab">
             <p class="hint">
-              Define your own pipeline — stages, tools, budgets, extra role instructions — and run it once here.
-              Budgets are capped at the built-in ceilings (4 sub-tasks, 4 actions per worker, 24 model calls)
-              no matter what the spec asks. Apps can POST the same spec to <code>/core/teams/run</code>.
+              Named agents share one conversation. Pick how the floor moves — round robin, a model
+              moderator, or explicit handoffs — and how it ends. A <b>human</b> agent pauses the run
+              and asks you. Hard ceilings always hold: 60 messages, 120 model calls, 6 tool actions
+              per turn. Apps can POST the same spec to <code>/core/agents/run</code>.
             </p>
-            <!-- Visual builder (task #61 phase C): a form that WRITES the JSON
-                 below — the JSON stays the source of truth the run uses, so
-                 what you see in the box is exactly what runs. -->
+            <div class="form-row">
+              <input id="ag-label" placeholder="Team name" />
+              <select id="ag-mode">
+                <option value="round_robin">Round robin — agents speak in order</option>
+                <option value="selector">Selector — a model picks who speaks next</option>
+                <option value="handoff">Handoff — the speaker passes the floor by name</option>
+              </select>
+            </div>
+            <div id="ag-list"></div>
+            <div class="form-row"><button id="btn-ag-add" class="small">+ Add agent</button></div>
+            <div class="form-row">
+              <label class="check">max messages <input id="ag-maxmsg" type="number" min="1" max="60" value="12" /></label>
+              <label class="check">max model calls <input id="ag-maxcalls" type="number" min="1" max="120" value="40" /></label>
+              <input id="ag-term" placeholder='End phrase (default "TERMINATE")' />
+            </div>
+            <div class="form-row">
+              <button id="btn-ag-tojson" class="small">Write the JSON below</button>
+              <button id="btn-ag-save" class="primary small">Save team</button>
+              <select id="ag-defs"></select>
+              <button id="btn-ag-load" class="small">Load</button>
+              <button id="btn-ag-del" class="small">Delete</button>
+            </div>
+            <textarea id="ag-json" rows="12" spellcheck="false"></textarea>
+          </div>
+
+          <div id="devtab-playground" class="devtab" hidden>
+            <p class="hint">
+              Run a team and watch the conversation live. When a human agent's turn comes, the box
+              below asks you — the run waits (up to its timeout) for your words.
+            </p>
+            <div class="form-row">
+              <select id="pg-source"></select>
+              <input id="pg-task" placeholder="Task for the team" />
+            </div>
+            <div class="form-row">
+              <button id="btn-pg-run" class="primary small">Run</button>
+              <button id="btn-pg-stop" class="small" hidden>Stop</button>
+              <span id="pg-status" class="meta"></span>
+            </div>
+            <div id="pg-convo"></div>
+            <div id="pg-input-row" class="form-row" hidden>
+              <input id="pg-input" placeholder="It's your turn — type your message" />
+              <button id="btn-pg-send" class="primary small">Send</button>
+            </div>
+          </div>
+
+          <div id="devtab-pipelines" class="devtab" hidden>
+            <p class="hint">
+              The simple track: one pipeline of typed stages (plan → work → write → critique →
+              revise). Budgets cap at the built-in ceilings (4 sub-tasks, 4 actions per worker,
+              24 model calls) no matter what the spec asks. Also at <code>/core/teams/run</code>.
+            </p>
             <div id="dev-builder">
               <div class="form-row"><input id="devb-label" placeholder="Team name" /></div>
               <div class="form-row" id="devb-stages">
@@ -537,8 +605,9 @@
               <span id="dev-run-status" class="meta"></span>
             </div>
             <pre id="dev-team-out" class="snippet" hidden></pre>
+          </div>
 
-            <h2>Benchmark</h2>
+          <div id="devtab-bench" class="devtab" hidden>
             <p class="hint">
               Scores the current model on a fixed suite of objective tasks — arithmetic, instruction
               following, JSON output, extraction, and a tool-using agent case. Same tasks every run,
@@ -549,8 +618,9 @@
               <span id="dev-bench-status" class="meta"></span>
             </div>
             <pre id="dev-bench-out" class="snippet" hidden></pre>
-            <p class="error" id="dev-error" hidden></p>
           </div>
+
+          <p class="error" id="dev-error" hidden></p>
         </div>
       </section>
     </main>
@@ -574,6 +644,7 @@
   <script src="audio-wav.js"></script>
   <script src="agents.js"></script>
   <script src="app.js"></script>
+  <script src="devtools-view.js"></script>
   <script src="tools-view.js"></script>
   <script src="app-extras.js"></script>
   <script src="docs-view.js"></script>
