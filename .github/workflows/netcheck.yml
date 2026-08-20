@@ -93,6 +93,14 @@ jobs:
           # production merge 3205141). settlement.error on recent epochs is
           # THE diagnosis for roots quietly not landing on the testnet
           # contract; proofs are elided here — the digest below checks them.
+          # Tester docs (kai public/docs): the shell, one content page, and one
+          # SCREENSHOT must all serve — a docs deploy that loses its images
+          # shows up here instead of in an angry field report.
+          echo "== /docs (tester documentation) =="
+          curl -sS --max-time 15 -o /dev/null -w 'docs shell  HTTP %{http_code} (%{size_download} bytes)\n' https://koinosai.com/docs/
+          curl -sS --max-time 15 -o /dev/null -w 'docs page   HTTP %{http_code} (%{size_download} bytes)\n' https://koinosai.com/docs/content/earn.md
+          curl -sS --max-time 15 -o /dev/null -w 'docs image  HTTP %{http_code} (%{size_download} bytes)\n' https://koinosai.com/docs/img/earn.png
+          echo
           echo "== /scheduler/claims (settlement diagnosis) =="
           curl -sS --max-time 15 "https://koinosai.com/scheduler/claims?address=1EXvuuW5HMrYRPdkraSi5Z4TBd4djyMj6E&limit=8" \
             | python3 -c "import json,sys; d=json.load(sys.stdin); [c.pop('proof', None) for c in d.get('claims', [])]; print(json.dumps(d, indent=2))" \
