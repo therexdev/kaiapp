@@ -517,6 +517,17 @@ for dev/screenshots).
      double-click PATH behavior is OWNER-VERIFIED-PENDING on his Windows machines. Linux
      stays `npx koinos-code` (AppImage is read-only — different mechanism someday).
      Koinos Code phases v1/v2/v3a/v3b are now ALL shipped; task #60 track closed.
+   - **v0.33.1 (2026-08-21): code-surface hardening + a correction.** Self-review of the
+     night's work found the v0.32.0 commit message wrong where it called the code agent
+     "reach, not privilege": teams' `run_code` is workspace-sandboxed, the code agent
+     writes ANYWHERE named and runs shell commands as the user. The gate is sound for
+     desktop (loopback bind — no env changes it; `_sameSite` fails a cross-site fetch on
+     BOTH sec-fetch-site and origin; dev switch off by default; a human answers every
+     card), so this is defence-in-depth for ONE shape: the headless operator who puts a
+     reverse proxy in front, where a stripped origin lands in `_sameSite`'s deliberate
+     header-less trust. `/core/code/*` now refuses any request carrying `x-forwarded-*` /
+     `x-real-ip` / `forwarded` unless KAI_CORE_TOKEN is set; the refusal names the way out.
+     Fails-on-old test verified by reverting the gateway and re-running.
 10. **Moderation/AUP — owner-DEFERRED 2026-08-20**: owner agrees with the A40 reporter's
     finding but explicitly wants it on the future plan ("easier to understand the
     implications... with more nodes and network usage"). Design in kaiapp

@@ -1,5 +1,9 @@
 "use strict";
 
+// Headers a reverse proxy adds. Their presence means the request did NOT come
+// straight from this machine's loopback — used to gate the code-agent surface.
+const FORWARDED_HEADERS = ["x-forwarded-for", "x-forwarded-host", "x-real-ip", "forwarded"];
+
 const http = require("http");
 const fs = require("fs");
 const nodePath = require("path");
@@ -1046,6 +1050,21 @@ class Gateway {
     if (this.code && path.startsWith("/core/code/")) {
       if (!(this.dev && this.dev.status().enabled)) {
         return this._json(res, 403, { ok: false, error: "Koinos Code needs Developer tools on (Local API → Developer tools)." });
+      }
+      // This surface is the widest in the product: it writes files ANYWHERE
+      // the caller names and runs shell commands as this user — unlike teams'
+      // run_code, which is sandboxed to the app workspace. Core binds loopback
+      // only, so the sole way a non-local caller reaches here is a reverse
+      // proxy the operator put in front (the A40 headless shape). _sameSite
+      // deliberately trusts header-less callers, and a proxy commonly strips
+      // origin/sec-fetch-site — so for THIS surface a forwarded request must
+      // carry the core token. Desktop users never see this: nothing forwards.
+      if (!this.coreToken && FORWARDED_HEADERS.some((h) => req.headers[h])) {
+        return this._json(res, 403, {
+          ok: false,
+          error:
+            "Koinos Code refuses proxied requests unless KAI_CORE_TOKEN is set. This endpoint writes files and runs commands anywhere on the machine, so a forwarded caller must prove itself.",
+        });
       }
       if (path === "/core/code/approve" && req.method === "POST") {
         let body;

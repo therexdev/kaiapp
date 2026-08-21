@@ -195,6 +195,55 @@ async function sse(base, pathname, body, onEvent = () => {}) {
   return { status: resp.status, events, done: events.find((e) => e.done) };
 }
 
+test("HTTP: a PROXIED code request is refused unless a core token is configured", async () => {
+  // The code surface writes anywhere and runs commands — unlike teams'
+  // run_code it is NOT workspace-sandboxed. Core binds loopback, so a
+  // forwarded request means an operator put a proxy in front; _sameSite
+  // trusts header-less callers, so this surface asks for the token instead.
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-codeproxy-"));
+  fs.mkdirSync(path.join(dataDir, "models"), { recursive: true });
+  fs.writeFileSync(path.join(dataDir, "models", "smollm2-135m-instruct-q8_0.gguf"), "weights");
+  const { createCore } = require("../server");
+  const core = await createCore({
+    dataDir,
+    port: 0,
+    llamaBin: path.join(__dirname, "fixtures", "fake-llama-server"),
+    onEvent: () => {},
+  });
+  const base = `http://127.0.0.1:${await core.start()}`;
+  const project = tmpProject();
+  try {
+    await json(base, "/core/dev", { method: "POST", body: { enabled: true } });
+
+    for (const header of ["x-forwarded-for", "x-forwarded-host", "x-real-ip", "forwarded"]) {
+      const r = await fetch(`${base}/core/code/run`, {
+        method: "POST",
+        headers: { "content-type": "application/json", [header]: "203.0.113.7" },
+        body: JSON.stringify({ dir: project, task: "write a file" }),
+      });
+      assert.strictEqual(r.status, 403, `${header} must be refused`);
+      const body = await r.json();
+      assert.match(body.error, /KAI_CORE_TOKEN/, `${header} refusal names the way out`);
+    }
+
+    // The approve and stop routes are gated the same way — answering a card
+    // is as powerful as starting the run.
+    const approve = await fetch(`${base}/core/code/approve`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-forwarded-for": "203.0.113.7" },
+      body: JSON.stringify({ approvalId: "x", approved: true }),
+    });
+    assert.strictEqual(approve.status, 403);
+
+    // A direct (non-proxied) call is unaffected — the desktop path.
+    const direct = await json(base, "/core/code/stop", { method: "POST", body: { runId: "nope" } });
+    assert.strictEqual(direct.status, 200);
+    assert.strictEqual(direct.body.stopped, false);
+  } finally {
+    await core.stop();
+  }
+});
+
 test("HTTP: gate, an SSE run with a live approval round trip, stale approve, stop route", async () => {
   const project = tmpProject();
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-codeagent-core-"));

@@ -104,9 +104,19 @@ Not a terminal emulator — the same agent, hosted by Core, with the terminal's
   start/tool/obs/approval-request/note + terminal done), `/core/code/approve`,
   `/core/code/stop`. A directory that doesn't exist is a terminal error on the
   stream; a filesystem root is refused as a certain typo.
-- Trust model unchanged: same-site/loopback + the dev switch (+ KAI_CORE_TOKEN
-  where set). A caller able to answer approval cards could already run code
-  via the teams consent flag — this surface adds reach, not privilege.
+- Trust model: four layers — Core binds loopback ONLY (no env changes that),
+  `_sameSite` (a cross-site browser fetch fails on BOTH `sec-fetch-site` and
+  `origin`), the dev switch (off by default), and a human answering every
+  card. **Correction to the v0.32.0 commit message, which said this "adds
+  reach, not privilege": that was imprecise.** Teams' `run_code` is sandboxed
+  to the app workspace; this surface writes ANYWHERE the caller names and runs
+  shell commands as the user. Same gate, much larger blast radius — so v0.33.1
+  additionally refuses `/core/code/*` on any request carrying proxy headers
+  (`x-forwarded-*`, `x-real-ip`, `forwarded`) unless KAI_CORE_TOKEN is set.
+  Loopback-bound desktop users never hit that (nothing forwards); it closes
+  the one shape that could reach here from off-machine — the headless operator
+  who put a reverse proxy in front, where a stripped origin would otherwise
+  land in `_sameSite`'s deliberate header-less trust.
 - Test fixture note: `fake-llama-server` accepts FAKE_LLAMA_SCRIPT (a JSON
   array of replies, one per non-streaming completion) so agent-loop decisions
   are deterministic through the REAL stack — the HTTP and browser tests answer
