@@ -104,15 +104,6 @@ jobs:
           # page and its screenshot — a partial docs deploy shows up here.
           curl -sS --max-time 15 -o /dev/null -w 'docs kcode  HTTP %{http_code} (%{size_download} bytes)\n' https://koinosai.com/docs/content/koinos-code.md
           curl -sS --max-time 15 -o /dev/null -w 'docs devimg HTTP %{http_code} (%{size_download} bytes)\n' https://koinosai.com/docs/img/api-dev.png
-          # CONTENT check, not just a 200: a stale docs checkout serves every
-          # page fine and is invisible to status codes. This greps the newest
-          # paragraph on the developer-tools page (the v0.33.1 proxied-request
-          # refusal), so "deployed" means the bytes actually changed.
-          if curl -sS --max-time 15 https://koinosai.com/docs/content/developer-tools.md | grep -q 'KAI_CORE_TOKEN'; then
-            echo "docs fresh  OK   (developer-tools.md carries the proxied-request note)"
-          else
-            echo "docs fresh  STALE — developer-tools.md served without the proxied-request note"
-          fi
           echo
           echo "== /scheduler/claims (settlement diagnosis) =="
           curl -sS --max-time 15 "https://koinosai.com/scheduler/claims?address=1EXvuuW5HMrYRPdkraSi5Z4TBd4djyMj6E&limit=8" \

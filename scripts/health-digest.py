@@ -73,6 +73,19 @@ warn(age_min(o["updatedAt"]) < 20, "oracle fresh", f"{age_min(o['updatedAt']):.1
 check(o.get("sources", 0) >= 2, "two price sources configured", str(o.get("sources")))
 print(f"STATE oracle={o.get('status')} usd={o.get('usd')} median={o.get('lastMedian')} updatedAt={o.get('updatedAt')}")
 
+# Docs freshness is a CONTENT check, not a status code: a stale checkout
+# serves every page with a cheerful 200 and is invisible to HTTP probes.
+# The marker is the newest paragraph on the developer-tools page — bump it
+# whenever a docs change matters enough to prove it landed.
+DOCS_MARKER = ("/docs/content/developer-tools.md", "KAI_CORE_TOKEN")
+try:
+    _, _, d = get(DOCS_MARKER[0], raw=True)
+    check(DOCS_MARKER[1] in d, "docs deploy is current",
+          f"{DOCS_MARKER[0]} carries {DOCS_MARKER[1]}" if DOCS_MARKER[1] in d
+          else f"{DOCS_MARKER[0]} served WITHOUT {DOCS_MARKER[1]} — stale checkout on the box")
+except Exception as e:
+    check(False, "docs deploy is current", f"{DOCS_MARKER[0]} unreachable: {e}")
+
 print(f"\nDIGEST {'FAIL' if fails else ('WARN' if warns else 'HEALTHY')} fails={len(fails)} warns={len(warns)}")
 if fails: print("FAILING: " + "; ".join(fails))
 if warns: print("WARNING: " + "; ".join(warns))
