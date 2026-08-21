@@ -13,6 +13,12 @@
  *   --yes             pre-approves file edits (scripted use)
  *   --allow-commands  lets run_cmd execute without a prompt (CI use)
  * There is deliberately no flag that silences both gates at once.
+ *
+ * v2: KOINOS.md project notes feed the system prompt (re-read every task),
+ * edit_file makes surgical replacements instead of full rewrites, and big
+ * thinking jobs can be handed to the app's AI Teams (--team / the /team
+ * REPL command) — the team works in the APP's workspace, not this project,
+ * so it plans and reviews; this loop applies the changes.
  */
 
 const fs = require("fs");
@@ -25,8 +31,12 @@ const { buildAgentSystem, parseAgentAction, trimConvo } = require(path.join(__di
 const PREAMBLE =
   "You are Koinos Code, a careful coding agent working inside the person's project directory. " +
   "Read the relevant files before changing them. Make the smallest change that accomplishes the task, " +
-  "matching the project's existing style. Never invent file contents you have not read.";
+  "matching the project's existing style. Never invent file contents you have not read. " +
+  "Prefer edit_file for small changes; use write_file only for new files or full rewrites.";
 
+const CONTEXT_FILE = "KOINOS.md"; // project notes, read fresh every task
+const CONTEXT_MAX_CHARS = 4000;
+const TEAM_TEMPLATES = ["research", "analyst", "review"];
 const OBS_MAX_CHARS = 4000; // what one observation may feed back into the context
 const READ_WINDOW = 120; // lines per read_file call — big files are windowed
 const SEARCH_MAX_HITS = 40;
@@ -70,6 +80,12 @@ function usage() {
       "  -y, --yes           pre-approve file edits (commands still ask)",
       "  --allow-commands    let run_cmd execute without a prompt (for CI)",
       "  --max-steps <n>     tool-step budget per task (default 25, max 50)",
+      "  --team <template>   hand the task to an AI Team instead of the agent loop",
+      `                      (${TEAM_TEMPLATES.join(" | ")} — teams think in the app's`,
+      "                      workspace; they don't edit this project)",
+      "",
+      "If the project has a KOINOS.md, its notes are given to the model every task.",
+      'In the interactive session, "/team [template] task…" does the same handoff.',
     ].join("\n")
   );
 }
@@ -83,6 +99,7 @@ function parseArgs(argv) {
     yes: false,
     allowCommands: false,
     maxSteps: 25,
+    team: "",
     task: "",
     help: false,
   };
@@ -95,6 +112,7 @@ function parseArgs(argv) {
     else if (a === "--key") opts.key = argv[++i];
     else if (a === "--yes" || a === "-y") opts.yes = true;
     else if (a === "--allow-commands") opts.allowCommands = true;
+    else if (a === "--team") opts.team = String(argv[++i] || "").trim();
     else if (a === "--max-steps") opts.maxSteps = Math.max(1, Math.min(50, Number(argv[++i]) || 25));
     else if (a === "--help" || a === "-h") opts.help = true;
     else rest.push(a);
@@ -109,6 +127,23 @@ function jailed(root, p) {
   const abs = path.resolve(root, String(p || ""));
   if (abs !== root && !abs.startsWith(root + path.sep)) return null;
   return abs;
+}
+
+/** KOINOS.md project notes for the system prompt, or "". Read fresh every
+ *  task so an edit mid-session (by the person OR by the agent itself) takes
+ *  effect on the very next task. Size-bounded: a huge file must not eat the
+ *  model's working context. */
+function projectContext(root) {
+  let text;
+  try {
+    text = fs.readFileSync(path.join(root, CONTEXT_FILE), "utf8").trim();
+  } catch {
+    return "";
+  }
+  if (!text) return "";
+  const clipped =
+    text.length > CONTEXT_MAX_CHARS ? `${text.slice(0, CONTEXT_MAX_CHARS)}\n⋯ (${CONTEXT_FILE} truncated at ${CONTEXT_MAX_CHARS} chars)` : text;
+  return `\n\nProject notes from ${CONTEXT_FILE} (the project's own instructions — follow them):\n${clipped}`;
 }
 
 /** Minimal unified-ish diff: changed lines with 2 lines of context. */
@@ -208,6 +243,24 @@ function walkFiles(root, dir, acc, depth = 0) {
 
 function makeTools(root, opts) {
   const interactive = Boolean(process.stdin.isTTY);
+  // The one write gate both writing tools share: show the diff, ask (or
+  // honor --yes), then write. Every path to disk goes through here.
+  async function approveAndWrite(abs, rel, old, next) {
+    print(`\n--- ${rel} ---`);
+    print(paintDiff(unifiedDiff(old, next)));
+    let approved = false;
+    if (opts.yes) approved = true;
+    else if (interactive) approved = await askYesNo(`apply this edit to ${rel}?`);
+    if (!approved) {
+      return interactive
+        ? "the user declined this edit"
+        : "edit declined: no terminal to ask on — the person must pass --yes to pre-approve edits";
+    }
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, next);
+    print(dim(`  wrote ${rel}`));
+    return `wrote ${rel} (${Buffer.byteLength(next)} bytes)`;
+  }
   return [
     {
       name: "list_files",
@@ -273,8 +326,36 @@ function makeTools(root, opts) {
       },
     },
     {
+      name: "edit_file",
+      description: "Surgical edit: replace one exact text occurrence in a file. Prefer this over write_file for small changes.",
+      params: { path: "file path", find: "exact existing text (must occur exactly once)", replace: "replacement text" },
+      handler: async ({ path: p, find, replace }) => {
+        const abs = jailed(root, p);
+        if (!abs) return "refused: path escapes the project directory";
+        let old;
+        try {
+          old = fs.readFileSync(abs, "utf8");
+        } catch (e) {
+          return `cannot read ${p}: ${e.code || e.message} — edit_file only changes existing files; use write_file to create one`;
+        }
+        const needle = String(find ?? "");
+        if (!needle) return "give find: the exact text to replace";
+        const first = old.indexOf(needle);
+        if (first === -1) {
+          return `not found: that exact text does not occur in ${p} — read the file and copy it exactly (whitespace matters)`;
+        }
+        if (old.indexOf(needle, first + 1) !== -1) {
+          const count = old.split(needle).length - 1;
+          return `ambiguous: that text occurs ${count} times in ${p} — include more surrounding lines in find so it matches exactly once`;
+        }
+        const next = old.slice(0, first) + String(replace ?? "") + old.slice(first + needle.length);
+        if (next === old) return "no change: the replacement equals the existing text";
+        return approveAndWrite(abs, p, old, next);
+      },
+    },
+    {
       name: "write_file",
-      description: "Create or replace a file with new content. The person sees a diff and approves first.",
+      description: "Create a file, or replace one whole. The person sees a diff and approves first.",
       params: { path: "file path", content: "full new file content" },
       handler: async ({ path: p, content }) => {
         const abs = jailed(root, p);
@@ -287,20 +368,7 @@ function makeTools(root, opts) {
           /* new file */
         }
         if (old === next) return `no change: ${p} already has that content`;
-        print(`\n--- ${p} ---`);
-        print(paintDiff(unifiedDiff(old, next)));
-        let approved = false;
-        if (opts.yes) approved = true;
-        else if (interactive) approved = await askYesNo(`apply this edit to ${p}?`);
-        if (!approved) {
-          return interactive
-            ? "the user declined this edit"
-            : "edit declined: no terminal to ask on — the person must pass --yes to pre-approve edits";
-        }
-        fs.mkdirSync(path.dirname(abs), { recursive: true });
-        fs.writeFileSync(abs, next);
-        print(dim(`  wrote ${p}`));
-        return `wrote ${p} (${Buffer.byteLength(next)} bytes)`;
+        return approveAndWrite(abs, p, old, next);
       },
     },
     {
@@ -362,12 +430,86 @@ async function complete(opts, messages) {
   return String(j?.choices?.[0]?.message?.content ?? "");
 }
 
+/* ------------------------------------------------------- team handoff ---- */
+
+/** Hand one big thinking job to the app's AI Teams (/core/teams/run) and
+ *  stream its trace. The team works in the APP's workspace, never in this
+ *  project — it plans, researches, reviews; the agent loop applies changes. */
+async function runTeam(opts, template, question, { interactive = false } = {}) {
+  const t = String(template || "").trim().toLowerCase() || "review";
+  if (!TEAM_TEMPLATES.includes(t)) {
+    throw new Error(`unknown team template "${t}" — pick one of: ${TEAM_TEMPLATES.join(", ")}`);
+  }
+  const q = String(question || "").trim();
+  if (!q) throw new Error("give the team a task");
+  // The analyst team computes by RUNNING CODE (sandboxed, in the app's
+  // workspace). Same consent rule as everywhere: an explicit yes up front.
+  let allowSensitive = false;
+  if (t === "analyst") {
+    if (opts.allowCommands) allowSensitive = true;
+    else if (interactive) allowSensitive = await askYesNo("the analyst team runs sandboxed code in the app's workspace — allow?");
+    if (!allowSensitive) {
+      throw new Error(
+        interactive
+          ? "the analyst team needs that approval — task cancelled"
+          : "the analyst team runs code: pass --allow-commands to approve without a terminal"
+      );
+    }
+  }
+  print(dim(`→ ${t} team (in the app's workspace — it thinks, this loop edits)`));
+  const headers = { "content-type": "application/json" };
+  if (opts.key) headers.authorization = `Bearer ${opts.key}`;
+  let r;
+  try {
+    r = await fetch(opts.url.replace(/\/$/, "") + "/core/teams/run", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ template: t, question: q, model: opts.model, allowSensitive }),
+    });
+  } catch {
+    throw new Error(`cannot reach the Koinos AI gateway at ${opts.url} — is the app (or \`npm run core\`) running?`);
+  }
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    throw new Error(j?.error?.message || j?.error || `gateway answered ${r.status} for /core/teams/run`);
+  }
+  let result = null;
+  let buf = "";
+  const decoder = new TextDecoder();
+  for await (const chunk of r.body) {
+    buf += decoder.decode(chunk, { stream: true });
+    let cut;
+    while ((cut = buf.indexOf("\n\n")) !== -1) {
+      const frame = buf.slice(0, cut);
+      buf = buf.slice(cut + 2);
+      const data = frame.split("\n").find((l) => l.startsWith("data: "));
+      if (!data) continue;
+      let ev;
+      try {
+        ev = JSON.parse(data.slice(6));
+      } catch {
+        continue;
+      }
+      if (ev.trace) print(dim(`  [${ev.trace.stage}] ${String(ev.trace.detail ?? "").replace(/\s+/g, " ").slice(0, 160)}`));
+      if (ev.done) result = ev;
+    }
+  }
+  if (!result) throw new Error("the team stream ended without a result");
+  if (result.error) throw new Error(result.error);
+  print(dim(`  team done — ${result.modelCalls} model calls`));
+  return String(result.answer ?? "").trim();
+}
+
 /* --------------------------------------------------------- agent loop ---- */
 
 async function runTask(opts, tools, convo, task) {
   const names = tools.map((t) => t.name);
-  // A fresh system prompt per task keeps the tool menu tuned to the question.
-  convo[0] = { role: "system", content: `${PREAMBLE}\n\n${buildAgentSystem(tools, { question: task, allNames: names })}` };
+  // A fresh system prompt per task keeps the tool menu tuned to the question
+  // — and re-reads KOINOS.md, so edited project notes apply immediately.
+  convo[0] = {
+    role: "system",
+    content: `${PREAMBLE}${projectContext(opts.dir)}\n\n${buildAgentSystem(tools, { question: task, allNames: names })}`,
+  };
   convo.push({ role: "user", content: task });
   for (let step = 0; step < opts.maxSteps; step++) {
     const out = await complete(opts, trimConvo(convo));
@@ -414,23 +556,45 @@ async function main() {
   opts.model = await pickModel(opts);
   print(dim(`Koinos Code — ${opts.model} via ${opts.url}`));
   print(dim(`project: ${opts.dir}`));
+  if (projectContext(opts.dir)) print(dim(`context: ${CONTEXT_FILE} found — its notes ride along on every task`));
   const tools = makeTools(opts.dir, opts);
   const convo = [{ role: "system", content: "" }];
+  const interactive = Boolean(process.stdin.isTTY);
 
+  if (opts.team && !opts.task) throw new Error("--team needs a task, e.g. koinos-code --team review \"plan the refactor of …\"");
   if (opts.task) {
-    const answer = await runTask(opts, tools, convo, opts.task);
+    const answer = opts.team
+      ? await runTeam(opts, opts.team, opts.task, { interactive })
+      : await runTask(opts, tools, convo, opts.task);
     print(`\n${answer}`);
     closeRl();
     return;
   }
 
-  print(dim('Interactive session — type a task, or "exit".'));
+  print(dim('Interactive session — type a task, "/team [template] task…" for a big thinking job, or "exit".'));
   for (;;) {
     const line = await new Promise((res) => getRl().question("koinos-code> ", res));
     const t = String(line).trim();
     if (!t) continue;
     if (/^(exit|quit)$/i.test(t)) break;
     try {
+      if (/^\/team\b/i.test(t)) {
+        const restStr = t.replace(/^\/team\s*/i, "");
+        const m = restStr.match(/^(\w+)\s+([\s\S]+)$/);
+        let template = "review";
+        let q = restStr;
+        if (m && TEAM_TEMPLATES.includes(m[1].toLowerCase())) {
+          template = m[1].toLowerCase();
+          q = m[2];
+        }
+        if (!q.trim()) {
+          print(`usage: /team [${TEAM_TEMPLATES.join("|")}] task…`);
+          continue;
+        }
+        const answer = await runTeam(opts, template, q.trim(), { interactive: true });
+        print(`\n${answer}\n`);
+        continue;
+      }
       const answer = await runTask(opts, tools, convo, t);
       print(`\n${answer}\n`);
     } catch (e) {
@@ -440,7 +604,7 @@ async function main() {
   closeRl();
 }
 
-module.exports = { parseArgs, jailed, unifiedDiff, makeTools };
+module.exports = { parseArgs, jailed, unifiedDiff, makeTools, projectContext, runTeam };
 
 if (require.main === module) {
   main().catch((e) => {

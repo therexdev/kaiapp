@@ -60,9 +60,31 @@ Budgets: `--max-steps` tool actions per task (default 25, ceiling 50);
 observations truncated to 4000 chars; diffs capped at 160 lines; file reads
 windowed (`from` arg) so a big file cannot blow the context.
 
+## v2 (shipped 0.31.0)
+
+- **KOINOS.md project context.** If the project root has a `KOINOS.md`, its
+  text rides in the system prompt of EVERY task — re-read per task, so edits
+  (by the person or by the agent itself) apply on the very next instruction.
+  Bounded to 4000 chars with an honest truncation marker; a missing or empty
+  file adds nothing.
+- **`edit_file` — surgical edits.** `{path, find, replace}` replaces one
+  exact occurrence. Zero matches → "not found … copy it exactly (whitespace
+  matters)"; several matches → "ambiguous: occurs N times — include more
+  surrounding lines"; both are observations the model routes around. The
+  approved change goes through the SAME diff-and-ask gate as `write_file`
+  (one shared `approveAndWrite` — every path to disk crosses one gate). The
+  system prompt steers models to prefer it over whole-file rewrites.
+- **Team handoff.** `--team <research|analyst|review>` (one-shot) and
+  `/team [template] task…` (REPL) send a big THINKING job to the app's AI
+  Teams over `/core/teams/run`, streaming the `[stage] detail` trace live.
+  Honest boundary, stated in help and startup text: the team works in the
+  APP's workspace, never in the project — it plans/researches/reviews; the
+  agent loop applies changes. The analyst template runs sandboxed code, so
+  it needs an upfront yes (TTY prompt, or `--allow-commands` headless);
+  templates run without the Developer-tools switch, custom specs stay
+  gated (unchanged gateway rule).
+
 ## Later phases
 
-- v2: project context file (KOINOS.md read into the system prompt), edit-by
-  replacement tool for surgical diffs, `/core/teams` handoff for big jobs.
 - v3: surfaced inside the app (Developer tools) as a terminal panel; ships in
   PATH via the installer.

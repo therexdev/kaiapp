@@ -474,6 +474,16 @@ for dev/screenshots).
      async engine self-test (spawn, event-loop liveness test in `core/test/ollama.test.js`),
      async ollama locate, Compare preset chips (`ui/app-extras.js` CMP_PRESETS),
      scheduler-mirror retirement recorded in both repos' headers.
+   - **v0.31.0 (2026-08-21): Koinos Code v2** (design doc "v2" section): KOINOS.md
+     project context (re-read EVERY task, 4000-char bound, honest truncation marker);
+     `edit_file` surgical replace (exactly-once match or a routable refusal; shares ONE
+     `approveAndWrite` gate with write_file — every disk write crosses the same diff+ask);
+     team handoff `--team <research|analyst|review>` / REPL `/team` streaming
+     `/core/teams/run` SSE (`[stage] detail` lines). Boundary stated everywhere: teams
+     think in the APP's workspace, the agent loop edits the project. Analyst = run_code →
+     upfront consent (TTY ask, `--allow-commands` headless); templates need NO dev switch,
+     custom specs stay gated. Tests: 15 in koinos-code.test.js incl. a REAL-core `--team`
+     e2e (model pinned to `dev-tiny` — first-listed alias would trigger a model download).
 10. **Moderation/AUP — owner-DEFERRED 2026-08-20**: owner agrees with the A40 reporter's
     finding but explicitly wants it on the future plan ("easier to understand the
     implications... with more nodes and network usage"). Design in kaiapp
