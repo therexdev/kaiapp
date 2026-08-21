@@ -1078,9 +1078,29 @@ class Gateway {
     // cards instead of [y/N]. Same trust model as the rest of /core (dev
     // switch + loopback/same-site, KAI_CORE_TOKEN where set): a caller that
     // could answer approvals could already run code via teams' consent flag.
+    /*
+     * The Koinos Code switch itself lives OUTSIDE the gated block below — you
+     * have to be able to read it, and turn it on, precisely when it is off.
+     * Same shape as /core/dev.
+     */
+    if (this.code && this.code.switch && path === "/core/code-switch") {
+      if (req.method === "GET") return this._json(res, 200, { ok: true, ...this.code.switch.status() });
+      if (req.method === "POST") {
+        try {
+          const b = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+          return this._json(res, 200, { ok: true, ...this.code.switch.configure({ enabled: b.enabled === true }) });
+        } catch (e) {
+          return this._json(res, 400, { ok: false, error: String(e.message) });
+        }
+      }
+    }
     if (this.code && path.startsWith("/core/code/")) {
-      if (!(this.dev && this.dev.status().enabled)) {
-        return this._json(res, 403, { ok: false, error: "Koinos Code needs Developer tools on (Local API → Developer tools)." });
+      // Koinos Code has its own switch now (task #72): it is its own sidebar
+      // item, and its capability is a different question from the developer
+      // tools' multi-agent surfaces. The switch seeds itself from dev.tools on
+      // first read, so existing users keep what they already had.
+      if (!(this.code.switch && this.code.switch.status().enabled)) {
+        return this._json(res, 403, { ok: false, error: "Koinos Code is switched off (Settings → Koinos Code)." });
       }
       // This surface is the widest in the product: it writes files ANYWHERE
       // the caller names and runs shell commands as this user — unlike teams'
@@ -1096,6 +1116,55 @@ class Gateway {
           error:
             "Koinos Code refuses proxied requests unless KAI_CORE_TOKEN is set. This endpoint writes files and runs commands anywhere on the machine, so a forwarded caller must prove itself.",
         });
+      }
+      /*
+       * Projects and sessions. Every one of these sits BEHIND the same switch
+       * and the same forwarded-header refusal as /core/code/run above — a
+       * caller who can add a project chooses where the agent may write, which
+       * is exactly as powerful as starting a run.
+       */
+      const P = this.code.projects;
+      if (path === "/core/code/projects" && req.method === "GET") {
+        return this._json(res, 200, { ok: true, projects: P.list() });
+      }
+      if (path === "/core/code/projects" && req.method === "POST") {
+        try {
+          const b = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+          return this._json(res, 200, { ok: true, project: P.add({ dir: b.dir, name: b.name, origin: b.origin || null }) });
+        } catch (e) {
+          return this._json(res, 400, { ok: false, error: String(e.message) });
+        }
+      }
+      if (path.startsWith("/core/code/projects/")) {
+        const rest = path.slice("/core/code/projects/".length).split("/");
+        const projectId = decodeURIComponent(rest[0] || "");
+        try {
+          if (rest.length === 1 && req.method === "DELETE") {
+            // Forgets the project. The FOLDER is never touched — removing a
+            // project from the list must never be a way to lose work.
+            return this._json(res, 200, { ok: true, removed: P.remove(projectId) });
+          }
+          if (rest.length === 1 && req.method === "PATCH") {
+            const b = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+            return this._json(res, 200, { ok: true, project: P.rename(projectId, b.name) });
+          }
+          if (rest[1] === "sessions" && rest.length === 2 && req.method === "GET") {
+            return this._json(res, 200, { ok: true, sessions: P.sessions(projectId) });
+          }
+          if (rest[1] === "sessions" && rest.length === 2 && req.method === "POST") {
+            const b = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+            return this._json(res, 200, { ok: true, session: P.newSession(projectId, { title: b.title }) });
+          }
+          if (rest[1] === "sessions" && rest.length === 3 && req.method === "GET") {
+            return this._json(res, 200, { ok: true, session: P.session(projectId, decodeURIComponent(rest[2])) });
+          }
+          if (rest[1] === "sessions" && rest.length === 3 && req.method === "DELETE") {
+            return this._json(res, 200, { ok: true, removed: P.deleteSession(projectId, decodeURIComponent(rest[2])) });
+          }
+        } catch (e) {
+          return this._json(res, 400, { ok: false, error: String(e.message) });
+        }
+        return this._json(res, 404, { ok: false, error: "no such Koinos Code route" });
       }
       if (path === "/core/code/approve" && req.method === "POST") {
         let body;
@@ -1123,19 +1192,58 @@ class Gateway {
         } catch {
           return this._json(res, 400, { ok: false, error: "Body must be JSON" });
         }
+        /*
+         * A run can name a PROJECT and a SESSION instead of a raw path. That
+         * is what turns this from a command into a workspace: the directory
+         * comes from the project, and the session's earlier turns ride along
+         * so "now do the same to the other file" means something. A bare `dir`
+         * still works exactly as before — the CLI and any existing script that
+         * predates projects keep running unchanged.
+         */
+        let dir = String(body.dir || "");
+        let project = null;
+        let sessionId = String(body.sessionId || "");
+        let history = [];
+        try {
+          if (body.projectId) {
+            project = this.code.projects.get(String(body.projectId));
+            dir = project.path;
+            // No session named: start one, so every run through a project is
+            // part of a thread rather than falling out of the history.
+            if (!sessionId) sessionId = this.code.projects.newSession(project.id, {}).id;
+            history = this.code.projects.history(project.id, sessionId);
+          }
+        } catch (e) {
+          return this._json(res, 400, { ok: false, error: String(e.message) });
+        }
+
         // SSE with approval-request events: the run PAUSES on every write
         // and command until /core/code/approve answers that card.
         res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
         const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+        const task = String(body.task || "");
+        if (project && sessionId) send({ session: { projectId: project.id, sessionId } });
         try {
           const r = await this.code.run({
-            dir: String(body.dir || ""),
-            task: String(body.task || ""),
+            dir,
+            task,
             model: String(body.model || ""),
             maxSteps: body.maxSteps,
+            history,
             onTrace: (e) => send({ trace: e }),
           });
-          send({ done: true, answer: r.answer, steps: r.steps, reason: r.reason });
+          // Record the exchange AFTER it happens, and never let a bookkeeping
+          // failure swallow a result the person is waiting for.
+          if (project && sessionId) {
+            try {
+              this.code.projects.appendTurn(project.id, sessionId, { role: "user", content: task });
+              if (r.answer) this.code.projects.appendTurn(project.id, sessionId, { role: "assistant", content: r.answer });
+              this.code.projects.touch(project.id);
+            } catch {
+              /* the run stands even if the session could not be written */
+            }
+          }
+          send({ done: true, answer: r.answer, steps: r.steps, reason: r.reason, projectId: project?.id || null, sessionId: sessionId || null });
         } catch (e) {
           send({ done: true, error: String(e.message) });
         }

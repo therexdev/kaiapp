@@ -452,6 +452,7 @@ function activateView(name) {
   }
   if (name === "api") renderApi();
   if (name === "devtools") window.KaiDevTools?.render();
+  if (name === "code") window.KaiCode?.render();
   if (name === "earn") renderEarn();
   if (name === "models") renderModels();
   if (name === "compare") renderCompare();
@@ -959,6 +960,7 @@ async function renderApi() {
     ")",
   ].join("\n");
   renderDev(); // developer-tools toggle + panel (task #61)
+  renderCodeSwitch(); // Koinos Code toggle + its own sidebar item (task #72)
   const j = await coreGet("/core/keys");
   $("key-list").innerHTML = "";
   for (const k of j.keys) {
@@ -1026,6 +1028,37 @@ async function renderDev() {
     /* core not up yet — the next renderApi retries */
   }
 }
+
+// ---------- Koinos Code (task #72) ----------
+// Its OWN switch and its OWN sidebar item. It used to ride on the developer
+// switch, but they answer different questions: developer tools reveal
+// multi-agent systems and a benchmark; Koinos Code writes files where you
+// point it and runs commands as you. Core seeds this switch from dev.tools the
+// first time it is read, so nobody who already had it loses it.
+
+async function renderCodeSwitch() {
+  try {
+    const d = await coreGet("/core/code-switch");
+    const on = d.enabled === true;
+    $("btn-code-toggle").setAttribute("aria-checked", String(on));
+    $("nav-code").hidden = !on;
+    // Turning it off while looking at it should not strand the user on a
+    // hidden view.
+    if (!on && state.view === "code") activateView("chat");
+  } catch {
+    /* core not up yet — the next renderApi retries */
+  }
+}
+
+$("btn-code-toggle").addEventListener("click", async () => {
+  const on = $("btn-code-toggle").getAttribute("aria-checked") === "true";
+  await fetch("/core/code-switch", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ enabled: !on }),
+  });
+  renderCodeSwitch();
+});
 
 $("btn-dev-toggle").addEventListener("click", async () => {
   const on = $("btn-dev-toggle").getAttribute("aria-checked") === "true";

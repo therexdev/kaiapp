@@ -92,7 +92,7 @@ class CodeAgent {
    * Returns {runId, answer, steps, reason} — reason "answered" | "stopped" |
    * "budget" (step budget exhausted).
    */
-  async run({ dir, task, model = "", maxSteps, onTrace = () => {} }) {
+  async run({ dir, task, model = "", maxSteps, history = [], onTrace = () => {} }) {
     const q = String(task || "").trim();
     if (!q) throw new Error("give the agent a task");
     const root = path.resolve(String(dir || ""));
@@ -124,10 +124,29 @@ class CodeAgent {
 
     try {
       onTrace({ type: "start", runId });
+      /*
+       * Prior turns of the SESSION ride ahead of the task, which is what makes
+       * this a continuing thread instead of a series of strangers: "now do the
+       * same for the other file" only means something if the agent saw the
+       * first one. The caller bounds the history (count and characters) before
+       * it gets here, so a long thread can never crowd out the actual task.
+       * Framed as context, not as instructions to re-execute.
+       */
+      const prior = (Array.isArray(history) ? history : [])
+        .filter((m) => m && (m.role === "user" || m.role === "assistant") && String(m.content || "").trim())
+        .map((m) => ({ role: m.role, content: String(m.content) }));
       const convo = [
         { role: "system", content: `${PREAMBLE}${projectContext(root)}\n\n${buildAgentSystem(tools, { question: q, allNames: names })}` },
-        { role: "user", content: q },
       ];
+      if (prior.length) {
+        convo.push({
+          role: "system",
+          content:
+            "EARLIER IN THIS SESSION (context only — already done, do not redo):\n" +
+            prior.map((m) => `${m.role === "user" ? "You were asked" : "You answered"}: ${m.content}`).join("\n"),
+        });
+      }
+      convo.push({ role: "user", content: q });
       for (let step = 0; step < budget; step++) {
         if (run.aborted) return { runId, answer: "", steps: step, reason: "stopped" };
         const out = String((await this.chatFn({ model, messages: trimConvo(convo), maxTokens: MAX_TOKENS_PER_CALL })) ?? "");

@@ -452,7 +452,36 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
   // Core, permission gates routed to approval cards over SSE. Same loopback
   // lane, so runs inherit every routing/privacy rule.
   const { CodeAgent } = require("./lib/code-agent");
+  const { CodeProjects } = require("./lib/code-projects");
+  /*
+   * Koinos Code has its OWN switch and its own sidebar item (task #72). It
+   * used to ride on the Developer-tools switch, but the two are different
+   * questions: developer tools reveal multi-agent systems and a benchmark,
+   * while Koinos Code writes files anywhere you point it and runs commands as
+   * you. Someone should be able to want one without the other.
+   *
+   * MIGRATION: the switch is seeded from dev.tools the first time it is read,
+   * so anyone who turned developer tools on to get Koinos Code keeps it and
+   * nothing disappears out from under them.
+   */
+  const codeSwitch = {
+    status: () => {
+      let v = settings.get("code.enabled", null);
+      if (v === null || v === undefined) {
+        v = settings.get("dev.tools", false) === true;
+        settings.set("code.enabled", v);
+      }
+      return { enabled: v === true };
+    },
+    configure: ({ enabled }) => {
+      settings.set("code.enabled", enabled === true);
+      events({ type: "code:switch", message: enabled === true ? "on" : "off" });
+      return codeSwitch.status();
+    },
+  };
   const code = new CodeAgent({ chatFn: loopbackChat, onEvent: events });
+  code.projects = new CodeProjects(dataDir);
+  code.switch = codeSwitch;
   mcp.autoConnect().catch(() => {}); // reconnect servers the user used before
 
   // Local speech-to-text (§7: audio never leaves the machine). Engine+model

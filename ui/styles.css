@@ -787,6 +787,31 @@ button.small:disabled { opacity: 0.5; cursor: default; }
 .kc-diff { margin: 0; background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font-size: 0.82em; line-height: 1.5; overflow-x: auto; white-space: pre; }
 .kc-add { color: var(--emerald); }
 .kc-del { color: var(--danger); }
+
+/* Koinos Code as its own view (task #72): projects rail + working pane.
+   The rail collapses above the pane on narrow windows rather than squeezing
+   both — the trace and the task box are what you actually need at width. */
+.kc-layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 18px; align-items: start; }
+@media (max-width: 860px) { .kc-layout { grid-template-columns: minmax(0, 1fr); } }
+.kc-side { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.kc-side-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 0.85em; }
+.kc-sessions-head { margin-top: 10px; }
+.kc-list { display: flex; flex-direction: column; gap: 4px; }
+.kc-item {
+  display: block; width: 100%; text-align: left; cursor: pointer;
+  background: transparent; border: 1px solid transparent; border-radius: 8px;
+  color: var(--text); padding: 7px 10px; font: inherit; font-size: 0.88em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.kc-item:hover { background: var(--bg-raised); }
+.kc-item.on { background: var(--bg-raised); border-color: var(--violet); }
+.kc-item .kc-sub { display: block; font-size: 0.82em; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; }
+.kc-item.missing { opacity: 0.6; }
+.kc-item.missing .kc-sub { color: var(--danger); }
+.kc-main { min-width: 0; }
+.kc-empty { margin: 14px 0; }
+.kc-path-row { align-items: center; }
+#kc-path { font-family: ui-monospace, Menlo, Consolas, monospace; overflow-wrap: anywhere; flex: 1 1 auto; }
 .pg-msg {
   background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius);
   padding: 8px 12px; white-space: pre-wrap; overflow-wrap: anywhere;

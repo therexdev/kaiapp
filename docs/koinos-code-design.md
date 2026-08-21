@@ -142,3 +142,44 @@ Windows installs get a real `koinos-code` command:
 - Linux/AppImage deliberately unchanged: `npx koinos-code` stays the way in
   (an AppImage mounts read-only; PATH integration there is a different
   mechanism for a later day).
+
+## v4 (shipped 0.35.0) — its own menu item, projects, sessions
+
+The owner's ask: Koinos Code should be its own thing, with several projects and
+GitHub, working the way Claude Code does. This is the first half.
+
+- **Its own sidebar item and its own switch.** It used to ride on the
+  Developer-tools switch; those answer different questions. Developer tools
+  reveal multi-agent systems, a playground, pipelines and a benchmark. Koinos
+  Code writes files where you point it and runs commands as you. Someone should
+  be able to want one without the other. MIGRATION: `code.enabled` seeds itself
+  from `dev.tools` the first time it is read, so anyone who enabled developer
+  tools to get Koinos Code keeps it.
+- **Projects** (`core/lib/code-projects.js`): add a folder, name it, switch
+  between them, rename, forget. Bounded (50 projects). Validation is the
+  agent's own: missing folder, a file, and a filesystem root are all refused in
+  words. A folder that moved is FLAGGED in the list, never silently dropped —
+  and forgetting a project never touches the folder.
+- **Sessions**: each project keeps threads, each thread keeps its turns, and a
+  run's earlier turns ride into the next run's prompt as context ("already
+  done, do not redo"). That is what makes "now do the same in the tests" mean
+  something. Bounded on every axis — sessions per project, turns per session,
+  characters per turn, and the history handed to a run is capped by BOTH turn
+  count and characters so an old thread cannot crowd out the actual task.
+- `POST /core/code/run` takes `projectId` + optional `sessionId`; a bare `dir`
+  still works exactly as before, so the CLI and any existing script are
+  untouched. The session id streams out ahead of the work so the UI can attach.
+- `ui/code-view.js` — projects rail, sessions rail, transcript, task box. The
+  permission model is unchanged and must stay that way: every write is a card
+  with its diff, every command a card with the exact line.
+
+Bugs caught building it, both worth keeping:
+- `path.resolve("")` returns the process's working directory, so an empty
+  project path silently became the app's install folder. Now the RAW input is
+  checked before resolving.
+- Refreshing the session list after a run cleared and rebuilt the transcript,
+  so the answer visibly flashed away — and would have been lost outright if the
+  reload failed. List refresh and transcript replay are now separate.
+
+STILL TO COME (v5): GitHub — connect, clone a repo into a project, branch and
+status, commit, push, open a PR.

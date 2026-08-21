@@ -213,7 +213,7 @@ test("HTTP: a PROXIED code request is refused unless a core token is configured"
   const base = `http://127.0.0.1:${await core.start()}`;
   const project = tmpProject();
   try {
-    await json(base, "/core/dev", { method: "POST", body: { enabled: true } });
+    await json(base, "/core/code-switch", { method: "POST", body: { enabled: true } });
 
     for (const header of ["x-forwarded-for", "x-forwarded-host", "x-real-ip", "forwarded"]) {
       const r = await fetch(`${base}/core/code/run`, {
@@ -273,8 +273,10 @@ test("HTTP: gate, an SSE run with a live approval round trip, stale approve, sto
     // Developer-gated like the rest of the track.
     let r = await json(base, "/core/code/approve", { method: "POST", body: {} });
     assert.strictEqual(r.status, 403);
-    assert.match(r.body.error, /Developer tools/);
-    await json(base, "/core/dev", { method: "POST", body: { enabled: true } });
+    // Koinos Code has its own switch since task #72 — its own sidebar item,
+    // its own gate, separate from the developer-tools surfaces.
+    assert.match(r.body.error, /Koinos Code is switched off/);
+    await json(base, "/core/code-switch", { method: "POST", body: { enabled: true } });
 
     // A bad directory is a clear terminal error on the stream, not a hang.
     const bad = await sse(base, "/core/code/run", { dir: "/definitely/not/here", task: "x" });

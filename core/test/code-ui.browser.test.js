@@ -53,16 +53,26 @@ test("code panel: run -> diff card -> approve -> file written -> answer bubble",
     await page.goto(base);
     await page.waitForSelector("#view-chat:not([hidden])");
 
+    // Koinos Code is its own sidebar item behind its own switch (task #72).
     await page.click('.nav-item[data-view="api"]');
-    await page.click("#btn-dev-toggle");
-    await page.waitForSelector("#nav-devtools:not([hidden])");
-    await page.click("#nav-devtools");
-    await page.waitForSelector("#view-devtools:not([hidden])");
+    await page.click("#btn-code-toggle");
+    await page.waitForSelector("#nav-code:not([hidden])");
+    await page.click("#nav-code");
+    await page.waitForSelector("#view-code:not([hidden])");
 
-    await page.click('.subtab[data-tab="code"]');
-    await page.waitForSelector("#devtab-code:not([hidden])");
+    // No projects yet: the empty state shows and there is nothing to run.
+    await page.waitForSelector("#kc-empty:not([hidden])");
 
-    await page.fill("#kc-dir", project);
+    // Add the project through the real dialog the person uses.
+    page.once("dialog", (d) => d.accept(project));
+    await page.click("#btn-kc-add");
+    await page.waitForSelector("#kc-work:not([hidden])");
+    await page.waitForFunction(
+      (dir) => document.getElementById("kc-path").textContent === dir,
+      project,
+      { timeout: 15000 }
+    );
+
     await page.fill("#kc-task", "create a greeting file");
     await page.click("#btn-kc-run");
 
@@ -75,8 +85,21 @@ test("code panel: run -> diff card -> approve -> file written -> answer bubble",
     await page.click(".kc-approval button.primary");
     await page.waitForFunction(() => document.getElementById("kc-status").textContent.includes("done"), { timeout: 30000 });
     assert.strictEqual(fs.readFileSync(path.join(project, "greet.txt"), "utf8"), "hi from the panel\n");
-    const answer = await page.$eval("#kc-trace .pg-msg", (el) => el.textContent);
-    assert.match(answer, /Created greet\.txt\./);
+    const bubbles = await page.$$eval("#kc-trace .pg-msg", (els) => els.map((e) => e.textContent));
+    assert.ok(
+      bubbles.some((t) => /Created greet\.txt\./.test(t)),
+      `expected the answer in the transcript, got ${JSON.stringify(bubbles)}`
+    );
+
+    // The run became a SESSION on that project — the thing that makes this a
+    // workspace instead of a one-shot command. It carries both turns.
+    await page.waitForFunction(
+      () => document.querySelectorAll("#kc-sessions .kc-item").length > 0,
+      { timeout: 15000 }
+    );
+    const session = await page.$eval("#kc-sessions .kc-item", (el) => el.textContent);
+    assert.match(session, /create a greeting file/, "the session is titled by what was asked");
+    assert.match(session, /2 turns/, "both the ask and the answer were recorded");
   } finally {
     delete process.env.FAKE_LLAMA_SCRIPT;
     await browser.close();
