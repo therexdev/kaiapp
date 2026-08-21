@@ -30,6 +30,11 @@ const startedAt = Date.now();
 // Scripted replies for agent-loop tests: FAKE_LLAMA_SCRIPT names a JSON file
 // holding an array of strings; each NON-streaming completion shifts the next
 // one, then everything falls back to the default answer. Unset = unchanged.
+//
+// FAKE_LLAMA_RECORD names a file that every received completion request is
+// appended to, one JSON object per line. It is how a test asserts what the
+// model ACTUALLY received — that grounding's reference material arrived, and
+// that Koinos-only fields were stripped before the runtime ever saw them.
 let scripted = [];
 try {
   if (process.env.FAKE_LLAMA_SCRIPT) {
@@ -59,6 +64,13 @@ const server = http.createServer((req, res) => {
       } catch {
         res.writeHead(400);
         return res.end();
+      }
+      if (process.env.FAKE_LLAMA_RECORD) {
+        try {
+          require("fs").appendFileSync(process.env.FAKE_LLAMA_RECORD, JSON.stringify(body) + "\n");
+        } catch {
+          /* recording never breaks the fixture */
+        }
       }
       if (body.stream) {
         res.writeHead(200, { "content-type": "text/event-stream" });

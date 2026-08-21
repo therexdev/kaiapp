@@ -568,12 +568,30 @@ for dev/screenshots).
      owner had to ask where Koinos Code lived; that question WAS the bug report. The hint
      now names all four surfaces. Same commit lands `docs/api-grounding-design.md`
      (open thread 11) — design only, nothing implemented.
+   - **v0.34.0 (2026-08-21): API grounding — `koinos.ground` on
+     /v1/chat/completions.** Optional block; absent it, behaviour is
+     byte-identical. `sources` (URL allowlist over the caller's own material)
+     and `web: true` (open web) are fields on ONE object and compose: own docs
+     are read first, the web fills what is left, citations say which was which.
+     Returned in the body (non-streaming) and in an `x-koinos-grounding`
+     header (always, so streaming callers get them too).
+     **Safety properties, all test-pinned:** grounding + `koinos-network` is
+     REFUSED permanently (that request runs on a volunteer's machine — see
+     open thread 11); Local-Only refuses before any egress; every fetch passes
+     `isPublicHttpUrl`; an allowlist pattern may not carry a wildcard HOST
+     (that would be open web wearing a restriction's clothes — refused with
+     the honest alternative named); ONE search round with the user's question
+     as the query verbatim, so a page just read can never shape the next query;
+     NO tools in the loop, which is the containment that actually matters —
+     the worst a hostile page achieves is a wrong answer; the reference is
+     budgeted against the model's real context; and a grounded request never
+     overflows to the network.
 10. **Moderation/AUP — owner-DEFERRED 2026-08-20**: owner agrees with the A40 reporter's
     finding but explicitly wants it on the future plan ("easier to understand the
     implications... with more nodes and network usage"). Design in kaiapp
     docs/moderation-aup-design.md. Do NOT implement until the owner re-opens it.
 
-11. **API grounding — DESIGNED, awaiting a go/no-go** (`docs/api-grounding-design.md`,
+11. **API grounding — SHIPPED v0.34.0 (owner said go 2026-08-21).** (`docs/api-grounding-design.md`,
     2026-08-21). Owner asked whether the API can reach the internet for grounded answers,
     so support-bot builders don't have to build retrieval on their own side.
     **The safety half is decided and is NOT a sequencing question:** a request carrying
@@ -588,7 +606,13 @@ for dev/screenshots).
     agent loop): an optional `koinos.ground` block on `/v1/chat/completions`, absent =
     byte-identical behavior. Local models only, privacy switch first, allowlisted sources,
     fetched text framed as reference material never as instructions, citations always
-    returned. Do NOT implement until the owner says go.
+    returned. Built as designed — both shapes together, per the owner's call
+    that live data (news, weather) matters as much as static docs.
+    **The node-side refusal above is permanent and is NOT a backlog item.**
+    Residual risk accepted and documented rather than hidden: with `web: true`
+    an end user's question steers what the caller's machine fetches from the
+    public internet. That is inherent to open-web grounding everywhere; it is
+    capped, off by default, and feeds a tool-less loop.
 
 ## 8. Working with the owner
 

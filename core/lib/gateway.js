@@ -8,6 +8,7 @@ const http = require("http");
 const fs = require("fs");
 const nodePath = require("path");
 const { searchWeb, fetchPage } = require("./websearch");
+const { parseGroundSpec, ground, injectReference, lastUserQuestion } = require("./grounding");
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -39,6 +40,31 @@ const MAX_BODY_BYTES = 10 * 1024 * 1024;
 // §7 context capability: keep room for the completion so a prompt that
 // technically fits still has space to be answered.
 const CTX_HEADROOM_TOKENS = 512;
+
+/** What a grounded response reports back: which sources were read, and an
+ *  honest status when nothing could be. */
+function groundResult(g) {
+  return { grounding: { status: g.status, pages_read: g.citations.length }, citations: g.citations };
+}
+
+/*
+ * Node rejects non-latin-1 bytes in a header value, and page titles are full
+ * of em-dashes and worse. Escape to \uXXXX and bound the whole thing, so a
+ * long title can never break an otherwise good response.
+ */
+function citationHeader(g) {
+  try {
+    const json = JSON.stringify(groundResult(g)).replace(/[\u0080-\uffff]/g, (c) =>
+      "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0")
+    );
+    if (json.length > 3500) {
+      return { "x-koinos-grounding": JSON.stringify({ grounding: { status: g.status, pages_read: g.citations.length } }) };
+    }
+    return { "x-koinos-grounding": json };
+  } catch {
+    return null;
+  }
+}
 
 /** Rough prompt-size estimate (~4 chars/token + per-message overhead).
  *  Deliberately cheap — it gates routing, it does not bill anything.
@@ -108,6 +134,11 @@ class Gateway {
     // and the served UI does not carry the token, so this is for deployments
     // driven programmatically (proxies, fleet scripts), not the window.
     this.coreToken = process.env.KAI_CORE_TOKEN || null;
+    // Grounding egress is injectable for the same reason websearch's fetchImpl
+    // is: the tests exercise the REAL request path end to end without a single
+    // byte leaving the machine. Production leaves it null and gets the real
+    // DuckDuckGo/Wikipedia search and page fetcher.
+    this.groundIo = null;
   }
 
   _coreAuthed(req) {
@@ -1183,6 +1214,47 @@ class Gateway {
     }
     const alias = String(body.model || "");
 
+    /*
+     * API grounding (optional `koinos.ground`). Parsed FIRST so a malformed
+     * block is a clean 400 before anything else happens, and so the two
+     * refusals below land before a single byte of egress.
+     */
+    let groundSpec = null;
+    try {
+      groundSpec = parseGroundSpec(body.koinos);
+    } catch (e) {
+      return this._json(res, 400, { error: { message: String(e.message), type: "invalid_request_error" } });
+    }
+    if (groundSpec) {
+      // Grounding is LOCAL-ONLY-MODEL by design. A koinos-network request runs
+      // on a volunteer operator's machine; asking them to fetch URLs for a
+      // stranger would make every operator an open egress proxy. Permanent
+      // refusal, not a missing feature — the error names the working path.
+      if (alias === "koinos-network" || alias.startsWith("koinos-network:")) {
+        return this._json(res, 400, {
+          error: {
+            message:
+              "Grounding runs on this machine only, so it can't be combined with the koinos-network model — " +
+              "that request would execute on another operator's computer, and fetching web pages there would " +
+              "make their machine an open proxy for your callers. Use a local model (for example koinos-fast) " +
+              "with koinos.ground, or drop koinos.ground to use the network.",
+            type: "invalid_request_error",
+          },
+        });
+      }
+      // §7 egress gate, same contract as /core/search: Local-Only means
+      // nothing leaves this machine, so refuse before any network code runs.
+      const gmode = this.network ? this.network.status().privacyMode : "local-only";
+      if (gmode === "local-only") {
+        return this._json(res, 400, {
+          error: {
+            message: "Privacy mode is Local-Only: koinos.ground needs to read the web, so it is disabled on this machine. Switch to Local-First or Network to use it.",
+            type: "invalid_request_error",
+          },
+        });
+      }
+    }
+
     // §46.5 network consume. Privacy policy is checked FIRST (§7): in
     // Local-Only mode this request never leaves the machine — the refusal
     // happens before any network code path is reached.
@@ -1237,10 +1309,39 @@ class Gateway {
     } catch {
       /* not a local alias — ensure() decides */
     }
+    /*
+     * Grounding runs HERE — after the model's context is known, before the
+     * size check below. That order matters: the reference block is budgeted
+     * against the context the model actually has, so grounding can never be
+     * the reason a prompt no longer fits. Roughly 3.5 chars per token, minus
+     * the answer's headroom and what the caller already sent.
+     */
+    let groundOut = null;
+    if (groundSpec) {
+      const spent = estimateMessageTokens(body.messages);
+      const freeTok = (localCtx || 4096) - CTX_HEADROOM_TOKENS - spent;
+      groundOut = await ground(groundSpec, lastUserQuestion(body.messages), {
+        budgetChars: Math.max(0, Math.floor(freeTok * 3.5)),
+        ...(this.groundIo || {}),
+      });
+      body.messages = injectReference(body.messages, groundOut.reference);
+      // `koinos` is ours, not the runtime's — never forward it upstream.
+      delete body.koinos;
+      raw = Buffer.from(JSON.stringify(body));
+      this.onEvent({
+        type: "gateway:grounded",
+        model: alias,
+        status: groundOut.status,
+        pages: groundOut.citations.length,
+      });
+    }
+
     const estTok = estimateMessageTokens(body.messages);
     if (localCtx && estTok > localCtx - CTX_HEADROOM_TOKENS) {
       const net = this.network ? this.network.status() : null;
-      const canNetwork = net && net.privacyMode !== "local-only" && net.schedulerUrl;
+      // A grounded request never overflows to the network: the whole promise
+      // is that the fetched material and the question stay on this machine.
+      const canNetwork = !groundSpec && net && net.privacyMode !== "local-only" && net.schedulerUrl;
       const netCtx = canNetwork ? (await this._networkRates(net.schedulerUrl)).ctxTokens : 0;
       if (canNetwork && estTok <= netCtx - CTX_HEADROOM_TOKENS) {
         const reason = `prompt ~${estTok} tokens exceeds the ${localCtx}-token local context`;
@@ -1277,7 +1378,7 @@ class Gateway {
       // permits it (Local-First and Network — never Local-Only, where the
       // request must not leave the machine even if it cannot be served).
       const net = this.network ? this.network.status() : null;
-      if (net && net.privacyMode !== "local-only" && net.schedulerUrl) {
+      if (!groundSpec && net && net.privacyMode !== "local-only" && net.schedulerUrl) {
         this.onEvent({ type: "gateway:overflow", from: alias, reason: String(e.message) });
         return this._chatNetwork(body, req, res, { overflowFrom: alias, localError: String(e.message) });
       }
@@ -1301,6 +1402,12 @@ class Gateway {
               costMicro: 0,
             })
         : null,
+      // Citations ride BOTH ways: the header works for streaming and
+      // non-streaming alike, the body field is the convenient one for the
+      // ordinary JSON call. A caller who never asked for grounding gets
+      // neither, and the response is byte-for-byte what it always was.
+      extraHeaders: groundOut ? citationHeader(groundOut) : null,
+      injectJson: groundOut && body.stream !== true ? { koinos: groundResult(groundOut) } : null,
     }).finally(releaseHold);
   }
 
@@ -1519,7 +1626,7 @@ class Gateway {
    * pass through untouched, so OpenAI SDK clients behave identically against
    * llama-server's already-compatible responses.
    */
-  _proxy(endpoint, upstreamPath, bodyBuffer, req, res, { meter = null } = {}) {
+  _proxy(endpoint, upstreamPath, bodyBuffer, req, res, { meter = null, extraHeaders = null, injectJson = null } = {}) {
     return new Promise((resolve) => {
       const target = new URL(upstreamPath, endpoint);
       const up = http.request(
@@ -1533,10 +1640,31 @@ class Gateway {
           },
         },
         (upRes) => {
-          res.writeHead(upRes.statusCode || 502, {
-            "content-type": upRes.headers["content-type"] || "application/json",
-            ...(upRes.headers["transfer-encoding"] ? {} : {}),
-          });
+          const head = () =>
+            res.writeHead(upRes.statusCode || 502, {
+              "content-type": upRes.headers["content-type"] || "application/json",
+              ...(extraHeaders || {}),
+            });
+          /*
+           * Non-streaming responses can carry `koinos.citations` in the body,
+           * which means holding the bytes back until they can be merged. Only
+           * ever for JSON: an SSE stream is piped through untouched, because
+           * buffering a stream would defeat the point of streaming. The header
+           * carries the citations either way, so a streaming caller is not
+           * left guessing what the answer rested on.
+           */
+          const buffering = Boolean(injectJson);
+          const held = [];
+          let heldBytes = 0;
+          let flushed = false;
+          const flush = () => {
+            if (flushed) return;
+            flushed = true;
+            head();
+            for (const c of held) res.write(c);
+            upRes.pipe(res);
+          };
+
           // §8 metering tee: collect a bounded copy of the response so token
           // usage can be attributed to the API key — JSON bodies directly,
           // SSE via the last chunk that carries a usage block. Best-effort;
@@ -1550,8 +1678,40 @@ class Gateway {
               teeBytes += c.length;
             });
           }
-          upRes.pipe(res);
+          if (buffering) {
+            upRes.on("data", (c) => {
+              if (flushed) return;
+              held.push(c);
+              heldBytes += c.length;
+              // Pathological body: stop trying to merge, start streaming.
+              if (heldBytes > 4 * 1024 * 1024) flush();
+            });
+          } else {
+            head();
+            upRes.pipe(res);
+          }
           upRes.on("end", () => {
+            if (buffering && !flushed) {
+              flushed = true;
+              const ctype = String(upRes.headers["content-type"] || "application/json");
+              let out = Buffer.concat(held);
+              if (/json/i.test(ctype) && (upRes.statusCode || 0) < 400) {
+                try {
+                  const parsed = JSON.parse(out.toString("utf8"));
+                  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+                    out = Buffer.from(JSON.stringify({ ...parsed, ...injectJson }));
+                  }
+                } catch {
+                  /* not JSON after all — send it through exactly as received */
+                }
+              }
+              res.writeHead(upRes.statusCode || 502, {
+                "content-type": ctype,
+                "content-length": Buffer.byteLength(out),
+                ...(extraHeaders || {}),
+              });
+              res.end(out);
+            }
             if (meter && (upRes.statusCode || 0) < 400) {
               try {
                 const body = Buffer.concat(tee).toString("utf8");

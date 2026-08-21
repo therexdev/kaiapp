@@ -147,5 +147,41 @@ It turns "you must build a RAG pipeline to use our API" into "add a few lines of
 JSON" — for exactly the customers most likely to run a Core of their own. And it
 does it without asking a single volunteer operator to become an open proxy.
 
-STATUS: design agreed in shape (allowlist + open web, shipped together).
-Awaiting the go-ahead to implement.
+## SHIPPED — v0.34.0
+
+Built as designed, both sources together. What landed:
+
+- `core/lib/grounding.js` — spec parsing/validation, glob matching, the one
+  retrieval round, the reference framing, and the character budget.
+- `core/lib/gateway.js` — `koinos.ground` parsed at the top of `_chat` so a
+  malformed block is a clean 400 and the two refusals (network model, Local-
+  Only) land before any egress. Grounding runs after the model's context is
+  known so the reference is budgeted against it, and a grounded request never
+  overflows to the network — "local models only" holds on the fallback paths
+  too, or it silently is not a rule.
+- `_proxy` gained `extraHeaders` + `injectJson`: citations ride an
+  `x-koinos-grounding` header for every call (streaming included) and the JSON
+  body for non-streaming ones. Streams are never buffered.
+- `Gateway.groundIo` makes search/fetch injectable, so the HTTP tests drive the
+  real request path with zero egress.
+- Fixture: `FAKE_LLAMA_RECORD` records what the runtime actually received,
+  which is how the tests prove the reference material arrived AND that the
+  `koinos` field was stripped before it got there.
+
+19 tests in `core/test/grounding.test.js`. Suite: 308 tests, 304 pass,
+4 env-skips, 0 fail. The koinos-network refusal was verified fails-on-old by
+removing the guard and re-running.
+
+Two bugs the tests caught during the build, both worth recording:
+
+1. `Number(budgetChars) || TOTAL_CHARS` read a budget of ZERO as "unset" and
+   handed back the full allowance — injecting the most material exactly when
+   the context had room for the least. Now an explicit `Number.isFinite` check.
+2. The "concrete URLs need no search" test initially failed because remaining
+   page slots were filled by a site:-scoped search. That behaviour is right
+   (more of the caller's own material is good); the test was imprecise and now
+   pins the property exactly, with `max_pages` filled by the concrete URL.
+
+Deliberately NOT built, and still the right calls: node-side fetching (refused
+permanently, see above), multi-round grounding, and a persistent
+`/core/knowledge` index.
