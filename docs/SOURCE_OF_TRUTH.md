@@ -491,8 +491,19 @@ for dev/screenshots).
      --yes equivalent in the app — every card is answered by a human, 5-min timeout =
      declined, cards die with their run; filesystem-root dirs refused). Fixture gained
      FAKE_LLAMA_SCRIPT (JSON array, one reply per non-streaming completion) so the HTTP
-     and browser tests answer a REAL approval card mid-stream. Remaining v3b: installer
-     PATH shim (Windows `resources\bin\koinos-code.cmd` + asar-unpack + NSIS PATH edit).
+     and browser tests answer a REAL approval card mid-stream.
+   - **v0.33.0 (2026-08-21): Koinos Code v3b — on the PATH** (design doc "v3b"): Windows
+     installs get a real `koinos-code` command. `build/bin/koinos-code.cmd` ships to
+     `resources\bin` (win extraResources), drives the app's own Electron with
+     ELECTRON_RUN_AS_NODE against the asar-UNPACKED CLI (`asarUnpack: cli/**,
+     ui/agents.js`); `build/installer.nsh` (nsis.include) adds/removes `resources\bin`
+     on the USER Path via PowerShell SetEnvironmentVariable (broadcasts — new terminals
+     see it, no reboot; duplicate-guarded for updates; a PATH failure never aborts
+     install). Shim mechanics proven cross-platform (packaged Electron + unpacked CLI ran
+     --help in CI-identical form); the .cmd + NSIS compile on the Windows CI build; the
+     double-click PATH behavior is OWNER-VERIFIED-PENDING on his Windows machines. Linux
+     stays `npx koinos-code` (AppImage is read-only — different mechanism someday).
+     Koinos Code phases v1/v2/v3a/v3b are now ALL shipped; task #60 track closed.
 10. **Moderation/AUP — owner-DEFERRED 2026-08-20**: owner agrees with the A40 reporter's
     finding but explicitly wants it on the future plan ("easier to understand the
     implications... with more nodes and network usage"). Design in kaiapp

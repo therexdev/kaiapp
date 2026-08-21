@@ -1,7 +1,7 @@
 {
   "name": "koinos-ai",
   "productName": "Koinos AI",
-  "version": "0.32.0",
+  "version": "0.33.0",
   "private": true,
   "description": "Koinos AI Core — local-first AI with a self-hosted OpenAI-compatible API",
   "license": "MIT",
@@ -43,17 +43,28 @@
       "!core/test/**",
       "package.json"
     ],
+    "asarUnpack": [
+      "cli/**",
+      "ui/agents.js"
+    ],
     "win": {
       "target": [
         "nsis",
         "portable"
       ],
-      "icon": "build/icon.ico"
+      "icon": "build/icon.ico",
+      "extraResources": [
+        {
+          "from": "build/bin",
+          "to": "bin"
+        }
+      ]
     },
     "nsis": {
       "oneClick": true,
       "perMachine": false,
-      "deleteAppDataOnUninstall": false
+      "deleteAppDataOnUninstall": false,
+      "include": "build/installer.nsh"
     },
     "linux": {
       "target": [

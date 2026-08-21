@@ -112,9 +112,23 @@ Not a terminal emulator — the same agent, hosted by Core, with the terminal's
   are deterministic through the REAL stack — the HTTP and browser tests answer
   a live approval card mid-stream.
 
-## Later phases
+## v3b (shipped 0.33.0) — on the PATH
 
-- v3b: ships in PATH via the installer (Windows: a `koinos-code.cmd` shim in
-  `resources\bin` driving the app's own Electron with ELECTRON_RUN_AS_NODE,
-  cli/ + ui/agents.js asar-unpacked, NSIS adds/removes the dir on the user
-  PATH).
+Windows installs get a real `koinos-code` command:
+
+- `build/bin/koinos-code.cmd` ships to `$INSTDIR\resources\bin` (win-scoped
+  extraResources) and drives the app's own Electron with ELECTRON_RUN_AS_NODE
+  against the asar-UNPACKED CLI (`asarUnpack: cli/**, ui/agents.js` — a plain
+  file path, no asar reader needed). The mechanics are proven on every
+  platform by running the packaged Electron binary against the unpacked CLI.
+- `build/installer.nsh` (nsis.include): customInstall appends
+  `resources\bin` to the USER Path via PowerShell's
+  [Environment]::SetEnvironmentVariable — which also broadcasts
+  WM_SETTINGCHANGE, so new terminals see it with no reboot and no NSIS
+  plugin; customUnInstall filters the entry back out. Guarded against
+  duplicates on update installs; a PATH edit failure never aborts install.
+  Known edge accepted for alpha: an apostrophe in the Windows username would
+  break the quoted path and skip (only) the PATH step.
+- Linux/AppImage deliberately unchanged: `npx koinos-code` stays the way in
+  (an AppImage mounts read-only; PATH integration there is a different
+  mechanism for a later day).
