@@ -1124,6 +1124,16 @@ class Gateway {
        * is exactly as powerful as starting a run.
        */
       const P = this.code.projects;
+      // Folder navigation for "Select a folder". Directories only — it never
+      // lists files, so it cannot be used to discover document names.
+      if (path === "/core/code/browse" && req.method === "POST") {
+        try {
+          const b = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+          return this._json(res, 200, { ok: true, ...require("./code-projects").browseDir(b.dir) });
+        } catch (e) {
+          return this._json(res, 400, { ok: false, error: String(e.message) });
+        }
+      }
       if (path === "/core/code/projects" && req.method === "GET") {
         return this._json(res, 200, { ok: true, projects: P.list() });
       }

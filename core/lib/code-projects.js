@@ -3,6 +3,7 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const os = require("os");
 
 /*
  * Koinos Code projects + sessions (task #72).
@@ -257,4 +258,84 @@ class CodeProjects {
   }
 }
 
-module.exports = { CodeProjects, validateDir, MAX_PROJECTS, MAX_SESSIONS_PER_PROJECT };
+/*
+ * Directory browser for the "Select a folder" flow.
+ *
+ * The desktop app uses the NATIVE picker (koinosShell.pickFolder) — that is
+ * the right experience and it returns a real on-disk path. This exists for the
+ * served UI, where there is no native dialog, and as the thing that makes the
+ * picker's result reviewable before it becomes a project.
+ *
+ * DIRECTORIES ONLY. It never lists files, so it cannot be used to discover
+ * document names — a meaningfully smaller disclosure than "list this folder".
+ * It sits behind the Koinos Code switch and the forwarded-header refusal like
+ * every other route here, and Koinos Code can already read and write inside a
+ * project you add, so listing folder names is strictly less than what the
+ * surface already grants.
+ */
+function browseDir(dir) {
+  const raw = String(dir == null ? "" : dir).trim();
+
+  // No path yet: hand back sensible starting points rather than the
+  // filesystem root, which is a hostile place to begin navigating.
+  if (!raw) {
+    const home = os.homedir();
+    const starts = [{ name: "Home", path: home }];
+    if (process.platform === "win32") {
+      // Enumerate drive letters that actually respond.
+      for (const letter of "CDEFGHIJKLMNOPQRSTUVWXYZ") {
+        const root = `${letter}:\\`;
+        try {
+          fs.statSync(root);
+          starts.push({ name: `${letter}:`, path: root });
+        } catch {
+          /* no such drive */
+        }
+      }
+    } else {
+      starts.push({ name: "Filesystem root", path: "/" });
+    }
+    return { path: "", parent: null, entries: starts, start: true };
+  }
+
+  const here = path.resolve(raw);
+  let st;
+  try {
+    st = fs.statSync(here);
+  } catch {
+    throw new Error(`that folder does not exist: ${here}`);
+  }
+  if (!st.isDirectory()) throw new Error(`that is a file, not a folder: ${here}`);
+
+  let names = [];
+  try {
+    names = fs.readdirSync(here, { withFileTypes: true });
+  } catch (e) {
+    throw new Error(`cannot read that folder: ${e.code === "EACCES" ? "permission denied" : e.message}`);
+  }
+  const entries = [];
+  for (const d of names) {
+    if (entries.length >= 500) break;
+    let isDir = d.isDirectory();
+    // A symlinked directory is still a directory to anyone navigating.
+    if (!isDir && d.isSymbolicLink()) {
+      try {
+        isDir = fs.statSync(path.join(here, d.name)).isDirectory();
+      } catch {
+        isDir = false;
+      }
+    }
+    if (isDir) entries.push({ name: d.name, path: path.join(here, d.name) });
+  }
+  // Dot-folders sort last: they are rarely the project and always the noise.
+  entries.sort((a, b) => {
+    const ad = a.name.startsWith(".");
+    const bd = b.name.startsWith(".");
+    if (ad !== bd) return ad ? 1 : -1;
+    return a.name.localeCompare(b.name);
+  });
+  const parent = path.dirname(here);
+  return { path: here, parent: parent === here ? null : parent, entries, start: false };
+}
+
+module.exports = { CodeProjects, validateDir, MAX_PROJECTS, MAX_SESSIONS_PER_PROJECT, browseDir };

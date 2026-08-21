@@ -979,15 +979,51 @@ async function renderApi() {
     const budget = document.createElement("button");
     budget.className = "linklike";
     budget.textContent = "budget";
-    budget.addEventListener("click", async () => {
-      const v = prompt("Monthly network budget in USD for this key (empty = no limit):", k.budgetUsdMonthly ?? "");
-      if (v === null) return;
-      await fetch(`/core/keys/${k.id}/budget`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ budgetUsdMonthly: v === "" ? null : Number(v) }),
+    /*
+     * An INLINE editor, not prompt(): window.prompt does not exist in Electron
+     * — it returns null without showing anything, so this button did nothing
+     * at all in the packaged app. Same trap as the MCP folder entry and the
+     * first Koinos Code panel; core/test/electron-dialogs.test.js now greps
+     * for it, because no browser test can reproduce a missing browser API.
+     */
+    budget.addEventListener("click", () => {
+      if (li.querySelector(".budget-edit")) return;
+      const wrap = document.createElement("span");
+      wrap.className = "budget-edit";
+      const input = document.createElement("input");
+      input.type = "number";
+      input.min = "0";
+      input.step = "0.01";
+      input.className = "small";
+      input.placeholder = "USD / month — empty = no limit";
+      input.value = k.budgetUsdMonthly ?? "";
+      const save = document.createElement("button");
+      save.className = "small primary";
+      save.textContent = "Save";
+      const cancel = document.createElement("button");
+      cancel.className = "small";
+      cancel.textContent = "Cancel";
+      const close = () => wrap.remove();
+      const commit = async () => {
+        const v = input.value.trim();
+        save.disabled = true;
+        await fetch(`/core/keys/${k.id}/budget`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ budgetUsdMonthly: v === "" ? null : Number(v) }),
+        });
+        close();
+        renderApi();
+      };
+      save.addEventListener("click", commit);
+      cancel.addEventListener("click", close);
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") commit();
+        if (e.key === "Escape") close();
       });
-      renderApi();
+      wrap.append(input, save, cancel);
+      li.appendChild(wrap);
+      input.focus();
     });
 
     const del = document.createElement("button");

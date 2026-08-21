@@ -60,13 +60,33 @@ test("code panel: run -> diff card -> approve -> file written -> answer bubble",
     await page.click("#nav-code");
     await page.waitForSelector("#view-code:not([hidden])");
 
-    // No projects yet: the empty state shows and there is nothing to run.
-    await page.waitForSelector("#kc-empty:not([hidden])");
+    // No project yet: the start screen offers the two ways in.
+    await page.waitForSelector("#kc-start:not([hidden])");
+    await page.waitForSelector("#btn-kc-pick");
+    await page.waitForSelector("#btn-kc-clone");
 
-    // Add the project through the real dialog the person uses.
-    page.once("dialog", (d) => d.accept(project));
-    await page.click("#btn-kc-add");
-    await page.waitForSelector("#kc-work:not([hidden])");
+    /*
+     * Choose a folder through the IN-APP browser — the path a served UI takes,
+     * and the one a test can drive. (The packaged app calls the native picker
+     * via koinosShell.pickFolder instead; both end at useFolder.)
+     *
+     * NOTHING here may use window.prompt: it does not exist in Electron and
+     * returns null without showing anything, which is exactly the bug this
+     * screen replaced.
+     */
+    await page.click("#btn-kc-pick");
+    await page.waitForSelector("#kc-browse:not([hidden])");
+    await page.fill("#kc-browse-path", project);
+    await page.click("#btn-kc-browse-go");
+    await page.waitForFunction(
+      (dir) => document.getElementById("kc-browse-here").textContent.includes(dir),
+      project,
+      { timeout: 15000 }
+    );
+    await page.click("#btn-kc-browse-use");
+
+    // Choosing a folder goes straight into the conversation.
+    await page.waitForSelector("#kc-chat:not([hidden])");
     await page.waitForFunction(
       (dir) => document.getElementById("kc-path").textContent === dir,
       project,

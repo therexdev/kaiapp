@@ -529,66 +529,124 @@
            (AutoGen parity), a playground, the simple pipelines that shipped
            first, and the benchmark. -->
       <section id="view-code" class="view" hidden>
-        <div class="api-card kc-layout">
-          <div class="kc-side">
-            <div class="kc-side-head">
-              <b>Projects</b>
-              <button id="btn-kc-add" class="small">Add</button>
-            </div>
+        <div class="kc-shell">
+          <!-- Projects rail -->
+          <aside class="kc-rail">
+            <button id="btn-kc-new" class="kc-new">+ New chat</button>
+            <div class="kc-rail-label">Projects</div>
             <div id="kc-projects" class="kc-list"></div>
-            <div class="kc-side-head kc-sessions-head" hidden id="kc-sessions-head">
-              <b>Sessions</b>
-              <button id="btn-kc-new-session" class="small">New</button>
-            </div>
+            <div class="kc-rail-label kc-rail-sessions" id="kc-sessions-label" hidden>Chats</div>
             <div id="kc-sessions" class="kc-list"></div>
-
-            <div class="kc-side-head kc-sessions-head">
-              <b>GitHub</b>
-              <button id="btn-kc-gh" class="small">Connect</button>
+            <div class="kc-rail-foot">
+              <div id="kc-gh-status" class="kc-gh"></div>
+              <button id="btn-kc-gh" class="kc-link">Connect GitHub</button>
             </div>
-            <div id="kc-gh-status" class="hint"></div>
-            <div class="form-row"><button id="btn-kc-clone" class="small" hidden>Clone a repo</button></div>
-          </div>
+          </aside>
 
-          <div class="kc-main">
-            <h1 id="kc-title">Koinos Code</h1>
-            <p class="lede" id="kc-lede">
-              The coding agent, working on <em>your</em> projects. Add a folder, then talk to it the
-              way you would a developer — it reads freely inside that project, and every file change
-              or command waits on a card you approve. Each project keeps its own sessions, so it
-              remembers what you were doing.
-            </p>
+          <!-- Working pane -->
+          <main class="kc-pane">
+            <!-- START SCREEN: no project chosen -->
+            <div id="kc-start" class="kc-start">
+              <h1 class="kc-start-title">Koinos Code</h1>
+              <p class="kc-start-sub">Point it at a folder and tell it what to do. It shows you every change before anything happens.</p>
 
-            <div id="kc-empty" class="kc-empty">
-              <p class="hint">
-                No projects yet. <b>Add</b> one by giving the full path to a folder on this machine —
-                for example <code>C:\Users\you\my-project</code>. The same agent also ships as the
-                <code>koinos-code</code> terminal command.
-              </p>
+              <div class="kc-choices">
+                <button id="btn-kc-pick" class="kc-choice">
+                  <span class="kc-choice-title">Select a folder</span>
+                  <span class="kc-choice-sub">Work on something already on this machine</span>
+                </button>
+                <button id="btn-kc-clone" class="kc-choice">
+                  <span class="kc-choice-title">Clone from GitHub</span>
+                  <span class="kc-choice-sub">Copy a repository down and start on it</span>
+                </button>
+              </div>
+
+              <!-- Inline folder browser (no window.prompt: it does not exist in Electron) -->
+              <div id="kc-browse" class="kc-panel" hidden>
+                <div class="kc-panel-head">
+                  <b>Choose a folder</b>
+                  <button id="btn-kc-browse-close" class="kc-x" aria-label="Close">✕</button>
+                </div>
+                <div class="form-row">
+                  <input id="kc-browse-path" placeholder="Type or paste a full path" />
+                  <button id="btn-kc-browse-go" class="small">Go</button>
+                </div>
+                <div id="kc-browse-list" class="kc-browse-list"></div>
+                <div class="form-row">
+                  <button id="btn-kc-browse-use" class="primary small">Use this folder</button>
+                  <span id="kc-browse-here" class="meta"></span>
+                </div>
+              </div>
+
+              <!-- Inline clone form -->
+              <div id="kc-clone" class="kc-panel" hidden>
+                <div class="kc-panel-head">
+                  <b>Clone a repository</b>
+                  <button id="btn-kc-clone-close" class="kc-x" aria-label="Close">✕</button>
+                </div>
+                <div class="form-row">
+                  <input id="kc-clone-repo" placeholder="owner/name — or the full GitHub URL" />
+                </div>
+                <div class="form-row">
+                  <input id="kc-clone-parent" placeholder="Folder to clone into" />
+                  <button id="btn-kc-clone-pick" class="small">Browse…</button>
+                </div>
+                <div class="form-row">
+                  <button id="btn-kc-clone-go" class="primary small">Clone and start</button>
+                  <span id="kc-clone-status" class="meta"></span>
+                </div>
+                <div id="kc-repo-list" class="kc-browse-list" hidden></div>
+              </div>
+
+              <div id="kc-start-error" class="kc-error" hidden></div>
             </div>
 
-            <div id="kc-work" hidden>
-              <div class="form-row kc-path-row">
-                <span id="kc-path" class="meta"></span>
-                <button id="btn-kc-rename" class="small">Rename</button>
-                <button id="btn-kc-forget" class="small">Forget</button>
+            <!-- CHAT: a project is chosen -->
+            <div id="kc-chat" class="kc-chat" hidden>
+              <header class="kc-head">
+                <div class="kc-head-main">
+                  <span id="kc-title" class="kc-head-title"></span>
+                  <span id="kc-path" class="kc-head-path"></span>
+                </div>
+                <div class="kc-head-actions">
+                  <span id="kc-branch" class="kc-branch" hidden></span>
+                  <button id="btn-kc-git" class="small" hidden>Git</button>
+                  <button id="btn-kc-rename" class="small">Rename</button>
+                  <button id="btn-kc-forget" class="small">Forget</button>
+                </div>
+              </header>
+
+              <!-- Git actions, revealed by the Git button -->
+              <div id="kc-git-bar" class="kc-panel" hidden>
+                <div class="form-row">
+                  <input id="kc-git-input" placeholder="Branch name / commit message / PR title" />
+                  <button id="btn-kc-branch" class="small">Branch</button>
+                  <button id="btn-kc-commit" class="small">Commit</button>
+                  <button id="btn-kc-push" class="small">Push</button>
+                  <button id="btn-kc-pr" class="small">Pull request</button>
+                </div>
+                <div class="form-row"><span id="kc-git-status" class="meta"></span></div>
               </div>
-              <div id="kc-git" class="kc-git" hidden>
-                <span id="kc-branch" class="meta"></span>
-                <button id="btn-kc-branch" class="small">Branch</button>
-                <button id="btn-kc-commit" class="small">Commit</button>
-                <button id="btn-kc-push" class="small">Push</button>
-                <button id="btn-kc-pr" class="small">Pull request</button>
+
+              <!-- Rename, inline -->
+              <div id="kc-rename-bar" class="kc-panel" hidden>
+                <div class="form-row">
+                  <input id="kc-rename-input" placeholder="Project name" />
+                  <button id="btn-kc-rename-save" class="primary small">Save</button>
+                  <button id="btn-kc-rename-cancel" class="small">Cancel</button>
+                </div>
               </div>
-              <div id="kc-trace"></div>
-              <div class="form-row">
-                <input id="kc-task" placeholder="What should it do? e.g. add a --version flag to cli.js" />
-                <button id="btn-kc-run" class="primary small">Run</button>
+
+              <div id="kc-trace" class="kc-transcript"></div>
+
+              <div class="kc-composer">
+                <textarea id="kc-task" rows="1" placeholder="What should it do? (Enter to send, Shift+Enter for a new line)"></textarea>
+                <button id="btn-kc-run" class="primary small">Send</button>
                 <button id="btn-kc-stop" class="small" hidden>Stop</button>
               </div>
-              <div class="form-row"><span id="kc-status" class="meta"></span></div>
+              <div class="kc-statusline"><span id="kc-status" class="meta"></span></div>
             </div>
-          </div>
+          </main>
         </div>
       </section>
 

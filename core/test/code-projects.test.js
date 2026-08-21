@@ -331,3 +331,51 @@ test("HTTP: a proxied request is refused on the project routes too", async () =>
     await core.stop();
   }
 });
+
+test("browse: directories only, never files — and it starts somewhere sane", () => {
+  const { browseDir } = require("../lib/code-projects");
+  // No path: sensible starting points, not the filesystem root.
+  const start = browseDir("");
+  assert.strictEqual(start.start, true);
+  assert.ok(start.entries.some((e) => e.name === "Home"));
+
+  const dir = tmp("kai-browse-");
+  fs.mkdirSync(path.join(dir, "src"));
+  fs.mkdirSync(path.join(dir, ".hidden"));
+  fs.writeFileSync(path.join(dir, "secret-notes.txt"), "x");
+  const out = browseDir(dir);
+
+  const names = out.entries.map((e) => e.name);
+  assert.deepStrictEqual(names, ["src", ".hidden"], "directories only, dot-folders last");
+  // The point of directories-only: it cannot be used to enumerate documents.
+  assert.ok(!JSON.stringify(out).includes("secret-notes.txt"), "file names are never disclosed");
+  assert.strictEqual(out.parent, path.dirname(dir));
+
+  assert.throws(() => browseDir(path.join(dir, "secret-notes.txt")), /file, not a folder/);
+  assert.throws(() => browseDir("/definitely/not/here"), /does not exist/);
+});
+
+test("HTTP: browse is gated by the switch and refuses proxied callers", async () => {
+  const dataDir = coreDir();
+  const { core, base } = await startCore(dataDir);
+  try {
+    const off = await j(base, "/core/code/browse", { method: "POST", body: JSON.stringify({ dir: "" }) });
+    assert.strictEqual(off.status, 403);
+    assert.match(off.body.error, /Koinos Code is switched off/);
+
+    await j(base, "/core/code-switch", { method: "POST", body: JSON.stringify({ enabled: true }) });
+    const on = await j(base, "/core/code/browse", { method: "POST", body: JSON.stringify({ dir: "" }) });
+    assert.strictEqual(on.status, 200);
+    assert.ok(on.body.entries.length > 0);
+
+    const proxied = await fetch(`${base}/core/code/browse`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-forwarded-for": "203.0.113.7" },
+      body: JSON.stringify({ dir: "" }),
+    });
+    assert.strictEqual(proxied.status, 403);
+    assert.match((await proxied.json()).error, /KAI_CORE_TOKEN/);
+  } finally {
+    await core.stop();
+  }
+});
