@@ -294,7 +294,18 @@ for dev/screenshots).
   09:21:59, then answered fine at 09:27. One or two failed probes right after a deploy are
   the rollover, not an outage — verify with a positive check a few minutes later before
   reverting. Workers ride it out (outbound-only + persisted roster; presence held).
-- **WATCH (opened 2026-08-21 10:51Z): paired worker identities cycling ~every 22h.** The
+- **RESOLVED 2026-08-21 14:56Z — it was ordinary CHURN, and worker identity provably
+  PERSISTS.** The suspect pair (`1E5cxC…jR7g`, `1H7T7D…C4gg`) was still on the roster four
+  hours later and climbing — ageDays 0.02→0.19, perf 6→81 each — so no ~22h rotation. The
+  clincher came unprompted: `1CkzKK…fs5u` REJOINED carrying 1.14 accrued ageDays and 112
+  jobs, i.e. a worker that went offline and returned with its address and history intact.
+  That is exactly what identity-cycling would have made impossible. Roster membership is
+  fluid (`1H7Qva…FjvK`, 4.34 days, dropped in the same window) but IDENTITY is stable, so
+  the §17 reputation inputs are trustworthy going into the `KAI_REPUTATION_ENFORCE` arming
+  (~Sep 2). Rule for future checks: judge worker health PER ADDRESS across checks — a
+  departure is not a fault, and a returning address carrying its old ageDays is the health
+  signal to look for. Original observation and reasoning kept below for provenance.
+- **WATCH (opened 2026-08-21 10:51Z, now RESOLVED above): paired worker identities cycling ~every 22h.** The
   roster lost `16wmrJ…1EYi` and `12Y8Ww…T8ii` (both ~0.77 ageDays, ~275 perf jobs) and
   gained `1E5cxC…jR7g` + `1H7T7D…C4gg` (both 0.02 ageDays, 6 jobs) in the SAME window —
   and that pair had itself appeared together ~22h earlier. Pairs appearing/vanishing
