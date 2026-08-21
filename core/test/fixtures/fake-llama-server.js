@@ -27,6 +27,18 @@ const model = argValue("--model") || "unknown";
 const READY_DELAY_MS = Number(process.env.FAKE_LLAMA_DELAY_MS || 300);
 const startedAt = Date.now();
 
+// Scripted replies for agent-loop tests: FAKE_LLAMA_SCRIPT names a JSON file
+// holding an array of strings; each NON-streaming completion shifts the next
+// one, then everything falls back to the default answer. Unset = unchanged.
+let scripted = [];
+try {
+  if (process.env.FAKE_LLAMA_SCRIPT) {
+    scripted = JSON.parse(require("fs").readFileSync(process.env.FAKE_LLAMA_SCRIPT, "utf8"));
+  }
+} catch {
+  scripted = [];
+}
+
 const server = http.createServer((req, res) => {
   if (req.url === "/health") {
     if (Date.now() - startedAt < READY_DELAY_MS) {
@@ -80,11 +92,12 @@ const server = http.createServer((req, res) => {
         return;
       }
       res.writeHead(200, { "content-type": "application/json" });
+      const content = scripted.length ? String(scripted.shift()) : "Hello from fake llama";
       res.end(
         JSON.stringify({
           object: "chat.completion",
           model,
-          choices: [{ index: 0, message: { role: "assistant", content: "Hello from fake llama" }, finish_reason: "stop" }],
+          choices: [{ index: 0, message: { role: "assistant", content }, finish_reason: "stop" }],
           usage: { prompt_tokens: 1, completion_tokens: 4, total_tokens: 5 },
           // Shape matches llama-server's timing block, used by the benchmark.
           timings: { prompt_n: 1, prompt_per_second: 500, predicted_n: 4, predicted_per_second: 42 },

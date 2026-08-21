@@ -519,6 +519,7 @@
             <button class="subtab active" data-tab="agents">Multi-agent</button>
             <button class="subtab" data-tab="playground">Playground</button>
             <button class="subtab" data-tab="pipelines">Pipelines</button>
+            <button class="subtab" data-tab="code">Koinos Code</button>
             <button class="subtab" data-tab="bench">Benchmark</button>
           </nav>
 
@@ -606,6 +607,25 @@
               <span id="dev-run-status" class="meta"></span>
             </div>
             <pre id="dev-team-out" class="snippet" hidden></pre>
+          </div>
+
+          <div id="devtab-code" class="devtab" hidden>
+            <p class="hint">
+              Koinos Code — the coding agent — pointed at one of <em>your</em> folders. It reads freely
+              inside that folder; every file change appears below as a card with its diff, every
+              command as a card with the exact line, and nothing happens until you approve the card.
+              The same agent ships as the <code>koinos-code</code> terminal CLI.
+            </p>
+            <div class="form-row">
+              <input id="kc-dir" placeholder="Project folder — absolute path, e.g. C:\Users\you\my-project" />
+            </div>
+            <div class="form-row">
+              <input id="kc-task" placeholder="The task, e.g. add a --version flag to cli.js" />
+              <button id="btn-kc-run" class="primary small">Run</button>
+              <button id="btn-kc-stop" class="small" hidden>Stop</button>
+            </div>
+            <div class="form-row"><span id="kc-status" class="meta"></span></div>
+            <div id="kc-trace"></div>
           </div>
 
           <div id="devtab-bench" class="devtab" hidden>

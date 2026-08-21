@@ -458,6 +458,147 @@
     }
   });
 
+  // ---------- Koinos Code tab: the CLI's agent, approval cards for gates ----------
+  let kcRunId = null;
+  try {
+    $("kc-dir").value = localStorage.getItem("kai-code-dir") || "";
+  } catch {
+    /* storage off — the field just starts empty */
+  }
+
+  function kcLine(text) {
+    const div = document.createElement("div");
+    div.className = "pg-tool";
+    div.textContent = text;
+    $("kc-trace").appendChild(div);
+    div.scrollIntoView({ block: "nearest" });
+  }
+
+  function kcApprovalCard(t) {
+    const card = document.createElement("div");
+    card.className = "kc-approval";
+    const head = document.createElement("div");
+    head.className = "kc-approval-head";
+    head.textContent = t.kind === "edit" ? `edit ${t.path}` : `run: ${t.cmd}`;
+    card.appendChild(head);
+    if (t.kind === "edit") {
+      const pre = document.createElement("pre");
+      pre.className = "kc-diff";
+      for (const line of String(t.diff || "").split("\n")) {
+        const span = document.createElement("span");
+        span.className = line.startsWith("+") ? "kc-add" : line.startsWith("-") ? "kc-del" : "";
+        span.textContent = `${line}\n`;
+        pre.appendChild(span);
+      }
+      card.appendChild(pre);
+    }
+    const row = document.createElement("div");
+    row.className = "form-row";
+    const yes = document.createElement("button");
+    yes.className = "primary small";
+    yes.textContent = t.kind === "edit" ? "Apply edit" : "Run command";
+    const no = document.createElement("button");
+    no.className = "small";
+    no.textContent = "Deny";
+    const answer = async (approved) => {
+      yes.disabled = no.disabled = true;
+      card.classList.add("answered");
+      head.textContent += approved ? " — approved" : " — denied";
+      await fetch("/core/code/approve", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ approvalId: t.approvalId, approved }),
+      }).catch(() => {});
+      $("kc-status").textContent = "running…";
+    };
+    yes.addEventListener("click", () => answer(true));
+    no.addEventListener("click", () => answer(false));
+    row.appendChild(yes);
+    row.appendChild(no);
+    card.appendChild(row);
+    $("kc-trace").appendChild(card);
+    card.scrollIntoView({ block: "nearest" });
+  }
+
+  $("btn-kc-run").addEventListener("click", async () => {
+    clearError();
+    const dir = $("kc-dir").value.trim();
+    const task = $("kc-task").value.trim();
+    if (!dir) return showError("Name the project folder first (an absolute path).");
+    if (!task) return showError("Give the agent a task.");
+    try {
+      localStorage.setItem("kai-code-dir", dir);
+    } catch {
+      /* storage off */
+    }
+    $("kc-trace").innerHTML = "";
+    $("btn-kc-run").disabled = true;
+    $("btn-kc-stop").hidden = false;
+    $("kc-status").textContent = "running…";
+    try {
+      const resp = await fetch("/core/code/run", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ dir, task, model: state.alias ?? "" }),
+      });
+      if (!resp.ok || !resp.body) {
+        const j = await resp.json().catch(() => ({}));
+        throw new Error(j.error || `code endpoint answered ${resp.status}`);
+      }
+      let done = null;
+      await readSse(resp, (ev) => {
+        const t = ev.trace;
+        if (t?.type === "start") kcRunId = t.runId;
+        if (t?.type === "tool") kcLine(`» ${t.name} ${t.args}`);
+        if (t?.type === "obs") kcLine(`  ${t.text}`);
+        if (t?.type === "note") kcLine(t.text);
+        if (t?.type === "approval-request") {
+          kcApprovalCard(t);
+          $("kc-status").textContent = "waiting for your approval…";
+        }
+        if (ev.done) done = ev;
+      });
+      if (!done) throw new Error("the run ended without a result");
+      if (done.error) throw new Error(done.error);
+      if (done.answer) {
+        const div = document.createElement("div");
+        div.className = "pg-msg";
+        const who = document.createElement("span");
+        who.className = "pg-name";
+        who.textContent = "Koinos Code";
+        div.appendChild(who);
+        div.appendChild(document.createTextNode(done.answer));
+        $("kc-trace").appendChild(div);
+        div.scrollIntoView({ block: "nearest" });
+      }
+      $("kc-status").textContent =
+        done.reason === "budget"
+          ? "step budget exhausted — the task may be incomplete"
+          : done.reason === "stopped"
+            ? "stopped"
+            : `done — ${done.steps} tool step${done.steps === 1 ? "" : "s"}`;
+    } catch (e) {
+      showError(e.message);
+      $("kc-status").textContent = "";
+    } finally {
+      $("btn-kc-run").disabled = false;
+      $("btn-kc-stop").hidden = true;
+      kcRunId = null;
+    }
+  });
+
+  $("btn-kc-stop").addEventListener("click", async () => {
+    if (!kcRunId) return;
+    await fetch("/core/code/stop", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ runId: kcRunId }),
+    }).catch(() => {});
+  });
+  $("kc-task").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") $("btn-kc-run").click();
+  });
+
   // ---------- entry point, called by app.js on navigation ----------
   let rendered = false;
   async function render() {

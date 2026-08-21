@@ -448,6 +448,11 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     defs: new GroupDefs(path.join(dataDir, "agent-teams.json")),
     registry,
   };
+  // Koinos Code in the app (task #60 v3): the CLI's coding agent hosted by
+  // Core, permission gates routed to approval cards over SSE. Same loopback
+  // lane, so runs inherit every routing/privacy rule.
+  const { CodeAgent } = require("./lib/code-agent");
+  const code = new CodeAgent({ chatFn: loopbackChat, onEvent: events });
   mcp.autoConnect().catch(() => {}); // reconnect servers the user used before
 
   // Local speech-to-text (§7: audio never leaves the machine). Engine+model
@@ -482,6 +487,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     dev,
     bench,
     agents,
+    code,
     chats: new ChatStore(path.join(dataDir, "chats")),
     docs: new (require("./lib/docs").DocStore)(path.join(dataDir, "docs")),
     coreInfo: () => ({ version: VERSION, dataDir, hardware: hw }),

@@ -67,7 +67,7 @@ function hasImageParts(messages) {
 }
 
 class Gateway {
-  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, earn, network, feedback, chats, docs, voice, tools, memory, mcp, nodeRuntime, email, calendar, koinos, koinosNode, teams, account, dev, bench, agents, onEvent }) {
+  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, earn, network, feedback, chats, docs, voice, tools, memory, mcp, nodeRuntime, email, calendar, koinos, koinosNode, teams, account, dev, bench, agents, code, onEvent }) {
     this.tools = tools || null; // unified tool registry (agents/MCP/memory/…)
     this.memory = memory || null; // cross-chat memory store
     this.mcp = mcp || null; // MCP server manager
@@ -81,6 +81,7 @@ class Gateway {
     this.dev = dev || null; // developer-tools switch (task #61) — gates custom specs + bench
     this.bench = bench || null; // objective model benchmark (task #61)
     this.agents = agents || null; // multi-agent group chats (task #64) — runner + saved defs
+    this.code = code || null; // Koinos Code in the app (task #60 v3) — approval-carded coding agent
     this.voice = voice || null; // local speech-to-text (whisper)
     this.feedback = feedback || null; // relay to the project's feedback inbox
     this.chats = chats || null; // local chat history store
@@ -1036,6 +1037,61 @@ class Gateway {
         return res.end();
       }
       return this._json(res, 404, { ok: false, error: "unknown /core/agents route" });
+    }
+
+    // ---- Koinos Code in the app (task #60 v3): the CLI's agent, approval
+    // cards instead of [y/N]. Same trust model as the rest of /core (dev
+    // switch + loopback/same-site, KAI_CORE_TOKEN where set): a caller that
+    // could answer approvals could already run code via teams' consent flag.
+    if (this.code && path.startsWith("/core/code/")) {
+      if (!(this.dev && this.dev.status().enabled)) {
+        return this._json(res, 403, { ok: false, error: "Koinos Code needs Developer tools on (Local API → Developer tools)." });
+      }
+      if (path === "/core/code/approve" && req.method === "POST") {
+        let body;
+        try {
+          body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+        } catch {
+          return this._json(res, 400, { ok: false, error: "Body must be JSON" });
+        }
+        const took = this.code.provideApproval(String(body.approvalId || ""), body.approved === true);
+        return this._json(res, took ? 200 : 404, took ? { ok: true } : { ok: false, error: "no such pending approval — it may have timed out" });
+      }
+      if (path === "/core/code/stop" && req.method === "POST") {
+        let body;
+        try {
+          body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+        } catch {
+          return this._json(res, 400, { ok: false, error: "Body must be JSON" });
+        }
+        return this._json(res, 200, { ok: true, stopped: this.code.stop(String(body.runId || "")) });
+      }
+      if (path === "/core/code/run" && req.method === "POST") {
+        let body;
+        try {
+          body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+        } catch {
+          return this._json(res, 400, { ok: false, error: "Body must be JSON" });
+        }
+        // SSE with approval-request events: the run PAUSES on every write
+        // and command until /core/code/approve answers that card.
+        res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
+        const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+        try {
+          const r = await this.code.run({
+            dir: String(body.dir || ""),
+            task: String(body.task || ""),
+            model: String(body.model || ""),
+            maxSteps: body.maxSteps,
+            onTrace: (e) => send({ trace: e }),
+          });
+          send({ done: true, answer: r.answer, steps: r.steps, reason: r.reason });
+        } catch (e) {
+          send({ done: true, error: String(e.message) });
+        }
+        return res.end();
+      }
+      return this._json(res, 404, { ok: false, error: "unknown /core/code route" });
     }
 
     // ----- OpenAI-compatible surface -----

@@ -241,24 +241,48 @@ function walkFiles(root, dir, acc, depth = 0) {
   }
 }
 
-function makeTools(root, opts) {
+/** The terminal's asking surface — the default io. Another host (the app's
+ *  Koinos Code panel) injects its own io to route the SAME policy through
+ *  approval cards instead of [y/N] prompts; the policy itself never moves. */
+function ttyIo(opts) {
   const interactive = Boolean(process.stdin.isTTY);
-  // The one write gate both writing tools share: show the diff, ask (or
-  // honor --yes), then write. Every path to disk goes through here.
+  return {
+    showDiff(rel, diff) {
+      print(`\n--- ${rel} ---`);
+      print(paintDiff(diff));
+    },
+    async askEdit(rel) {
+      if (opts.yes) return { approved: true };
+      if (!interactive) {
+        return { approved: false, reason: "edit declined: no terminal to ask on — the person must pass --yes to pre-approve edits" };
+      }
+      return { approved: await askYesNo(`apply this edit to ${rel}?`), reason: "the user declined this edit" };
+    },
+    async askCommand(cmd) {
+      if (opts.allowCommands) return { approved: true };
+      if (!interactive) {
+        return { approved: false, reason: "command declined: no terminal to ask on — the person must pass --allow-commands to allow commands" };
+      }
+      return { approved: await askYesNo(`run: ${cmd} ?`), reason: "the user declined this command" };
+    },
+    note(line) {
+      print(dim(line));
+    },
+  };
+}
+
+function makeTools(root, opts) {
+  const io = opts.io || ttyIo(opts);
+  // The one write gate both writing tools share: show the diff, ask, then
+  // write. Every path to disk goes through here.
   async function approveAndWrite(abs, rel, old, next) {
-    print(`\n--- ${rel} ---`);
-    print(paintDiff(unifiedDiff(old, next)));
-    let approved = false;
-    if (opts.yes) approved = true;
-    else if (interactive) approved = await askYesNo(`apply this edit to ${rel}?`);
-    if (!approved) {
-      return interactive
-        ? "the user declined this edit"
-        : "edit declined: no terminal to ask on — the person must pass --yes to pre-approve edits";
-    }
+    const diff = unifiedDiff(old, next);
+    io.showDiff(rel, diff);
+    const verdict = await io.askEdit(rel, diff);
+    if (!verdict.approved) return verdict.reason || "the user declined this edit";
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     fs.writeFileSync(abs, next);
-    print(dim(`  wrote ${rel}`));
+    io.note(`  wrote ${rel}`);
     return `wrote ${rel} (${Buffer.byteLength(next)} bytes)`;
   }
   return [
@@ -378,14 +402,8 @@ function makeTools(root, opts) {
       handler: async ({ cmd }) => {
         const command = String(cmd || "").trim();
         if (!command) return "give a command";
-        let approved = false;
-        if (opts.allowCommands) approved = true;
-        else if (interactive) approved = await askYesNo(`run: ${command} ?`);
-        if (!approved) {
-          return interactive
-            ? "the user declined this command"
-            : "command declined: no terminal to ask on — the person must pass --allow-commands to allow commands";
-        }
+        const verdict = await io.askCommand(command);
+        if (!verdict.approved) return verdict.reason || "the user declined this command";
         return await new Promise((res) => {
           exec(command, { cwd: root, timeout: CMD_TIMEOUT_MS, maxBuffer: 512 * 1024 }, (err, stdout, stderr) => {
             const code = err ? (err.killed ? "timeout" : err.code ?? 1) : 0;
@@ -604,7 +622,7 @@ async function main() {
   closeRl();
 }
 
-module.exports = { parseArgs, jailed, unifiedDiff, makeTools, projectContext, runTeam };
+module.exports = { parseArgs, jailed, unifiedDiff, makeTools, projectContext, runTeam, PREAMBLE };
 
 if (require.main === module) {
   main().catch((e) => {

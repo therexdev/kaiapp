@@ -484,6 +484,15 @@ for dev/screenshots).
      upfront consent (TTY ask, `--allow-commands` headless); templates need NO dev switch,
      custom specs stay gated. Tests: 15 in koinos-code.test.js incl. a REAL-core `--team`
      e2e (model pinned to `dev-tiny` — first-listed alias would trigger a model download).
+   - **v0.32.0 (2026-08-21): Koinos Code v3a — the panel** (design doc "v3a"): a Koinos
+     Code sub-tab under Developer Tools hosting the SAME agent via `core/lib/code-agent.js`
+     — CLI tools/jail/diff/KOINOS.md reused through the CLI's injectable `io`, [y/N] gates
+     re-expressed as approval CARDS over SSE (`/core/code/run|approve|stop`, dev-gated; NO
+     --yes equivalent in the app — every card is answered by a human, 5-min timeout =
+     declined, cards die with their run; filesystem-root dirs refused). Fixture gained
+     FAKE_LLAMA_SCRIPT (JSON array, one reply per non-streaming completion) so the HTTP
+     and browser tests answer a REAL approval card mid-stream. Remaining v3b: installer
+     PATH shim (Windows `resources\bin\koinos-code.cmd` + asar-unpack + NSIS PATH edit).
 10. **Moderation/AUP — owner-DEFERRED 2026-08-20**: owner agrees with the A40 reporter's
     finding but explicitly wants it on the future plan ("easier to understand the
     implications... with more nodes and network usage"). Design in kaiapp

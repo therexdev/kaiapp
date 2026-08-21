@@ -84,7 +84,37 @@ windowed (`from` arg) so a big file cannot blow the context.
   templates run without the Developer-tools switch, custom specs stay
   gated (unchanged gateway rule).
 
+## v3a (shipped 0.32.0) — the panel
+
+Koinos Code inside the app: a **Koinos Code** sub-tab under Developer Tools.
+Not a terminal emulator — the same agent, hosted by Core, with the terminal's
+[y/N] gates re-expressed as **approval cards**:
+
+- `core/lib/code-agent.js` (CodeAgent) hosts the loop. Nothing re-implemented:
+  tools/jail/diff/KOINOS.md come from `cli/koinos-code.js` via its injectable
+  `io` (the CLI's TTY io stays the default; the panel injects one that emits
+  `approval-request` events), grammar from `ui/agents.js`, completions via the
+  loopback lane so runs inherit every routing/privacy rule.
+- Permission policy is IDENTICAL to the terminal and there is NO `--yes`
+  equivalent in the app: every write shows its diff in a card, every command
+  shows its exact line, and the run PAUSES until the card is answered
+  (`/core/code/approve`), times out (5 min → declined, run continues), or the
+  run is stopped. Un-answered cards die with their run.
+- Routes (all Developer-tools-gated): `POST /core/code/run` (SSE:
+  start/tool/obs/approval-request/note + terminal done), `/core/code/approve`,
+  `/core/code/stop`. A directory that doesn't exist is a terminal error on the
+  stream; a filesystem root is refused as a certain typo.
+- Trust model unchanged: same-site/loopback + the dev switch (+ KAI_CORE_TOKEN
+  where set). A caller able to answer approval cards could already run code
+  via the teams consent flag — this surface adds reach, not privilege.
+- Test fixture note: `fake-llama-server` accepts FAKE_LLAMA_SCRIPT (a JSON
+  array of replies, one per non-streaming completion) so agent-loop decisions
+  are deterministic through the REAL stack — the HTTP and browser tests answer
+  a live approval card mid-stream.
+
 ## Later phases
 
-- v3: surfaced inside the app (Developer tools) as a terminal panel; ships in
-  PATH via the installer.
+- v3b: ships in PATH via the installer (Windows: a `koinos-code.cmd` shim in
+  `resources\bin` driving the app's own Electron with ELECTRON_RUN_AS_NODE,
+  cli/ + ui/agents.js asar-unpacked, NSIS adds/removes the dir on the user
+  PATH).

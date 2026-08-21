@@ -82,6 +82,8 @@ async function main() {
     await shot("devtools-playground", null);
     await page.click('.subtab[data-tab="pipelines"]');
     await shot("devtools-pipelines", null);
+    await page.click('.subtab[data-tab="code"]');
+    await shot("devtools-code", null);
     await shot("tasks", "tasks");
     await shot("compare", "compare");
   } finally {
