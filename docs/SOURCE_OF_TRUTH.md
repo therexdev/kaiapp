@@ -333,6 +333,14 @@ for dev/screenshots).
   owner only if it is still frozen after a genuinely quiet 45 min — that rules out cadence
   and points at the upstream aggregators. Serving/billing is unaffected throughout: the
   held price stays inside floor/ceil, which is the breaker working as designed.
+- **A docs deploy is verified by CONTENT, not by a status code (added 2026-08-21).** A stale
+  checkout on the box serves every docs page with a cheerful 200, so the HTTP probes cannot
+  see it. `scripts/health-digest.py` now asserts `docs deploy is current` by fetching
+  `/docs/content/developer-tools.md` and grepping for a marker string (`DOCS_MARKER`, today
+  `KAI_CORE_TOKEN`). It is a `check`, not a `warn` — a stale docs deploy FAILS the digest.
+  **When a docs change matters enough to prove it landed, move the marker to a phrase unique
+  to that change.** Same principle applies to any future "did it actually deploy?" question.
+
 - **The host restarts the process on its own (not just on deploy).** 2026-08-16 ~20:43Z the
   process went `i_0eceee22`→`i_b56be4e1` with a whole-site HTTP 000 blip the monitor caught,
   with NO deploy — a host recycle (budget hosting) or a crash. The roster survived and workers
