@@ -554,10 +554,33 @@ for dev/screenshots).
      header-less trust. `/core/code/*` now refuses any request carrying `x-forwarded-*` /
      `x-real-ip` / `forwarded` unless KAI_CORE_TOKEN is set; the refusal names the way out.
      Fails-on-old test verified by reverting the gateway and re-running.
+   - **v0.33.2 (2026-08-21): the dev-tools switch names Koinos Code.** The switch's own
+     hint still described only "multi-agent systems, custom pipelines, and a model
+     benchmark" — written before v0.32.0 put the code panel behind that same switch. The
+     owner had to ask where Koinos Code lived; that question WAS the bug report. The hint
+     now names all four surfaces. Same commit lands `docs/api-grounding-design.md`
+     (open thread 11) — design only, nothing implemented.
 10. **Moderation/AUP — owner-DEFERRED 2026-08-20**: owner agrees with the A40 reporter's
     finding but explicitly wants it on the future plan ("easier to understand the
     implications... with more nodes and network usage"). Design in kaiapp
     docs/moderation-aup-design.md. Do NOT implement until the owner re-opens it.
+
+11. **API grounding — DESIGNED, awaiting a go/no-go** (`docs/api-grounding-design.md`,
+    2026-08-21). Owner asked whether the API can reach the internet for grounded answers,
+    so support-bot builders don't have to build retrieval on their own side.
+    **The safety half is decided and is NOT a sequencing question:** a request carrying
+    model `koinos-network` is PROXIED to a volunteer operator's machine (gateway.js
+    ~1189/`_proxy` ~1295). Asking a node to fetch a URL would make every operator an open
+    egress proxy — SSRF onto their home LAN, abuse attributed to their IP, bandwidth they
+    never agreed to spend, and results nobody can verify (a dishonest node can invent the
+    page it claims to have read; §17 challenges score inference, not fetch honesty).
+    **Node-side fetching is refused permanently, not deferred.** The half worth building
+    lives on the CALLER'S OWN Core, where trust already exists and so do the parts
+    (`/core/search`, `/core/fetch`, the `isPublicHttpUrl` guard, the tool registry, the
+    agent loop): an optional `koinos.ground` block on `/v1/chat/completions`, absent =
+    byte-identical behavior. Local models only, privacy switch first, allowlisted sources,
+    fetched text framed as reference material never as instructions, citations always
+    returned. Do NOT implement until the owner says go.
 
 ## 8. Working with the owner
 
