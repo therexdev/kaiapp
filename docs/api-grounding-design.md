@@ -2,10 +2,10 @@
 
 The ask: let someone build a support bot or company chatbot **on top of the
 Koinos AI API** without writing their own agent loop. Today a developer who
-wants a web- or docs-grounded answer has to build search, fetching, chunking,
-and the tool loop on their side, then hand us the assembled prompt. That is a
-lot of scaffolding for what most people want, which is "answer from THIS
-material."
+wants a grounded answer has to build search, fetching, chunking, and the tool
+loop on their side, then hand us the assembled prompt. That is a lot of
+scaffolding for what most people want, which is "answer from THIS material" —
+and increasingly "…and from what is true right now."
 
 ## The safety line: network nodes must never fetch on a caller's behalf
 
@@ -25,99 +25,127 @@ five things break at once:
 2. **Attribution lands on the operator.** Fetch traffic carries the operator's
    IP. Scraping, abuse, or illegal content fetched "by the network" is logged
    against a volunteer's home connection. This is the moderation/AUP question
-   (task #63, owner-deferred) in its sharpest form — allowing node-side egress
-   would force that decision immediately instead of at more usage.
+   (task #63, owner-deferred) in its sharpest form.
 3. **Operators never consented to be an egress proxy.** They signed up to serve
    inference. Turning their machine into an open fetcher is a different deal
    than the one they agreed to.
 4. **The result is unverifiable.** A dishonest node can invent "fetched"
-   content. The caller cannot tell. Our §17 challenge machinery scores
-   inference quality, not fetch honesty — we would be trusting strangers with
-   the factual grounding of someone's support bot.
+   content. Our §17 challenge machinery scores inference quality, not fetch
+   honesty.
 5. **Unbounded cost on someone else's bandwidth.**
 
 **Decision: node-side fetching is refused, permanently, not "later".** If a
-request asks for grounding tools AND routes to `koinos-network`, the gateway
-answers with a clear error naming the local path instead.
+request asks for grounding AND routes to `koinos-network`, the gateway answers
+with a clear error naming the local path instead.
 
 ## Where grounding SHOULD live: the caller's own Core
 
 The trust story is already right on a machine the developer controls. It is
 their hardware, their network, their privacy switch — and the pieces exist:
 
-- `/core/search` + `/core/fetch` with the `isPublicHttpUrl` SSRF guard
-  (loopback, RFC1918, link-local/metadata, IPv6 literals all refused).
-- The one tool registry with its egress/sensitive policy.
-- The agent loop (`ui/agents.js`) and the research loop already shipped in the
-  app.
+- `/core/search` (keyless DuckDuckGo HTML + Wikipedia) and `/core/fetch`, both
+  behind `isPublicHttpUrl`: no `localhost`, no `.local`/`.internal`, no IPv6
+  literals, none of `0.*`, `10.*`, `127.*`, `169.254.*`, `172.16-31.*`,
+  `192.168.*`. Search results are filtered at parse time, not just on fetch.
+- Both are already hard-refused unless the privacy switch permits leaving the
+  machine (there is a test pinning exactly that).
+- The agent loop (`ui/agents.js`) and the research loop already in the app.
 
 What is missing is only this: none of it is reachable through the
-**OpenAI-compatible** surface, so an API consumer cannot get it without
-rebuilding it. That is the actual gap — not a missing capability, a missing
-door.
+**OpenAI-compatible** surface. That is the actual gap — not a missing
+capability, a missing door.
 
-## Proposal — two shapes, one opt-in extension
+## Proposal — ONE opt-in block, two sources that compose
 
 Add an optional `koinos` block to `/v1/chat/completions`. Absent it, behaviour
 is byte-identical to today. Requires an API key (already true for `/v1`), obeys
-the privacy switch (Local-Only refuses in words), local models only.
+the privacy switch, local models only.
 
-### Shape A — web grounding (open questions)
+The two sources are NOT separate features. They are two fields on one object,
+and the interesting case is both at once:
 
 ```json
 {
   "model": "koinos-fast",
-  "messages": [{"role": "user", "content": "What changed in the EU AI Act this month?"}],
-  "koinos": { "ground": { "web": true, "max_pages": 3 } }
-}
-```
-
-Core runs the existing search→read→answer loop internally and returns a normal
-OpenAI-shaped completion, with the sources attached (`koinos.citations`) so the
-caller can show them. The developer writes zero agent code.
-
-### Shape B — source grounding (what support bots actually need)
-
-Company bots rarely want the open web; they want **their own material**. So:
-
-```json
-{
+  "messages": [{"role": "user", "content": "Is the venue open tomorrow?"}],
   "koinos": { "ground": {
     "sources": ["https://help.acme.com/**", "https://acme.com/docs/**"],
+    "web": true,
     "max_pages": 4
   }}
 }
 ```
 
-An explicit allowlist. Core fetches only matching public URLs (same SSRF
-guard), grounds the answer in them, and cites them. No crawler, no index to
-maintain, nothing to keep warm — and the allowlist doubles as the safety
-bound, since the caller has named exactly what may be fetched.
+- **`sources` only** — bounded retrieval over the company's own material. An
+  explicit URL allowlist; nothing else is ever fetched. Safest shape.
+- **`web` only** — open-web grounding for questions no static page answers:
+  today's news, the weather, whether a service is down right now.
+- **Both** — the honest shape for a real support bot. Their own docs answer
+  "how do I reset my password"; the open web answers "is there an outage" and
+  "what's the forecast for the event". Allowlisted sources are consulted
+  first; the web supplements. Citations say which answer came from where, so
+  the company can see when its bot leaned on a stranger's page.
 
-Later, if field use asks for it: a persistent indexed collection
-(`/core/knowledge`) reusing the existing local TF-IDF memory store, so a bot
-can be grounded in a large doc set without re-fetching per call. Deliberately
-NOT phase one — the allowlist covers the common case and ships far sooner.
+## Open web: what it actually exposes, stated plainly
 
-## Rules that hold in both shapes
+With an allowlist, the DEVELOPER decides what may be fetched, in their own
+server code, and their end users cannot change it. Open web is different and
+the difference should not be soft-pedalled:
+
+**In open-web mode, the end user's question steers what the machine fetches
+from the public internet.** Someone chatting with the support bot types a
+question, the model turns it into a search, and pages come back and get read.
+That is not a flaw in our implementation — it is what open-web grounding *is*,
+here and everywhere else it exists. The honest framing for the docs is: turning
+`web: true` on means your Core will fetch public pages chosen, indirectly, by
+whoever is talking to your bot.
+
+What bounds that exposure:
+
+- **Public addresses only.** The SSRF guard applies to every fetch, so it can
+  never be turned inward at the company's own network or a metadata endpoint.
+- **No tools in the grounding loop.** This is the important one. The loop is
+  search → read → answer, and nothing else — no file access, no commands, no
+  MCP, no memory writes. So the worst a malicious page can achieve is *a wrong
+  or weird answer*. It cannot reach anything, because in this loop there is
+  nothing to reach. (Contrast agent mode, which has tools and is human-watched.)
+- **One search round by default.** Multi-round would let a fetched page
+  influence the NEXT query, which is a narrow but real way for injected text to
+  smuggle conversation content into an outbound request. One round closes it.
+  Deep research remains the multi-round surface, and it is human-driven.
+- **Bounded**: page cap (`max_pages`, default 3, hard ceiling 8), per-fetch
+  timeout, total byte cap. Their bandwidth, their caps.
+- **Fetched text is untrusted input**, framed as reference material and never
+  as instructions. A strong mitigation, not a proof — worth saying out loud.
+- **Off by default**, and the allowlist remains available for anyone who wants
+  live-data-free operation.
+
+Residual risk we accept and document rather than pretend away: an end user can
+cause the company's machine to fetch a public page of roughly their choosing,
+and pay the bandwidth for it. Anyone running a web-connected chatbot carries
+that. The mitigation is that it is explicit, capped, off unless asked for, and
+that the loop it feeds cannot do anything but produce text.
+
+## Rules that hold in every shape
 
 - **Local models only.** `koinos-network` + grounding = refused, with the error
   naming why and pointing at the local path.
 - Privacy switch first: Local-Only refuses grounding in words, as everywhere.
-- Bounded: page cap, per-fetch timeout, total byte cap, one loop, no recursion.
-- Fetched text is **untrusted input**. It is framed as reference material in
-  the prompt, never as instructions — a page that says "ignore your
-  instructions" is data, not a command.
-- Citations always returned when grounding ran, so an operator of the bot can
-  audit what its answers were based on.
+- Citations always returned when grounding ran (`koinos.citations`), so the bot
+  can show its sources and the operator can audit what an answer rested on.
+  Non-negotiable for news answers in particular.
 - Off by default. A caller who never sends `koinos` sees no change at all.
+
+Later, if field use asks for it: a persistent indexed collection
+(`/core/knowledge`) reusing the existing local TF-IDF memory store, so a bot can
+be grounded in a large doc set without re-fetching per call. Deliberately not
+phase one.
 
 ## Why this is worth doing
 
-It turns "you must build a RAG pipeline to use our API" into "add four lines of
-JSON" — for exactly the customers (support bots, company assistants) most
-likely to run a Core of their own and pay for network inference on the harder
-questions. And it does it without asking a single volunteer operator to become
-an open proxy.
+It turns "you must build a RAG pipeline to use our API" into "add a few lines of
+JSON" — for exactly the customers most likely to run a Core of their own. And it
+does it without asking a single volunteer operator to become an open proxy.
 
-STATUS: design only, awaiting the owner's go-ahead. Nothing implemented.
+STATUS: design agreed in shape (allowlist + open web, shipped together).
+Awaiting the go-ahead to implement.
