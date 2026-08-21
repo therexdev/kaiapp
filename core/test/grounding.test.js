@@ -499,3 +499,31 @@ test("HTTP: no koinos block means no change at all — no header, no body field,
     await core.stop();
   }
 });
+
+test("HTTP: the `koinos` namespace never leaves this machine, even with no ground block", async () => {
+  // `koinos` is ours. A block with no `ground` key parses to null, so the
+  // grounding branch never runs — and without an unconditional strip the field
+  // would ride on to the runtime, or be serialized into a network request
+  // signed for a stranger's machine. Whatever a caller puts there stops here.
+  const dataDir = tmpCore();
+  const { core, base } = await startCore(dataDir, ["fine"], { record: true });
+  try {
+    await post(base, "/core/network/config", { privacyMode: "local-first" });
+    const r = await post(base, "/v1/chat/completions", {
+      model: "dev-tiny",
+      messages: [{ role: "user", content: "hello" }],
+      koinos: { note: "not a ground block", secret: "should never be forwarded" },
+    });
+    assert.strictEqual(r.status, 200);
+    const lines = fs.readFileSync(path.join(dataDir, "requests.jsonl"), "utf8").trim().split("\n");
+    const sent = JSON.parse(lines[lines.length - 1]);
+    assert.strictEqual(sent.koinos, undefined, "the koinos namespace must be stripped");
+    assert.ok(!JSON.stringify(sent).includes("should never be forwarded"));
+    // The rest of the request is untouched.
+    assert.strictEqual(sent.messages[0].content, "hello");
+  } finally {
+    delete process.env.FAKE_LLAMA_SCRIPT;
+    delete process.env.FAKE_LLAMA_RECORD;
+    await core.stop();
+  }
+});

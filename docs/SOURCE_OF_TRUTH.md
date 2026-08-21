@@ -586,6 +586,14 @@ for dev/screenshots).
      the worst a hostile page achieves is a wrong answer; the reference is
      budgeted against the model's real context; and a grounded request never
      overflows to the network.
+   - **v0.34.1 (2026-08-21): the `koinos` namespace is stripped
+     unconditionally.** Found by re-reading the v0.34.0 diff, not by a test:
+     the strip lived inside the grounding branch, so `{"koinos": {...}}` with
+     no `ground` key parsed to null, skipped the branch, and rode on to the
+     runtime — or was serialized and SIGNED into a network request bound for a
+     stranger's machine. Now stripped as soon as it is parsed. General rule:
+     a field in our own namespace stops at the gateway, whether or not the
+     feature it belongs to ran.
 10. **Moderation/AUP — owner-DEFERRED 2026-08-20**: owner agrees with the A40 reporter's
     finding but explicitly wants it on the future plan ("easier to understand the
     implications... with more nodes and network usage"). Design in kaiapp

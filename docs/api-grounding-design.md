@@ -168,7 +168,7 @@ Built as designed, both sources together. What landed:
   which is how the tests prove the reference material arrived AND that the
   `koinos` field was stripped before it got there.
 
-19 tests in `core/test/grounding.test.js`. Suite: 308 tests, 304 pass,
+20 tests in `core/test/grounding.test.js`. Suite: 309 tests, 305 pass,
 4 env-skips, 0 fail. The koinos-network refusal was verified fails-on-old by
 removing the guard and re-running.
 
@@ -181,6 +181,13 @@ Two bugs the tests caught during the build, both worth recording:
    page slots were filled by a site:-scoped search. That behaviour is right
    (more of the caller's own material is good); the test was imprecise and now
    pins the property exactly, with `max_pages` filled by the concrete URL.
+
+3. **v0.34.1, found by re-reading the diff rather than by a test.** `koinos`
+   was stripped from the body only when grounding actually RAN. A block with no
+   `ground` key parses to null, so the field survived and rode on to the local
+   runtime — or, on a network request, was serialized and signed into a payload
+   sent to a stranger's machine. Now stripped unconditionally: whatever a caller
+   puts under our namespace stops at the gateway.
 
 Deliberately NOT built, and still the right calls: node-side fetching (refused
 permanently, see above), multi-round grounding, and a persistent

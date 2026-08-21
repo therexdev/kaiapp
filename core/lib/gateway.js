@@ -1225,6 +1225,17 @@ class Gateway {
     } catch (e) {
       return this._json(res, 400, { error: { message: String(e.message), type: "invalid_request_error" } });
     }
+    /*
+     * `koinos` is OUR namespace and belongs to no one downstream — strip it
+     * here, unconditionally, not just when grounding ran. A block carrying no
+     * `ground` key parses to null, and without this it would ride on to the
+     * local runtime or, worse, be serialized into a network request signed for
+     * a stranger's machine. Whatever a caller puts under `koinos` stops here.
+     */
+    if (body.koinos !== undefined) {
+      delete body.koinos;
+      raw = Buffer.from(JSON.stringify(body));
+    }
     if (groundSpec) {
       // Grounding is LOCAL-ONLY-MODEL by design. A koinos-network request runs
       // on a volunteer operator's machine; asking them to fetch URLs for a
@@ -1325,8 +1336,6 @@ class Gateway {
         ...(this.groundIo || {}),
       });
       body.messages = injectReference(body.messages, groundOut.reference);
-      // `koinos` is ours, not the runtime's — never forward it upstream.
-      delete body.koinos;
       raw = Buffer.from(JSON.stringify(body));
       this.onEvent({
         type: "gateway:grounded",
