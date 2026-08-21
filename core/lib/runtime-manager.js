@@ -208,16 +208,16 @@ class RuntimeManager {
     this._healed = this._healed || new Set();
     const testHard = async (binPath, cap) => {
       // A binary that crashed its self-test crashes it again 10 seconds
-      // later — and the test is a BLOCKING spawn of up to 15s that starves
-      // polls, heartbeats, and every timer in the process. Field log
-      // showed it re-running on EVERY model switch, several times a
-      // minute, strangling the node's own presence while it served jobs.
+      // later — the test can burn 15s per attempt, and field log showed it
+      // re-running on EVERY model switch, several times a minute. Cache the
+      // verdict; the test itself is async so even a slow probe no longer
+      // starves polls, heartbeats, or timers.
       if (this._failedTests.has(binPath)) {
         throw new Error(`${this._failedTests.get(binPath)} (cached — not re-tested this session)`);
       }
       try {
         try {
-          return selfTest(binPath);
+          return await selfTest(binPath);
         } catch (e1) {
           if (typeof this.provisioner?.reprovision !== "function" || this._healed.has(binPath)) {
             throw new Error(`${e1.message} [beside: ${dirSnapshot(binPath)}]`);
@@ -226,12 +226,12 @@ class RuntimeManager {
           this.onEvent({ type: "runtime:heal", step: "reprovision", binPath, reason: String(e1.message) });
           await this.provisioner.reprovision(kind, { cap });
           try {
-            return selfTest(binPath);
+            return await selfTest(binPath);
           } catch (e2) {
             if (stripCpuVariants(binPath)) {
               this.onEvent({ type: "runtime:heal", step: "strip-cpu-variants", binPath });
               try {
-                return selfTest(binPath);
+                return await selfTest(binPath);
               } catch (e3) {
                 throw new Error(`${e3.message} [after reprovision + variant strip; beside: ${dirSnapshot(binPath)}]`);
               }

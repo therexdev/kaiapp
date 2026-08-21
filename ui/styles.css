@@ -448,6 +448,9 @@ button.primary:hover:not(:disabled) { box-shadow: 0 4px 16px rgba(109, 62, 240, 
 .cmp-controls { display: flex; align-items: center; gap: 12px; }
 .cmp-controls select { background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; font: inherit; }
 .cmp-vs { color: var(--text-dim); font-size: 0.85em; }
+.cmp-presets { display: flex; flex-wrap: wrap; gap: 8px; }
+.cmp-preset { border: 1px solid var(--border); background: var(--bg-raised); color: var(--text-dim); border-radius: 999px; padding: 5px 12px; font: inherit; font-size: 0.82em; cursor: pointer; }
+.cmp-preset:hover { color: var(--text); border-color: var(--violet); }
 #cmp-form { display: flex; gap: 10px; align-items: flex-end; }
 #cmp-input { flex: 1; resize: vertical; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; font: inherit; }
 #cmp-input:focus { outline: 1px solid var(--violet); }

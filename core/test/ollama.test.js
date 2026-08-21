@@ -18,16 +18,34 @@ const { Gateway } = require("../lib/gateway");
 const { makeZip } = require("./fixtures/make-zip");
 const { RuntimeProvisioner } = require("../lib/runtime-provisioner");
 
-test("selfTest passes on a runnable binary and fails on a crashing one", () => {
+test("selfTest passes on a runnable binary and fails on a crashing one", async () => {
   // node itself answers --version: the cheapest healthy binary around.
-  selfTest(process.execPath);
+  await selfTest(process.execPath);
   if (process.platform !== "win32") {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-st-"));
     const bad = path.join(dir, "crasher");
     fs.writeFileSync(bad, "#!/bin/sh\nexit 5\n");
     fs.chmodSync(bad, 0o755);
-    assert.throws(() => selfTest(bad), /Engine self-test failed.*exit code 5/);
+    await assert.rejects(() => selfTest(bad), /Engine self-test failed.*exit code 5/);
   }
+});
+
+test("selfTest does not block the event loop while the binary is slow", { skip: process.platform === "win32" }, async () => {
+  // The field failure mode: a slow probe used to be a BLOCKING spawn that
+  // starved scheduler long-polls and heartbeats. A timer ticking while the
+  // self-test runs is the whole guarantee.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-st-slow-"));
+  const slow = path.join(dir, "slowpoke");
+  fs.writeFileSync(slow, "#!/bin/sh\nsleep 1\necho v1.0.0\n");
+  fs.chmodSync(slow, 0o755);
+  let ticks = 0;
+  const timer = setInterval(() => { ticks += 1; }, 50);
+  try {
+    await selfTest(slow);
+  } finally {
+    clearInterval(timer);
+  }
+  assert.ok(ticks >= 5, `event loop starved during selfTest: only ${ticks} timer ticks in ~1s`);
 });
 
 test("ollama detect returns null when nothing listens", async () => {

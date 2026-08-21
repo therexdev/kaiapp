@@ -38,14 +38,23 @@ class OllamaRuntime {
     }
   }
 
-  /** Where an installed Ollama binary lives, or null. */
-  static locate() {
-    const { spawnSync } = require("child_process");
+  /** Where an installed Ollama binary lives, or null. Async spawn — a PATH
+   *  probe must never block the event loop (same rule as engine selfTest). */
+  static async locate() {
+    const { spawn } = require("child_process");
     const path = require("path");
-    const probe = spawnSync(process.platform === "win32" ? "where" : "which", ["ollama"], {
-      encoding: "utf8",
-      windowsHide: true,
-      timeout: 5000,
+    const probe = await new Promise((resolve) => {
+      let child;
+      try {
+        child = spawn(process.platform === "win32" ? "where" : "which", ["ollama"], { windowsHide: true });
+      } catch (e) {
+        return resolve({ error: e, status: null, stdout: "" });
+      }
+      let stdout = "";
+      const timer = setTimeout(() => { try { child.kill("SIGKILL"); } catch { /* gone */ } }, 5000);
+      child.stdout?.on("data", (d) => { stdout += d; });
+      child.on("error", (e) => { clearTimeout(timer); resolve({ error: e, status: null, stdout }); });
+      child.on("close", (status) => { clearTimeout(timer); resolve({ status, stdout }); });
     });
     const found = (probe.stdout || "").split("\n")[0].trim();
     if (probe.status === 0 && found) return found;
@@ -65,7 +74,7 @@ class OllamaRuntime {
     const emit = onEvent || (() => {});
     const up = await OllamaRuntime.detect({ host, port });
     if (up) return up;
-    let bin = OllamaRuntime.locate();
+    let bin = await OllamaRuntime.locate();
     // Nothing installed: provision our own portable build — everything in
     // the app, nobody gets sent to a website (field requirement). The zip
     // is hash-pinned in the runtime catalog like every engine (§27) and

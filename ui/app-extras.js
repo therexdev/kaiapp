@@ -117,6 +117,49 @@ function renderCompare() {
   cmpFillPickers();
 }
 
+// Preset prompts: one chip per skill the bench also probes, so a blind vote
+// teaches something specific. Clicking fills the box — the user still edits
+// and runs; nothing fires on its own.
+const CMP_PRESETS = [
+  {
+    label: "🧮 Logic",
+    prompt:
+      "A farmer has 17 sheep. All but 9 wander off. How many sheep does the farmer have left? Explain your reasoning in one sentence, then give the number alone on the final line.",
+  },
+  {
+    label: "💻 Code",
+    prompt:
+      "Write a JavaScript function dedupe(arr) that removes duplicate values while keeping first-occurrence order. Show the function, then one example call and its output.",
+  },
+  {
+    label: "📋 Instructions",
+    prompt:
+      "List exactly 5 unusual uses for a brick. Number them 1 to 5, each under 8 words, with no introduction and no closing sentence.",
+  },
+  {
+    label: "📝 Summarize",
+    prompt:
+      "Summarize the following in exactly two sentences: Honeybees communicate the location of food through a waggle dance. The dance's angle relative to vertical encodes direction relative to the sun, while its duration encodes distance. Other bees follow the dance in the dark of the hive, reading it by touch, and then fly out to the advertised flowers. Studies show the dance also reflects the quality of the source, with livelier dances recruiting more foragers to richer nectar.",
+  },
+  {
+    label: "✨ Creative",
+    prompt:
+      "Write the opening paragraph of a mystery story set in a lighthouse, at most 80 words, ending on an unresolved detail.",
+  },
+];
+for (const p of CMP_PRESETS) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "cmp-preset";
+  b.textContent = p.label;
+  b.title = p.prompt;
+  b.addEventListener("click", () => {
+    $("cmp-input").value = p.prompt;
+    $("cmp-input").focus();
+  });
+  $("cmp-presets").appendChild(b);
+}
+
 async function cmpStreamInto(model, prompt, paneIdx, signal) {
   const body = $(`cmp-body-${paneIdx}`);
   const resp = await fetch("/core/chat/completions", {

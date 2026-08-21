@@ -8,6 +8,16 @@ const { Signer } = require("koilib");
 const { PriceOracle, parseSources } = require("./oracle");
 
 /*
+ * RETIRED AS A MIRROR — TEST FIXTURE ONLY (decision 2026-08-21).
+ * The CANONICAL scheduler is therexdev/kai lib/scheduler.js, which serves
+ * koinosai.com and has evolved far past this copy (roster persistence,
+ * multi-class dispatch, fair seeding, streaming, perf-fed routing). This
+ * file exists so core/test can run the shipped worker (core/lib/worker.js)
+ * against an in-process scheduler; change it only when a worker test needs
+ * a protocol behavior it lacks — never by porting kai changes wholesale,
+ * and never deploy it. Real protocol compatibility is verified continuously
+ * by live workers plus the netcheck workflow.
+ *
  * Koinos AI scheduler — M2/M3 alpha (§12/§13/§16/§17/§46.5). Project-operated;
  * workers connect OUTBOUND only (register + long-poll + submit), never accept
  * inbound connections. Job types are profile-approved (§31): "inference-eval"

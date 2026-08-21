@@ -155,8 +155,8 @@ function removeCrtBeside(binPath) {
   return removed;
 }
 
-function selfTest(binPath) {
-  const { spawnSync } = require("child_process");
+async function selfTest(binPath) {
+  const { spawn } = require("child_process");
   ensureCrtBeside(binPath);
   // NOTE: the Electron dir is deliberately NOT prepended to PATH — its
   // bundled CRT aging behind the engine toolchain was the v0.22.1 field
@@ -165,22 +165,47 @@ function selfTest(binPath) {
   // topology detection can access-violate at process load on very new
   // hybrid CPUs (field machine: Arrow Lake Core Ultra). Disabling affinity
   // skips the crashing path; ggml does its own thread placement anyway.
+  // Async spawn, never spawnSync: a 15s blocking probe on an earning node
+  // starves scheduler long-polls and heartbeats — presence must survive a
+  // slow first self-test.
   const attempt = () =>
-    spawnSync(binPath, ["--version"], {
-      timeout: 15000,
-      windowsHide: true,
-      cwd: path.dirname(binPath),
-      encoding: "utf8",
-      env: engineEnv(binPath),
+    new Promise((resolve) => {
+      let child;
+      try {
+        child = spawn(binPath, ["--version"], {
+          windowsHide: true,
+          cwd: path.dirname(binPath),
+          env: engineEnv(binPath),
+        });
+      } catch (e) {
+        return resolve({ error: e, status: null, stdout: "", stderr: "" });
+      }
+      let stdout = "";
+      let stderr = "";
+      let timedOut = false;
+      const timer = setTimeout(() => {
+        timedOut = true;
+        try { child.kill("SIGKILL"); } catch { /* already gone */ }
+      }, 15000);
+      child.stdout?.on("data", (d) => { stdout += d; });
+      child.stderr?.on("data", (d) => { stderr += d; });
+      child.on("error", (e) => {
+        clearTimeout(timer);
+        resolve({ error: e, status: null, stdout, stderr });
+      });
+      child.on("close", (status) => {
+        clearTimeout(timer);
+        resolve({ status, stdout, stderr, ...(timedOut ? { error: new Error("spawn ETIMEDOUT") } : {}) });
+      });
     });
-  let r = attempt();
+  let r = await attempt();
   // llama-server prints its version and exits 0 (some builds exit 1 after
   // printing usage); a loader crash gives a big NTSTATUS code and no output.
   const crashed = (x) => x.error || (`${x.stdout || ""}${x.stderr || ""}`.trim().length === 0 && x.status !== 0);
   if (crashed(r) && removeCrtBeside(binPath)) {
     // Self-heal: if OUR planted CRT is what kills the loader, the binary
     // runs fine on the machine's own redist — try once without it.
-    r = attempt();
+    r = await attempt();
   }
   if (crashed(r)) {
     const code = r.status;

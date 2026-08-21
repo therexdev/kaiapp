@@ -281,13 +281,14 @@ for dev/screenshots).
 - **Release habit**: after every `[release]` push, arm a silent check (~12–18 min) that
   verifies the GitHub release + installer assets exist; report to the user only on
   failure.
-- **The kaiapp scheduler mirror is STALE.** `kai/lib/scheduler.js` claims to be "mirrored
-  from therexdev/kaiapp server/scheduler.js — keep in sync", but the sync stopped long ago:
-  the kai copy carries months of evolution (roster persistence, multi-class dispatch, fair
-  seeding, streaming, perf-fed routing) the kaiapp copy lacks, and kaiapp's `core/test`
-  scheduler tests exercise the OLD copy. The kai copy is CANONICAL — scheduler changes land
-  there with a probe script (`kai/scripts/`), not in kaiapp. Either resync the mirror (and
-  its tests) deliberately someday, or retire it; don't trust the header comment.
+- **The kaiapp scheduler mirror is RETIRED (decision 2026-08-21, v0.30.1).** The kai copy
+  (`kai/lib/scheduler.js`) is CANONICAL — scheduler changes land there with a probe script
+  (`kai/scripts/`), never in kaiapp. kaiapp `server/scheduler.js` stays as a deliberate
+  TEST FIXTURE: it lets `core/test` run the shipped worker against an in-process scheduler.
+  Change the fixture only when a worker test needs a protocol behavior it lacks; never port
+  kai changes wholesale, never deploy it (it's excluded from the installer build anyway).
+  Both files' headers now state this — the old "keep in sync" claim is gone. Real protocol
+  compatibility is proven continuously by live workers + the netcheck workflow.
 - **Deploys cause a public unreachability window (minutes).** Shipping `aa832ac` the site
   TCP-timed out at 09:21 and STILL at 09:26 despite the new instance's first stats serve at
   09:21:59, then answered fine at 09:27. One or two failed probes right after a deploy are
@@ -422,8 +423,17 @@ for dev/screenshots).
    `KAI_STORE=sqlite` live since ad421ae, `/api/health` reports `store.mode=sqlite`, job counts
    and ageDays carried through the migration. Remaining: (c) decommission the dormant Hostinger
    app once Vultr has proven stable (keep the plan for email DNS).
-8. Parked: async self-test (spawn vs spawnSync), Compare presets, deep-research surface,
-   Microsoft Store distribution, kaiapp scheduler-mirror resync-or-retire (§5).
+8. Parked list — CLEARED in v0.30.1 (2026-08-21) except one owner-gated item:
+   ~~async self-test~~ DONE (engine `selfTest` + ollama `locate` are async spawns; the
+   blocking-spawn starvation can't recur — liveness test pins it); ~~Compare presets~~
+   DONE (five preset chips: logic/code/instructions/summarize/creative); ~~deep-research
+   surface~~ CLOSED as overtaken — research mode has its trace, citations render and
+   persist on the message, and power users got Developer Tools; ~~scheduler-mirror
+   resync-or-retire~~ DECIDED: retired as a mirror, kept as the worker-test fixture
+   (headers on BOTH copies now say so — kaiapp `server/scheduler.js` is fixture-only,
+   kai `lib/scheduler.js` is canonical; never port kai changes into the fixture
+   wholesale). Remaining, owner-gated: Microsoft Store distribution (needs the owner's
+   Partner Center account + code signing).
 9. **Developer track (owner ask 2026-08-19: "toggle switch for developer tools… in the API
    section") — SHIPPED 2026-08-20** as three releases in one night:
    - **v0.28.9**: `dev.tools` switch in Local API (default OFF). With it on:
@@ -460,6 +470,10 @@ for dev/screenshots).
      composer pickers, card-wide textarea rule silently restyling the Tasks form,
      #dev-question unstyled, small buttons not matching row heights, SIX views with no
      padding/scroll, select overflow, number-input mismatch. All fixed in v0.30.0.
+   - **v0.30.1 (2026-08-21)**: parked-list clearance before Koinos Code v2 (§7 item 8):
+     async engine self-test (spawn, event-loop liveness test in `core/test/ollama.test.js`),
+     async ollama locate, Compare preset chips (`ui/app-extras.js` CMP_PRESETS),
+     scheduler-mirror retirement recorded in both repos' headers.
 10. **Moderation/AUP — owner-DEFERRED 2026-08-20**: owner agrees with the A40 reporter's
     finding but explicitly wants it on the future plan ("easier to understand the
     implications... with more nodes and network usage"). Design in kaiapp
