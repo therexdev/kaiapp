@@ -527,3 +527,50 @@ test("HTTP: the `koinos` namespace never leaves this machine, even with no groun
     await core.stop();
   }
 });
+
+test("HTTP: a STREAMING grounded call still streams, and carries citations in the header", async () => {
+  // Citations cannot ride in the body of an SSE response, which is exactly why
+  // the header exists. And the buffering that makes body-injection possible for
+  // JSON must NEVER apply to a stream — buffering a stream defeats the point.
+  const dataDir = tmpCore();
+  const { core, base } = await startCore(dataDir);
+  try {
+    await post(base, "/core/network/config", { privacyMode: "local-first" });
+    core.gateway.groundIo = {
+      search: async () => ({ results: [{ url: "https://ok.example/a", title: "A" }], source: "duckduckgo" }),
+      fetch: async (url) => ({ title: "A", url, text: "grounded fact" }),
+    };
+    const r = await fetch(`${base}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: "dev-tiny",
+        stream: true,
+        messages: [{ role: "user", content: "q" }],
+        koinos: { ground: { web: true } },
+      }),
+    });
+    assert.strictEqual(r.status, 200);
+    assert.match(r.headers.get("content-type"), /text\/event-stream/);
+    const hdr = JSON.parse(r.headers.get("x-koinos-grounding"));
+    assert.strictEqual(hdr.grounding.status, "ok");
+    assert.strictEqual(hdr.citations[0].url, "https://ok.example/a");
+
+    // Arrives incrementally: more than one chunk means it was piped, not held.
+    const reader = r.body.getReader();
+    let chunks = 0;
+    let text = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks++;
+      text += Buffer.from(value).toString("utf8");
+    }
+    assert.ok(chunks > 1, `expected a streamed response, got ${chunks} chunk(s)`);
+    assert.match(text, /data: /);
+  } finally {
+    delete process.env.FAKE_LLAMA_SCRIPT;
+    delete process.env.FAKE_LLAMA_RECORD;
+    await core.stop();
+  }
+});

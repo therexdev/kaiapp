@@ -168,7 +168,7 @@ Built as designed, both sources together. What landed:
   which is how the tests prove the reference material arrived AND that the
   `koinos` field was stripped before it got there.
 
-20 tests in `core/test/grounding.test.js`. Suite: 309 tests, 305 pass,
+21 tests in `core/test/grounding.test.js`. Suite: 310 tests, 306 pass,
 4 env-skips, 0 fail. The koinos-network refusal was verified fails-on-old by
 removing the guard and re-running.
 
