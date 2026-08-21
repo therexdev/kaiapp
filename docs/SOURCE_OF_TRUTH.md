@@ -294,6 +294,19 @@ for dev/screenshots).
   09:21:59, then answered fine at 09:27. One or two failed probes right after a deploy are
   the rollover, not an outage — verify with a positive check a few minutes later before
   reverting. Workers ride it out (outbound-only + persisted roster; presence held).
+- **A fast deploy cadence starves the price oracle — PROVEN 2026-08-21, not a fault.**
+  Four releases in 63 min (restarts 01:51:53 / 02:18:52 / 02:40:46 / 02:54:15Z) left the
+  oracle reading `stale-hold` on EVERY netcheck, and after 02:33:53Z its price stopped
+  refreshing at all (25.7 min stale by 02:59, tripping the `oracle fresh` assertion too).
+  Each restart resets the in-memory refresh cycle; the refresh interval is ~15-30 min, so
+  deploying every ~20 min means it never completes one. Confirmed by a CONTROLLED QUIET
+  PERIOD: no deploys after 02:54:15, and at 03:43 the oracle was `live`, 4.2 min fresh,
+  `median` populated again — DIGEST HEALTHY fails=0 warns=0, with no intervention at all.
+  **So: stale-hold plus a recent restart is expected; diagnose it by leaving the box alone
+  for 45 minutes and re-checking, NOT by touching the oracle or its env.** Escalate to the
+  owner only if it is still frozen after a genuinely quiet 45 min — that rules out cadence
+  and points at the upstream aggregators. Serving/billing is unaffected throughout: the
+  held price stays inside floor/ceil, which is the breaker working as designed.
 - **The host restarts the process on its own (not just on deploy).** 2026-08-16 ~20:43Z the
   process went `i_0eceee22`→`i_b56be4e1` with a whole-site HTTP 000 blip the monitor caught,
   with NO deploy — a host recycle (budget hosting) or a crash. The roster survived and workers
