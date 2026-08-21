@@ -812,6 +812,9 @@ button.small:disabled { opacity: 0.5; cursor: default; }
 .kc-empty { margin: 14px 0; }
 .kc-path-row { align-items: center; }
 #kc-path { font-family: ui-monospace, Menlo, Consolas, monospace; overflow-wrap: anywhere; flex: 1 1 auto; }
+.kc-git { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; }
+#kc-branch { font-family: ui-monospace, Menlo, Consolas, monospace; margin-right: auto; }
+#kc-gh-status { margin: 2px 0 6px; }
 .pg-msg {
   background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius);
   padding: 8px 12px; white-space: pre-wrap; overflow-wrap: anywhere;

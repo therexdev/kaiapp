@@ -482,6 +482,11 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
   const code = new CodeAgent({ chatFn: loopbackChat, onEvent: events });
   code.projects = new CodeProjects(dataDir);
   code.switch = codeSwitch;
+  // GitHub for Koinos Code (task #73): clone a repo into a project, and push
+  // work back. The token lives on this machine at 0600 and never enters a
+  // command line, a remote URL, or any response body.
+  const { GitHub } = require("./lib/github");
+  code.github = new GitHub(dataDir);
   mcp.autoConnect().catch(() => {}); // reconnect servers the user used before
 
   // Local speech-to-text (§7: audio never leaves the machine). Engine+model

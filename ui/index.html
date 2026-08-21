@@ -541,6 +541,13 @@
               <button id="btn-kc-new-session" class="small">New</button>
             </div>
             <div id="kc-sessions" class="kc-list"></div>
+
+            <div class="kc-side-head kc-sessions-head">
+              <b>GitHub</b>
+              <button id="btn-kc-gh" class="small">Connect</button>
+            </div>
+            <div id="kc-gh-status" class="hint"></div>
+            <div class="form-row"><button id="btn-kc-clone" class="small" hidden>Clone a repo</button></div>
           </div>
 
           <div class="kc-main">
@@ -565,6 +572,13 @@
                 <span id="kc-path" class="meta"></span>
                 <button id="btn-kc-rename" class="small">Rename</button>
                 <button id="btn-kc-forget" class="small">Forget</button>
+              </div>
+              <div id="kc-git" class="kc-git" hidden>
+                <span id="kc-branch" class="meta"></span>
+                <button id="btn-kc-branch" class="small">Branch</button>
+                <button id="btn-kc-commit" class="small">Commit</button>
+                <button id="btn-kc-push" class="small">Push</button>
+                <button id="btn-kc-pr" class="small">Pull request</button>
               </div>
               <div id="kc-trace"></div>
               <div class="form-row">

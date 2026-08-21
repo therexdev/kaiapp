@@ -1166,6 +1166,61 @@ class Gateway {
         }
         return this._json(res, 404, { ok: false, error: "no such Koinos Code route" });
       }
+      /*
+       * GitHub. Behind the same switch and the same forwarded-header refusal
+       * as everything else here — this surface holds a credential and can push
+       * to someone's repositories.
+       */
+      if (path.startsWith("/core/code/github")) {
+        const GH = this.code.github;
+        const readBody = async () => JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+        // Resolve a projectId to its folder: every repo action names a project
+        // the user added, never a raw path from the request.
+        const dirOf = async (b) => this.code.projects.get(String(b.projectId || "")).path;
+        try {
+          if (path === "/core/code/github" && req.method === "GET") {
+            return this._json(res, 200, { ok: true, ...GH.status(), git: await require("./git").available() });
+          }
+          if (path === "/core/code/github/connect" && req.method === "POST") {
+            return this._json(res, 200, { ok: true, ...(await GH.connect((await readBody()).token)) });
+          }
+          if (path === "/core/code/github/disconnect" && req.method === "POST") {
+            return this._json(res, 200, { ok: true, ...GH.disconnect() });
+          }
+          if (path === "/core/code/github/repos" && req.method === "GET") {
+            return this._json(res, 200, { ok: true, repos: await GH.repos({}) });
+          }
+          if (path === "/core/code/github/clone" && req.method === "POST") {
+            const b = await readBody();
+            const out = await GH.clone({ repo: b.repo, parentDir: b.parentDir });
+            // A clone that is not added as a project would be a folder nobody
+            // can reach from the UI — so it becomes one, with its origin.
+            const project = this.code.projects.add({ dir: out.dir, name: b.name || "", origin: out.repo });
+            return this._json(res, 200, { ok: true, ...out, project });
+          }
+          if (path === "/core/code/github/status" && req.method === "POST") {
+            return this._json(res, 200, { ok: true, status: await GH.status_(await dirOf(await readBody())) });
+          }
+          if (path === "/core/code/github/branch" && req.method === "POST") {
+            const b = await readBody();
+            return this._json(res, 200, { ok: true, status: await GH.branch(await dirOf(b), b.name) });
+          }
+          if (path === "/core/code/github/commit" && req.method === "POST") {
+            const b = await readBody();
+            return this._json(res, 200, { ok: true, status: await GH.commit(await dirOf(b), b.message) });
+          }
+          if (path === "/core/code/github/push" && req.method === "POST") {
+            return this._json(res, 200, { ok: true, ...(await GH.push(await dirOf(await readBody()))) });
+          }
+          if (path === "/core/code/github/pr" && req.method === "POST") {
+            const b = await readBody();
+            return this._json(res, 200, { ok: true, pr: await GH.pullRequest(await dirOf(b), { title: b.title, body: b.body, base: b.base }) });
+          }
+        } catch (e) {
+          return this._json(res, 400, { ok: false, error: String(e.message) });
+        }
+        return this._json(res, 404, { ok: false, error: "no such Koinos Code GitHub route" });
+      }
       if (path === "/core/code/approve" && req.method === "POST") {
         let body;
         try {

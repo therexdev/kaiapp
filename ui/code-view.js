@@ -14,7 +14,7 @@
   const $ = (id) => document.getElementById(id);
   // NOT named `state`: app.js has a top-level `state` this file reads for the
   // selected model alias, and shadowing it would silently break that.
-  const kc = { projects: [], projectId: null, sessions: [], sessionId: null, runId: null };
+  const kc = { projects: [], projectId: null, sessions: [], sessionId: null, runId: null, gh: null };
 
   async function api(path, opts = {}) {
     const r = await fetch(path, { headers: { "content-type": "application/json" }, ...opts });
@@ -152,6 +152,7 @@
     status("");
     try {
       await loadSessions();
+      await renderGit();
     } catch (e) {
       status(e.message);
     }
@@ -341,6 +342,7 @@
             : `done — ${done.steps} tool step${done.steps === 1 ? "" : "s"}`
       );
       await refreshSessionList();
+      await renderGit();
     } catch (e) {
       status(e.message);
     } finally {
@@ -363,9 +365,149 @@
     if (e.key === "Enter") $("btn-kc-run").click();
   });
 
+  // ---------------------------------------------------------------- GitHub
+
+  async function renderGitHub() {
+    try {
+      const g = await api("/core/code/github");
+      kc.gh = g;
+      const el = $("kc-gh-status");
+      if (!g.git?.ok) {
+        // Saying "git is not installed" is far more use than a failed clone.
+        el.textContent = g.git?.error || "git is not available on this machine";
+        $("btn-kc-gh").hidden = true;
+        $("btn-kc-clone").hidden = true;
+        return;
+      }
+      $("btn-kc-gh").hidden = false;
+      $("btn-kc-gh").textContent = g.connected ? "Disconnect" : "Connect";
+      $("btn-kc-clone").hidden = false;
+      el.textContent = g.connected ? `Connected as ${g.login} (${g.tokenTail})` : "Not connected — public repos can still be cloned.";
+    } catch (e) {
+      $("kc-gh-status").textContent = e.message;
+    }
+  }
+
+  /** The git bar for the selected project: branch, and what you can do next. */
+  async function renderGit() {
+    const p = currentProject();
+    const bar = $("kc-git");
+    if (!p || p.missing) {
+      bar.hidden = true;
+      return;
+    }
+    try {
+      const j = await api("/core/code/github/status", { method: "POST", body: JSON.stringify({ projectId: p.id }) });
+      const st = j.status;
+      if (!st.repo) {
+        bar.hidden = true;
+        return;
+      }
+      bar.hidden = false;
+      const bits = [st.branch];
+      if (st.dirty) bits.push(`${st.files.length} changed`);
+      if (st.ahead) bits.push(`${st.ahead} ahead`);
+      if (st.behind) bits.push(`${st.behind} behind`);
+      $("kc-branch").textContent = bits.join(" · ");
+    } catch {
+      bar.hidden = true;
+    }
+  }
+
+  $("btn-kc-gh").addEventListener("click", async () => {
+    try {
+      if (kc.gh?.connected) {
+        if (!window.confirm("Disconnect GitHub? The stored token is deleted from this machine.")) return;
+        await api("/core/code/github/disconnect", { method: "POST", body: "{}" });
+      } else {
+        const token = window.prompt(
+          "Paste a GitHub personal access token.\n\n" +
+            "It is stored on this machine only, never sent anywhere but github.com, and never shown again."
+        );
+        if (!token) return;
+        await api("/core/code/github/connect", { method: "POST", body: JSON.stringify({ token }) });
+      }
+      await renderGitHub();
+      status("");
+    } catch (e) {
+      status(e.message);
+    }
+  });
+
+  $("btn-kc-clone").addEventListener("click", async () => {
+    const repo = window.prompt("Repository to clone — owner/name, or its GitHub URL:");
+    if (!repo) return;
+    const parentDir = window.prompt("Clone into which folder on this machine?");
+    if (!parentDir) return;
+    status("cloning…");
+    try {
+      const j = await api("/core/code/github/clone", { method: "POST", body: JSON.stringify({ repo, parentDir }) });
+      kc.projectId = j.project.id;
+      kc.sessionId = null;
+      await loadProjects();
+      await renderGit();
+      status(`cloned ${j.repo}`);
+    } catch (e) {
+      status(e.message);
+    }
+  });
+
+  async function gitAction(pathname, body, working) {
+    const p = currentProject();
+    if (!p) return;
+    status(working);
+    try {
+      const j = await api(pathname, { method: "POST", body: JSON.stringify({ projectId: p.id, ...body }) });
+      await renderGit();
+      return j;
+    } catch (e) {
+      status(e.message);
+      return null;
+    }
+  }
+
+  $("btn-kc-branch").addEventListener("click", async () => {
+    const name = window.prompt("Branch name:");
+    if (!name) return;
+    if (await gitAction("/core/code/github/branch", { name }, "switching branch…")) status(`on ${name}`);
+  });
+
+  $("btn-kc-commit").addEventListener("click", async () => {
+    const message = window.prompt("Commit message:");
+    if (!message) return;
+    if (await gitAction("/core/code/github/commit", { message }, "committing…")) status("committed");
+  });
+
+  $("btn-kc-push").addEventListener("click", async () => {
+    const j = await gitAction("/core/code/github/push", {}, "pushing…");
+    if (j) status(`pushed ${j.branch}`);
+  });
+
+  $("btn-kc-pr").addEventListener("click", async () => {
+    const title = window.prompt("Pull request title:");
+    if (!title) return;
+    const body = window.prompt("Description (optional):") || "";
+    const j = await gitAction("/core/code/github/pr", { title, body }, "opening pull request…");
+    if (j) {
+      status(`opened #${j.pr.number}`);
+      const a = document.createElement("a");
+      a.href = j.pr.url;
+      a.target = "_blank";
+      a.rel = "noreferrer";
+      a.textContent = `Pull request #${j.pr.number} — ${j.pr.url}`;
+      const div = document.createElement("div");
+      div.className = "pg-tool";
+      div.appendChild(a);
+      $("kc-trace").appendChild(div);
+      div.scrollIntoView({ block: "nearest" });
+    }
+  });
+
   async function render() {
     try {
       await loadProjects();
+      await renderGitHub();
+      await renderGit();
     } catch (e) {
       status(e.message);
     }

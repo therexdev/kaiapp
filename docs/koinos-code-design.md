@@ -181,5 +181,45 @@ Bugs caught building it, both worth keeping:
   so the answer visibly flashed away — and would have been lost outright if the
   reload failed. List refresh and transcript replay are now separate.
 
-STILL TO COME (v5): GitHub — connect, clone a repo into a project, branch and
-status, commit, push, open a PR.
+## v5 (shipped 0.36.0) — GitHub
+
+Connect an account, clone a repo into a project, and publish work back:
+branch, status, commit, push, open a pull request. `core/lib/git.js` runs git;
+`core/lib/github.js` holds the account and the API.
+
+THE TOKEN is treated as what it is — a credential for someone's account:
+stored on that machine only at mode 0600; NEVER in a command line (argv is
+readable by other processes, so `https://TOKEN@github.com/...` leaks) — git
+receives it over stdin through a credential helper; never written into
+`.git/config`, which keeps the clean remote; never returned by any endpoint
+(status reports the login and the last four characters); scrubbed out of every
+line of git output before it is returned or logged; and sent to exactly one
+host, api.github.com.
+
+NO SHELL, ANYWHERE. Every invocation is `spawn("git", argv, {shell:false})`.
+A branch named `x; touch /tmp/PWNED #` is a rejected branch name and nothing
+else — there is a test that asserts the canary file never appears.
+
+REPO REFERENCES are github.com only, https or bare `owner/name`. No ssh, no
+scp-style `git@host:path`, no other hosts — a clone must never be pointable at
+an internal service. `.` and `..` are refused by name: they pass a character
+check and are catastrophic in `path.join(parent, repo)`, which is exactly the
+hole the first probe of this module found.
+
+EVERY REPO ACTION NAMES A PROJECT, never a path from the request, so the
+surface cannot be aimed at an arbitrary folder. Publishing is always a
+deliberate act: the agent proposes edits through its approval cards, and
+commit / push / pull request each happen because a person asked for that
+specific thing.
+
+## What "exactly like Claude Code" does and does not mean here
+
+Worth stating plainly rather than implying parity that does not exist. Koinos
+Code now matches the shape: its own place in the app, many projects, sessions
+that remember, a coding agent with approval gates, a terminal CLI, and GitHub.
+It does NOT have Claude Code's subagents, hooks, custom slash commands, MCP
+inside the coding agent, plan mode, or background tasks — and it runs on
+whatever model the local gateway serves, which is the whole point but does
+mean small models behave differently from a frontier one. Those are honest
+gaps, not oversights, and the next ones worth closing are MCP tools inside the
+agent and a plan-then-act mode.
