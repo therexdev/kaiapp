@@ -602,6 +602,29 @@ for dev/screenshots).
      stranger's machine. Now stripped as soon as it is parsed. General rule:
      a field in our own namespace stops at the gateway, whether or not the
      feature it belongs to ran.
+   - **v0.35.0 (2026-08-21): Koinos Code is its OWN menu item, with projects
+     and sessions.** Owner's ask: make it its own thing, several projects,
+     GitHub, working the way Claude Code does. It has its OWN switch now
+     (`code.enabled`), separate from `dev.tools` — the two answer different
+     questions — and the switch SEEDS ITSELF from dev.tools on first read so
+     nobody who had it loses it. `core/lib/code-projects.js` stores projects
+     (add/rename/forget, bounded, agent-grade path validation, a moved folder
+     is FLAGGED not dropped, forgetting never touches the folder) and sessions
+     (turns persist; earlier turns ride into the next run as context marked
+     "already done, do not redo", capped by BOTH turn count and characters).
+     `/core/code/run` takes `projectId` + optional `sessionId`; a bare `dir`
+     still works, so the CLI is untouched. New view `ui/code-view.js`.
+   - **v0.36.0 (2026-08-21): Koinos Code connects to GitHub.** `core/lib/git.js`
+     + `core/lib/github.js`. Clone → becomes a project; branch, status, commit,
+     push, open a PR. **Security properties, all test-pinned:** NO SHELL ever
+     (`spawn("git", argv, {shell:false})` — a branch name full of shell
+     metacharacters is proven inert by a canary test); the token is never in
+     argv (credential helper over stdin), never in `.git/config`, never in a
+     response, scrubbed from all git output, stored 0600; repo refs are
+     github.com-only https/`owner/name` (no ssh, no scp-style, no other hosts);
+     `.`/`..` refused by name — they pass a character check and would escape
+     `path.join(parent, repo)`, a real hole found by probing before wiring;
+     every repo action names a PROJECT, never a request-supplied path.
 10. **Moderation/AUP — owner-DEFERRED 2026-08-20**: owner agrees with the A40 reporter's
     finding but explicitly wants it on the future plan ("easier to understand the
     implications... with more nodes and network usage"). Design in kaiapp
@@ -629,6 +652,17 @@ for dev/screenshots).
     an end user's question steers what the caller's machine fetches from the
     public internet. That is inherent to open-web grounding everywhere; it is
     capped, off by default, and feeds a tool-less loop.
+
+12. **Koinos Code vs Claude Code — what parity does and does not mean.**
+    Shipped: own menu item, many projects, sessions that remember, approval
+    gates on every write and command, a terminal CLI, GitHub (clone → project,
+    branch/commit/push/PR). NOT shipped, and named rather than implied:
+    subagents, hooks, custom slash commands, MCP tools INSIDE the coding agent,
+    plan mode, background tasks. It also runs on whatever the local gateway
+    serves, so a small model behaves differently from a frontier one — that is
+    the product's whole point, but it is a real difference in capability, not
+    just in branding. Next two worth closing: MCP inside the agent, and a
+    plan-then-act mode.
 
 ## 8. Working with the owner
 
