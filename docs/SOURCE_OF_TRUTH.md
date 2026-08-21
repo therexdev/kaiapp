@@ -340,6 +340,14 @@ for dev/screenshots).
   `KAI_CORE_TOKEN`). It is a `check`, not a `warn` — a stale docs deploy FAILS the digest.
   **When a docs change matters enough to prove it landed, move the marker to a phrase unique
   to that change.** Same principle applies to any future "did it actually deploy?" question.
+  **ORDER MATTERS, learned 2026-08-21 by getting it wrong:** move the marker AFTER the kai
+  docs PR is merged and deployed, not before. Moving it first makes the very next check
+  report `DIGEST FAIL` for an entirely legitimate reason — the marker is ahead of the box —
+  which is indistinguishable at a glance from a real stale deploy.
+  Also worth knowing: `health-digest.py` never exits non-zero, so `DIGEST FAIL` does NOT turn
+  the workflow red. The digest LINE is the verdict; the green check mark only means the
+  script ran. Deliberate (a transient blip should not train anyone to ignore red), but it
+  means the digest has to actually be read.
 
 - **The host restarts the process on its own (not just on deploy).** 2026-08-16 ~20:43Z the
   process went `i_0eceee22`→`i_b56be4e1` with a whole-site HTTP 000 blip the monitor caught,
