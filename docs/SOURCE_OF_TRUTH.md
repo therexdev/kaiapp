@@ -294,6 +294,21 @@ for dev/screenshots).
   09:21:59, then answered fine at 09:27. One or two failed probes right after a deploy are
   the rollover, not an outage — verify with a positive check a few minutes later before
   reverting. Workers ride it out (outbound-only + persisted roster; presence held).
+- **WATCH (opened 2026-08-21 10:51Z): paired worker identities cycling ~every 22h.** The
+  roster lost `16wmrJ…1EYi` and `12Y8Ww…T8ii` (both ~0.77 ageDays, ~275 perf jobs) and
+  gained `1E5cxC…jR7g` + `1H7T7D…C4gg` (both 0.02 ageDays, 6 jobs) in the SAME window —
+  and that pair had itself appeared together ~22h earlier. Pairs appearing/vanishing
+  together match the A40 operator's shape (two headless Core instances). The app is NOT at
+  fault: `core/lib/wallet.js` persists the keystore at `<walletDir>/wallet.json` and reads
+  it on boot, so a restart or auto-update keeps the address. A CHANGED address therefore
+  means a new/ephemeral dataDir (fresh install, container without a persistent volume, a
+  different KAI_DATA_DIR per run). Why it matters: ageDays and perf feed the §17 reputation
+  weighting, so an operator who loses their dataDir silently resets their earning identity
+  — and payouts get materially weighted once `KAI_REPUTATION_ENFORCE` arms (~Sep 2).
+  NEXT STEP: the recurring netcheck now records the live addresses, so the following check
+  tells CHURN (the new pair persists) from IDENTITY-CYCLING (it rotates again ~22h later).
+  If it cycles, the fix is operator guidance on persisting the dataDir (plus surfacing the
+  wallet address + dataDir at headless startup), NOT a change to wallet storage.
 - **A fast deploy cadence starves the price oracle — PROVEN 2026-08-21, not a fault.**
   Four releases in 63 min (restarts 01:51:53 / 02:18:52 / 02:40:46 / 02:54:15Z) left the
   oracle reading `stale-hold` on EVERY netcheck, and after 02:33:53Z its price stopped
