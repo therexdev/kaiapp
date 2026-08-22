@@ -427,6 +427,34 @@ for dev/screenshots).
    signup notifications need `SMTP_TO` as well as `SMTP_HOST`. Sign-in works
    without it; those notification emails do not.
 
+0b. **v0.41.0 (2026-08-22): Settings, a Network icon, and one Koinos Node
+   entry.** Field report opened with a real bug: *"Koinos Code and Developer
+   Tools don't seem to pop up until I click the earn tab."* Correct — both nav
+   items start `hidden`, and the only things that unhid them were `renderDev()`
+   / `renderCodeSwitch()`, which ran **nowhere but inside `renderApi()`**. So
+   the reveal was a SIDE EFFECT OF VISITING A VIEW: a feature the person had
+   already switched on looked switched off until they wandered somewhere
+   unrelated. Fixed by calling both at boot. **Standing rule: anything that
+   decides what the sidebar CONTAINS runs on the way in, never as a byproduct
+   of navigation.** The regression guard is a reload — switch both on, reload,
+   assert they are there before anything is clicked; it fails on the old code.
+   The restructure the owner asked for, same release:
+   - **Settings** — a gear icon under the status pane, above Send feedback.
+     Holds the Koinos AI account block and the Run Koinos Node switch (moved
+     out of Earn) and the Developer tools and Koinos Code switches (moved out
+     of Local API). They were scattered, so the only way to find a switch was
+     to already know which unrelated page was hiding it.
+   - **Network** — a second icon beside the gear; the full-width nav row is
+     gone. Settings and Network are places you visit occasionally, and each was
+     costing a scarce sidebar row next to Chat and Models.
+   - **Koinos Node** — ONE entry, its seven screens on a rail inside the view,
+     the Koinos Code shape. Seven top-level entries made an optional feature
+     look like most of the app. The screens themselves did not move: the rail
+     posts to the same embedded node app, so none of the node's own code
+     changed. A structural test asserts every embedded view stays reachable
+     from the rail, in both directions — a rail that lost one would strand it.
+   Selection now keys off `[data-view]` rather than `.nav-item`, so the icons
+   and the rows navigate and highlight through the same single path.
 1. ~~Azure Trusted Signing~~ — **SHIPPED 2026-08-17, v0.25.11 signed** (see §2 for the
    secret layout and the 403/AADSTS debug trail). Watch the field: SmartScreen reputation
    still accrues per-file over downloads; signed ≠ instant zero warnings on day one.

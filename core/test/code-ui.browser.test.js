@@ -54,7 +54,7 @@ test("code panel: run -> diff card -> approve -> file written -> answer bubble",
     await page.waitForSelector("#view-chat:not([hidden])");
 
     // Koinos Code is its own sidebar item behind its own switch (task #72).
-    await page.click('.nav-item[data-view="api"]');
+    await page.click('[data-view="settings"]'); // the gear, not Local API (v0.41.0)
     await page.click("#btn-code-toggle");
     await page.waitForSelector("#nav-code:not([hidden])");
     await page.click("#nav-code");
@@ -159,7 +159,7 @@ test("plan mode: reads, proposes, changes nothing — then the approved plan doe
     const page = await browser.newPage();
     await page.goto(base);
     await page.waitForSelector("#view-chat:not([hidden])");
-    await page.click('.nav-item[data-view="api"]');
+    await page.click('[data-view="settings"]'); // the gear, not Local API (v0.41.0)
     await page.click("#btn-code-toggle");
     await page.waitForSelector("#nav-code:not([hidden])");
     await page.click("#nav-code");
@@ -251,7 +251,7 @@ test("clone destination opens the native folder window, and the model box drives
     }, cloneInto);
     await page.goto(base);
     await page.waitForSelector("#view-chat:not([hidden])");
-    await page.click('.nav-item[data-view="api"]');
+    await page.click('[data-view="settings"]'); // the gear, not Local API (v0.41.0)
     await page.click("#btn-code-toggle");
     await page.waitForSelector("#nav-code:not([hidden])");
     await page.click("#nav-code");

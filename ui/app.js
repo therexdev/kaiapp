@@ -433,9 +433,28 @@ function showView(name, { navOnly = false } = {}) {
   const phys = name.startsWith("koinos") ? "koinos" : name;
   for (const v of document.querySelectorAll(".view")) v.hidden = true;
   $(`view-${phys}`).hidden = false;
-  for (const b of document.querySelectorAll(".nav-item")) {
+  // Every navigable thing carries data-view — the full-width nav rows AND
+  // the Settings/Network icons under the status pane.
+  for (const b of document.querySelectorAll("[data-view]")) {
     b.classList.toggle("active", b.dataset.view === name);
   }
+}
+
+/** Which node screen the rail is on — the dashboard until someone picks. */
+function currentNodeScreen() {
+  return document.querySelector("#kn-rail [data-knode].on")?.dataset.knode || "koinos";
+}
+
+/*
+ * Settings draws the things that were moved into it. Each piece already knew
+ * how to render itself; what changed is that they are asked from ONE place a
+ * person can find, instead of as a side effect of opening Earn or Local API.
+ */
+function renderSettings() {
+  renderAccount?.();
+  renderDev();
+  renderCodeSwitch();
+  window.KaiKoinos?.refresh?.();
 }
 
 /** Switch to a view and draw it. Shared so anything that navigates the user
@@ -446,8 +465,9 @@ function activateView(name) {
   state.routed = true; // they chose this; the boot poll must stop overriding it
   showView(name);
   if (name.startsWith("koinos")) {
-    // The embedded node app switches its own screens.
-    if (window.KaiKoinosNode) window.KaiKoinosNode.show(name);
+    // One entry now; the rail inside picks the screen. Re-selecting the rail's
+    // current item keeps the iframe warm and the highlight honest.
+    if (window.KaiKoinosNode) window.KaiKoinosNode.select(currentNodeScreen());
     return;
   }
   if (name === "api") renderApi();
@@ -458,10 +478,11 @@ function activateView(name) {
   if (name === "compare") renderCompare();
   if (name === "tasks") renderTasks();
   if (name === "network") renderNetwork();
+  if (name === "settings") renderSettings();
   if (name === "docs") renderDocs();
 }
 
-for (const b of document.querySelectorAll(".nav-item[data-view]")) {
+for (const b of document.querySelectorAll("[data-view]")) {
   b.addEventListener("click", () => {
     if (b.disabled) return;
     activateView(b.dataset.view);
@@ -1115,6 +1136,20 @@ function esc(s) {
 
 refresh();
 
+/*
+ * Reveal the switched-on sections AT BOOT.
+ *
+ * Field report: "Koinos Code and Developer Tools don't seem to pop up until I
+ * click the earn tab." Exactly right — both nav items start `hidden` in the
+ * markup and were only unhidden by renderDev/renderCodeSwitch, which ran
+ * nowhere but inside renderApi(). So the reveal was a SIDE EFFECT OF VISITING
+ * A VIEW, and a feature the person had already switched on looked switched
+ * off until they wandered somewhere unrelated. Anything that decides what the
+ * sidebar contains has to run on the way in, not on the way past.
+ */
+renderDev();
+renderCodeSwitch();
+
 // ---------- earn view (M2 alpha) ----------
 
 let earnTimer = null;
@@ -1217,8 +1252,6 @@ async function renderEarn() {
     $("earn-stats").innerHTML = rows.map(([k, v]) => `<span class="k">${k}</span><span>${esc(v)}</span>`).join("");
     // The wallet card's receive address — same wallet the worker earns with.
     if ($("wallet-address") && s.wallet.address) $("wallet-address").value = s.wallet.address;
-    // Account card — self-throttled to one status fetch per 30s (egress).
-    renderAccount();
     $("btn-earn-toggle").textContent = s.worker.running ? "Stop Earning" : "Start Earning";
     $("btn-earn-toggle").dataset.running = s.worker.running ? "1" : "";
   }

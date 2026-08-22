@@ -43,9 +43,10 @@ test("developer tools view: nav reveal, tabs, a pipeline run, and a playground c
     await page.goto(base);
     await page.waitForSelector("#view-chat:not([hidden])");
 
-    // The switch lives in Local API; the CONTENT lives in its own view.
-    await page.click('.nav-item[data-view="api"]');
-    await page.waitForSelector("#view-api:not([hidden])");
+    // The switch lives in Settings (v0.41.0 — it used to be buried at the
+    // bottom of Local API); the CONTENT lives in its own view.
+    await page.click('[data-view="settings"]');
+    await page.waitForSelector("#view-settings:not([hidden])");
     assert.strictEqual(await page.$eval("#nav-devtools", (el) => el.hidden), true, "sidebar item hidden while the switch is off");
     await page.click("#btn-dev-toggle");
     await page.waitForSelector("#nav-devtools:not([hidden])");
@@ -91,10 +92,67 @@ test("developer tools view: nav reveal, tabs, a pipeline run, and a playground c
     assert.match(first, /hello from the person/, "the typed words became Ana's turn");
 
     // The switch closes the whole area again.
-    await page.click('.nav-item[data-view="api"]');
+    await page.click('[data-view="settings"]'); // the gear, not Local API (v0.41.0)
     await page.click("#btn-dev-toggle");
     await page.waitForSelector('#btn-dev-toggle[aria-checked="false"]');
     assert.strictEqual(await page.$eval("#nav-devtools", (el) => el.hidden), true);
+  } finally {
+    await browser.close();
+    await core.stop();
+  }
+});
+
+/*
+ * v0.41.0 — the sidebar restructure, and the bug that prompted it.
+ *
+ * Field report: "Koinos Code and Developer Tools don't seem to pop up until I
+ * click the earn tab." Both nav items start hidden and were only unhidden by
+ * renderDev/renderCodeSwitch, which ran nowhere but inside renderApi() — so
+ * the reveal was a side effect of VISITING A VIEW. A feature you had already
+ * switched on looked switched off until you wandered somewhere unrelated.
+ *
+ * The regression guard is the reload: switch both on, reload, and they must be
+ * there before the user touches anything.
+ */
+test("sidebar: switches live in Settings, and what they reveal survives a reload", { skip: !available, timeout: 180000 }, async () => {
+  const { chromium } = require("playwright-core");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-navboot-"));
+  fs.mkdirSync(path.join(dir, "models"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "models", "smollm2-135m-instruct-q8_0.gguf"), "weights");
+  const { createCore } = require("../server");
+  const core = await createCore({ dataDir: dir, port: 0, llamaBin: FAKE_BIN, onEvent: () => {} });
+  const base = `http://127.0.0.1:${await core.start()}`;
+  const browser = await chromium.launch({ executablePath: CHROMIUM });
+  try {
+    const page = await browser.newPage();
+    await page.goto(base);
+    await page.waitForSelector("#view-chat:not([hidden])");
+
+    // Network is an icon now, not a sidebar row.
+    assert.strictEqual(await page.$$eval('.nav-item[data-view="network"]', (e) => e.length), 0);
+    await page.click('[data-view="network"]');
+    await page.waitForSelector("#view-network:not([hidden])");
+
+    // Both switches are in one findable place.
+    await page.click('[data-view="settings"]');
+    await page.waitForSelector("#view-settings:not([hidden])");
+    for (const id of ["#btn-dev-toggle", "#btn-code-toggle", "#btn-koinos-toggle", "#account-signedout"]) {
+      assert.ok(await page.$(id), `${id} moved into Settings`);
+    }
+    await page.click("#btn-dev-toggle");
+    await page.click("#btn-code-toggle");
+    await page.waitForSelector("#nav-devtools:not([hidden])");
+    await page.waitForSelector("#nav-code:not([hidden])");
+
+    // THE BUG: reload and look at the sidebar without going anywhere first.
+    await page.reload();
+    await page.waitForSelector("#view-chat:not([hidden])");
+    await page.waitForFunction(
+      () => !document.getElementById("nav-devtools").hidden && !document.getElementById("nav-code").hidden,
+      { timeout: 20000 }
+    );
+    // Nothing was clicked between the reload and now — that is the whole point.
+    assert.strictEqual(await page.$eval("#view-chat", (el) => el.hidden), false, "still on the view we booted onto");
   } finally {
     await browser.close();
     await core.stop();

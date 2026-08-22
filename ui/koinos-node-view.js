@@ -47,7 +47,35 @@
     try { f.contentWindow.postMessage({ koinosView: view }, "*"); } catch { /* not loaded yet; the src default is the dashboard */ }
   }
 
+  /*
+   * The rail inside the view. One sidebar entry now opens the node; which of
+   * its seven screens you are on is a choice made HERE, next to the screen,
+   * the same way Koinos Code picks a project. Selection is painted locally
+   * because the embedded app owns its own rendering and cannot tell us which
+   * view it settled on.
+   */
+  var rail = document.getElementById("kn-rail");
+  if (rail) {
+    rail.addEventListener("click", function (e) {
+      var b = e.target.closest ? e.target.closest("[data-knode]") : null;
+      if (!b) return;
+      select(b.getAttribute("data-knode"));
+    });
+  }
+
+  function select(navName) {
+    if (!VIEWS[navName]) return;
+    if (rail) {
+      var items = rail.querySelectorAll("[data-knode]");
+      for (var i = 0; i < items.length; i++) {
+        items[i].classList.toggle("on", items[i].getAttribute("data-knode") === navName);
+      }
+    }
+    show(navName);
+  }
+
   window.KaiKoinosNode = {
+    select: select,
     show: show,
     views: Object.keys(VIEWS),
     // Field report: this used to navigate to the dashboard, and the Earn

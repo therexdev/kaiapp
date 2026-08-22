@@ -74,6 +74,25 @@ body {
 .dot.err { background: var(--danger); }
 .status-sub { font-size: 0.78em; color: var(--text-dim); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Settings + Network: icons, not rows. They are destinations you visit
+   occasionally, and giving each a full-width sidebar row cost more than they
+   are worth next to Chat and Models. */
+.rail-icons { display: flex; gap: 6px; padding: 0 4px; }
+.rail-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; border: 0; border-radius: 8px;
+  background: none; color: var(--text-dim); cursor: pointer;
+}
+.rail-icon:hover { background: var(--bg-input); color: var(--text); }
+.rail-icon.active { background: var(--bg-input); color: var(--violet); }
+.rail-icon:focus-visible { outline: 1px solid var(--violet); }
+
+/* The node's own shell — the Koinos Code shape, reusing its rail and pane so
+   the two read as the same kind of place. */
+.kn-shell { flex: 1; min-height: 0; display: grid; grid-template-columns: 210px minmax(0, 1fr); }
+@media (max-width: 900px) { .kn-shell { grid-template-columns: minmax(0, 1fr); } }
+.kn-shell #koinos-frame-host { flex: 1; min-height: 0; display: flex; }
+
 .local-note { font-size: 0.75em; color: var(--text-dim); padding: 0 6px; }
 #app-version { display: block; font-weight: 600; letter-spacing: 0.02em; margin-bottom: 3px; }
 

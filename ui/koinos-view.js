@@ -1,10 +1,11 @@
 /*
  * The "Run Koinos Node" switch.
  *
- * This file owns one thing: the switch in Earn, and what it reveals. Flipping
- * it on unhides the seven node menus in the sidebar; flipping it off hides
- * them again and walks the user back to Earn rather than stranding them on a
- * view that is no longer there. The screens themselves live in
+ * This file owns one thing: the switch in Settings, and what it reveals.
+ * Flipping it on unhides the single "Koinos Node" sidebar entry (its seven
+ * screens are a rail inside that view now); flipping it off hides it again and
+ * walks the user back to Settings — where the switch they just flipped is —
+ * rather than stranding them on a view that is no longer there. The screens themselves live in
  * koinos-node-view.js and talk to the real node channels.
  */
 (function () {
@@ -40,7 +41,7 @@
     if (open) open.hidden = !state.enabled;
     // Turning it off while looking at one of its screens would strand the user
     // on a hidden view, so send them somewhere real.
-    if (!state.enabled && onKoinosView() && typeof activateView === "function") activateView("earn");
+    if (!state.enabled && onKoinosView() && typeof activateView === "function") activateView("settings");
   }
 
   /* Local-Only means nothing leaves the machine, and a node is nothing but

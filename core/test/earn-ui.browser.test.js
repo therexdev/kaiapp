@@ -174,8 +174,10 @@ test("account card: signed-out state renders, and Local-Only privacy is explaine
     const page = await browser.newPage();
     await page.goto(base);
     await page.waitForSelector("#view-chat:not([hidden])");
-    await page.click('.nav-item[data-view="earn"]');
-    await page.waitForSelector("#earn-ready:not([hidden])");
+    // The account card moved out of Earn and into Settings (v0.41.0) — it is
+    // about who you are, not about earning.
+    await page.click('[data-view="settings"]');
+    await page.waitForSelector("#view-settings:not([hidden])");
     // Default privacy is Local-Only: the card must say so, in words, instead
     // of showing a broken sign-in button.
     await page.waitForFunction(() => {
@@ -214,6 +216,66 @@ test("team mode: 'Write & review' runs through the real engine and lands a final
     );
     const trace = await page.textContent("body");
     assert.match(trace, /team finished in 3 model calls/);
+  } finally {
+    await browser.close();
+    await core.stop();
+  }
+});
+
+/*
+ * v0.41.0 — the node is ONE sidebar entry with its seven screens on a rail
+ * inside, the Koinos Code shape. Seven top-level entries made an optional
+ * feature look like most of the app, and stayed in the way when only one was
+ * ever in use.
+ */
+test("koinos node: one sidebar entry, seven screens on a rail, Dashboard first", { skip: !available, timeout: 120000 }, async () => {
+  const { chromium } = require("playwright-core");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-nodenav-"));
+  fs.mkdirSync(path.join(dir, "models"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "models", "smollm2-135m-instruct-q8_0.gguf"), "weights");
+  const { createCore } = require("../server");
+  const core = await createCore({ dataDir: dir, port: 0, llamaBin: FAKE_BIN, onEvent: () => {} });
+  const base = `http://127.0.0.1:${await core.start()}`;
+  const browser = await chromium.launch({ executablePath: CHROMIUM });
+  try {
+    const page = await browser.newPage();
+    await page.goto(base);
+    await page.waitForSelector("#view-chat:not([hidden])");
+
+    // The switch moved to Settings along with everything else optional.
+    await page.click('[data-view="settings"]');
+    await page.waitForSelector("#view-settings:not([hidden])");
+    assert.strictEqual(await page.$eval("#nav-koinos", (el) => el.hidden), true, "hidden while off");
+    await page.click("#btn-koinos-toggle");
+    await page.waitForSelector("#nav-koinos:not([hidden])");
+
+    // Exactly one entry — not seven.
+    assert.strictEqual(await page.$$eval(".nav-item.koinos-nav", (e) => e.length), 1);
+
+    await page.click("#nav-koinos");
+    await page.waitForSelector("#view-koinos:not([hidden])");
+    const rail = await page.$$eval("#kn-rail [data-knode]", (els) =>
+      els.map((e) => ({ v: e.dataset.knode, label: e.textContent.trim(), on: e.classList.contains("on") }))
+    );
+    assert.strictEqual(rail.length, 7, "all seven screens reachable");
+    assert.strictEqual(rail[0].label, "Dashboard", "Dashboard is first");
+    assert.strictEqual(rail[0].on, true, "and selected on arrival");
+
+    // Picking another screen moves the highlight — the rail is the navigation.
+    await page.click('#kn-rail [data-knode="koinos-wallet"]');
+    await page.waitForFunction(
+      () => document.querySelector('#kn-rail [data-knode="koinos-wallet"]').classList.contains("on")
+    );
+    assert.strictEqual(
+      await page.$eval('#kn-rail [data-knode="koinos"]', (e) => e.classList.contains("on")),
+      false,
+      "one screen selected at a time"
+    );
+
+    // Switching the node off must not strand anyone on a view that is gone.
+    await page.click('[data-view="settings"]');
+    await page.click("#btn-koinos-toggle");
+    await page.waitForFunction(() => document.getElementById("nav-koinos").hidden);
   } finally {
     await browser.close();
     await core.stop();

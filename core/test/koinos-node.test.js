@@ -150,9 +150,22 @@ test("node UI: the switch reveals every node menu, and the embedded app is wired
   const html = fs.readFileSync(path.join(__dirname, "..", "..", "ui", "index.html"), "utf8");
   const knodeHtml = fs.readFileSync(path.join(__dirname, "..", "..", "ui", "knode", "index.html"), "utf8");
   const hostView = fs.readFileSync(path.join(__dirname, "..", "..", "ui", "koinos-node-view.js"), "utf8");
+  /*
+   * v0.41.0: ONE sidebar entry, seven screens on a rail inside the view — the
+   * Koinos Code shape. Seven top-level entries made an optional feature look
+   * like most of the app, and they stayed in the way even when only one was
+   * ever used. The screens are unchanged; only where you choose between them
+   * moved, so the rail must still cover every embedded view.
+   */
   const navs = [...html.matchAll(/class="nav-item koinos-nav" data-view="([^"]+)"/g)].map((m) => m[1]);
-  assert.strictEqual(navs.length, 7, "seven node menus");
-  for (const v of navs) assert.ok(hostView.includes(`"${v}"`), `${v} maps to an embedded view`);
+  assert.deepStrictEqual(navs, ["koinos"], "one sidebar entry for the whole node");
+  const rail = [...html.matchAll(/data-knode="([^"]+)"/g)].map((m) => m[1]);
+  assert.strictEqual(rail.length, 7, "seven screens on the rail");
+  assert.strictEqual(rail[0], "koinos", "Dashboard is first");
+  for (const v of rail) assert.ok(hostView.includes(`"${v}"`), `${v} maps to an embedded view`);
+  // Every embedded view stays reachable — a rail that lost one would strand it.
+  const mapped = [...hostView.matchAll(/"(koinos[a-z-]*)":\s*"/g)].map((m) => m[1]);
+  for (const v of mapped) assert.ok(rail.includes(v), `${v} is reachable from the rail`);
   assert.ok(html.includes('id="koinos-frame-host"'), "the koinos view hosts the iframe");
   // A button that says "Turn on" is a link pretending to be a switch. This is
   // the control the owner asked for by name.

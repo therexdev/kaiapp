@@ -40,19 +40,14 @@
         <button class="nav-item" data-view="compare">Compare</button>
         <button class="nav-item" data-view="models">Models</button>
         <button class="nav-item" data-view="tasks">Tasks</button>
-        <button class="nav-item" data-view="network">Network</button>
         <button class="nav-item" data-view="tools">Tools</button>
         <button class="nav-item" data-view="api">Local API</button>
         <button class="nav-item" data-view="earn">Earn <span class="soon">alpha</span></button>
         <button class="nav-item" data-view="code" id="nav-code" hidden>Koinos Code</button>
         <button class="nav-item" data-view="devtools" id="nav-devtools" hidden>Developer Tools</button>
-        <button class="nav-item koinos-nav" data-view="koinos" id="nav-koinos" hidden>Node dashboard</button>
-        <button class="nav-item koinos-nav" data-view="koinos-wallet" id="nav-koinos-wallet" hidden>Wallet</button>
-        <button class="nav-item koinos-nav" data-view="koinos-fund" id="nav-koinos-fund" hidden>Fund node</button>
-        <button class="nav-item koinos-nav" data-view="koinos-burn" id="nav-koinos-burn" hidden>Burn KOIN → VHP</button>
-        <button class="nav-item koinos-nav" data-view="koinos-node" id="nav-koinos-node" hidden>Node</button>
-        <button class="nav-item koinos-nav" data-view="koinos-returns" id="nav-koinos-returns" hidden>Reward returns</button>
-        <button class="nav-item koinos-nav" data-view="koinos-settings" id="nav-koinos-settings" hidden>Node settings</button>
+        <!-- ONE entry, like Koinos Code. Its seven screens are a rail inside
+             the view, not seven things competing in the sidebar. -->
+        <button class="nav-item koinos-nav" data-view="koinos" id="nav-koinos" hidden>Koinos Node</button>
       </nav>
       <div id="chats-pane">
         <div class="chats-head">
@@ -65,6 +60,23 @@
       <div id="status-pane">
         <div class="status-row"><span id="status-dot" class="dot"></span><span id="status-text">Connecting…</span></div>
         <div class="status-sub" id="status-model"></div>
+      </div>
+      <!-- Settings and Network are places you GO OCCASIONALLY, not things you
+           work in, so they sit as icons under the status pane rather than
+           taking two of the sidebar's scarce full-width rows. -->
+      <div class="rail-icons">
+        <button class="rail-icon" data-view="settings" id="nav-settings" title="Settings" aria-label="Settings">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3.2" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
+        </button>
+        <button class="rail-icon" data-view="network" id="nav-network" title="Network" aria-label="Network">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="4.5" r="2.2" /><circle cx="4.8" cy="18" r="2.2" /><circle cx="19.2" cy="18" r="2.2" />
+            <path d="M12 6.7v4.8M12 11.5 6.3 16.3M12 11.5l5.7 4.8" />
+          </svg>
+        </button>
       </div>
       <button id="btn-feedback" class="nav-item feedback-link">Send feedback</button>
       <footer class="local-note">
@@ -413,33 +425,81 @@
             </div>
             <p class="hint" id="wallet-msg" hidden></p>
 
-            <h2>Koinos AI account</h2>
-            <p class="hint">
-              One account across your devices: sign in once, link this wallet, and your balance
-              and claims follow you. Sign-in happens at koinosai.com with a passkey, email code,
-              or Google — the app never asks for a password, it just shows a short code.
-            </p>
-            <div id="account-signedout" hidden>
-              <button id="btn-account-signin" class="primary small">Sign in / create account</button>
-              <div id="account-code-row" hidden>
-                <p class="hint">
-                  On any device, open
-                  <a id="account-verify-link" href="https://koinosai.com/link" target="_blank" rel="noopener">koinosai.com/link</a>,
-                  sign in, and type this code:
-                </p>
-                <div id="account-code" class="mono" style="font-size:24px;letter-spacing:4px;margin:6px 0"></div>
-                <p class="hint" id="account-poll-status">Waiting for approval…</p>
-              </div>
-            </div>
-            <div id="account-signedin" hidden>
-              <div class="hw-summary" id="account-stats"></div>
-              <div class="form-row">
-                <button id="btn-account-linkwallet" class="primary small">Link this wallet</button>
-                <button id="btn-account-signout" class="small">Sign out on this device</button>
-              </div>
-            </div>
-            <p class="hint" id="account-msg" hidden></p>
           </div>
+
+
+          <p class="error" id="earn-error" hidden></p>
+        </div>
+      </section>
+
+      <!-- Local API -->
+      <!-- Koinos Node Desktop, whole, in an iframe: ui/knode/ is that app's
+           own renderer + styles, verbatim, speaking to the same handlers in
+           Core. The seven sidebar entries above select its views. -->
+      <!-- Koinos Node: ONE sidebar entry, its seven screens on a rail inside —
+           the Koinos Code shape. Seven top-level entries made the node look
+           like most of the app when it is one optional feature, and they were
+           all still there when you were only ever using one of them. The
+           screens themselves are unchanged: the rail posts to the same
+           embedded node app, so nothing about the node's own code moves. -->
+      <section id="view-koinos" class="view koinos-view" hidden>
+        <div class="kn-shell">
+          <aside class="kc-rail" id="kn-rail">
+            <div class="kc-rail-label">Koinos Node</div>
+            <button class="kc-item on" data-knode="koinos"><span>Dashboard</span></button>
+            <button class="kc-item" data-knode="koinos-wallet"><span>Wallet</span></button>
+            <button class="kc-item" data-knode="koinos-fund"><span>Fund node</span></button>
+            <button class="kc-item" data-knode="koinos-burn"><span>Burn KOIN → VHP</span></button>
+            <button class="kc-item" data-knode="koinos-node"><span>Node</span></button>
+            <button class="kc-item" data-knode="koinos-returns"><span>Reward returns</span></button>
+            <button class="kc-item" data-knode="koinos-settings"><span>Node settings</span></button>
+            <div class="kc-rail-foot">
+              <button id="btn-kn-settings" class="kc-link">App settings</button>
+            </div>
+          </aside>
+          <main class="kc-pane"><div id="koinos-frame-host"></div></main>
+        </div>
+      </section>
+
+      <!-- Settings (task #78): the things you set ONCE and then stop thinking
+           about. They were scattered — your account and the node switch buried
+           at the bottom of Earn, the two developer switches buried at the
+           bottom of Local API — which meant the only way to find a switch was
+           to already know which unrelated page it was hiding on. -->
+      <section id="view-settings" class="view" hidden>
+        <div class="api-card">
+          <h1>Settings</h1>
+          <p class="lede">Your account, and the parts of the app that are off until you turn them on.</p>
+
+          <h2>Koinos AI account</h2>
+          <p class="hint">
+            One account across your devices: sign in once, link this wallet, and your balance
+            and claims follow you. Sign-in happens at koinosai.com with a passkey, email code,
+            or Google — the app never asks for a password, it just shows a short code.
+          </p>
+          <div id="account-signedout" hidden>
+            <button id="btn-account-signin" class="primary small">Sign in / create account</button>
+            <div id="account-code-row" hidden>
+              <p class="hint">
+                On any device, open
+                <a id="account-verify-link" href="https://koinosai.com/link" target="_blank" rel="noopener">koinosai.com/link</a>,
+                sign in, and type this code:
+              </p>
+              <div id="account-code" class="mono" style="font-size:24px;letter-spacing:4px;margin:6px 0"></div>
+              <p class="hint" id="account-poll-status">Waiting for approval…</p>
+            </div>
+          </div>
+          <div id="account-signedin" hidden>
+            <div class="hw-summary" id="account-stats"></div>
+            <div class="form-row">
+              <button id="btn-account-linkwallet" class="primary small">Link this wallet</button>
+              <button id="btn-account-signout" class="small">Sign out on this device</button>
+            </div>
+          </div>
+          <p class="hint" id="account-msg" hidden></p>
+
+          <h2>Optional sections</h2>
+          <p class="hint">Each of these adds its own entry to the sidebar. All of them are off until you switch them on, and switching one off only hides it — nothing you made is deleted.</p>
 
           <div class="koinos-toggle-row">
             <div>
@@ -453,44 +513,7 @@
               <span class="switch-track"><span class="switch-thumb"></span></span>
             </button>
           </div>
-          <p class="hint" id="koinos-toggle-open" hidden>Koinos Node is on — its menus are in the sidebar.</p>
-
-          <p class="error" id="earn-error" hidden></p>
-        </div>
-      </section>
-
-      <!-- Local API -->
-      <!-- Koinos Node Desktop, whole, in an iframe: ui/knode/ is that app's
-           own renderer + styles, verbatim, speaking to the same handlers in
-           Core. The seven sidebar entries above select its views. -->
-      <section id="view-koinos" class="view koinos-view" hidden><div id="koinos-frame-host"></div></section>
-
-      <section id="view-api" class="view" hidden>
-        <div class="api-card">
-          <h1>Your local OpenAI-compatible API</h1>
-          <p class="lede">Point any OpenAI SDK or tool at this machine. No cloud, no per-token bill.</p>
-          <pre id="api-snippet" class="snippet"></pre>
-          <h2>Network &amp; privacy</h2>
-          <p class="hint">Local-Only is the default: requests can never leave this machine. Local-First and Network unlock the “Koinos Network” model — requests overflow to network providers through the scheduler.
-            <b>Network requests run on other people's computers: the provider serving your request can read what it contains</b> — nothing is stored by the serving path, but treat anything sent off this machine as visible to that provider.</p>
-          <div class="form-row">
-            <select id="privacy-pick">
-              <option value="local-only">Local-Only (nothing leaves this machine)</option>
-              <option value="local-first">Local-First (local when possible, network when needed — first 25k tokens/epoch free)</option>
-              <option value="network">Network</option>
-            </select>
-          </div>
-
-          <div class="keys-head">
-            <h2>API keys</h2>
-            <button id="btn-new-key" class="primary small">Create key</button>
-          </div>
-          <p class="hint">Without keys, apps on this computer connect freely. Creating the first key requires every API call to present one — the built-in chat keeps working either way.</p>
-          <div id="new-key-reveal" hidden>
-            <p class="hint strong">Copy it now — it is shown only once:</p>
-            <pre class="snippet" id="new-key-value"></pre>
-          </div>
-          <ul id="key-list"></ul>
+          <p class="hint" id="koinos-toggle-open" hidden>Koinos Node is on — it is in the sidebar now.</p>
 
           <div class="koinos-toggle-row">
             <div>
@@ -521,6 +544,38 @@
               <span class="switch-track"><span class="switch-thumb"></span></span>
             </button>
           </div>
+
+          <p class="error" id="settings-error" hidden></p>
+        </div>
+      </section>
+
+      <section id="view-api" class="view" hidden>
+        <div class="api-card">
+          <h1>Your local OpenAI-compatible API</h1>
+          <p class="lede">Point any OpenAI SDK or tool at this machine. No cloud, no per-token bill.</p>
+          <pre id="api-snippet" class="snippet"></pre>
+          <h2>Network &amp; privacy</h2>
+          <p class="hint">Local-Only is the default: requests can never leave this machine. Local-First and Network unlock the “Koinos Network” model — requests overflow to network providers through the scheduler.
+            <b>Network requests run on other people's computers: the provider serving your request can read what it contains</b> — nothing is stored by the serving path, but treat anything sent off this machine as visible to that provider.</p>
+          <div class="form-row">
+            <select id="privacy-pick">
+              <option value="local-only">Local-Only (nothing leaves this machine)</option>
+              <option value="local-first">Local-First (local when possible, network when needed — first 25k tokens/epoch free)</option>
+              <option value="network">Network</option>
+            </select>
+          </div>
+
+          <div class="keys-head">
+            <h2>API keys</h2>
+            <button id="btn-new-key" class="primary small">Create key</button>
+          </div>
+          <p class="hint">Without keys, apps on this computer connect freely. Creating the first key requires every API call to present one — the built-in chat keeps working either way.</p>
+          <div id="new-key-reveal" hidden>
+            <p class="hint strong">Copy it now — it is shown only once:</p>
+            <pre class="snippet" id="new-key-value"></pre>
+          </div>
+          <ul id="key-list"></ul>
+
         </div>
       </section>
 
