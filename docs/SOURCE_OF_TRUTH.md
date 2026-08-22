@@ -405,29 +405,28 @@ for dev/screenshots).
 
 ## 7. Open threads (next work, in rough priority)
 
-0. **ACCOUNT CREATION IS SHUT ON PRODUCTION — owner action, nothing to build.**
-   Live 2026-08-22 (netcheck digest, `/auth/methods`):
-   `signin=passkey signup=none missing=SMTP_HOST,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET`.
-   Passkey login runs but is unreachable in practice, because **a passkey
-   cannot CREATE an account** — WebAuthn registration attaches a key to a
-   session that must already exist (`requireAccount` on
-   `/auth/passkey/register/*`). It is a way back in, never a way to start. So
-   with neither email nor Google configured, nobody can sign up at all.
-   The code is finished and probed; this is purely absent configuration:
-   - **Email codes** need `SMTP_HOST` (+ PORT/USER/PASS/FROM as the provider
-     wants). NOTE, corrected: the waitlist-notification SMTP was ASSUMED to be
-     live and is NOT — `SMTP_HOST` is unset on the box, so waitlist emails are
-     not sending either.
-   - **Google** needs `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET`, with the
-     redirect URI `https://koinosai.com/auth/google/callback` registered
-     EXACTLY (it is derived from `KAI_SITE_ORIGIN`; a mismatched character is
-     the usual failure) and the consent screen published out of Testing.
-   - **Passkeys** need nothing — WebAuthn over the HTTPS that already exists.
-   Values go in `/opt/koinos/kai.env` on the box, never `deploy/app.env`
-   (committed to git). Owner-gated: do not attempt to set these.
-   Shipped alongside the finding (kai PR #19): `/auth/methods`, a sign-in page
-   that hides unconfigured doors instead of 503-ing on click, and a digest
-   STATE+WARN line so this can never again be invisible.
+0. ~~Account creation shut on production~~ — **OPENED by the owner 2026-08-22
+   05:02Z.** Verified from OUTSIDE the box, which is the only proof that
+   counts (the startup log says what the process thinks it has; `/auth/methods`
+   says what a visitor actually gets):
+   `STATE signin=email,google,passkey signup=email,google missing=nothing`,
+   and the digest assertion flipped to `PASS account creation possible`.
+   Both `SMTP_HOST` and the Google OAuth pair are set in `/opt/koinos/kai.env`;
+   bootCount 35 = 34 plus the owner's one manual restart, clean SIGTERM.
+   Kept here rather than deleted, because the finding behind it is permanent:
+   **a passkey cannot CREATE an account** — WebAuthn registration attaches a
+   key to a session that must already exist (`requireAccount` on
+   `/auth/passkey/register/*`), so biometric is a way back in and never a way
+   to start. Any future "sign-in is broken" report starts by reading
+   `/auth/methods`, not by guessing.
+   STILL UNVERIFIED, and only a human can do it: nobody has actually created
+   an account end to end. Email codes need a real inbox to receive them and
+   the Google consent screen has to be OUT of Testing or only listed accounts
+   pass. Ask the owner to make one account both ways, then add a passkey to it.
+   Loose end, unchecked because the digest has no assertion for it: waitlist
+   signup notifications need `SMTP_TO` as well as `SMTP_HOST`. Sign-in works
+   without it; those notification emails do not.
+
 1. ~~Azure Trusted Signing~~ — **SHIPPED 2026-08-17, v0.25.11 signed** (see §2 for the
    secret layout and the 403/AADSTS debug trail). Watch the field: SmartScreen reputation
    still accrues per-file over downloads; signed ≠ instant zero warnings on day one.
