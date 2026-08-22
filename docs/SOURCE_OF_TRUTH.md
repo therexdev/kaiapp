@@ -405,6 +405,29 @@ for dev/screenshots).
 
 ## 7. Open threads (next work, in rough priority)
 
+0. **ACCOUNT CREATION IS SHUT ON PRODUCTION — owner action, nothing to build.**
+   Live 2026-08-22 (netcheck digest, `/auth/methods`):
+   `signin=passkey signup=none missing=SMTP_HOST,GOOGLE_CLIENT_ID,GOOGLE_CLIENT_SECRET`.
+   Passkey login runs but is unreachable in practice, because **a passkey
+   cannot CREATE an account** — WebAuthn registration attaches a key to a
+   session that must already exist (`requireAccount` on
+   `/auth/passkey/register/*`). It is a way back in, never a way to start. So
+   with neither email nor Google configured, nobody can sign up at all.
+   The code is finished and probed; this is purely absent configuration:
+   - **Email codes** need `SMTP_HOST` (+ PORT/USER/PASS/FROM as the provider
+     wants). NOTE, corrected: the waitlist-notification SMTP was ASSUMED to be
+     live and is NOT — `SMTP_HOST` is unset on the box, so waitlist emails are
+     not sending either.
+   - **Google** needs `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET`, with the
+     redirect URI `https://koinosai.com/auth/google/callback` registered
+     EXACTLY (it is derived from `KAI_SITE_ORIGIN`; a mismatched character is
+     the usual failure) and the consent screen published out of Testing.
+   - **Passkeys** need nothing — WebAuthn over the HTTPS that already exists.
+   Values go in `/opt/koinos/kai.env` on the box, never `deploy/app.env`
+   (committed to git). Owner-gated: do not attempt to set these.
+   Shipped alongside the finding (kai PR #19): `/auth/methods`, a sign-in page
+   that hides unconfigured doors instead of 503-ing on click, and a digest
+   STATE+WARN line so this can never again be invisible.
 1. ~~Azure Trusted Signing~~ — **SHIPPED 2026-08-17, v0.25.11 signed** (see §2 for the
    secret layout and the 403/AADSTS debug trail). Watch the field: SmartScreen reputation
    still accrues per-file over downloads; signed ≠ instant zero warnings on day one.
