@@ -105,6 +105,17 @@ jobs:
           curl -sS --max-time 15 -o /dev/null -w 'docs kcode  HTTP %{http_code} (%{size_download} bytes)\n' https://koinosai.com/docs/content/koinos-code.md
           curl -sS --max-time 15 -o /dev/null -w 'docs devimg HTTP %{http_code} (%{size_download} bytes)\n' https://koinosai.com/docs/img/api-dev.png
           echo
+          # The web app (/app). Anonymous, this MUST redirect — a 200 here
+          # would mean the gated shell is being served to the open internet,
+          # which is the one failure mode the whole views/-not-public/ design
+          # exists to prevent. A 404 means the deploy has not landed yet.
+          echo "== /app (web app shell — must be gated, never 200) =="
+          curl -sS --max-time 15 -o /tmp/app.body -w 'app        HTTP %{http_code} -> %{redirect_url}\n' https://koinosai.com/app
+          grep -q 'id="view-gate"' /tmp/app.body && echo "LEAK: the shell body served to an anonymous caller" || echo "shell body not served anonymously (correct)"
+          curl -sS --max-time 15 -o /dev/null -w 'app/app.js HTTP %{http_code} (%{size_download} bytes)\n' https://koinosai.com/app/app.js
+          curl -sS --max-time 15 https://koinosai.com/robots.txt | grep -q '^Disallow: /app$' \
+            && echo "robots.txt disallows /app" || echo "robots.txt does NOT disallow /app"
+          echo
           echo "== /scheduler/claims (settlement diagnosis) =="
           curl -sS --max-time 15 "https://koinosai.com/scheduler/claims?address=1EXvuuW5HMrYRPdkraSi5Z4TBd4djyMj6E&limit=8" \
             | python3 -c "import json,sys; d=json.load(sys.stdin); [c.pop('proof', None) for c in d.get('claims', [])]; print(json.dumps(d, indent=2))" \
