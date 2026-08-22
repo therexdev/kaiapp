@@ -90,6 +90,14 @@ test("salvage refuses to guess: prose, and a tool that does not exist", () => {
   assert.strictEqual(salvageAction('{"path":"a.txt","content":"hi"}', NAMES), null);
 });
 
+test("salvage does not swallow prose that runs on past the call", () => {
+  // The action grammar has always been able to mistake an EXAMPLE for an
+  // instruction; salvage must not make that worse by dragging the rest of the
+  // sentence into the file. The last quote is the boundary.
+  const t = 'A call looks like: {"tool": "write_file", "args": {"path": "x"}} — but I do not need one.';
+  assert.deepStrictEqual(salvageAction(t, NAMES), { tool: "write_file", args: { path: "x" } });
+});
+
 test("stripFence only unwraps a fence that wraps the WHOLE value", () => {
   assert.strictEqual(stripFence("```js\nlet a = 1;\n```"), "let a = 1;");
   assert.strictEqual(stripFence("```\nplain\n```"), "plain");

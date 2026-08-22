@@ -77,7 +77,7 @@ print(f"STATE oracle={o.get('status')} usd={o.get('usd')} median={o.get('lastMed
 # serves every page with a cheerful 200 and is invisible to HTTP probes.
 # The marker is the newest paragraph on the developer-tools page — bump it
 # whenever a docs change matters enough to prove it landed.
-DOCS_MARKER = ("/docs/content/koinos-code.md", "Plan first")
+DOCS_MARKER = ("/docs/content/koinos-code.md", "Which model does the work")
 try:
     _, _, d = get(DOCS_MARKER[0], raw=True)
     check(DOCS_MARKER[1] in d, "docs deploy is current",

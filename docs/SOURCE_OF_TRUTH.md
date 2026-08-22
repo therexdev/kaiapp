@@ -679,7 +679,9 @@ for dev/screenshots).
         approval card with the same full diff** — a garbled salvage is a
         garbled diff the person declines. It can never write unattended what a
         clean parse could not. Refuses to guess: unknown tool, or no tool name,
-        returns null so the nudge fires instead.
+        returns null so the nudge fires instead. (v0.40.1: when a long value
+        has no cleanly-closing quote — prose ran on past the call — the tail is
+        cut at the LAST quote rather than swallowing the rest of the sentence.)
      2. `looksLikeToolCall` no longer parses — shape only. That is the whole
         point of a fallback check.
      3. `truthfulAnswer`: the run tracks whether any write tool actually

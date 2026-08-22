@@ -378,10 +378,15 @@
          * contains braces (a CSS rule, a JS function) or stray quotes.
          */
         var end = -1;
+        var lastQuote = -1;
         for (var q = slice.length - 1; q >= 0; q--) {
           if (slice.charAt(q) !== '"') continue;
+          if (lastQuote < 0) lastQuote = q;
           if (/^[\s}\],]*$/.test(slice.slice(q + 1))) { end = q; break; }
         }
+        // Nothing closed cleanly (prose ran on past the call, say). The last
+        // quote is still a better boundary than swallowing the rest.
+        if (end < 0) end = lastQuote;
         slice = end >= 0 ? slice.slice(0, end) : slice.replace(/[\s}\],]+$/, "");
       } else {
         slice = slice.replace(/[\s}\],]+$/, "");
