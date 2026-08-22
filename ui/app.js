@@ -1488,7 +1488,19 @@ async function renderAccount(force) {
     si.hidden = true;
     return accountMsg(e.message);
   }
-  accountMsg("");
+  /*
+   * Three different things used to look identical here: signed out, session
+   * rejected, and the account server simply unreachable. The last one is the
+   * common case during a deploy, and telling someone to sign in again when
+   * the site is merely restarting sends them off to redo a device link they
+   * never needed to redo.
+   */
+  if (j.offline) {
+    so.hidden = true;
+    si.hidden = true;
+    return accountMsg(`${j.error || "Can't reach the account server."} Your sign-in is still saved — this should clear by itself.`);
+  }
+  accountMsg(j.sessionRejected ? "That session has ended. Sign in again to reconnect this device." : "");
   if (j.verifyUrl || j.site) {
     const link = $("account-verify-link");
     const url = (j.site || "https://koinosai.com") + "/link";

@@ -178,3 +178,97 @@ test("sidebar: switches live in Settings, and what they reveal survives a reload
     await core.stop();
   }
 });
+
+/*
+ * The multi-agent tool picker, with a real MCP server's worth of tools
+ * (field report, v0.42.0).
+ *
+ * A 29-tool server rendered 29 rows of `mcp:srvmsxqbdxy249df8:health` — the
+ * internal storage id, repeated on every line — which the tester described,
+ * accurately, as a wall of noise. Core now sends the name the server calls
+ * itself; this asserts the list actually uses it, groups by server, and can
+ * still be wired by the id nobody should have to read.
+ */
+test("tool picker groups by server and shows readable names, not internal ids", { skip: !available, timeout: 180000 }, async () => {
+  const { chromium } = require("playwright-core");
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-toolpick-"));
+  fs.mkdirSync(path.join(dataDir, "models"), { recursive: true });
+  fs.writeFileSync(path.join(dataDir, "models", "smollm2-135m-instruct-q8_0.gguf"), "weights");
+
+  const { createCore } = require("../server");
+  const core = await createCore({ dataDir, port: 0, llamaBin: FAKE_BIN, onEvent: () => {} });
+  const base = `http://127.0.0.1:${await core.start()}`;
+  const browser = await chromium.launch({ executablePath: CHROMIUM });
+  const SRV_ID = "srvmsxqbdxy249df8";
+  try {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    // Answer the view's REAL fetch — no test hook in the shipping code.
+    await page.route("**/core/tools", async (route) => {
+      const names = ["health", "balance", "transfer", "block", "tx", "account", "models", "status", "peers"];
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ok: true,
+          tools: [
+            { name: "web_search", label: "web_search", server: null, serverId: null, sensitive: false, description: "", params: {} },
+            ...names.map((n) => ({
+              name: `mcp:${SRV_ID}:${n}`, label: `koinos-ai:${n}`,
+              server: "koinos-ai-mcp", serverId: SRV_ID,
+              sensitive: n === "transfer", description: "", params: {},
+            })),
+          ],
+        }),
+      });
+    });
+    await page.goto(base);
+    await page.waitForSelector("#view-chat:not([hidden])");
+    await page.click('[data-view="settings"]');
+    await page.click("#btn-dev-toggle");
+    await page.waitForSelector("#nav-devtools:not([hidden])");
+    await page.click("#nav-devtools");
+    await page.waitForSelector("#view-devtools:not([hidden])");
+    await page.waitForSelector(".tool-group");
+
+    // Nothing a person reads carries the internal id.
+    // Scoped to the FIRST agent card. The example team ships two agents and
+    // each carries its own independent picker, so an unscoped selector sees
+    // every group twice and the assertions read as duplicates.
+    const CARD = ".agent-card:nth-of-type(1)";
+    const shown = await page.$$eval(`${CARD} .ag-tools .check`, (els) => els.map((e) => e.textContent.trim()));
+    assert.ok(shown.length > 0, "the picker rendered tools");
+    assert.ok(!shown.some((t) => t.includes(SRV_ID)), `no label should contain the server id, got ${JSON.stringify(shown.slice(0, 3))}`);
+    assert.ok(shown.some((t) => t.startsWith("koinos-ai:health")), `expected koinos-ai:health, got ${JSON.stringify(shown)}`);
+
+    // Two groups, built-ins first, each headed by a name.
+    const heads = await page.$$eval(`${CARD} .ag-tools .tool-group-name`, (els) => els.map((e) => e.textContent.trim()));
+    assert.deepStrictEqual(heads, ["Built-in", "koinos-ai-mcp"], "grouped and ordered by server");
+
+    // The id is reachable, just not shouted: it lives in the header tooltip.
+    const tip = await page.$eval(`${CARD} .ag-tools .tool-group:nth-of-type(2) .tool-group-name`, (el) => el.title);
+    assert.ok(tip.includes(SRV_ID), `the id belongs in a tooltip, got "${tip}"`);
+
+    // Enable-all flips the whole server on, and the checkbox VALUE is still
+    // the wiring key — a display change must never rewrite what gets saved.
+    const group = `${CARD} .ag-tools .tool-group:nth-of-type(2)`;
+    await page.click(`${group} .tool-group-all`);
+    const checked = await page.$$eval(`${group} .ag-tool:checked`, (els) => els.map((e) => e.dataset.tool));
+    assert.strictEqual(checked.length, 9, "every tool in the group turned on");
+    assert.ok(checked.every((n) => n.startsWith(`mcp:${SRV_ID}:`)), "values are still the registry ids");
+    assert.strictEqual(
+      await page.$eval(`${group} .tool-group-all`, (el) => el.textContent.trim()), "None",
+      "and the button now offers the opposite action");
+
+    // Built-ins untouched: an enable-all is scoped to its own server.
+    const builtinOn = await page.$$eval(`${CARD} .ag-tools .tool-group:nth-of-type(1) .ag-tool:checked`, (els) => els.length);
+    assert.strictEqual(builtinOn, 1, "the other group kept its own state (web_search was preselected)");
+
+    await page.click(`${group} .tool-group-all`);
+    assert.strictEqual(
+      await page.$$eval(`${group} .ag-tool:checked`, (els) => els.length), 0,
+      "clicking again turns the group back off");
+  } finally {
+    await browser.close();
+    await core.stop();
+  }
+});

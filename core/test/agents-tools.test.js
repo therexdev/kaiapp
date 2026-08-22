@@ -177,6 +177,71 @@ test("mcp manager: registry naming, http=egress policy, trusted flip clears conf
   assert.strictEqual(reg.list().some((t) => t.name === name), false, "disconnect unregisters");
 });
 
+/*
+ * A 29-tool server rendered 29 rows of `mcp:srvmsxqbdxy249df8:health` in the
+ * multi-agent tool picker — the internal storage id, repeated on every line
+ * (field report, v0.42.0). The handshake already returns the name the server
+ * calls itself; this is that name reaching the list.
+ *
+ * The `name` key must NOT change: saved team specs store it.
+ */
+test("mcp manager: tools carry a readable label, and the id stays the wiring key", async () => {
+  const { JsonStore } = require("../lib/store");
+  const dir = tmp();
+  const settings = new JsonStore(path.join(dir, "settings.json"), {});
+  const reg = new ToolRegistry({ privacyMode: () => "network" });
+  const mgr = new McpManager({ settings, registry: reg, onEvent: () => {} });
+
+  // serverInfo.name is "test-srv" (see STDIO_SERVER); the user called it
+  // something else entirely, and the SERVER's own name is what should win.
+  const s = mgr.addServer({ name: "Whatever I typed", transport: "stdio", command: [process.execPath, "-e", STDIO_SERVER] });
+  await mgr.connect(s.id);
+  try {
+    const t = reg.list().find((x) => x.name === `mcp:${s.id}:shout`);
+    assert.ok(t, "the tool is registered under its id");
+    assert.strictEqual(t.label, "test-srv:shout", "label comes from serverInfo.name, not the internal id");
+    assert.strictEqual(t.server, "test-srv", "and the group header names the server");
+    assert.strictEqual(t.serverId, s.id, "the id is still available, for a tooltip");
+    assert.ok(!t.label.includes(s.id), "the id does not appear in what a person reads");
+
+    // Built-ins have no server and fall back to their own name, so a list
+    // consumer never has to branch on whether `label` exists.
+    registerBuiltinTools(reg, { dataDir: dir });
+    const builtin = reg.list().find((x) => x.name === "read_file");
+    assert.ok(builtin, "a built-in is present");
+    assert.strictEqual(builtin.label, "read_file", "built-ins label as themselves");
+    assert.strictEqual(builtin.server, null, "and belong to no server group");
+  } finally {
+    mgr.closeAll();
+  }
+});
+
+test("mcp manager: two servers with the SAME self-reported name stay tellable apart", async () => {
+  const { JsonStore } = require("../lib/store");
+  const dir = tmp();
+  const settings = new JsonStore(path.join(dir, "settings.json"), {});
+  const reg = new ToolRegistry({ privacyMode: () => "network" });
+  const mgr = new McpManager({ settings, registry: reg, onEvent: () => {} });
+
+  const a = mgr.addServer({ name: "one", transport: "stdio", command: [process.execPath, "-e", STDIO_SERVER] });
+  const b = mgr.addServer({ name: "two", transport: "stdio", command: [process.execPath, "-e", STDIO_SERVER] });
+  await mgr.connect(a.id);
+  await mgr.connect(b.id);
+  try {
+    const la = reg.list().find((x) => x.name === `mcp:${a.id}:shout`).label;
+    const lb = reg.list().find((x) => x.name === `mcp:${b.id}:shout`).label;
+    /*
+     * The id earns a place in the label ONLY here. Both servers say they are
+     * "test-srv", so one of them has to carry a fragment of its id or the two
+     * checkboxes are indistinguishable — which is worse than a little noise.
+     */
+    assert.notStrictEqual(la, lb, "identical server names must not produce identical labels");
+    assert.ok(la.startsWith("test-srv") && lb.startsWith("test-srv"), "both still read as the server they are");
+  } finally {
+    mgr.closeAll();
+  }
+});
+
 /* ---------------- calendar ---------------- */
 
 test("ics parser: events, all-day, escaping, rrule marker", () => {

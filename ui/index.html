@@ -49,14 +49,6 @@
              the view, not seven things competing in the sidebar. -->
         <button class="nav-item koinos-nav" data-view="koinos" id="nav-koinos" hidden>Koinos Node</button>
       </nav>
-      <div id="chats-pane">
-        <div class="chats-head">
-          <span class="chats-title">Chats</span>
-          <button id="btn-new-chat" class="linklike" title="Start a new chat">+ New</button>
-        </div>
-        <input id="chat-search" type="search" placeholder="Search chats…" />
-        <div id="chat-list"></div>
-      </div>
       <div id="status-pane">
         <div class="status-row"><span id="status-dot" class="dot"></span><span id="status-text">Connecting…</span></div>
         <div class="status-sub" id="status-model"></div>
@@ -108,7 +100,19 @@
       </section>
 
       <!-- Chat -->
+      <!-- Chat owns its own rail, the way Koinos Code, Docs and Koinos Node
+           already do. The main sidebar is for GOING somewhere; a list of
+           conversations is something you work inside one place, and it was
+           the only view still spending the sidebar's scarce rows on it. -->
       <section id="view-chat" class="view" hidden>
+       <div class="kc-shell chat-shell">
+        <aside class="kc-rail" id="chats-pane">
+          <button id="btn-new-chat" class="kc-new" title="Start a new chat">+ New chat</button>
+          <input id="chat-search" type="search" placeholder="Search chats…" />
+          <div class="kc-rail-label">Chats</div>
+          <div id="chat-list"></div>
+        </aside>
+        <div class="chat-pane">
         <div id="messages" aria-live="polite">
           <div id="chat-empty" class="chat-empty">
             <div class="chat-empty-mark" aria-hidden="true"></div>
@@ -147,6 +151,8 @@
         <div id="persona-custom-row" hidden>
           <textarea id="persona-custom" rows="2" placeholder="Describe how the AI should behave, e.g. “You are a pirate. Answer everything in character.”"></textarea>
         </div>
+        </div>
+       </div>
       </section>
 
       <!-- Docs: local-first writing surface with AI assist -->

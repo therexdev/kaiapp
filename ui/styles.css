@@ -339,18 +339,30 @@ button.primary:hover:not(:disabled) { box-shadow: 0 4px 16px rgba(109, 62, 240, 
   opacity: 0.85; box-shadow: 0 6px 24px rgba(139, 92, 246, 0.35);
 }
 
-/* ----- sidebar chat history ----- */
-#chats-pane {
-  display: flex; flex-direction: column; gap: 6px;
-  flex: 1 1 auto; min-height: 148px;
+/* ----- chat history rail (inside the Chat view, not the sidebar) -----
+   Reuses .kc-rail / .kc-new / .kc-rail-label from Koinos Code on purpose:
+   two rails that do the same job should not be two designs. #chats-pane
+   keeps its id so nothing that addressed it has to be rewritten. */
+/* 220px, matching the main sidebar and the Docs list — chat rows are one
+   line each, like those. Koinos Code keeps 248 because its project rows are
+   two. The media override is repeated because .kc-shell's own collapse rule
+   is declared ABOVE this one and would otherwise lose the cascade. */
+.kc-shell.chat-shell { grid-template-columns: 220px minmax(0, 1fr); }
+@media (max-width: 900px) { .kc-shell.chat-shell { grid-template-columns: minmax(0, 1fr); } }
+#chats-pane { gap: 6px; }
+/* Named container: the composer inside sizes itself against THIS pane's
+   width, which is the measurement that actually matters to it. */
+.chat-pane {
+  display: flex; flex-direction: column; min-width: 0; min-height: 0;
+  container-type: inline-size; container-name: chat-pane;
 }
-.chats-head { display: flex; align-items: baseline; justify-content: space-between; padding: 0 6px; }
-.chats-title { font-size: 0.72em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.09em; color: var(--text-dim); }
 #chat-search {
   background: var(--bg-input); color: var(--text);
   border: 1px solid var(--border); border-radius: 8px;
   padding: 6px 10px; font: inherit; font-size: 0.85em;
 }
+#chat-search:focus { outline: 1px solid var(--violet); }
+/* The list scrolls; the New button and the search box above it do not. */
 #chat-list { overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 2px; }
 .chat-row {
   display: flex; align-items: center; gap: 6px;
@@ -553,10 +565,38 @@ button.primary:hover:not(:disabled) { box-shadow: 0 4px 16px rgba(109, 62, 240, 
    floor make the box claim its own row the moment the pickers crowd it. */
 #composer { flex-wrap: wrap; }
 #composer #input { flex: 1 1 320px; min-width: 240px; }
+/*
+ * The rule above already wraps the box onto its own line when the pickers
+ * crowd it. This block is the TIDY version of that state: pickers spread
+ * evenly across the top row, box and buttons beneath.
+ *
+ * It is a CONTAINER query now, not a viewport one. The comment above has
+ * always said a viewport breakpoint "ignores the sidebar and side padding",
+ * and giving Chat its own rail proved it: at a 1280px window the pane is
+ * ~810px and needs this layout, while the old 1180px viewport test still
+ * read the window and said no. 960px is the pane width the old breakpoint
+ * actually meant (1180 minus the 220px sidebar).
+ */
+@container chat-pane (max-width: 960px) {
+  #composer #input { flex: 1 1 100%; order: 5; }
+  #composer #btn-send, #composer #btn-stop, #composer #btn-attach, #composer #btn-web, #composer #btn-mic { order: 6; }
+  /* Equal quarters, NOT `flex: 1 1 auto`. Auto bases each picker on its
+     widest option, so "Write & review team" made the mode picker claim a
+     whole row and shoved the other three onto the next one. A zero basis
+     with min-width:0 makes the four share one row and shrink together. */
+  #src-pick, #model-pick, #persona-pick, #mode-pick { max-width: none; flex: 1 1 0; min-width: 0; }
+}
+/* Fallback for a renderer without container queries: the old viewport test,
+   which is still right for a genuinely small window. Both may fire; they
+   ask for the same layout, so there is nothing to reconcile. */
 @media (max-width: 1180px) {
   #composer #input { flex: 1 1 100%; order: 5; }
   #composer #btn-send, #composer #btn-stop, #composer #btn-attach, #composer #btn-web, #composer #btn-mic { order: 6; }
-  #src-pick, #model-pick, #persona-pick, #mode-pick { max-width: none; flex: 1 1 auto; }
+  /* Equal quarters, NOT `flex: 1 1 auto`. Auto bases each picker on its
+     widest option, so "Write & review team" made the mode picker claim a
+     whole row and shoved the other three onto the next one. A zero basis
+     with min-width:0 makes the four share one row and shrink together. */
+  #src-pick, #model-pick, #persona-pick, #mode-pick { max-width: none; flex: 1 1 0; min-width: 0; }
 }
 
 /* Typing indicator: three dots swelling in sequence while the model thinks —
@@ -763,6 +803,13 @@ button.small:not(.primary):hover:not(:disabled) { border-color: var(--violet); }
 button.small:disabled { opacity: 0.5; cursor: default; }
 
 .check { display: inline-flex; gap: 6px; align-items: center; font-size: 0.85em; color: var(--text-dim); white-space: nowrap; }
+/* Tool picker groups: one block per tool server, so 29 tools from one server
+   read as one thing you can take or leave rather than 29 unrelated rows. */
+.tool-group { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; width: 100%; }
+.tool-group + .tool-group { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.tool-group-head { display: flex; align-items: baseline; gap: 8px; width: 100%; }
+.tool-group-name { font-size: 0.74em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-dim); }
+.tool-group-all { font-size: 0.78em; }
 .check input[type="checkbox"] { accent-color: var(--violet); }
 .check input[type="number"] {
   width: 64px; flex: 0 0 auto; background: var(--bg-input); color: var(--text);

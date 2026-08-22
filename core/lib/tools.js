@@ -49,7 +49,15 @@ class ToolRegistry {
     const localOnly = this._privacyMode() === "local-only";
     return [...this._tools.values()]
       .filter((t) => !(localOnly && t.egress))
-      .map(({ name, description, params, egress, sensitive }) => ({ name, description, params, egress, sensitive }));
+      /*
+       * `name` is the WIRING key — saved team specs and agent definitions
+       * store it, so it must never change shape. `label`/`server` are the
+       * display pair a UI should show instead. Registering a tool without
+       * them is normal (built-ins are already readable); a list consumer
+       * falls back to `name`.
+       */
+      .map(({ name, label, server, serverId, description, params, egress, sensitive }) =>
+        ({ name, label: label || name, server: server || null, serverId: serverId || null, description, params, egress, sensitive }));
   }
 
   async call(name, args = {}, { confirmed = false } = {}) {

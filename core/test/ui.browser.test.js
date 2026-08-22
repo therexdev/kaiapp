@@ -136,3 +136,82 @@ test("onboarding -> download -> streaming chat -> key lockdown (real browser)", 
     cdn.close();
   }
 });
+
+/*
+ * Chat owns its own rail (v0.42.1).
+ *
+ * The conversation list used to live in the MAIN sidebar, which made Chat the
+ * only view that spent the app's scarce global rows on its own contents —
+ * Koinos Code, Docs and Koinos Node all keep their lists inside themselves.
+ * This pins the new shape so it cannot drift back: the list and the New chat
+ * button are inside the Chat view, and the sidebar holds navigation only.
+ */
+test("chat keeps its conversations in its own rail, not the app sidebar", { skip: !available, timeout: 180000 }, async () => {
+  const { chromium } = require("playwright-core");
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-chatrail-"));
+  fs.mkdirSync(path.join(dataDir, "models"), { recursive: true });
+  fs.writeFileSync(path.join(dataDir, "models", "smollm2-135m-instruct-q8_0.gguf"), "weights");
+
+  const { createCore } = require("../server");
+  const core = await createCore({ dataDir, port: 0, llamaBin: FAKE_BIN, onEvent: () => {} });
+  const base = `http://127.0.0.1:${await core.start()}`;
+  const browser = await chromium.launch({ executablePath: CHROMIUM });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 820 } });
+    await page.goto(base);
+    await page.waitForSelector("#view-chat:not([hidden])");
+
+    for (const sel of ["#chat-list", "#btn-new-chat", "#chat-search"]) {
+      const insideView = await page.$eval(sel, (el) => Boolean(el.closest("#view-chat")));
+      const insideSidebar = await page.$eval(sel, (el) => Boolean(el.closest("#sidebar")));
+      assert.strictEqual(insideView, true, `${sel} should live inside the Chat view`);
+      assert.strictEqual(insideSidebar, false, `${sel} should NOT be in the app sidebar`);
+    }
+
+    // The rail sits BESIDE the conversation, not above it — the same two-column
+    // shape Koinos Code uses, which is the whole point of the change.
+    const side = await page.evaluate(() => {
+      const rail = document.getElementById("chats-pane").getBoundingClientRect();
+      const pane = document.querySelector("#view-chat .chat-pane").getBoundingClientRect();
+      return { railRight: Math.round(rail.right), paneLeft: Math.round(pane.left), railW: Math.round(rail.width) };
+    });
+    assert.ok(side.paneLeft >= side.railRight - 1, `rail should be left of the pane (${JSON.stringify(side)})`);
+    assert.ok(side.railW > 150 && side.railW < 300, `rail width should be one column, got ${side.railW}`);
+
+    /*
+     * The composer measures its OWN pane, not the window. Before this it used
+     * a viewport breakpoint, and giving Chat a rail pushed the pane under the
+     * width that layout was meant for while the window stayed above it — so
+     * the pickers crowded the message box at a perfectly ordinary 1280.
+     */
+    /*
+     * Rows are counted by BOTTOM edge, not top. #composer is
+     * `align-items: flex-end`, so a tall textarea and a short button sitting
+     * on the same flex line have different tops and the same bottom —
+     * counting tops reports a correct three-row layout as four.
+     */
+    const rowsOf = (sel) =>
+      page.evaluate((s) => {
+        const els = [...document.querySelectorAll(s)].filter((el) => el.offsetParent !== null);
+        return [...new Set(els.map((el) => Math.round(el.getBoundingClientRect().bottom)))].sort((a, b) => a - b);
+      }, sel);
+
+    const rows = await rowsOf("#composer > *");
+    assert.ok(rows.length <= 3, `composer should settle in at most three rows, got ${rows.length} (${rows})`);
+
+    const pickerRows = await rowsOf("#composer select");
+    assert.strictEqual(pickerRows.length, 1,
+      `the pickers should share a single row, got ${pickerRows.length} (${pickerRows})`);
+
+    // Every picker on ONE row: `flex: 1 1 auto` sized them by their longest
+    // option, so "Write & review team" alone pushed the rest onto a second.
+    const inputBottom = await page.evaluate(() =>
+      Math.round(document.getElementById("input").getBoundingClientRect().bottom));
+    assert.ok(!pickerRows.includes(inputBottom),
+      "the message box should have its own row, not share one with the pickers");
+    assert.ok(inputBottom > pickerRows[0], "…and sit below them, not above");
+  } finally {
+    await browser.close();
+    await core.stop();
+  }
+});

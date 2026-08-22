@@ -175,12 +175,59 @@ class McpManager {
     this.registry.unregister(`mcp:${id}`);
   }
 
+  /**
+   * A readable stem for a server's tools.
+   *
+   * The MCP `initialize` handshake hands back serverInfo.name — the name the
+   * SERVER calls itself — and that is what a person recognises. The internal
+   * id (srvmsxqbdxy249df8) is a storage key that leaked into a checkbox list
+   * and turned it into a wall of noise (field report, v0.42.0).
+   *
+   * A trailing "mcp" segment is dropped: in a list where every entry is an
+   * MCP tool, saying so on each row carries no information.
+   */
+  _serverSlug(s, conn) {
+    const raw = String(conn?.serverInfo?.name || s.name || "server");
+    let slug = raw.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    const trimmed = slug.replace(/-?mcp$/, "");
+    if (trimmed) slug = trimmed;
+    slug = slug.slice(0, 24) || "server";
+    /*
+     * Two servers calling themselves the same thing is the ONLY case where
+     * the id earns a place in the label — and then only a fragment of it,
+     * enough to tell them apart. Checked against servers actually connected,
+     * because those are the only ones with tools in the registry.
+     */
+    let clash = false;
+    for (const [id, other] of this._conns) {
+      if (id === s.id) continue;
+      const os = (this.settings.get("mcp.servers") || []).find((x) => x.id === id);
+      if (os && this._slugOf(os, other) === slug) { clash = true; break; }
+    }
+    return clash ? `${slug}-${String(s.id).slice(-4)}` : slug;
+  }
+
+  /** The slug WITHOUT the clash check — used by the clash check itself, so
+   *  the two cannot recurse into each other. */
+  _slugOf(s, conn) {
+    const raw = String(conn?.serverInfo?.name || s.name || "server");
+    const slug = raw.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    const trimmed = slug.replace(/-?mcp$/, "");
+    return (trimmed || slug).slice(0, 24) || "server";
+  }
+
   _registerTools(s, conn) {
     this.registry.unregister(`mcp:${s.id}`);
+    const slug = this._serverSlug(s, conn);
+    const serverName = String(conn?.serverInfo?.name || s.name || "server");
     for (const t of conn.tools) {
       this.registry.register({
         name: `mcp:${s.id}:${t.name}`,
-        description: `[${s.name}] ${t.description || t.name}`,
+        // What a person reads. `name` above stays the stable wiring key.
+        label: `${slug}:${t.name}`,
+        server: serverName,
+        serverId: s.id,
+        description: `[${serverName}] ${t.description || t.name}`,
         params: Object.fromEntries(
           Object.entries(t.inputSchema?.properties || {}).map(([k, v]) => [k, String(v?.description || v?.type || "value").slice(0, 120)])
         ),

@@ -52,19 +52,86 @@
     return toolCache;
   }
 
+  /*
+   * Grouped by server, labelled by what the server calls itself.
+   *
+   * A 29-tool MCP server used to render 29 rows of
+   * `mcp:srvmsxqbdxy249df8:health` — the internal storage id, repeated on
+   * every line, which is a wall of noise nobody can scan (field report,
+   * v0.42.0). Core now sends `label` (koinos-ai:health) and `server`, so the
+   * id belongs in a tooltip, not the page.
+   *
+   * The checkbox VALUE is still t.name. Saved specs store that key, and a
+   * display change must never rewrite what is on disk.
+   */
   function toolCheckboxes(host, cls, checked = []) {
     host.innerHTML = "";
+    const BUILT_IN = "Built-in";
+    const groups = new Map(); // group heading -> tools
     for (const t of toolCache || []) {
-      const label = document.createElement("label");
-      label.className = "check";
-      const box = document.createElement("input");
-      box.type = "checkbox";
-      box.className = cls;
-      box.dataset.tool = t.name;
-      box.checked = checked.includes(t.name);
-      label.appendChild(box);
-      label.appendChild(document.createTextNode(` ${t.name}${t.sensitive ? " ⚠" : ""}`));
-      host.appendChild(label);
+      const key = t.server || BUILT_IN;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(t);
+    }
+    /*
+     * Built-ins first — they need nothing installed and are what most people
+     * reach for. They get a heading like everything else: leaving one block
+     * unlabelled on a page where every other block is labelled reads as a
+     * rendering fault rather than as a category.
+     */
+    const order = [...groups.keys()].sort((a, b) =>
+      a === BUILT_IN ? -1 : b === BUILT_IN ? 1 : a.localeCompare(b));
+
+    for (const key of order) {
+      const tools = groups.get(key);
+      const group = document.createElement("div");
+      group.className = "tool-group";
+
+      {
+        const head = document.createElement("div");
+        head.className = "tool-group-head";
+        const name = document.createElement("span");
+        name.className = "tool-group-name";
+        name.textContent = key;
+        // The id lives here and nowhere else — findable when you need it,
+        // invisible when you do not.
+        if (tools[0].serverId) name.title = `Tool server id: ${tools[0].serverId}`;
+        const all = document.createElement("button");
+        all.type = "button";
+        all.className = "linklike tool-group-all";
+        // One button, two jobs — its wording says which one it will do, so
+        // it never reads as a state that is already true.
+        const sync = () => {
+          const boxes = [...group.querySelectorAll(`.${cls}`)];
+          all.textContent = boxes.every((b) => b.checked) ? "None" : "All";
+        };
+        all.addEventListener("click", () => {
+          const boxes = [...group.querySelectorAll(`.${cls}`)];
+          const turnOn = !boxes.every((b) => b.checked);
+          for (const b of boxes) b.checked = turnOn;
+          sync();
+        });
+        group.addEventListener("change", sync);
+        head.append(name, all);
+        group.appendChild(head);
+        group._sync = sync;
+      }
+
+      for (const t of tools) {
+        const label = document.createElement("label");
+        label.className = "check";
+        label.title = t.name; // the wiring key, for anyone who needs it
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.className = cls;
+        box.dataset.tool = t.name;
+        box.checked = checked.includes(t.name);
+        label.appendChild(box);
+        label.appendChild(document.createTextNode(` ${t.label || t.name}${t.sensitive ? " ⚠" : ""}`));
+        group.appendChild(label);
+      }
+      if (group._sync) group._sync();
+      host.appendChild(group);
     }
   }
 

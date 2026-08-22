@@ -114,12 +114,36 @@ class AccountService {
       verifyUrl: this._pending && this._pending.expiresAt > Date.now() ? this._pending.verifyUrl : null,
     };
     if (!base.tokenStored) return { ...base, signedIn: false };
-    const r = await this._call("/auth/session");
+
+    /*
+     * The account server being UNREACHABLE is not the same as being signed
+     * out, and this used to conflate them: fetch rejects on a refused
+     * connection and the throw escaped status(), so the whole account panel
+     * blanked with an error whenever the site was mid-deploy.
+     */
+    let r;
+    try {
+      r = await this._call("/auth/session");
+    } catch (e) {
+      return { ...base, signedIn: false, offline: true, error: `Can't reach ${this.origin()} right now — ${e.message}` };
+    }
+
     if (r.status === 401) {
-      // The server no longer honors this token (revoked, expired): say
-      // signed-out honestly rather than showing a ghost session.
-      this._clearToken();
-      return { ...base, signedIn: false, tokenStored: false };
+      /*
+       * Report signed out, but KEEP the token file.
+       *
+       * This used to delete it on the first 401, which made one bad answer
+       * permanent: a person had to redo the whole device-link dance on
+       * another machine to get back in. And a 401 is not always the truth —
+       * a deploy mid-restart, a locked database, a clock skew — while the
+       * cost of being wrong is asymmetric. Keeping a genuinely dead token
+       * costs nothing (it is a random string that authenticates nothing) and
+       * the next poll recovers by itself if the rejection was transient.
+       *
+       * Deleting it is still what signOut() does, deliberately and on
+       * request. That is the only thing that should.
+       */
+      return { ...base, signedIn: false, sessionRejected: true };
     }
     if (!r.ok) return { ...base, signedIn: false, error: r.error || `account server answered ${r.status}` };
     const walletAddr = this.wallet?.address ?? null;

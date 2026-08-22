@@ -222,20 +222,71 @@ test("account: device link end-to-end — code, pending, approval, session, wall
   }
 });
 
-test("account: a token the server no longer honors is cleared, not ghosted", { timeout: 30000 }, async () => {
+/*
+ * A rejected session says so — and KEEPS the credential.
+ *
+ * This used to delete account.cfg on the first 401, which turned one bad
+ * answer into a permanent sign-out: the only way back was redoing the whole
+ * device-link dance on a second machine. A 401 is not always the truth (a
+ * deploy mid-restart, a locked database, a skewed clock), and the cost of
+ * being wrong is wildly asymmetric — keeping a genuinely dead token costs
+ * nothing, because it is a random string that authenticates nothing.
+ *
+ * Field report, 2026-08-22: "after update it looks like in my node it needs
+ * to reconnect the account but still shows on the web under account."
+ */
+test("account: a rejected session is reported, not destroyed — and recovers by itself", { timeout: 30000 }, async () => {
   const { core, fake, post, get, dir } = await coreWithAccount();
   try {
     fake.state.approved = true;
     await post("/core/account/link/start");
     await post("/core/account/link/poll");
     assert.strictEqual((await get("/core/account")).signedIn, true);
-    // Server-side revocation (signed out from the web, session expired…).
+
+    // Server-side rejection (revoked, expired, or a server having a bad day).
+    const saved = [...fake.state.tokens];
     fake.state.tokens.clear();
-    const s = await get("/core/account");
-    assert.strictEqual(s.signedIn, false);
-    assert.ok(!fs.existsSync(path.join(dir, "account.cfg")), "stale token deleted on discovery");
+    let s = await get("/core/account");
+    assert.strictEqual(s.signedIn, false, "reported signed out, honestly");
+    assert.strictEqual(s.sessionRejected, true, "and says WHY, so the UI can offer the right next step");
+    assert.ok(fs.existsSync(path.join(dir, "account.cfg")), "but the credential survives a single 401");
+
+    // …so a transient rejection heals with no human involved.
+    for (const t of saved) fake.state.tokens.add(t);
+    s = await get("/core/account");
+    assert.strictEqual(s.signedIn, true, "the very next poll is signed in again");
+
+    // Signing out deliberately is still what removes it.
+    await post("/core/account/logout");
+    assert.ok(!fs.existsSync(path.join(dir, "account.cfg")), "signOut is the one thing that deletes the token");
   } finally {
     fake.server.close();
+    await core.stop();
+  }
+});
+
+/*
+ * An unreachable server is not a signed-out user. fetch REJECTS on a refused
+ * connection, and that throw used to escape status() — the account panel
+ * blanked with a raw error every time the site was mid-deploy, which today
+ * was thirteen times.
+ */
+test("account: an unreachable account server reports offline, keeps the session", { timeout: 30000 }, async () => {
+  const { core, fake, post, get, dir } = await coreWithAccount();
+  try {
+    fake.state.approved = true;
+    await post("/core/account/link/start");
+    await post("/core/account/link/poll");
+    assert.strictEqual((await get("/core/account")).signedIn, true);
+
+    await new Promise((r) => fake.server.close(r)); // the site goes down
+    const s = await get("/core/account");
+    assert.strictEqual(s.ok, true, "the CORE call still succeeds — this is not an app error");
+    assert.strictEqual(s.signedIn, false);
+    assert.strictEqual(s.offline, true, "and is labelled offline, not signed out");
+    assert.ok(fs.existsSync(path.join(dir, "account.cfg")), "the session is untouched by the site being down");
+  } finally {
+    try { fake.server.close(); } catch { /* already closed */ }
     await core.stop();
   }
 });
