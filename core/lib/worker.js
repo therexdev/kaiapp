@@ -85,12 +85,37 @@ class Worker {
       // (field feedback — it would reward hoarding over capability). The
       // same minRamGb line the catalog shows buyers gates what we offer.
       const ramGb = this.hardware?.ramBytes ? this.hardware.ramBytes / 1e9 : null;
+      /*
+       * VRAM counts, and until now it did not.
+       *
+       * `minRamGb` was compared against os.totalmem() alone, which treats
+       * system RAM as a proxy for capability. On a desktop that is roughly
+       * true. On anything with a real GPU the two are decoupled, and the
+       * proxy fails in the direction that matters: a 48 GB card in a box with
+       * modest system RAM was refused the very classes it serves FASTEST,
+       * while a RAM-rich CPU-only machine was waved into classes it serves at
+       * a crawl. Found while exploring cloud GPU hosting, but it is a
+       * consumer-hardware bug too — a 24 GB 4090 next to 16 GB of DDR4 is an
+       * ordinary gaming PC.
+       *
+       * MAX, not sum: the question is whether EITHER memory pool can hold the
+       * model. Summing would claim a partial-offload split that only works
+       * when the overflow half still fits in RAM — exactly the case that
+       * swaps. Comparing the same minRamGb threshold against VRAM is
+       * conservative (weights are far smaller than the CPU-inference headroom
+       * the number was calibrated for), which is the right way to be wrong.
+       */
+      const vramGb = Math.max(
+        0,
+        ...(Array.isArray(this.hardware?.gpus) ? this.hardware.gpus.map((g) => (Number(g?.vramMb) || 0) / 1024) : [0])
+      );
+      const capacityGb = ramGb == null ? (vramGb || null) : Math.max(ramGb, vramGb);
       // Round like the capabilities report below does (field finding: a
       // "4 GB" Raspberry Pi sees ~3.9 GB after the GPU carve-out, so a
       // strict minRamGb<=ramGb refused Koinos Fast on the exact machine it
       // was named for — while the scheduler, receiving the ROUNDED ramGb,
       // would have accepted it. One fit rule, both sides).
-      const fits = (a) => ramGb == null || !a.minRamGb || a.minRamGb <= Math.round(ramGb);
+      const fits = (a) => capacityGb == null || !a.minRamGb || a.minRamGb <= Math.round(capacityGb);
       // Per-model verdicts, kept on the worker so the UI can always answer
       // "why is my model not on the network?" with the actual rule that
       // fired (Pi field finding 2026-08-19: the machine sat online with an
@@ -99,13 +124,18 @@ class Worker {
         ? this.models.aliases().filter((a) => a.status === "ready").map((a) => ({
             alias: a.alias,
             advertised: !a.custom && !a.dev && fits(a),
+            // A CODE, not a substring of the prose. The "nothing fits" notice
+            // below used to test reason.includes("GB RAM") — which is a rule
+            // that silently stops firing the day someone rewords the message,
+            // and rewording it is exactly what adding VRAM required.
+            reasonCode: a.custom ? "private" : a.dev ? "dev" : fits(a) ? null : "too-big",
             reason: a.custom
               ? "private import — never advertised"
               : a.dev
                 ? "dev build — never advertised"
                 : fits(a)
                   ? null
-                  : `needs ${a.minRamGb} GB RAM — this machine reports ${Math.round(ramGb)} GB`,
+                  : `needs ${a.minRamGb} GB — this machine reports ${Math.round(ramGb ?? 0)} GB RAM${vramGb ? ` and ${Math.round(vramGb)} GB VRAM` : ""}`,
           }))
         : [];
       this.ramGb = ramGb == null ? null : Math.round(ramGb);
@@ -113,11 +143,11 @@ class Worker {
       // Every downloaded model is too big for this machine: say so instead
       // of silently earning nothing (the empty advertisement is correct —
       // this machine has nothing it can serve the network comfortably).
-      if (this.models && ready.length === 0 && this.modelGate.some((g) => !g.advertised && g.reason?.includes("GB RAM"))) {
-        const short = this.modelGate.filter((g) => g.reason?.includes("GB RAM")).map((g) => `${g.alias} (${g.reason})`).join("; ");
+      if (this.models && ready.length === 0 && this.modelGate.some((g) => g.reasonCode === "too-big")) {
+        const short = this.modelGate.filter((g) => g.reasonCode === "too-big").map((g) => `${g.alias} (${g.reason})`).join("; ");
         this.onEvent({
           type: "worker:no-servable-models",
-          message: `No model on this machine fits its RAM, so nothing is offered to the network: ${short}. Download a smaller model (like Koinos Fast) to serve and earn.`,
+          message: `No model on this machine fits its memory, so nothing is offered to the network: ${short}. Download a smaller model (like Koinos Fast) to serve and earn.`,
         });
       }
       const r = await fetch(`${this.schedulerUrl}/worker/register`, {

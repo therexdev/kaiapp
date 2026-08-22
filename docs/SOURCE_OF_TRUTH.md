@@ -477,8 +477,48 @@ for dev/screenshots).
      pairing code was 24px with 4px tracking and NO monospace face — the one
      place proportional digits actually cost you, since you read it off one
      screen and type it into another) and `.cmp-pane-label`.
-0c. **Cloud GPU (RunPod et al) — EXPLORED 2026-08-22, nothing built, owner
-   decision pending.** Full analysis in `docs/cloud-gpu-design.md`. Owner asked
+0c. **Cloud GPU — DIRECTION SET 2026-08-22: FIRST-PARTY SEED CAPACITY ONLY.**
+   Owner's call after reading the exploration: *"the real goal is to get bigger
+   models available on the network... If we offer that capability then people
+   don't really need the capability of integrating cloud hosting to access them
+   and they are not profitable earns so don't really make sense for standard
+   miners to do."* **Koinos AI runs the big-model capacity ITSELF, as
+   inventory.** The user-facing cloud-integration work is DECLINED, not
+   deferred — if the network offers 70B, nobody needs to wire up a pod to reach
+   one, and telling volunteers to rent hardware that loses money was never good
+   advice. Three obligations this reframing creates, all in
+   `docs/cloud-gpu-design.md` §6:
+   1. **Seed workers MUST draw ZERO from the bootstrap pool.** Non-negotiable.
+      `_networkSubsidyBudget` divides the pool across ALL honest receipts
+      pro-rata, so a first-party worker earning subsidy takes a slice of the
+      pot meant for VOLUNTEERS — the treasury paying itself while diluting
+      every real machine. Mechanism: an operator allowlist (`KAI_SEED_ADDRS`)
+      checked in `_subsidyValueSat`. Seed pods DO earn paid revenue (never from
+      the pool) and serve free-tier traffic AT KOINOS AI'S CASH EXPENSE, which
+      is the whole point. **Build this BEFORE any first-party pod touches
+      production** — far easier than retrofitting after volunteers are diluted.
+   2. **It must be VISIBLE that we run it.** "9 workers online" means something
+      different if 3 are ours. Stats page separates community from seed
+      capacity; seed workers are excluded from the anti-Sybil shadow
+      calibration (our identical pods would poison the ~Sep 2 gate dataset).
+   3. **The blocker is the CATALOG, not the hardware** — nothing above 32B
+      exists to serve. A 70B needs a real URL + sha256 that cannot be
+      fabricated. Rate-card entry is inert until advertised, so it lands first.
+   **Cost reality: an always-on 70B is order $1,200-1,500/month and recovers a
+   minority of that even at full utilisation.** It is a capability/marketing
+   budget, approved as one. The structural problem is scale-to-zero: a worker
+   that is not running is not in the roster, so nothing routes to it, so it
+   never wakes. `PREFER_WINDOW_MS` + `/worker/warming` are the pieces to solve
+   it; worth designing BEFORE renting anything always-on.
+   **SHIPPED with the decision (v0.41.2): VRAM now counts in the advertise
+   gate.** `fits()` compared `minRamGb` against `os.totalmem()` alone, so a
+   24 GB 4090 beside 16 GB of DDR4 — an ordinary gaming PC — was refused the
+   classes it serves FASTEST, while a RAM-rich CPU box was waved into classes
+   it serves at a crawl. MAX of the two pools, not sum (summing claims a
+   partial-offload split that only works when the overflow still fits in RAM —
+   exactly the case that swaps). Also replaced a `reason.includes("GB RAM")`
+   test with a `reasonCode`, since rewording the message is what this required.
+   ORIGINAL EXPLORATION (evidence for the above) — Full analysis in `docs/cloud-gpu-design.md`. Owner asked
    how someone could rent a GPU to run bigger models AND serve them to the
    network. **The two halves are not the same product and only one is a good
    idea today:**

@@ -1,6 +1,8 @@
 # Cloud GPU (RunPod and friends) — design exploration
 
-**Status: exploration, nothing built. 2026-08-22.**
+**Status: DIRECTION SET by the owner 2026-08-22 — first-party seed capacity.
+The user-integration half is declined. VRAM gate fixed; everything else below
+awaits a spend decision.**
 Owner asked how someone could use a service like RunPod to host bigger models
 for their own Koinos AI *and* offer them to the network.
 
@@ -19,7 +21,11 @@ now.**
   demand, **a guaranteed loss** — see §5, where the numbers are worked. It is
   not blocked by anything technical; it is blocked by arithmetic.
 
-That asymmetry should drive what gets built and in what order.
+**The owner's resolution (§6) took a third path neither of those describes:**
+Koinos AI runs the big-model capacity ITSELF, as inventory. That makes the
+first bullet unnecessary (nobody needs to integrate a pod to reach a 70B) and
+the second one moot (nobody is asked to lose money). §1-§5 are the evidence;
+§6 is the decision.
 
 ---
 
@@ -55,7 +61,10 @@ cloud. As a Sybil signal on cloud operators, this one is close to noise.
 
 ---
 
-## 2. Part A — using a big model yourself
+## 2. Part A — using a big model yourself — **DECLINED, see §6**
+
+*Kept for the reasoning, not as a plan. The owner declined this half: if the
+network offers 70B, nobody needs to wire up their own pod to reach one.*
 
 Three shapes. They are not variations; they put the trust boundary in three
 different places.
@@ -189,42 +198,128 @@ they would be right to be annoyed about it.
 
 ---
 
-## 6. What this is actually good for
+## 6. DECIDED — first-party seed capacity only
 
-Three uses survive the arithmetic:
+Owner, 2026-08-22, after reading §1-§5:
 
-1. **Burst capability for yourself.** $0.40/hr for a 32B-class model you switch
-   off when you are done is cheap next to a $1,500 card, and needs no belief
-   about token prices. This is the real offer.
-2. **Seeding capacity deliberately.** Koinos AI running its own pods to give the
-   network big-model classes it otherwise lacks — a marketing and capability
-   expense, honestly booked as one, not dressed up as mining.
-3. **Later, on real demand.** The break-even formula in §5 is the trigger. When
-   sustained paid utilisation on the big classes clears it, this reopens on its
-   own merits. Not before.
+> "the real goal is to get bigger models available on the network. Even as we
+> grow, we may not always have super strong hardware on the network until we
+> gain enough momentum. There also is a market for people who need these
+> stronger models... If we offer that capability then people don't really need
+> the capability of integrating cloud hosting to access them and they are not
+> profitable earns so don't really make sense for standard miners to do."
+
+That resolves it, and it resolves it well. **Koinos AI runs the big-model
+capacity itself.** The user-facing cloud-integration work (§2's A1/A2/A3) is
+DECLINED — not deferred. If the network offers 70B, nobody needs to wire up a
+pod to reach one, and telling volunteers to rent hardware that loses money
+would have been the wrong advice anyway.
+
+This changes what the thing IS. It is no longer a feature; it is **inventory**.
+That reframing carries three obligations the earning framing did not.
+
+### 6.1 Seed workers must draw ZERO from the bootstrap pool
+
+Non-negotiable, and it is the reason this section exists.
+
+`_networkSubsidyBudget` divides the pool across **all honest receipts pro-rata**
+(`scheduler.js:1935-1941`). A first-party worker earning subsidy would take a
+slice of a pot whose entire purpose is bootstrapping *volunteers* — the treasury
+paying itself, diluting every real machine, while the public stats page says the
+network has N workers. That is self-dealing, and no amount of good intent
+changes the arithmetic on a volunteer's payout.
+
+So: **seed receipts contribute zero subsidy demand and mint zero subsidy.**
+
+Mechanism: an operator-held allowlist on the scheduler (`KAI_SEED_ADDRS`),
+checked in `_subsidyValueSat`. Authoritative — no client self-declaration, no
+new protocol surface, and visible in config rather than hidden in behaviour.
+
+Seed workers DO earn **paid** revenue, and should. Paid chat value never touches
+the pool (`scheduler.js:1900-1901`); it is payment for compute actually
+delivered, and it offsets the pod bill honestly.
+
+Free-tier traffic served by a seed pod is therefore **Koinos AI's expense, paid
+in cash, not minted**. That is precisely the intent: buying the network a
+capability it cannot yet grow.
+
+### 6.2 It has to be visible that we run it
+
+"9 workers online" means something different if 3 are ours. A network that sells
+itself as volunteer-powered cannot quietly be half first-party without saying
+so — and the moment someone works it out from a wallet address, the honesty of
+everything else we publish is in question.
+
+- `/scheduler/network/status` marks seed workers.
+- The public stats page separates **community** from **Koinos AI seed**
+  capacity, and says why the seed exists.
+- Seed workers are **excluded from the anti-Sybil shadow calibration**. Our own
+  identical pods would collide with each other and poison the very dataset the
+  ~Sep 2 gate decision is being calibrated on.
+
+### 6.3 The blocker is the catalog, not the hardware
+
+There is nothing above 32B to serve. Adding a 70B class needs, in order:
+
+1. A rate-card entry in `MODEL_RATES` — inert until a worker advertises it, so
+   this is safe to land early.
+2. A catalog entry in `core/models/catalog.json` with a **real URL and
+   sha256**. This cannot be fabricated and cannot be verified from here; it
+   needs the actual artifact.
+3. `minRamGb` set for the class (~48 for a 70B Q4).
+
+Suggested rate, following the existing ladder (32B is $1.00/$4.00):
+**70B at $2.00 / $8.00 per 1M.** Provisional — it is a price, and pricing is
+the owner's call.
+
+### 6.4 The cost, and the one hard problem
+
+Using the §5 formula at the proposed 70B rate, revenue is `$0.0288 × T` per
+hour. A 70B Q4 on an 80 GB card does order 15-20 tok/s, so **~$0.43-0.58/hour
+at 100% utilisation** against a card costing roughly $1.50-2.00/hour.
+
+> **An always-on 70B costs on the order of $1,200-1,500/month and recovers a
+> minority of that even if it never idles.**
+
+That is the number the decision turns on. It is a marketing and capability
+budget, and should be approved as one.
+
+**The hard problem is scale-to-zero, and it is structural.** The obvious
+mitigation — only run the pod when there is demand — collides with how dispatch
+works: a worker that is not running is not in the roster, so nothing routes to
+it, so no demand ever appears, so it never starts. Chicken and egg.
+
+The pieces to solve it already exist. `PREFER_WINDOW_MS` reserves a job for a
+chosen worker, and `/worker/warming` already holds a lease open across an
+announced engine swap. A "cold seed" that is advertised-but-asleep, woken on
+first dispatch inside a warming grace, is the same shape. **Not built, not
+designed in detail — but it is the difference between $1,400/month and paying
+for what is used, so it deserves the design pass before any pod is rented.**
 
 ---
 
 ## 7. Recommendation
 
-1. **Build A2** — remote model alongside local ones, opt-in per model, labelled
-   at the point of selection, footer honest while active.
-2. **Write the operator guide** for the network half, leading with the
-   persistent-volume requirement and stating the economics plainly, including
-   that it currently loses money. Better to say it than to have someone
-   discover it with their own money.
-3. **Fix the RAM gate** to consider VRAM — worth doing regardless, since it
-   already misjudges consumer boxes with big GPUs and small RAM.
-4. **Decide on fingerprint-vs-cloud before the gate arms (~Sep 2).** Recommend:
-   keep fingerprint out of the reputation formula, where it already is. It is a
-   diagnostic worth watching, and a poor discriminator against exactly the
-   population that is hardest to distinguish.
-5. **Do not** market cloud hosting as an earning opportunity at current rates.
+1. **DONE — VRAM in the advertise gate** (§1). Shipped with this doc; it was a
+   standing bug on consumer hardware too (a 24 GB 4090 beside 16 GB of DDR4 was
+   refused the classes it serves fastest).
+2. **Land the 70B rate-card entry.** Inert until served; unblocks everything.
+3. **Build seed-worker exclusion** (§6.1) BEFORE any first-party pod touches
+   production. This is the integrity guarantee, and it is much easier to have
+   in place than to retrofit after volunteers have been diluted.
+4. **Design scale-to-zero** (§6.4) before renting anything always-on.
+5. **Then** rent one pod, one class, and measure real utilisation for a fixed
+   trial period against a stated budget cap.
+6. Keep fingerprint out of the reputation formula (§1) — now doubly so, since
+   our own pods would be its most obvious false positive.
 
 ## 8. Open questions for the owner
 
-- Ship A2 only, or A2 plus an explicitly-labelled self-hosted A1?
-- Does the catalog get a >32B class? Without one, the whole "bigger models"
-  premise has nowhere to go.
-- Fingerprint: confirm it stays out of the payout formula when the gate arms.
-- Should Koinos AI itself run seed pods (§6.2)? That is a spend decision.
+- **Budget and trial length?** One 70B pod is order $1,200-1,500/month
+  always-on. What is the cap, and how long is the trial before it is judged?
+- **Which model?** A 70B needs a real artifact (URL + sha256) that cannot be
+  invented here. Llama 3.3 70B and Qwen 2.5 72B are the obvious candidates.
+- **70B pricing** — $2.00/$8.00 per 1M is a suggestion following the ladder, not
+  a recommendation. It is a market decision.
+- **Is scale-to-zero worth building first**, or is a fixed-hours always-on pod
+  (e.g. 12h/day) an acceptable v1 at roughly half the cost?

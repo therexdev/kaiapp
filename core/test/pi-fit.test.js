@@ -77,7 +77,9 @@ test("a Pi with koinos-fast downloaded advertises it, with the verdict recorded"
   assert.strictEqual(gate.find((g) => g.alias === "koinos-fast").advertised, true);
   const held = gate.find((g) => g.alias === "gemma3-4b");
   assert.strictEqual(held.advertised, false);
-  assert.match(held.reason, /needs 8 GB RAM — this machine reports 3 GB/, "the verdict names the rule that fired");
+  // Wording widened when VRAM joined the gate: the message now reports both
+  // pools, because "needs 8 GB RAM" was a lie on any machine with a GPU.
+  assert.match(held.reason, /needs 8 GB — this machine reports 3 GB RAM/, "the verdict names the rule that fired");
 });
 
 test("nothing fits -> the event says which model needs what", async () => {
@@ -97,7 +99,7 @@ test("nothing fits -> the event says which model needs what", async () => {
   server.close();
   const ev = events.find((e) => e.type === "worker:no-servable-models");
   assert.ok(ev, "the silent-earning-nothing state announces itself");
-  assert.match(ev.message, /gemma3-12b \(needs 16 GB RAM — this machine reports 3 GB\)/, "with the concrete numbers");
+  assert.match(ev.message, /gemma3-12b \(needs 16 GB — this machine reports 3 GB RAM\)/, "with the concrete numbers");
 });
 
 test("private imports stay private, and the verdict says so", async () => {
