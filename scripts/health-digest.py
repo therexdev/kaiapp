@@ -86,6 +86,21 @@ try:
 except Exception as e:
     check(False, "docs deploy is current", f"{DOCS_MARKER[0]} unreachable: {e}")
 
+# Which sign-in doors are actually open in production. Reported as STATE, not
+# as an assertion: "Google is off" is a configuration CHOICE, not a fault, and
+# a digest that cried FAIL over it would be noise. But it must be VISIBLE —
+# the owner had to ask what was needed, which means the system was not saying.
+try:
+    _, _, m = get("/auth/methods")
+    si, su = m.get("signin", {}), m.get("signup", {})
+    on = lambda d: ",".join(k for k, v in d.items() if v) or "none"
+    print(f"STATE signin={on(si)} signup={on(su)} missing={','.join(m.get('missing') or []) or 'nothing'}")
+    warn(m.get("canCreateAccount") is True, "account creation possible",
+         "email or Google is configured" if m.get("canCreateAccount")
+         else "NOBODY can sign up — a passkey cannot create an account; set " + " or ".join(m.get("missing") or ["SMTP_HOST"]))
+except Exception as e:
+    warn(False, "account creation possible", f"/auth/methods unreachable: {e}")
+
 print(f"\nDIGEST {'FAIL' if fails else ('WARN' if warns else 'HEALTHY')} fails={len(fails)} warns={len(warns)}")
 if fails: print("FAILING: " + "; ".join(fails))
 if warns: print("WARNING: " + "; ".join(warns))
