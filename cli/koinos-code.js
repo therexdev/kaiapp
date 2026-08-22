@@ -32,7 +32,18 @@ const PREAMBLE =
   "You are Koinos Code, a careful coding agent working inside the person's project directory. " +
   "Read the relevant files before changing them. Make the smallest change that accomplishes the task, " +
   "matching the project's existing style. Never invent file contents you have not read. " +
-  "Prefer edit_file for small changes; use write_file only for new files or full rewrites.";
+  "Prefer edit_file for small changes; use write_file only for new files or full rewrites. " +
+  /*
+   * Said bluntly because the failure it prevents is the most common one in the
+   * field: asked to build something, a small model writes the file's contents
+   * into its REPLY, in a markdown fence, and stops. To the person that looks
+   * like the job was done — there is code on the screen — while the folder is
+   * still empty. The model is not refusing; it does not connect "produce this
+   * file" with "call a tool". So connect it for it, in the brief.
+   */
+  "IMPORTANT: writing code in your reply does NOT create a file. Nothing you type reaches the " +
+  "person's disk unless you call write_file or edit_file. If the task is to create or change " +
+  "something, call the tool — do not paste the code and stop.";
 
 const CONTEXT_FILE = "KOINOS.md"; // project notes, read fresh every task
 const CONTEXT_MAX_CHARS = 4000;

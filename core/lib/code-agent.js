@@ -74,6 +74,42 @@ function claimsAWrite(text) {
   return CLAIM_FIRST_PERSON.test(t) && CLAIM_VERB.test(t) && CLAIM_TARGET.test(t);
 }
 
+/*
+ * The OTHER way this feature looks broken, and the more common one: the model
+ * never attempts a tool call at all. Asked to build a calculator it writes the
+ * page into its reply inside a ```html fence and stops — so there is code on
+ * the screen, "0 tool steps", and an empty folder. Field words: "why does it
+ * keep giving me code in the chat instead of making actual folders and files?"
+ *
+ * salvageAction cannot help here — there is no call to salvage — and
+ * looksLikeToolCall correctly says no. This is the third state the loop never
+ * had a name for: not a tool call, not really an answer either.
+ *
+ * The nudge deliberately offers BOTH doors. "Explain how I would write a
+ * calculator" is a legitimate question whose answer IS a code block, and
+ * forcing a write there would create a file nobody asked for. So the model is
+ * asked which one it meant, and the write it may then propose is still a card.
+ */
+const FENCE_BLOCK = /```[A-Za-z0-9+#.-]*[ \t]*\r?\n([\s\S]*?)```/g;
+/*
+ * What separates "here is the file you asked for" from an illustration. Both
+ * thresholds are needed: `npm install` on two lines is advice, not a file, and
+ * a single long line is usually a command. Two real lines AND some substance.
+ */
+const CODE_MIN_CHARS = 40;
+const CODE_MIN_LINES = 2;
+
+function answeredWithCode(text) {
+  FENCE_BLOCK.lastIndex = 0; // the regex is global and therefore stateful
+  let m;
+  while ((m = FENCE_BLOCK.exec(String(text || "")))) {
+    const body = String(m[1] || "").trim();
+    const lines = body.split("\n").filter((l) => l.trim()).length;
+    if (body.length >= CODE_MIN_CHARS && lines >= CODE_MIN_LINES) return true;
+  }
+  return false;
+}
+
 const NOT_WRITTEN =
   "\n\n_Nothing was written to disk — no file in this project was created or changed. " +
   "Any file named above does not exist yet._";
@@ -384,6 +420,26 @@ class CodeAgent {
             });
             continue;
           }
+          /*
+           * Code in the reply, nothing on disk, and no tool ever attempted.
+           * Only while ACTING — a plan is prose by design — and only when this
+           * run has written nothing, so a summary that quotes what it already
+           * wrote is left alone.
+           */
+          if (!planning && !wrote && answeredWithCode(out) && nudges < MAX_NUDGES) {
+            nudges++;
+            onTrace({ type: "note", text: "(that code was not saved to any file)" });
+            convo.push({ role: "assistant", content: out });
+            convo.push({
+              role: "user",
+              content:
+                "You wrote code in your reply, but nothing was saved — code in a reply does not create a file. " +
+                'If that code belongs in this project, call write_file now: {"tool": "write_file", "args": ' +
+                '{"path": "<file name>", "content": "<the whole file>"}}. ' +
+                'If you were only explaining and no file was wanted, reply {"answer": true}.',
+            });
+            continue;
+          }
           return { runId, answer: truthfulAnswer(out.trim(), wrote), steps: step, reason: planning ? "planned" : "answered", wrote };
         }
         if (action.answer) {
@@ -417,4 +473,4 @@ class CodeAgent {
   }
 }
 
-module.exports = { CodeAgent, registryTools, looksLikeToolCall, claimsAWrite, truthfulAnswer, MAX_EXTRA_TOOLS, SUBAGENT_MAX_STEPS, SUBAGENT_LIMIT };
+module.exports = { CodeAgent, registryTools, looksLikeToolCall, answeredWithCode, claimsAWrite, truthfulAnswer, MAX_EXTRA_TOOLS, SUBAGENT_MAX_STEPS, SUBAGENT_LIMIT };

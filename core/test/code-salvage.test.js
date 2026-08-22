@@ -25,7 +25,7 @@ const path = require("path");
  */
 
 const { salvageAction, parseAgentAction, stripFence } = require("../../ui/agents");
-const { CodeAgent, looksLikeToolCall, claimsAWrite, truthfulAnswer } = require("../lib/code-agent");
+const { CodeAgent, looksLikeToolCall, answeredWithCode, claimsAWrite, truthfulAnswer } = require("../lib/code-agent");
 
 const NAMES = ["list_files", "read_file", "search_files", "edit_file", "write_file", "run_cmd"];
 
@@ -219,4 +219,93 @@ test("a markdown file keeps its fenced code block; other files do not keep the w
   assert.strictEqual(r.wrote, true);
   assert.strictEqual(fs.readFileSync(path.join(dir, "notes.md"), "utf8"), doc);
   assert.strictEqual(fs.readFileSync(path.join(dir, "page.html"), "utf8"), "<b>hi</b>");
+});
+
+/* ------------------------------------------- code in the reply, no call --- */
+
+/*
+ * v0.40.2 — the second, more common way this feature looked broken:
+ *
+ *   "Why does it keep giving me code in the chat instead of making actual
+ *    folders and files?"
+ *
+ * Here the model never ATTEMPTS a tool call. Asked to build a page it writes
+ * the page into its reply inside a ```html fence and stops. salvageAction has
+ * nothing to salvage and looksLikeToolCall correctly says no — this is a third
+ * state the loop had no name for: not a tool call, and not really an answer.
+ */
+
+test("answeredWithCode: a file yes, an illustration no", () => {
+  assert.ok(answeredWithCode("Here:\n```html\n<!DOCTYPE html>\n<html><body><div>0</div></body></html>\n```"));
+  // Both thresholds matter, in both directions.
+  assert.ok(!answeredWithCode("Set it like this: ```js\nconst x = 1;\n```"), "one short line is a snippet");
+  assert.ok(!answeredWithCode("Run:\n```\nnpm install\nnpm test\n```"), "two short lines are advice");
+  assert.ok(!answeredWithCode("The calculator needs a display and a keypad."));
+  assert.ok(!answeredWithCode(""));
+});
+
+test("code in the reply and nothing on disk is nudged into a real write", async () => {
+  const dir = tmpProject();
+  const agent = new CodeAgent({
+    chatFn: scriptedChat([
+      "Sure! Here is a simple calculator:\n\n```html\n<!DOCTYPE html>\n<html><body><div class=\"calc\">0</div></body></html>\n```\n\nSave this as calculator.html.",
+      JSON.stringify({
+        tool: "write_file",
+        args: { path: "calculator.html", content: '<!DOCTYPE html>\n<html><body><div class="calc">0</div></body></html>' },
+      }),
+      "Created calculator.html.",
+    ]),
+  });
+  const notes = [];
+  const r = await agent.run({
+    dir,
+    task: "make me a calculator page",
+    onTrace: (e) => {
+      if (e.type === "note") notes.push(e.text);
+      if (e.type === "approval-request") agent.provideApproval(e.approvalId, true);
+    },
+  });
+  assert.ok(notes.some((t) => /not saved to any file/.test(t)), `expected the nudge, got ${JSON.stringify(notes)}`);
+  assert.strictEqual(r.wrote, true);
+  assert.ok(fs.existsSync(path.join(dir, "calculator.html")), "the folder must not still be empty");
+});
+
+test("the nudge offers BOTH doors: explaining is a real answer, not a forced write", async () => {
+  const dir = tmpProject();
+  // "Show me how a fetch wrapper looks" — the answer IS a code block, and
+  // creating a file nobody asked for would be the wrong repair.
+  const agent = new CodeAgent({
+    chatFn: scriptedChat([
+      "A fetch wrapper looks like this:\n\n```js\nasync function get(url) {\n  const r = await fetch(url);\n  return r.json();\n}\n```",
+      '{"answer": true}',
+      "That is the shape — no file was needed.",
+    ]),
+  });
+  const r = await agent.run({ dir, task: "show me what a fetch wrapper looks like" });
+  assert.strictEqual(r.wrote, false);
+  assert.deepStrictEqual(fs.readdirSync(dir), [], "nothing may be invented on disk");
+  assert.match(r.answer, /no file was needed/);
+});
+
+test("a model that will not budge still finishes, bounded", async () => {
+  const dir = tmpProject();
+  const stubborn = "Here you go:\n\n```html\n<!DOCTYPE html>\n<html><body>hi there friend</body></html>\n```";
+  const agent = new CodeAgent({ chatFn: scriptedChat([stubborn, stubborn, stubborn, stubborn, stubborn]) });
+  const r = await agent.run({ dir, task: "make a page" });
+  // Nudged at most MAX_NUDGES times, then the code comes back as the answer
+  // rather than the loop spinning to its step budget.
+  assert.strictEqual(r.reason, "answered");
+  assert.ok(r.steps <= 3, `expected a bounded number of tries, got ${r.steps}`);
+  assert.strictEqual(r.wrote, false);
+});
+
+test("plan mode is prose by design and is never nudged for it", async () => {
+  const dir = tmpProject();
+  const agent = new CodeAgent({
+    chatFn: scriptedChat(["1. Create calculator.html:\n\n```html\n<!DOCTYPE html>\n<html><body>0</body></html>\n```"]),
+  });
+  const notes = [];
+  const r = await agent.run({ dir, task: "plan a calculator", mode: "plan", onTrace: (e) => e.type === "note" && notes.push(e.text) });
+  assert.strictEqual(r.reason, "planned");
+  assert.ok(!notes.some((t) => /not saved/.test(t)), "a plan is not a failed write");
 });

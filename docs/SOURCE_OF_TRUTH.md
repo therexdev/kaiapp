@@ -698,6 +698,35 @@ for dev/screenshots).
      it to volunteer machines would put private source on other people's
      computers as a side effect of picking a faster box. A pin whose model was
      later deleted is ignored with a note rather than bricking the project.
+   - **v0.40.2 (2026-08-22): the SECOND cause of "it gave me code instead of
+     files", and the more common one.** Owner, right after v0.40.1 shipped:
+     *"Why does it keep giving me code in the chat instead of making actual
+     folders and files?"* Probed rather than assumed — and it is a DIFFERENT
+     bug from v0.40.0. There the model attempted a tool call that could not be
+     parsed; here **it never attempts one at all**: asked to build a page it
+     writes the page into its reply in a ```` ```html ```` fence and stops.
+     `salvageAction` has nothing to salvage, `looksLikeToolCall` correctly says
+     no, and the loop returns the code as the answer with 0 steps. A third
+     state the loop had no name for: not a tool call, not really an answer.
+     Two fixes:
+     1. **The brief now says it outright** — "writing code in your reply does
+        NOT create a file; nothing reaches the person's disk unless you call
+        write_file or edit_file." The model was never refusing; it does not
+        connect "produce this file" with "call a tool", so the PREAMBLE
+        connects it. Cheapest fix available and it works at the source.
+     2. `answeredWithCode` + a bounded nudge (act mode only, and only when the
+        run has written nothing, so a summary quoting work already done is left
+        alone). **The nudge offers BOTH doors on purpose:** "show me what a
+        fetch wrapper looks like" is a real question whose answer IS a code
+        block, and forcing a write there would invent a file nobody asked for.
+        The model is asked which it meant; any write it then proposes is still
+        a card. Thresholds tuned so `npm install` on two lines is advice, not a
+        file: ≥2 non-empty lines AND ≥40 chars.
+     **Known gap, not a bug:** there is no tool that creates an EMPTY folder.
+     `write_file` mkdir's parents, so `src/components/Button.jsx` works and the
+     folders appear; a bare "make me a folder called src" cannot be done. Not
+     adding a tool for it — the menu is bounded and a 4k context pays for every
+     entry — unless someone actually wants it.
 10. **Moderation/AUP — owner-DEFERRED 2026-08-20**: owner agrees with the A40 reporter's
     finding but explicitly wants it on the future plan ("easier to understand the
     implications... with more nodes and network usage"). Design in kaiapp
