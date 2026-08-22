@@ -13,11 +13,20 @@
  *
  * So the order here is fixed and non-negotiable:
  *
- *   1. copy everything into a TEMPORARY directory beside the destination
- *   2. verify it — every file present, every size identical
- *   3. only then swap the temp directory into place
- *   4. only then point the setting at it
- *   5. only then delete the original
+ *   1. copy everything into a TEMPORARY directory beside the destination,
+ *      hashing each file as it is read
+ *   2. check every file is present at the right size
+ *   3. re-read the copy and check every sha256 against the source's
+ *   4. only then swap the temp directory into place
+ *   5. only then point the setting at it
+ *   6. only then delete the original
+ *
+ * Steps 2 and 3 are separate on purpose. The size pass is nearly free and
+ * catches the common failure — a copy cut short by a full disk or a pulled
+ * cable. The checksum pass costs a second full read and catches the one the
+ * size pass cannot: a file of exactly the right length holding the wrong
+ * bytes. Since the reward for passing is that the original gets deleted, both
+ * are worth their cost.
  *
  * Nothing before step 5 touches the source. Kill the process at any point and
  * the original is still there and still the one the app is configured to use;
@@ -33,6 +42,8 @@
 const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
+const crypto = require("crypto");
+const { pipeline } = require("stream/promises");
 
 // Copied into and swept from the destination's parent. The suffix is what
 // makes an interrupted move recognisable as debris rather than data.
@@ -162,15 +173,30 @@ function gb(n) {
 }
 
 /**
- * Copy a tree, reporting bytes as they land and honouring cancellation.
+ * Copy a tree, hashing every byte on the way through, reporting progress and
+ * honouring cancellation.
+ *
+ * The hash is computed from the SOURCE as it is read, not afterwards. That is
+ * the whole reason this streams rather than calling fs.copyFile: a separate
+ * hashing pass would mean reading the entire source a second time, and on the
+ * 50 GB this exists for that is not a rounding error. The trade is that we
+ * give up any copy-on-write fast path the filesystem might have offered —
+ * irrelevant here, because the destination is a different device (that is why
+ * someone is moving) and reflinks do not cross devices anyway.
  *
  * Errors are NOT swallowed. A single unreadable file means the copy is not a
  * faithful one, and a faithful copy is the only thing that earns the right to
  * delete the original.
+ *
+ * Returns { bytes, sums } where sums maps each file's path RELATIVE to the
+ * root onto its sha256 — relative so it can be checked against a destination
+ * rooted somewhere else entirely.
  */
 async function copyTree(src, dst, { onProgress = () => {}, shouldCancel = () => false, total = 0 }) {
   let done = 0;
   let lastPing = 0;
+  const sums = new Map();
+  const root = path.resolve(src);
 
   const walk = async (from, to) => {
     if (shouldCancel()) throw Object.assign(new Error("cancelled"), { cancelled: true });
@@ -188,23 +214,83 @@ async function copyTree(src, dst, { onProgress = () => {}, shouldCancel = () => 
         const target = await fsp.readlink(a);
         await fsp.symlink(target, b).catch(() => {});
       } else if (e.isFile()) {
-        await fsp.copyFile(a, b);
-        const { size } = await fsp.stat(b);
-        done += size;
-        const now = Date.now();
-        if (now - lastPing > 400) {
-          lastPing = now;
-          onProgress({ copiedBytes: done, totalBytes: total });
-        }
+        const h = crypto.createHash("sha256");
+        await pipeline(
+          fs.createReadStream(a),
+          async function* (chunks) {
+            for await (const c of chunks) {
+              if (shouldCancel()) throw Object.assign(new Error("cancelled"), { cancelled: true });
+              h.update(c);
+              done += c.length;
+              const now = Date.now();
+              if (now - lastPing > 400) {
+                lastPing = now;
+                onProgress({ copiedBytes: done, totalBytes: total });
+              }
+              yield c;
+            }
+          },
+          fs.createWriteStream(b),
+        );
+        sums.set(path.relative(root, a), h.digest("hex"));
       }
       // Sockets, FIFOs and devices are deliberately skipped: a chain data
       // directory has none, and copying one is never what was meant.
     }
   };
 
-  await walk(path.resolve(src), path.resolve(dst));
+  await walk(root, path.resolve(dst));
   onProgress({ copiedBytes: done, totalBytes: total });
-  return done;
+  return { bytes: done, sums };
+}
+
+/**
+ * Re-read every copied file and check its sha256 against what was read out of
+ * the source.
+ *
+ * This is the pass that answers "is everything still in order" rather than
+ * merely "is everything there". The size check below catches a torn copy; only
+ * this catches a file that is the right length and the wrong content — a bad
+ * cable, a failing drive, silent corruption in flight.
+ *
+ * One honest limitation, stated here so nobody reads more into a green result
+ * than it carries: reading a file back moments after writing it may be served
+ * from the operating system's page cache rather than from the disk itself, so
+ * this proves the bytes made it through the copy correctly, not that the new
+ * drive will still return them a year from now. Nothing portable can prove the
+ * latter, and the alternative — skipping the check — proves nothing at all.
+ */
+async function checksumTree(dst, sums, { onProgress = () => {}, shouldCancel = () => false, total = 0 } = {}) {
+  const mismatched = [];
+  const unreadable = [];
+  let done = 0;
+  let lastPing = 0;
+
+  for (const [rel, want] of sums) {
+    if (shouldCancel()) throw Object.assign(new Error("cancelled"), { cancelled: true });
+    const file = path.join(path.resolve(dst), rel);
+    try {
+      const h = crypto.createHash("sha256");
+      await pipeline(fs.createReadStream(file), async function* (chunks) {
+        for await (const c of chunks) {
+          h.update(c);
+          done += c.length;
+          const now = Date.now();
+          if (now - lastPing > 400) {
+            lastPing = now;
+            onProgress({ checkedBytes: done, totalBytes: total });
+          }
+          yield c;
+        }
+      }, async function (chunks) { for await (const _ of chunks) { /* drain */ } });
+      const got = h.digest("hex");
+      if (got !== want) mismatched.push({ path: rel, want, got });
+    } catch (e) {
+      unreadable.push({ path: rel, error: e.code || e.message });
+    }
+  }
+  onProgress({ checkedBytes: done, totalBytes: total });
+  return { ok: mismatched.length === 0 && unreadable.length === 0, checked: sums.size, mismatched, unreadable };
 }
 
 /**
@@ -256,5 +342,6 @@ module.exports = {
   checkTarget,
   copyTree,
   verifyTree,
+  checksumTree,
   gb,
 };

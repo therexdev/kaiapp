@@ -493,6 +493,8 @@ class NodeManager {
       totalBytes: size.bytes,
       fileCount: size.files,
       copiedBytes: 0,
+      checkedBytes: 0,
+      checkedFiles: 0,
       startedAt: Date.now(),
       finishedAt: null,
       error: null,
@@ -519,7 +521,7 @@ class NodeManager {
       m.phase = "copying";
       emit();
       await fsp.rm(temp, { recursive: true, force: true });
-      await dataMove.copyTree(source, temp, {
+      const copied = await dataMove.copyTree(source, temp, {
         total: size.bytes,
         shouldCancel: () => m.cancel,
         onProgress: ({ copiedBytes }) => {
@@ -528,7 +530,8 @@ class NodeManager {
         },
       });
 
-      // 3. Prove it landed before anything becomes irreversible.
+      // 3. Prove it landed before anything becomes irreversible. Cheap check
+      //    first: everything present, at the right length.
       m.phase = "verifying";
       emit();
       const v = dataMove.verifyTree(source, temp);
@@ -539,7 +542,35 @@ class NodeManager {
         throw new Error(`The copy did not match the original — ${detail}. Nothing was deleted.`);
       }
 
-      // 4. Swap it into place, then repoint the node. Only now does the new
+      /*
+       * 4. Then the expensive one: re-read every copied byte and compare its
+       *    sha256 to what was read out of the source. A file can be exactly
+       *    the right size and still be wrong, and the reward for passing here
+       *    is that the original gets deleted — so this is the last chance to
+       *    notice.
+       */
+      m.phase = "checksumming";
+      m.checkedBytes = 0;
+      emit();
+      const c = await dataMove.checksumTree(temp, copied.sums, {
+        total: size.bytes,
+        shouldCancel: () => m.cancel,
+        onProgress: ({ checkedBytes }) => {
+          m.checkedBytes = checkedBytes;
+          emit();
+        },
+      });
+      if (!c.ok) {
+        const detail = c.mismatched.length
+          ? `${c.mismatched.length} file(s) came out different (first: ${c.mismatched[0].path})`
+          : `${c.unreadable.length} file(s) could not be read back`;
+        throw new Error(
+          `The copy is not identical to the original — ${detail}. Nothing was deleted; your data is untouched.`,
+        );
+      }
+      m.checkedFiles = c.checked;
+
+      // 5. Swap it into place, then repoint the node. Only now does the new
       //    location become the real one.
       m.phase = "switching";
       emit();
@@ -547,7 +578,7 @@ class NodeManager {
       this.dataRoot = target;
       if (typeof onSwitched === "function") await onSwitched(target);
 
-      // 5. The original is now redundant. Deleting it last is the whole
+      // 6. The original is now redundant. Deleting it last is the whole
       //    safety property: every earlier failure leaves it untouched.
       m.phase = "cleaning";
       emit();

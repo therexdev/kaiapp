@@ -384,7 +384,8 @@
     bar.style.marginTop = "8px";
     var note = el("p", "small muted");
     note.style.marginTop = "10px";
-    note.textContent = "Safe to leave running. If this is interrupted, the original data stays exactly where it is.";
+    note.textContent = "Every file is copied, then read back and checked against the original before anything is removed. " +
+      "Safe to leave running: if this is interrupted, your data stays exactly where it is.";
     m.body.appendChild(line);
     m.body.appendChild(bar);
     m.body.appendChild(note);
@@ -402,6 +403,7 @@
       stopping: "Stopping the node…",
       copying: "Copying",
       verifying: "Checking every file arrived…",
+      checksumming: "Verifying the copy is identical",
       switching: "Switching over…",
       cleaning: "Removing the old copy…",
     };
@@ -414,6 +416,12 @@
         if (s.phase === "copying" && s.totalBytes) {
           var pct = Math.min(100, Math.round((s.copiedBytes / s.totalBytes) * 100));
           bar.textContent = fmtBytes(s.copiedBytes) + " of " + fmtBytes(s.totalBytes) + "  (" + pct + "%)";
+        }
+        // The checksum pass re-reads everything, so it needs its own bar —
+        // without one it looks like the move has hung at 100%.
+        if (s.phase === "checksumming" && s.totalBytes) {
+          var cpct = Math.min(100, Math.round((s.checkedBytes / s.totalBytes) * 100));
+          bar.textContent = fmtBytes(s.checkedBytes) + " of " + fmtBytes(s.totalBytes) + " checked  (" + cpct + "%)";
         }
         if (s.running) return;
         clearInterval(poll);

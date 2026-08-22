@@ -225,6 +225,97 @@ test("two moves cannot run at once", async () => {
   await assert.rejects(() => m.moveData("mainnet", dst), /already running/i);
 });
 
+// ------------------------------------------------- checksums earn their cost
+
+test("a file with the right SIZE but the wrong BYTES is caught", async () => {
+  /*
+   * This is the entire justification for the checksum pass. The size check
+   * next door passes this case happily: every file is present and every
+   * length matches. Only re-reading the content notices, and the reward for
+   * noticing is that the original does NOT get deleted.
+   */
+  const src = tmp("src");
+  const dstParent = tmp("dst");
+  const dst = path.join(dstParent, "koinos");
+  seedChain(src);
+  const before = dataMove.measure(src);
+
+  const m = mgr(src);
+  // Corrupt the copy after it lands, keeping the length identical — exactly
+  // what a bad cable or a failing sector looks like.
+  const realCopy = dataMove.copyTree;
+  dataMove.copyTree = async (a, b, opts) => {
+    const out = await realCopy(a, b, opts);
+    const victim = path.join(b, "mainnet", "basedir", "chain", "db", "000002.sst");
+    const size = fs.statSync(victim).size;
+    fs.writeFileSync(victim, "z".repeat(size));   // same size, different bytes
+    return out;
+  };
+
+  let err = null;
+  try {
+    await m.moveData("mainnet", dst);
+  } catch (e) {
+    err = e;
+  } finally {
+    dataMove.copyTree = realCopy;
+  }
+
+  assert.ok(err, "the move fails");
+  assert.match(err.message, /not identical to the original/i);
+  assert.match(err.message, /000002\.sst/, "and names the file that differed");
+  assert.match(err.message, /your data is untouched/i);
+  assert.equal(fs.existsSync(src), true, "the original survives");
+  assert.deepEqual(dataMove.measure(src), before);
+  assert.equal(m.dataRoot, path.resolve(src), "and is still the configured one");
+  assert.equal(fs.existsSync(dst), false, "the bad copy is not left in place");
+});
+
+test("the size check alone would NOT have caught it — which is why both run", () => {
+  // Guards against someone later deciding the checksum pass is redundant.
+  const a = tmp("a");
+  const b = tmp("b");
+  seedChain(a);
+  fs.cpSync(a, b, { recursive: true });
+  const victim = path.join(b, "mainnet", "basedir", "chain", "db", "000002.sst");
+  fs.writeFileSync(victim, "z".repeat(fs.statSync(victim).size));
+
+  assert.equal(dataMove.verifyTree(a, b).ok, true, "sizes all match, so the cheap check is happy");
+});
+
+test("checksums are taken from the source during the copy, not re-read afterwards", async () => {
+  // Reading the source twice would double the cost of the slowest operation
+  // in the app. copyTree returns the sums it computed on the way through.
+  const src = tmp("src");
+  const dst = path.join(tmp("dst"), "out");
+  seedChain(src);
+  const r = await dataMove.copyTree(src, dst, { total: 0 });
+  assert.ok(r.sums instanceof Map, "the copy hands back what it hashed");
+  assert.equal(r.sums.size, dataMove.measure(src).files, "one sha256 per file");
+  const rel = path.join("mainnet", "basedir", "chain", "db", "000001.sst");
+  const want = require("crypto").createHash("sha256")
+    .update(fs.readFileSync(path.join(src, rel))).digest("hex");
+  assert.equal(r.sums.get(rel), want, "and they are the real hashes");
+});
+
+test("checksumTree reports a mismatch precisely, and a clean copy as clean", async () => {
+  const src = tmp("src");
+  const dst = path.join(tmp("dst"), "out");
+  seedChain(src);
+  const { sums } = await dataMove.copyTree(src, dst, { total: 0 });
+
+  const clean = await dataMove.checksumTree(dst, sums);
+  assert.equal(clean.ok, true);
+  assert.equal(clean.checked, sums.size);
+
+  const victim = path.join(dst, "mainnet", "basedir", "peer_id");
+  fs.writeFileSync(victim, "X".repeat(fs.statSync(victim).size));
+  const dirty = await dataMove.checksumTree(dst, sums);
+  assert.equal(dirty.ok, false);
+  assert.equal(dirty.mismatched.length, 1);
+  assert.equal(dirty.mismatched[0].path, path.join("mainnet", "basedir", "peer_id"));
+});
+
 // ------------------------------------------------------------------ reporting
 
 test("progress is reported in bytes while the copy runs", async () => {
@@ -239,7 +330,7 @@ test("progress is reported in bytes while the copy runs", async () => {
   });
   await m.moveData("mainnet", dst);
   // The phases a person watching the screen would expect to pass through.
-  for (const phase of ["copying", "verifying", "switching", "done"]) {
+  for (const phase of ["copying", "verifying", "checksumming", "switching", "done"]) {
     assert.ok(seen.includes(phase), `emitted the ${phase} phase (saw ${seen.join(",")})`);
   }
 });
