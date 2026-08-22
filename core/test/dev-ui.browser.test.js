@@ -165,7 +165,10 @@ test("sidebar: switches live in Settings, and what they reveal survives a reload
     await page.waitForSelector("#view-settings:not([hidden])");
     const before = await page.$eval("#sidebar", (el) => el.getBoundingClientRect().top);
     await page.$eval("#view-settings", (el) => { el.scrollTop = el.scrollHeight; });
-    await page.waitForFunction(() => document.getElementById("view-settings").scrollTop > 0, { timeout: 5000 });
+    // 20s, not 5. Same lesson as code-ui.browser.test.js: an in-page wait is
+    // "has it got there yet", and a five-second bound on a runner sharing its
+    // cores with three other test files is a coin toss, not an assertion.
+    await page.waitForFunction(() => document.getElementById("view-settings").scrollTop > 0, { timeout: 20000 });
     const after = await page.$eval("#sidebar", (el) => el.getBoundingClientRect().top);
     assert.strictEqual(after, before, "the sidebar must not move when Settings scrolls");
     assert.strictEqual(

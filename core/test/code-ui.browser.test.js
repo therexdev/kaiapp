@@ -15,6 +15,30 @@ const os = require("os");
 const CHROMIUM = process.env.KAI_TEST_CHROMIUM || "/opt/pw-browsers/chromium";
 const FAKE_BIN = path.join(__dirname, "fixtures", "fake-llama-server");
 
+/*
+ * ONE bound for every in-page wait in this file.
+ *
+ * These waits are "has the UI got there yet", not performance budgets — the
+ * folder listing they mostly wait on takes ~200ms locally. Their job is to
+ * stop a genuinely hung page from hanging the suite, and each test's own
+ * 180s test-level timeout is the real backstop for that.
+ *
+ * It is a CONSTANT because the alternative failed twice. v0.42.0's build
+ * died on a 15s wait blown by `node --test` running files in parallel; the
+ * fix raised THAT wait and left its five identical siblings at 15s, and
+ * v0.42.1's build then died on one of the siblings. Patching the instance
+ * instead of the class costs a release each time.
+ */
+const UI_WAIT = 30000;
+
+/*
+ * Waits for a model RUN to finish are a different animal: a fake server still
+ * has to be polled, a diff rendered, an approval round-tripped. One of these
+ * was already 60s before the constants landed, and collapsing it into UI_WAIT
+ * would have quietly halved it.
+ */
+const RUN_WAIT = 90000;
+
 const available = (() => {
   try {
     require.resolve("playwright-core");
@@ -81,7 +105,7 @@ test("code panel: run -> diff card -> approve -> file written -> answer bubble",
     await page.waitForFunction(
       (dir) => document.getElementById("kc-browse-here").textContent.includes(dir),
       project,
-      { timeout: 15000 }
+      { timeout: UI_WAIT }
     );
     await page.click("#btn-kc-browse-use");
 
@@ -90,20 +114,20 @@ test("code panel: run -> diff card -> approve -> file written -> answer bubble",
     await page.waitForFunction(
       (dir) => document.getElementById("kc-path").textContent === dir,
       project,
-      { timeout: 15000 }
+      { timeout: UI_WAIT }
     );
 
     await page.fill("#kc-task", "create a greeting file");
     await page.click("#btn-kc-run");
 
     // The approval card arrives with the real diff; nothing on disk yet.
-    await page.waitForSelector(".kc-approval", { timeout: 30000 });
+    await page.waitForSelector(".kc-approval", { timeout: RUN_WAIT });
     const diff = await page.$eval(".kc-diff", (el) => el.textContent);
     assert.match(diff, /\+ hi from the panel/);
     assert.strictEqual(fs.existsSync(path.join(project, "greet.txt")), false, "nothing written before approval");
 
     await page.click(".kc-approval button.primary");
-    await page.waitForFunction(() => document.getElementById("kc-status").textContent.includes("done"), { timeout: 30000 });
+    await page.waitForFunction(() => document.getElementById("kc-status").textContent.includes("done"), { timeout: RUN_WAIT });
     assert.strictEqual(fs.readFileSync(path.join(project, "greet.txt"), "utf8"), "hi from the panel\n");
     const bubbles = await page.$$eval("#kc-trace .pg-msg", (els) => els.map((e) => e.textContent));
     assert.ok(
@@ -115,7 +139,7 @@ test("code panel: run -> diff card -> approve -> file written -> answer bubble",
     // workspace instead of a one-shot command. It carries both turns.
     await page.waitForFunction(
       () => document.querySelectorAll("#kc-sessions .kc-item").length > 0,
-      { timeout: 15000 }
+      { timeout: UI_WAIT }
     );
     const session = await page.$eval("#kc-sessions .kc-item", (el) => el.textContent);
     assert.match(session, /create a greeting file/, "the session is titled by what was asked");
@@ -177,7 +201,7 @@ test("plan mode: reads, proposes, changes nothing — then the approved plan doe
      * when the account tests got heavier, which is a scheduling fact about the
      * runner, not a fact about this feature.
      */
-    await page.waitForFunction((d) => document.getElementById("kc-browse-here").textContent.includes(d), project, { timeout: 30000 });
+    await page.waitForFunction((d) => document.getElementById("kc-browse-here").textContent.includes(d), project, { timeout: UI_WAIT });
     await page.click("#btn-kc-browse-use");
     await page.waitForSelector("#kc-chat:not([hidden])");
 
@@ -189,7 +213,7 @@ test("plan mode: reads, proposes, changes nothing — then the approved plan doe
     // A plan card arrives, and NOTHING has been written.
     await page.waitForFunction(
       () => document.getElementById("kc-status").textContent.includes("plan ready"),
-      { timeout: 30000 }
+      { timeout: RUN_WAIT }
     );
     const planText = await page.$eval(".kc-approval .pg-msg", (el) => el.textContent);
     assert.match(planText, /logs 2/);
@@ -201,11 +225,11 @@ test("plan mode: reads, proposes, changes nothing — then the approved plan doe
 
     // Approving runs it for real — and the write still needs its own card.
     await page.click(".kc-approval button.primary");
-    await page.waitForSelector(".kc-approval:not(.answered)", { timeout: 30000 });
+    await page.waitForSelector(".kc-approval:not(.answered)", { timeout: RUN_WAIT });
     await page.click(".kc-approval:not(.answered) button.primary");
     await page.waitForFunction(
       () => document.getElementById("kc-status").textContent.includes("done"),
-      { timeout: 30000 }
+      { timeout: UI_WAIT }
     );
     assert.strictEqual(fs.readFileSync(path.join(project, "app.js"), "utf8"), "console.log(2);\n");
   } finally {
@@ -277,7 +301,7 @@ test("clone destination opens the native folder window, and the model box drives
     await page.waitForFunction(
       (dir) => document.getElementById("kc-clone-parent-label").textContent === dir,
       cloneInto,
-      { timeout: 15000 }
+      { timeout: UI_WAIT }
     );
     assert.strictEqual(await page.inputValue("#kc-clone-parent"), cloneInto);
     assert.strictEqual((await page.evaluate(() => window.__picked)).length, 1, "the native window was opened");
@@ -289,7 +313,7 @@ test("clone destination opens the native folder window, and the model box drives
     await page.waitForSelector("#kc-chat:not([hidden])");
 
     // --- the model box: "App default" plus every model actually installed.
-    await page.waitForFunction(() => document.querySelectorAll("#kc-model option").length > 1, { timeout: 15000 });
+    await page.waitForFunction(() => document.querySelectorAll("#kc-model option").length > 1, { timeout: UI_WAIT });
     const options = await page.$$eval("#kc-model option", (els) => els.map((e) => ({ v: e.value, t: e.textContent })));
     assert.strictEqual(options[0].v, "", "the first choice follows the app");
     assert.match(options[0].t, /App default/);
@@ -299,7 +323,7 @@ test("clone destination opens the native folder window, and the model box drives
     // Choosing one PINS it to the project — it survives a reload, because a
     // model choice you have to re-make every time is not a choice.
     await page.selectOption("#kc-model", installed.v);
-    await page.waitForFunction(() => document.getElementById("kc-status").textContent.includes("using"), { timeout: 15000 });
+    await page.waitForFunction(() => document.getElementById("kc-status").textContent.includes("using"), { timeout: RUN_WAIT });
     const stored = await page.evaluate(async () => (await (await fetch("/core/code/projects")).json()).projects[0].model);
     assert.strictEqual(stored, installed.v);
 
@@ -307,7 +331,7 @@ test("clone destination opens the native folder window, and the model box drives
     fs.writeFileSync(record, "");
     await page.fill("#kc-task", "say hello");
     await page.click("#btn-kc-run");
-    await page.waitForFunction(() => /done|budget|step/.test(document.getElementById("kc-status").textContent), { timeout: 60000 });
+    await page.waitForFunction(() => /done|budget|step/.test(document.getElementById("kc-status").textContent), { timeout: RUN_WAIT });
     const asked = fs
       .readFileSync(record, "utf8")
       .split("\n")
