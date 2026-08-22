@@ -115,6 +115,13 @@ jobs:
           curl -sS --max-time 15 -o /dev/null -w 'app/app.js HTTP %{http_code} (%{size_download} bytes)\n' https://koinosai.com/app/app.js
           curl -sS --max-time 15 https://koinosai.com/robots.txt | grep -q '^Disallow: /app$' \
             && echo "robots.txt disallows /app" || echo "robots.txt does NOT disallow /app"
+          # Its API must be gated too, and answer JSON — a browser gets a door,
+          # an API caller gets a status it can read.
+          curl -sS --max-time 15 -o /tmp/appapi.body -w 'api/chats  HTTP %{http_code}\n' https://koinosai.com/app/api/chats
+          head -c 120 /tmp/appapi.body; echo
+          # The newest docs page. A partial docs deploy shows up here BEFORE
+          # the freshness marker below is moved onto it.
+          curl -sS --max-time 15 -o /dev/null -w 'docs webapp HTTP %{http_code} (%{size_download} bytes)\n' https://koinosai.com/docs/content/web-app.md
           echo
           echo "== /scheduler/claims (settlement diagnosis) =="
           curl -sS --max-time 15 "https://koinosai.com/scheduler/claims?address=1EXvuuW5HMrYRPdkraSi5Z4TBd4djyMj6E&limit=8" \
