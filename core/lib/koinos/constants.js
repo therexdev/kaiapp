@@ -125,6 +125,10 @@ const DEFAULT_SETTINGS = {
   customRpc: {},          // { [networkId]: "https://..." }
   node: {
     autoRecover: true,    // self-heal: auto-restart the node if it stalls/crashes
+    // Where the chain data lives. null = the default beside the app's own
+    // data; an absolute path once the user has chosen one, which they may do
+    // at setup (before the download) or later by moving what is already there.
+    dataDir: null,
   },
   rewards: {
     enabled: false,

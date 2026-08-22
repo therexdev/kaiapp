@@ -1,0 +1,260 @@
+"use strict";
+
+/*
+ * Moving the chain data to another disk, without ever being able to lose it.
+ *
+ * A synced Koinos node is tens of gigabytes, and the reason someone moves it
+ * is almost always that the current drive is full or has been replaced. Both
+ * of those are exactly the conditions under which a naive move destroys the
+ * thing it was asked to protect: a rename across devices fails outright, a
+ * copy that runs out of room halfway leaves a torn directory, and a "move"
+ * implemented as delete-then-copy loses everything if the machine dies in the
+ * middle.
+ *
+ * So the order here is fixed and non-negotiable:
+ *
+ *   1. copy everything into a TEMPORARY directory beside the destination
+ *   2. verify it — every file present, every size identical
+ *   3. only then swap the temp directory into place
+ *   4. only then point the setting at it
+ *   5. only then delete the original
+ *
+ * Nothing before step 5 touches the source. Kill the process at any point and
+ * the original is still there and still the one the app is configured to use;
+ * the worst outcome is a half-written temp directory, which is disposable by
+ * construction and is named so it can be recognised and swept up later.
+ *
+ * The copy is a manual walk rather than fs.cpSync because this is the main
+ * process of a desktop app: a synchronous 50 GB copy would freeze the window,
+ * and a progress bar is not decoration when the honest answer to "how long?"
+ * is twenty minutes.
+ */
+
+const fs = require("fs");
+const fsp = require("fs/promises");
+const path = require("path");
+
+// Copied into and swept from the destination's parent. The suffix is what
+// makes an interrupted move recognisable as debris rather than data.
+const TEMP_SUFFIX = ".koinos-move-tmp";
+
+/** Bytes free on the filesystem holding `dir`, or null where unsupported. */
+function freeBytes(dir) {
+  // statfs needs a path that exists; walk up until one does, since the
+  // destination is usually about to be created.
+  let probe = path.resolve(dir);
+  for (let i = 0; i < 40; i++) {
+    try {
+      const s = fs.statfsSync(probe);
+      return Number(s.bavail) * Number(s.bsize);
+    } catch {
+      const up = path.dirname(probe);
+      if (up === probe) return null;
+      probe = up;
+    }
+  }
+  return null;
+}
+
+/** Total bytes and file count under `dir`. Missing dir reads as empty. */
+function measure(dir) {
+  let bytes = 0;
+  let files = 0;
+  const walk = (d) => {
+    let entries;
+    try {
+      entries = fs.readdirSync(d, { withFileTypes: true });
+    } catch {
+      return; // unreadable subtree: measured as empty, and the copy will report it
+    }
+    for (const e of entries) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.isFile()) {
+        try {
+          bytes += fs.statSync(p).size;
+          files += 1;
+        } catch { /* vanished mid-walk */ }
+      }
+    }
+  };
+  walk(path.resolve(dir));
+  return { bytes, files };
+}
+
+/**
+ * Is `child` the same as, or inside, `parent`?
+ *
+ * Moving a directory into itself is the one input that turns a copy into an
+ * infinite one, and "put it in a subfolder of where it already is" is an
+ * entirely reasonable thing for someone to try in a folder picker.
+ */
+function isInside(parent, child) {
+  const a = path.resolve(parent);
+  const b = path.resolve(child);
+  if (a === b) return true;
+  const rel = path.relative(a, b);
+  return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
+}
+
+/**
+ * Everything that has to be true before a move is worth starting, answered in
+ * one place so the UI can explain the "no" instead of just refusing.
+ *
+ * Returns { ok, reason } — reason is written for a person, not a log.
+ */
+function checkTarget(source, target, { headroomBytes = 512 * 1024 * 1024 } = {}) {
+  const src = path.resolve(source);
+  const dst = path.resolve(target);
+
+  if (src === dst) return { ok: false, reason: "That is already where the data lives." };
+  if (isInside(src, dst)) {
+    return { ok: false, reason: "That folder is inside the current data folder — pick somewhere outside it." };
+  }
+  if (isInside(dst, src)) {
+    // Copying a directory into its own ancestor is legal, but the delete step
+    // would then take the destination with it. Refuse rather than be clever.
+    return { ok: false, reason: "The current data folder is inside that one — pick a different location." };
+  }
+
+  if (fs.existsSync(dst)) {
+    let entries;
+    try {
+      entries = fs.readdirSync(dst);
+    } catch (e) {
+      return { ok: false, reason: `That folder can't be read (${e.code || e.message}).` };
+    }
+    if (entries.length) {
+      return { ok: false, reason: "That folder already has something in it — choose an empty folder, or a new one." };
+    }
+  }
+
+  // Writable? Find out now, with a real file, rather than 40 GB in.
+  const probeDir = fs.existsSync(dst) ? dst : path.dirname(dst);
+  try {
+    fs.mkdirSync(probeDir, { recursive: true });
+    const probe = path.join(probeDir, `.koinos-write-test-${process.pid}`);
+    fs.writeFileSync(probe, "x");
+    fs.unlinkSync(probe);
+  } catch (e) {
+    return { ok: false, reason: `That location can't be written to (${e.code || e.message}).` };
+  }
+
+  const need = measure(src).bytes;
+  const free = freeBytes(probeDir);
+  if (free != null && free < need + headroomBytes) {
+    return {
+      ok: false,
+      reason: `Not enough room — the data is ${gb(need)} and that drive has ${gb(free)} free.`,
+      needBytes: need,
+      freeBytes: free,
+    };
+  }
+  return { ok: true, needBytes: need, freeBytes: free };
+}
+
+function gb(n) {
+  if (n == null) return "unknown";
+  if (n >= 1e12) return `${(n / 1e12).toFixed(2)} TB`;
+  if (n >= 1e9) return `${(n / 1e9).toFixed(1)} GB`;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(0)} MB`;
+  return `${Math.max(1, Math.round(n / 1e3))} kB`;
+}
+
+/**
+ * Copy a tree, reporting bytes as they land and honouring cancellation.
+ *
+ * Errors are NOT swallowed. A single unreadable file means the copy is not a
+ * faithful one, and a faithful copy is the only thing that earns the right to
+ * delete the original.
+ */
+async function copyTree(src, dst, { onProgress = () => {}, shouldCancel = () => false, total = 0 }) {
+  let done = 0;
+  let lastPing = 0;
+
+  const walk = async (from, to) => {
+    if (shouldCancel()) throw Object.assign(new Error("cancelled"), { cancelled: true });
+    await fsp.mkdir(to, { recursive: true });
+    const entries = await fsp.readdir(from, { withFileTypes: true });
+    for (const e of entries) {
+      if (shouldCancel()) throw Object.assign(new Error("cancelled"), { cancelled: true });
+      const a = path.join(from, e.name);
+      const b = path.join(to, e.name);
+      if (e.isDirectory()) {
+        await walk(a, b);
+      } else if (e.isSymbolicLink()) {
+        // Preserve the link rather than following it — a followed link would
+        // silently inflate the copy, or loop.
+        const target = await fsp.readlink(a);
+        await fsp.symlink(target, b).catch(() => {});
+      } else if (e.isFile()) {
+        await fsp.copyFile(a, b);
+        const { size } = await fsp.stat(b);
+        done += size;
+        const now = Date.now();
+        if (now - lastPing > 400) {
+          lastPing = now;
+          onProgress({ copiedBytes: done, totalBytes: total });
+        }
+      }
+      // Sockets, FIFOs and devices are deliberately skipped: a chain data
+      // directory has none, and copying one is never what was meant.
+    }
+  };
+
+  await walk(path.resolve(src), path.resolve(dst));
+  onProgress({ copiedBytes: done, totalBytes: total });
+  return done;
+}
+
+/**
+ * Prove the copy is faithful before anything irreversible happens.
+ *
+ * Byte-for-byte hashing of tens of gigabytes would take longer than the copy
+ * itself and buy little against the failure this actually guards — a copy cut
+ * short by a full disk, a dropped USB enclosure, or a killed process. Every
+ * file present at an identical size catches all of those. It is stated plainly
+ * rather than described as "verified" so nobody mistakes it for a checksum.
+ */
+function verifyTree(src, dst) {
+  const missing = [];
+  const wrongSize = [];
+  let checked = 0;
+
+  const walk = (from, to) => {
+    const entries = fs.readdirSync(from, { withFileTypes: true });
+    for (const e of entries) {
+      const a = path.join(from, e.name);
+      const b = path.join(to, e.name);
+      if (e.isDirectory()) {
+        if (!fs.existsSync(b)) { missing.push(b); continue; }
+        walk(a, b);
+      } else if (e.isFile()) {
+        checked += 1;
+        let sb;
+        try {
+          sb = fs.statSync(b);
+        } catch {
+          missing.push(b);
+          continue;
+        }
+        const sa = fs.statSync(a);
+        if (sa.size !== sb.size) wrongSize.push({ path: b, expected: sa.size, got: sb.size });
+      }
+    }
+  };
+
+  walk(path.resolve(src), path.resolve(dst));
+  return { ok: missing.length === 0 && wrongSize.length === 0, checked, missing, wrongSize };
+}
+
+module.exports = {
+  TEMP_SUFFIX,
+  freeBytes,
+  measure,
+  isInside,
+  checkTarget,
+  copyTree,
+  verifyTree,
+  gb,
+};

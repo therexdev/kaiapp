@@ -9,6 +9,7 @@ const { MIN_PASSWORD_LENGTH } = require("./wallet");
 const { NETWORKS, DEFAULT_SETTINGS } = require("./koinos/constants");
 const { ChainService } = require("./koinos/chain");
 const { NodeManager } = require("./koinos/node-manager");
+const dataMove = require("./koinos/data-move");
 const { SetupService } = require("./koinos/setup");
 const { RewardEngine } = require("./koinos/rewards");
 const { ProducerStats } = require("./koinos/producer-stats");
@@ -62,7 +63,7 @@ const { compareRoutes, descriptor } = require("./koinos/fund-routes");
 const DEFAULT_ONRAMP_ENDPOINT = "https://koinos-node.vercel.app/api/session";
 const ONRAMP_APP_KEY = "kkapp_71854dc40591df1aeb8811a514e3dbc302bb382f";
 
-function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards, stats, bridge, routeC, userData, appVersion, onEvent = () => {} }) {
+function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards, stats, bridge, routeC, userData, appVersion, defaultNodeData = null, onEvent = () => {} }) {
   const channels = new Map();
   const handle = (channel, fn) => channels.set(channel, fn);
 
@@ -354,6 +355,65 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
     return { autoRecover: !!on };
   });
   handle("node:logs", ({ service, tail }) => nodeMgr.logs(chain.network().id, service, tail));
+  /* ----- where the chain data lives -----
+   *
+   * Two moments matter. Before the download, choosing is free — nothing has
+   * been written yet, so it is only a setting. After it, choosing means
+   * moving tens of gigabytes, which is a real operation with a real chance of
+   * going wrong; node:moveDataDir is the one that does it properly.
+   */
+  handle("node:dataDir", () => {
+    const current = path.resolve(nodeMgr.dataRoot);
+    const size = dataMove.measure(current);
+    return {
+      path: current,
+      defaultPath: defaultNodeData ? path.resolve(defaultNodeData) : null,
+      isDefault: defaultNodeData ? path.resolve(defaultNodeData) === current : true,
+      sizeBytes: size.bytes,
+      fileCount: size.files,
+      freeBytes: dataMove.freeBytes(current),
+      // Empty means nothing has been downloaded yet, so a change is free.
+      hasData: size.files > 0,
+      move: nodeMgr.moveStatus(),
+    };
+  });
+
+  handle("node:inspectDataDir", ({ path: target }) => {
+    if (!target) throw new Error("Pick a folder first");
+    return nodeMgr.inspectMove(String(target));
+  });
+
+  /** Point at a new folder WITHOUT moving anything. Only legal while there is
+   *  nothing to move — otherwise it would silently orphan a synced chain. */
+  handle("node:setDataDir", ({ path: target }) => {
+    if (!target) throw new Error("Pick a folder first");
+    const next = path.resolve(String(target));
+    const current = path.resolve(nodeMgr.dataRoot);
+    if (next === current) return { path: current, changed: false };
+    if (dataMove.measure(current).files > 0) {
+      throw new Error("There is already chain data here — use Move instead, so it comes with you.");
+    }
+    const check = dataMove.checkTarget(current, next);
+    if (!check.ok) throw new Error(check.reason);
+    fs.mkdirSync(next, { recursive: true });
+    settings.set("node.dataDir", next);
+    nodeMgr.dataRoot = next;
+    return { path: next, changed: true };
+  });
+
+  /** Move existing chain data to a new folder and repoint the node at it. */
+  handle("node:moveDataDir", async ({ path: target }) => {
+    if (!target) throw new Error("Pick a folder first");
+    return nodeMgr.moveData(chain.network().id, String(target), {
+      // Persisted at the moment the new copy becomes the real one — before
+      // the old one is deleted, so a crash here costs disk, never data.
+      onSwitched: (dir) => { settings.set("node.dataDir", dir); },
+    });
+  });
+
+  handle("node:moveDataDirStatus", () => nodeMgr.moveStatus());
+  handle("node:moveDataDirCancel", () => nodeMgr.cancelMove());
+
   handle("node:quickSyncInfo", () => nodeMgr.quickSyncInfo(chain.network().id));
   handle("node:quickSync", () => nodeMgr.quickSync(chain.network().id));
   handle("node:quickSyncCancel", () => nodeMgr.cancelQuickSync());
@@ -725,9 +785,18 @@ function createKoinosNode({ dataDir, wallet, appVersion, onEvent = () => {} }) {
   const state = new JsonStore(path.join(root, "state.json"), {});
   const chain = new ChainService(settings);
 
+  /*
+   * Where the chain data lives. The default sits beside the app's own data,
+   * which is the right answer for most people and the wrong one for anyone
+   * whose system drive is small — so it is a default, not a decision: the
+   * setup flow offers it pre-filled and editable, and it can be moved later.
+   */
+  const defaultNodeData = path.join(root, "node");
+  const chosenNodeData = settings.get("node.dataDir", null);
+
   const nodeMgr = new NodeManager({
     templateRoot: path.join(__dirname, "..", "koinos-node-template"),
-    dataRoot: path.join(root, "node"),
+    dataRoot: chosenNodeData || defaultNodeData,
     onEvent,
     autoRecover: settings.get("node.autoRecover", true),
     probeHead: async () => {
@@ -785,7 +854,7 @@ function createKoinosNode({ dataDir, wallet, appVersion, onEvent = () => {} }) {
 
   const channels = buildChannels({
     settings, state, wallet, chain, nodeMgr, setup, rewards, stats, bridge, routeC,
-    userData: root, appVersion,
+    userData: root, appVersion, defaultNodeData,
   });
 
   return {

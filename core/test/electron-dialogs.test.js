@@ -24,11 +24,20 @@ const path = require("path");
 
 const UI_DIR = path.join(__dirname, "..", "..", "ui");
 
-function uiScripts() {
-  return fs
-    .readdirSync(UI_DIR)
-    .filter((f) => f.endsWith(".js"))
-    .map((f) => ({ file: f, text: fs.readFileSync(path.join(UI_DIR, f), "utf8") }));
+/*
+ * Every script under ui/, not just the top level. This used to stop at the
+ * first directory, which left ui/knode/bridge.js — the file that adapts the
+ * embedded node app, and the one place dialogs get ADDED to it — outside the
+ * net the whole test exists to cast.
+ */
+function uiScripts(dir = UI_DIR, prefix = "") {
+  const out = [];
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const rel = prefix ? `${prefix}/${e.name}` : e.name;
+    if (e.isDirectory()) out.push(...uiScripts(path.join(dir, e.name), rel));
+    else if (e.name.endsWith(".js")) out.push({ file: rel, text: fs.readFileSync(path.join(dir, e.name), "utf8") });
+  }
+  return out;
 }
 
 /** Strip comments so the warning ABOUT prompt() does not read as a use of it. */

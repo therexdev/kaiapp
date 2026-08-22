@@ -1,6 +1,7 @@
 "use strict";
 
 const fs = require("fs");
+const fsp = require("fs/promises");
 const path = require("path");
 const crypto = require("crypto");
 const { execFile, spawn } = require("child_process");
@@ -8,6 +9,7 @@ const { NETWORKS } = require("./constants");
 const { parseSha256File, analyzeMembers, requiredSpace, fmtBytes } = require("./quicksync-utils");
 const { httpHead, httpGetText, httpDownload } = require("./download");
 const { assessHealth, describeRecovery, classifyCrash, isCrashLooping } = require("./node-health");
+const dataMove = require("./data-move");
 
 const OP_LOG_LIMIT = 400;
 const ARCHIVE_NAME = "koinos-backup.tar.gz";
@@ -421,6 +423,164 @@ class NodeManager {
     if (!this._op) return null;
     const { lines, ...rest } = this._op;
     return { ...rest, tail: lines.slice(-15) };
+  }
+
+  // ---------- moving the data to another disk ----------
+  //
+  // People move this because a drive filled up or was replaced, so the code
+  // has to survive exactly the conditions that prompted it. The ordering
+  // rules live in ./data-move.js; what lives here is the part that needs the
+  // node itself: stopping it first, and pointing it at the new place after.
+  //
+  // Note that .env carries BASEDIR as an ABSOLUTE path, and ensureFiles()
+  // rewrites .env from this.dataRoot on every start — so moving the files and
+  // updating dataRoot is genuinely all it takes for Docker to follow. That is
+  // load-bearing, and there is a test pinning it.
+
+  moveStatus() {
+    if (!this._move) return null;
+    const { cancel, ...rest } = this._move;
+    return rest;
+  }
+
+  cancelMove() {
+    if (this._move?.running) this._move.cancel = true;
+    return { cancelling: !!this._move?.running };
+  }
+
+  /** What a move would involve, so the UI can ask before it commits. */
+  inspectMove(targetRoot) {
+    const source = path.resolve(this.dataRoot);
+    const target = path.resolve(targetRoot);
+    const check = dataMove.checkTarget(source, target);
+    const size = dataMove.measure(source);
+    return {
+      source,
+      target,
+      sizeBytes: size.bytes,
+      fileCount: size.files,
+      targetFreeBytes: dataMove.freeBytes(fs.existsSync(target) ? target : path.dirname(target)),
+      ...check,
+    };
+  }
+
+  /**
+   * Move the chain data to `targetRoot` and repoint the node at it.
+   *
+   * Resolves once the move has finished (or failed). Progress is on
+   * moveStatus(); the caller polls or listens for node:move events.
+   *
+   * @param onSwitched called after the setting must be updated — this is the
+   *   moment the new location becomes the real one, and it happens BEFORE the
+   *   old copy is deleted so a crash in between costs disk space, never data.
+   */
+  async moveData(networkId, targetRoot, { onSwitched } = {}) {
+    if (this._move?.running) throw new Error("A data move is already running");
+
+    const source = path.resolve(this.dataRoot);
+    const target = path.resolve(targetRoot);
+    const pre = dataMove.checkTarget(source, target);
+    if (!pre.ok) throw new Error(pre.reason);
+
+    const size = dataMove.measure(source);
+    const temp = target + dataMove.TEMP_SUFFIX;
+
+    const m = {
+      running: true,
+      phase: "stopping",
+      source,
+      target,
+      totalBytes: size.bytes,
+      fileCount: size.files,
+      copiedBytes: 0,
+      startedAt: Date.now(),
+      finishedAt: null,
+      error: null,
+      cancelled: false,
+      cancel: false,
+    };
+    this._move = m;
+    const emit = () => this.onEvent({ type: "node:move", move: this.moveStatus() });
+    emit();
+
+    try {
+      // 1. The node must not be writing to the files we are about to copy.
+      //    Docker holds the basedir open; copying underneath a running chain
+      //    would produce a torn database that looks fine until it doesn't.
+      if (this.filesReady(networkId)) {
+        await this.stop(networkId);
+        await this._settle();
+      }
+      if (m.cancel) throw Object.assign(new Error("cancelled"), { cancelled: true });
+
+      // 2. Copy into a temp directory beside the destination. Never into the
+      //    destination itself: a half-finished copy must never be mistakable
+      //    for a finished one.
+      m.phase = "copying";
+      emit();
+      await fsp.rm(temp, { recursive: true, force: true });
+      await dataMove.copyTree(source, temp, {
+        total: size.bytes,
+        shouldCancel: () => m.cancel,
+        onProgress: ({ copiedBytes }) => {
+          m.copiedBytes = copiedBytes;
+          emit();
+        },
+      });
+
+      // 3. Prove it landed before anything becomes irreversible.
+      m.phase = "verifying";
+      emit();
+      const v = dataMove.verifyTree(source, temp);
+      if (!v.ok) {
+        const detail = v.missing.length
+          ? `${v.missing.length} file(s) missing`
+          : `${v.wrongSize.length} file(s) the wrong size`;
+        throw new Error(`The copy did not match the original — ${detail}. Nothing was deleted.`);
+      }
+
+      // 4. Swap it into place, then repoint the node. Only now does the new
+      //    location become the real one.
+      m.phase = "switching";
+      emit();
+      await fsp.rename(temp, target);
+      this.dataRoot = target;
+      if (typeof onSwitched === "function") await onSwitched(target);
+
+      // 5. The original is now redundant. Deleting it last is the whole
+      //    safety property: every earlier failure leaves it untouched.
+      m.phase = "cleaning";
+      emit();
+      await fsp.rm(source, { recursive: true, force: true }).catch(() => {
+        // A locked file on Windows can keep the old folder alive. The move
+        // itself is done and correct; leftover bytes are not a failure.
+      });
+
+      m.phase = "done";
+      m.running = false;
+      m.finishedAt = Date.now();
+      emit();
+      return { moved: true, source, target };
+    } catch (e) {
+      // Cancelled or failed: bin the partial copy, leave the original alone.
+      await fsp.rm(temp, { recursive: true, force: true }).catch(() => {});
+      m.running = false;
+      m.finishedAt = Date.now();
+      m.cancelled = !!e.cancelled || m.cancel;
+      m.phase = m.cancelled ? "cancelled" : "error";
+      m.error = m.cancelled ? null : e.message;
+      emit();
+      if (m.cancelled) return { moved: false, cancelled: true };
+      throw e;
+    }
+  }
+
+  /** Wait for any in-flight compose operation to finish. */
+  async _settle(timeoutMs = 180000) {
+    const until = Date.now() + timeoutMs;
+    while (this._op?.running && Date.now() < until) {
+      await new Promise((r) => setTimeout(r, 500));
+    }
   }
 
   // ---------- quick sync (restore from the official chain backup) ----------
