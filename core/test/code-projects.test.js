@@ -379,3 +379,69 @@ test("HTTP: browse is gated by the switch and refuses proxied callers", async ()
     await core.stop();
   }
 });
+
+/*
+ * v0.40.0 — "what model does this use? There should probably be a model
+ * selector just like the chat." It was the app-wide Chat model, chosen
+ * silently. Now a project can pin its own, because a large repository and a
+ * scratch folder do not want the same model.
+ */
+test("a project can pin its own model, and \"\" means follow the app", () => {
+  const dataDir = tmp("kai-store-");
+  const store = new CodeProjects(dataDir);
+  const p = store.add({ dir: tmp("kai-p-") });
+  assert.strictEqual(store.list()[0].model, "", "unset by default — the app's model");
+  store.setModel(p.id, "koinos-fast");
+  assert.strictEqual(store.list()[0].model, "koinos-fast");
+  // It survives a restart: a choice you must re-make every time is not one.
+  assert.strictEqual(new CodeProjects(dataDir).list()[0].model, "koinos-fast");
+  // Clearing goes back to following the app, rather than being rejected.
+  store.setModel(p.id, "");
+  assert.strictEqual(store.list()[0].model, "");
+  assert.throws(() => store.setModel("nope", "x"), /no such project/);
+});
+
+test("HTTP: PATCH pins a model, and a run with no model of its own uses it", async () => {
+  const dataDir = coreDir();
+  const project = tmp("kai-pm-");
+  const { core, base } = await startCore(dataDir, ["Nothing to change."], { record: true });
+  try {
+    await j(base, "/core/code-switch", { method: "POST", body: JSON.stringify({ enabled: true }) });
+    const made = await j(base, "/core/code/projects", { method: "POST", body: JSON.stringify({ dir: project }) });
+    const id = made.body.project.id;
+
+    // A rename and a model pin are the same route and do not clobber each other.
+    const named = await j(base, `/core/code/projects/${id}`, { method: "PATCH", body: JSON.stringify({ name: "Ledger" }) });
+    assert.strictEqual(named.body.project.name, "Ledger");
+    const pinned = await j(base, `/core/code/projects/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ model: "dev-tiny" }),
+    });
+    assert.strictEqual(pinned.body.project.model, "dev-tiny");
+    assert.strictEqual(pinned.body.project.name, "Ledger", "pinning a model must not rename the project");
+
+    const out = await run(base, { projectId: id, task: "look around" });
+    assert.ok(out.frames.some((f) => f.done && !f.error), `the run finished: ${JSON.stringify(out.frames)}`);
+    const asked = fs
+      .readFileSync(path.join(dataDir, "requests.jsonl"), "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => JSON.parse(l));
+    assert.ok(asked.length, "the pinned project still reaches a model");
+
+    // A pinned model that has since been deleted must not brick the project:
+    // the run says so and falls back, rather than failing outright.
+    await j(base, `/core/code/projects/${id}`, { method: "PATCH", body: JSON.stringify({ model: "gone-forever" }) });
+    const after = await run(base, { projectId: id, task: "look around" });
+    const done = after.frames.find((f) => f.done);
+    assert.ok(done && !done.error, `a stale pin must not fail the run: ${JSON.stringify(after.frames)}`);
+    assert.ok(
+      after.frames.some((f) => f.trace?.type === "note" && /gone-forever is not installed/.test(f.trace.text)),
+      `expected a note naming the missing model: ${JSON.stringify(after.frames)}`
+    );
+  } finally {
+    delete process.env.FAKE_LLAMA_SCRIPT;
+    delete process.env.FAKE_LLAMA_RECORD;
+    await core.stop();
+  }
+});

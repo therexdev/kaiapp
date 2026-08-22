@@ -94,6 +94,7 @@ class CodeProjects {
         name: p.name,
         path: p.path,
         origin: p.origin || null,
+        model: p.model || "",
         createdAt: p.createdAt,
         lastUsedAt: p.lastUsedAt,
         missing: !this.exists(p),
@@ -154,6 +155,24 @@ class CodeProjects {
     this.projects.splice(i, 1);
     this._save();
     return true;
+  }
+
+  /*
+   * Which model works this project.
+   *
+   * "" means "whatever the app is set to" — the honest default, and the one
+   * that keeps working when a model is later removed from the machine. A
+   * pinned alias is a deliberate choice (a bigger model for a bigger repo) and
+   * survives restarts, which is the whole reason it lives here and not in the
+   * page. The alias is NOT validated against the catalog: models come and go,
+   * and a project should not become unopenable because one was deleted — the
+   * run falls back to the app default and says which model it used.
+   */
+  setModel(projectId, model) {
+    const p = this.get(projectId);
+    p.model = String(model || "").trim().slice(0, 80);
+    this._save();
+    return p;
   }
 
   rename(projectId, name) {

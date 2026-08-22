@@ -1186,7 +1186,12 @@ class Gateway {
           }
           if (rest.length === 1 && req.method === "PATCH") {
             const b = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
-            return this._json(res, 200, { ok: true, project: P.rename(projectId, b.name) });
+            let project = P.get(projectId);
+            if (b.name !== undefined) project = P.rename(projectId, b.name);
+            // "" is a real value here — it means "follow the app default" —
+            // so presence, not truthiness, decides whether to set it.
+            if (b.model !== undefined) project = P.setModel(projectId, b.model);
+            return this._json(res, 200, { ok: true, project });
           }
           if (rest[1] === "sessions" && rest.length === 2 && req.method === "GET") {
             return this._json(res, 200, { ok: true, sessions: P.sessions(projectId) });
@@ -1299,6 +1304,7 @@ class Gateway {
         let project = null;
         let sessionId = String(body.sessionId || "");
         let history = [];
+        let staleModel = ""; // a pinned model that is no longer installed
         try {
           if (body.projectId) {
             project = this.code.projects.get(String(body.projectId));
@@ -1307,6 +1313,26 @@ class Gateway {
             // part of a thread rather than falling out of the history.
             if (!sessionId) sessionId = this.code.projects.newSession(project.id, {}).id;
             history = this.code.projects.history(project.id, sessionId);
+            /*
+             * A project may pin its own model. An explicit model in the
+             * request still wins — the picker in the composer is the live
+             * choice — and a pin that no longer resolves is IGNORED rather
+             * than fatal: models get deleted, and a project must not become
+             * unopenable because one did. An alias the caller named on this
+             * request is a different matter and still fails loudly.
+             */
+            if (!String(body.model || "").trim() && project.model) {
+              try {
+                this.models.resolveAlias(project.model);
+                body.model = project.model;
+              } catch {
+                staleModel = project.model;
+                // Fall back to whatever the app is actually serving, so the
+                // project still opens and works while the pin is stale.
+                const live = this.runtime?.status?.().activeAlias;
+                if (live) body.model = live;
+              }
+            }
           }
         } catch (e) {
           return this._json(res, 400, { ok: false, error: String(e.message) });
@@ -1334,6 +1360,7 @@ class Gateway {
         res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
         const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
         if (commandName) send({ trace: { type: "note", text: `/${commandName}` } });
+        if (staleModel) send({ trace: { type: "note", text: `${staleModel} is not installed — using the app's model instead` } });
         if (project && sessionId) send({ session: { projectId: project.id, sessionId } });
         try {
           const r = await this.code.run({

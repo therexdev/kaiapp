@@ -261,13 +261,81 @@ observation, for context rather than privilege. The child reuses the parent's
 io (its writes are the parent's cards), gets no host tools, cannot delegate
 further, has a smaller budget, and is capped at 3 per run.
 
+## v9 (shipped 0.40.0) — the action grammar is the weakest link
+
+The field report that forced this, verbatim: *"It did not make this file like it
+said the first time or the second."* The screenshot showed a `write_file` call
+rendered as a chat bubble, `done — 0 tool steps`, no approval card, and a second
+turn insisting the file already existed.
+
+**Root cause.** To call a tool the model writes JSON. Asked for calculator.html
+it produced
+
+```
+{"tool": "write_file", "args": {"path": "calculator.html", "content": "```html
+<head><meta charset="UTF-8">…
+```"}}
+```
+
+— a markdown fence, raw newlines, and the page's own `charset="UTF-8"` quotes.
+That is not valid JSON and it never will be: no prompt makes a 4B model
+hand-escape a whole web page. `extractJson` returned null, and **the loop treats
+null as "this is the final answer"**, so the blob was surfaced as prose. The
+v0.38.0 nudge built for precisely this case *also* called `JSON.parse`, agreed
+it was not a tool call, and stayed silent.
+
+**Three fixes, one per failure.**
+
+1. `salvageAction(text, toolNames)` in `ui/agents.js` — when the grammar fails,
+   recover the call by SHAPE: find the tool name, walk a *closed vocabulary* of
+   argument keys in positional order, and take each value up to the next key;
+   the last long value runs to the last quote that has nothing but closers after
+   it, so braces inside the content (a CSS rule) survive. Markdown fences that
+   wrap a whole value are stripped. It refuses to guess — an unknown tool, or no
+   tool name at all, returns null so the nudge fires instead.
+
+   **Why heuristics are acceptable here and nowhere else:** a salvaged write goes
+   through the same approval card, showing the same full diff, as a cleanly
+   parsed one. A garbled salvage is a garbled diff the person declines. It can
+   never write unattended what a clean parse could not.
+
+2. `looksLikeToolCall` no longer parses. Shape only — a fallback check that
+   shares the failure mode of the thing it backstops is not a fallback.
+
+3. `truthfulAnswer` — the run tracks whether a write tool actually SUCCEEDED
+   (a helper's counts, since it writes through the parent's cards). An answer
+   that claims a write when nothing reached disk gets a correction appended.
+   Without this the lie enters the session history and the next turn believes it,
+   which is exactly what the second screenshot showed.
+
+Also in v0.40.0: fences stripped from `content`/`find`/`replace` in the file
+tools themselves, so even a cleanly-parsed fenced value does not put ```` ```html ````
+on line 1 of the file (`.md` targets keep theirs — a fenced block is legitimate
+content there); the clone destination opens the same native OS window as
+"Select a folder", with the typed-path row hidden entirely where that window
+exists; and a per-project model picker.
+
+**The model picker is local-only, unlike Chat, on purpose.** The coding agent
+reads your project's files into every prompt it sends. Offering the Koinos
+Network in this box would put private source on volunteer machines as a side
+effect of choosing a faster one — a consequence nobody would predict from a
+model dropdown. In Chat the person types what goes up; here the agent decides.
+A pin whose model was later deleted is ignored with a visible note and the run
+falls back to what the app is serving, because a project must not become
+unopenable because a model was removed.
+
+**Standing lesson.** With a small local model the action grammar — not the
+tools, not the permission model — is the weakest part of this feature. Assume
+malformed output is the normal case, recover from it, and never let an
+unreadable tool call become an answer.
+
 ## What "exactly like Claude Code" does and does not mean here
 
 Worth stating plainly rather than implying parity that does not exist. Koinos
 Code now matches the shape: its own place in the app, many projects, sessions
 that remember, a coding agent with approval gates, a terminal CLI, and GitHub.
 As of v0.39.0 it also has subagents, custom slash commands, MCP tools inside
-the coding agent, and plan mode. Two things remain different, and both are
+the coding agent, and plan mode; v0.40.0 adds a per-project model picker. Two things remain different, and both are
 deliberate:
 
 **Background tasks are not built.** A run that outlives its connection needs

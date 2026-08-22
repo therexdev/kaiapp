@@ -19,7 +19,7 @@ const crypto = require("crypto");
  */
 
 const { makeTools, projectContext, PREAMBLE } = require(path.join(__dirname, "..", "..", "cli", "koinos-code.js"));
-const { buildAgentSystem, parseAgentAction, trimConvo } = require(path.join(__dirname, "..", "..", "ui", "agents"));
+const { buildAgentSystem, parseAgentAction, salvageAction, trimConvo } = require(path.join(__dirname, "..", "..", "ui", "agents"));
 
 const DEFAULT_MAX_STEPS = 25;
 const HARD_MAX_STEPS = 50;
@@ -29,26 +29,59 @@ const MAX_TOKENS_PER_CALL = 900; // same as the CLI
 const MAX_NUDGES = 2; // bounded: a model that will not stop must still finish
 
 /*
- * Did the model TRY to call a tool that is not in its hands?
+ * Did the model TRY to call a tool, whether or not the attempt was usable?
  *
  * parseAgentAction returns null both for ordinary prose and for a tool call
  * naming something unavailable — and the loop treats null as "this is the
  * final answer". That meant a refused tool call was surfaced to the person as
  * raw JSON masquerading as an answer. Most visible in plan mode, where the
  * editing tools deliberately do not exist, but it was always wrong.
+ *
+ * This deliberately does NOT parse. It used to, and that was the bug behind
+ * the v0.39.0 field report: the call that failed hardest — a whole HTML file
+ * hand-escaped into a JSON string — is exactly the one JSON.parse rejects, so
+ * the check said "not a tool call", no nudge fired, and the blob became the
+ * answer. Shape is the question here; salvageAction handles meaning.
  */
+const TOOL_KEY = /"(?:tool|name|action|mcp|tool_name|function)"\s*:/;
+
 function looksLikeToolCall(text) {
   const t = String(text || "");
   const i = t.indexOf("{");
-  if (i < 0) return false;
-  const j = t.lastIndexOf("}");
-  if (j <= i) return false;
-  try {
-    const o = JSON.parse(t.slice(i, j + 1));
-    return Boolean(o && typeof o === "object" && (o.tool || o.name || o.action || o.mcp || o.tool_name || o.function));
-  } catch {
-    return false;
-  }
+  return i >= 0 && TOOL_KEY.test(t.slice(i));
+}
+
+/*
+ * "I have already written the HTML code for you and placed it in a file named
+ * calculator.html." — said after writing nothing at all (v0.39.0 field
+ * report). A model that failed to call write_file still narrates as though it
+ * succeeded, and the claim then rides into the session history where the next
+ * turn believes it.
+ *
+ * The run KNOWS whether anything was written. When nothing was and the answer
+ * says otherwise, the answer is corrected before anyone reads it or the
+ * transcript keeps it. All three signals must be present, so "I would create
+ * two files" (a plan) and "the file already contains that" (an observation)
+ * are left alone.
+ */
+const CLAIM_FIRST_PERSON = /\bI(?:'ve|'m| have| already)?\b/i;
+const CLAIM_VERB = /\b(?:wrote|written|created|saved|placed|generated|added)\b/i;
+const CLAIM_TARGET = /\bfiles?\b|\bfolder\b|\bdirectory\b|\.(?:html?|css|jsx?|tsx?|json|py|md|txt|sh|ya?ml|c|cpp|h|java|rb|go|rs|php|sql)\b/i;
+
+function claimsAWrite(text) {
+  const t = String(text || "");
+  if (/\bwould\s+(?:write|create|save|add|generate)\b/i.test(t) && !CLAIM_VERB.test(t.replace(/\bwould\s+\w+/gi, ""))) return false;
+  return CLAIM_FIRST_PERSON.test(t) && CLAIM_VERB.test(t) && CLAIM_TARGET.test(t);
+}
+
+const NOT_WRITTEN =
+  "\n\n_Nothing was written to disk — no file in this project was created or changed. " +
+  "Any file named above does not exist yet._";
+
+/** The answer as the person should see it: never a write that did not happen. */
+function truthfulAnswer(answer, wrote) {
+  const a = String(answer || "");
+  return !wrote && claimsAWrite(a) ? a.trimEnd() + NOT_WRITTEN : a;
 }
 
 /*
@@ -120,6 +153,7 @@ function registryTools(registry, { allow = [], io, runId, onTrace }) {
  *   - it has a smaller step budget than the parent, so N children cannot cost
  *     more than the parent's own ceiling.
  */
+const WRITE_TOOLS = new Set(["write_file", "edit_file"]);
 const SUBAGENT_MAX_STEPS = 12;
 const SUBAGENT_LIMIT = 3; // per parent run
 
@@ -226,6 +260,9 @@ class CodeAgent {
      * pass that should not be farming work out.
      */
     let spawned = 0;
+    // Hoisted out of the loop: the delegate handler below reads it so a
+    // helper's approved write is not later denied by the parent's answer.
+    let wrote = false;
     const delegateTool =
       planning || depth > 0
         ? []
@@ -255,6 +292,9 @@ class CodeAgent {
                     parentRunId: runId,
                     onTrace: (e) => onTrace({ ...e, from: "helper" }),
                   });
+                  // A helper writes through the parent's own approval cards,
+                  // so its approved write IS a write in this project.
+                  if (child.wrote) wrote = true;
                   return child.answer ? `helper reported:\n${child.answer}` : `the helper finished without an answer (${child.reason})`;
                 } catch (e) {
                   return `helper failed: ${e.message}`;
@@ -315,10 +355,13 @@ class CodeAgent {
       convo.push({ role: "user", content: q });
       let nudges = 0;
       for (let step = 0; step < budget; step++) {
-        if (run.aborted) return { runId, answer: "", steps: step, reason: "stopped" };
+        if (run.aborted) return { runId, answer: "", steps: step, reason: "stopped", wrote };
         const out = String((await this.chatFn({ model, messages: trimConvo(convo), maxTokens: MAX_TOKENS_PER_CALL })) ?? "");
-        if (run.aborted) return { runId, answer: "", steps: step, reason: "stopped" };
-        const action = parseAgentAction(out, names);
+        if (run.aborted) return { runId, answer: "", steps: step, reason: "stopped", wrote };
+        // Strict first. Then salvage, which recovers the call a small model
+        // could not escape — a whole file's content in a JSON string is the
+        // case it gets wrong, and the case that matters most.
+        const action = parseAgentAction(out, names) || salvageAction(out, names);
         if (!action) {
           /*
            * No parsable action. With small models that usually IS the final
@@ -341,13 +384,13 @@ class CodeAgent {
             });
             continue;
           }
-          return { runId, answer: out.trim(), steps: step, reason: planning ? "planned" : "answered" };
+          return { runId, answer: truthfulAnswer(out.trim(), wrote), steps: step, reason: planning ? "planned" : "answered", wrote };
         }
         if (action.answer) {
           convo.push({ role: "assistant", content: out });
           convo.push({ role: "user", content: "Give the final answer to the task now, as plain text." });
           const fin = String((await this.chatFn({ model, messages: trimConvo(convo), maxTokens: MAX_TOKENS_PER_CALL })) ?? "");
-          return { runId, answer: fin.trim(), steps: step, reason: planning ? "planned" : "answered" };
+          return { runId, answer: truthfulAnswer(fin.trim(), wrote), steps: step, reason: planning ? "planned" : "answered", wrote };
         }
         const tool = tools.find((t) => t.name === action.tool);
         onTrace({ type: "tool", name: action.tool, args: JSON.stringify(action.args || {}).slice(0, 200) });
@@ -358,11 +401,15 @@ class CodeAgent {
           obs = `tool error: ${e.message}`;
         }
         obs = obs.slice(0, OBS_MAX_CHARS);
+        // makeTools' file tools answer "wrote <path> (N bytes)" and only ever
+        // after an approval came back yes; a decline or a jail refusal reads
+        // differently. A helper's write counts too — it wrote in this project.
+        if (WRITE_TOOLS.has(action.tool) && /^wrote\s/.test(obs)) wrote = true;
         onTrace({ type: "obs", text: obs.split("\n")[0].slice(0, 200) });
         convo.push({ role: "assistant", content: out });
         convo.push({ role: "user", content: `Observation:\n${obs}\n\nContinue with the task. Use another tool, or reply {"answer": true} when done.` });
       }
-      return { runId, answer: "", steps: budget, reason: "budget" };
+      return { runId, answer: "", steps: budget, reason: "budget", wrote };
     } finally {
       this.stop(runId); // clears any orphaned approval cards
       this._runs.delete(runId);
@@ -370,4 +417,4 @@ class CodeAgent {
   }
 }
 
-module.exports = { CodeAgent, registryTools, MAX_EXTRA_TOOLS, SUBAGENT_MAX_STEPS, SUBAGENT_LIMIT };
+module.exports = { CodeAgent, registryTools, looksLikeToolCall, claimsAWrite, truthfulAnswer, MAX_EXTRA_TOOLS, SUBAGENT_MAX_STEPS, SUBAGENT_LIMIT };

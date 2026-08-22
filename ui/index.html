@@ -587,9 +587,16 @@
                 <div class="form-row">
                   <input id="kc-clone-repo" placeholder="owner/name — or the full GitHub URL" />
                 </div>
+                <!-- Destination. The BUTTON is the affordance, same native
+                     window as "Select a folder" on the start screen; the typed
+                     path is the fallback for the served UI, which has no
+                     dialog to open. -->
                 <div class="form-row">
-                  <input id="kc-clone-parent" placeholder="Folder to clone into" />
-                  <button id="btn-kc-clone-pick" class="small">Browse…</button>
+                  <button id="btn-kc-clone-pick" class="small">Select a folder…</button>
+                  <span id="kc-clone-parent-label" class="meta">no folder chosen yet</span>
+                </div>
+                <div class="form-row" id="kc-clone-parent-row">
+                  <input id="kc-clone-parent" placeholder="Folder to clone into — full path" />
                 </div>
                 <div class="form-row">
                   <button id="btn-kc-clone-go" class="primary small">Clone and start</button>
@@ -647,6 +654,8 @@
               </div>
               <div class="kc-composer-opts">
                 <label class="check kc-opt"><input type="checkbox" id="kc-plan" /> Plan first</label>
+                <label class="kc-opt" for="kc-model">Model</label>
+                <select id="kc-model" title="Which model does the work. Koinos Code runs on this machine only — the agent reads your project's files into the prompt, and those do not leave the computer."></select>
                 <button id="btn-kc-tools" class="kc-link">Tools…</button>
                 <span id="kc-tools-summary" class="meta"></span>
               </div>

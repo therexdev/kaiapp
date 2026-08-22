@@ -908,6 +908,11 @@ button.small:disabled { opacity: 0.5; cursor: default; }
 .kc-statusline { padding: 2px 20px 12px; min-height: 18px; }
 .kc-composer-opts { display: flex; align-items: center; gap: 12px; padding: 6px 20px 0; flex-wrap: wrap; }
 .kc-opt { font-size: 0.85em; color: var(--text-dim); }
+/* The model box sits in the same row as "Plan first" and "Tools…", sized to
+   its content so a long model name does not push the row apart. */
+#kc-model { font-size: 0.85em; padding: 3px 6px; max-width: 260px; }
+/* The chosen clone destination, beside the button that opens the OS window. */
+#kc-clone-parent-label { overflow-wrap: anywhere; }
 #kc-tools-panel { margin: 8px 20px 0; }
 .kc-tool-row { display: flex; align-items: flex-start; gap: 8px; padding: 7px 12px; font-size: 0.86em; }
 .kc-tool-row:hover { background: var(--bg-raised); }

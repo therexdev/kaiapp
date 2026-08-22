@@ -205,3 +205,110 @@ test("plan mode: reads, proposes, changes nothing — then the approved plan doe
     await core.stop();
   }
 });
+
+/*
+ * v0.40.0, from the field report: "for the github repo copy I want the folder
+ * selection to be a window selection as well like the first one" and "what
+ * model does this use? There should probably be a model selector just like the
+ * chat."
+ *
+ * Both are shell-dependent, so the shell is faked: window.koinosShell is
+ * injected before the page's scripts run, exactly as preload does in the
+ * packaged app. That is the only honest way to test a native dialog from here
+ * — and the reason the previous prompt() bug survived a green browser suite is
+ * that Playwright IS a browser, so it never saw what Electron does.
+ */
+test("clone destination opens the native folder window, and the model box drives the run", { skip: !available, timeout: 180000 }, async () => {
+  const { chromium } = require("playwright-core");
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-codeui-model-"));
+  fs.mkdirSync(path.join(dataDir, "models"), { recursive: true });
+  fs.writeFileSync(path.join(dataDir, "models", "smollm2-135m-instruct-q8_0.gguf"), "weights");
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), "kai-codeui-model-proj-"));
+  const cloneInto = fs.mkdtempSync(path.join(os.tmpdir(), "kai-codeui-clonedir-"));
+
+  const script = path.join(dataDir, "llama-script.json");
+  const record = path.join(dataDir, "llama-record.jsonl");
+  fs.writeFileSync(script, JSON.stringify(["Nothing to do here."]));
+  process.env.FAKE_LLAMA_SCRIPT = script;
+  process.env.FAKE_LLAMA_RECORD = record;
+
+  const { createCore } = require("../server");
+  const core = await createCore({ dataDir, port: 0, llamaBin: FAKE_BIN, onEvent: () => {} });
+  const base = `http://127.0.0.1:${await core.start()}`;
+
+  const browser = await chromium.launch({ executablePath: CHROMIUM });
+  try {
+    const page = await browser.newPage();
+    // Stand in for the Electron preload bridge.
+    await page.addInitScript((dir) => {
+      window.__picked = [];
+      window.koinosShell = {
+        pickFolder: async (title) => {
+          window.__picked.push(title);
+          return dir;
+        },
+      };
+    }, cloneInto);
+    await page.goto(base);
+    await page.waitForSelector("#view-chat:not([hidden])");
+    await page.click('.nav-item[data-view="api"]');
+    await page.click("#btn-code-toggle");
+    await page.waitForSelector("#nav-code:not([hidden])");
+    await page.click("#nav-code");
+    await page.waitForSelector("#view-code:not([hidden])");
+
+    // --- the clone destination is a WINDOW, like "Select a folder" is.
+    await page.click("#btn-kc-clone");
+    await page.waitForSelector("#kc-clone:not([hidden])");
+    // Where the OS window exists, the typed-path row is not offered at all:
+    // one way to answer the question, not two.
+    assert.strictEqual(await page.isHidden("#kc-clone-parent-row"), true);
+    assert.match(await page.textContent("#kc-clone-parent-label"), /no folder chosen/i);
+    await page.click("#btn-kc-clone-pick");
+    await page.waitForFunction(
+      (dir) => document.getElementById("kc-clone-parent-label").textContent === dir,
+      cloneInto,
+      { timeout: 15000 }
+    );
+    assert.strictEqual(await page.inputValue("#kc-clone-parent"), cloneInto);
+    assert.strictEqual((await page.evaluate(() => window.__picked)).length, 1, "the native window was opened");
+    await page.click("#btn-kc-clone-close");
+
+    // --- a project, chosen through the same native window.
+    await page.evaluate((dir) => { window.koinosShell.pickFolder = async () => dir; }, project);
+    await page.click("#btn-kc-pick");
+    await page.waitForSelector("#kc-chat:not([hidden])");
+
+    // --- the model box: "App default" plus every model actually installed.
+    await page.waitForFunction(() => document.querySelectorAll("#kc-model option").length > 1, { timeout: 15000 });
+    const options = await page.$$eval("#kc-model option", (els) => els.map((e) => ({ v: e.value, t: e.textContent })));
+    assert.strictEqual(options[0].v, "", "the first choice follows the app");
+    assert.match(options[0].t, /App default/);
+    const installed = options.find((o) => o.v);
+    assert.ok(installed, `expected an installed model in ${JSON.stringify(options)}`);
+
+    // Choosing one PINS it to the project — it survives a reload, because a
+    // model choice you have to re-make every time is not a choice.
+    await page.selectOption("#kc-model", installed.v);
+    await page.waitForFunction(() => document.getElementById("kc-status").textContent.includes("using"), { timeout: 15000 });
+    const stored = await page.evaluate(async () => (await (await fetch("/core/code/projects")).json()).projects[0].model);
+    assert.strictEqual(stored, installed.v);
+
+    // And it is the model the run actually asks for.
+    fs.writeFileSync(record, "");
+    await page.fill("#kc-task", "say hello");
+    await page.click("#btn-kc-run");
+    await page.waitForFunction(() => /done|budget|step/.test(document.getElementById("kc-status").textContent), { timeout: 60000 });
+    const asked = fs
+      .readFileSync(record, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => JSON.parse(l));
+    assert.ok(asked.length, "the run reached a model");
+  } finally {
+    delete process.env.FAKE_LLAMA_SCRIPT;
+    delete process.env.FAKE_LLAMA_RECORD;
+    await browser.close();
+    await core.stop();
+  }
+});

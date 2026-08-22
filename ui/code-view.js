@@ -35,7 +35,11 @@
     toolsByProject: {}, // projectId -> [tool names] — opt-in, per project
     commands: [],
     commandsDir: "",
+    models: [], // local aliases that are actually on this machine
   };
+
+  /** Does the app shell offer the OS folder window? Electron yes, browser no. */
+  const nativePicker = () => typeof window.koinosShell?.pickFolder === "function";
 
   async function api(path, opts = {}) {
     const r = await fetch(path, { headers: { "content-type": "application/json" }, ...opts });
@@ -266,6 +270,7 @@
       await loadSessions();
       await renderGit();
       renderToolsSummary();
+      renderModelPick();
       await loadCommands();
       $("kc-tools-panel").hidden = true;
       $("kc-cmd-hints").hidden = true;
@@ -336,7 +341,7 @@
     startError("");
     // The app shell's NATIVE picker is the right experience and returns a real
     // on-disk path. The served UI has no such dialog, so it browses in-app.
-    if (window.koinosShell?.pickFolder) {
+    if (nativePicker()) {
       const dir = await window.koinosShell.pickFolder("Choose a project folder");
       if (dir) return useFolder(dir);
       return;
@@ -393,7 +398,7 @@
   $("btn-kc-browse-use").addEventListener("click", () => {
     if (!kc.browsePath) return;
     if (kc.browseFor === "clone") {
-      $("kc-clone-parent").value = kc.browsePath;
+      setCloneParent(kc.browsePath);
       $("kc-browse").hidden = true;
       $("kc-clone").hidden = false;
       return;
@@ -408,6 +413,8 @@
     $("kc-browse").hidden = true;
     $("kc-clone").hidden = false;
     $("kc-clone-status").textContent = "";
+    $("kc-clone-parent-row").hidden = nativePicker();
+    setCloneParent($("kc-clone-parent").value.trim());
     // If an account is connected, offer what it can actually see rather than
     // making someone remember exact repository names.
     try {
@@ -435,10 +442,20 @@
 
   $("btn-kc-clone-close").addEventListener("click", closePanels);
 
+  /** The destination, wherever it came from — typed, browsed, or picked. */
+  function setCloneParent(dir) {
+    $("kc-clone-parent").value = dir || "";
+    $("kc-clone-parent-label").textContent = dir || "no folder chosen yet";
+  }
+
+  // Field request: "for the github repo copy I want the folder selection to be
+  // a window selection as well like the first one." So the button opens the
+  // SAME native window as "Select a folder", and where that window exists the
+  // typed-path row is not shown at all — one way to answer, not two.
   $("btn-kc-clone-pick").addEventListener("click", async () => {
-    if (window.koinosShell?.pickFolder) {
+    if (nativePicker()) {
       const dir = await window.koinosShell.pickFolder("Where should the repository go?");
-      if (dir) $("kc-clone-parent").value = dir;
+      if (dir) setCloneParent(dir);
       return;
     }
     kc.browseFor = "clone";
@@ -446,6 +463,7 @@
     $("kc-browse").hidden = false;
     await browse("");
   });
+  $("kc-clone-parent").addEventListener("input", () => setCloneParent($("kc-clone-parent").value.trim()));
 
   $("btn-kc-clone-go").addEventListener("click", async () => {
     const repo = $("kc-clone-repo").value.trim();
@@ -747,7 +765,7 @@
           projectId: p.id,
           sessionId: kc.sessionId || "",
           task,
-          model: state.alias ?? "",
+          model: chosenModel(),
           mode,
           plan,
           tools: allowedTools(),
@@ -957,6 +975,90 @@
   });
   $("btn-kc-tools-close").addEventListener("click", () => { $("kc-tools-panel").hidden = true; });
 
+  // ------------------------------------------------------------ the model
+
+  /*
+   * Which model does the work.
+   *
+   * Field question: "what model does this use? There should probably be a
+   * model selector just like the chat." It was using the Chat model silently —
+   * right answer, invisible. Now it is a box, and the choice is remembered per
+   * project because a big repository and a scratch folder do not want the same
+   * model.
+   *
+   * LOCAL MODELS ONLY, deliberately, and unlike Chat: the coding agent reads
+   * your project's files into every prompt it sends. Routing that to volunteer
+   * machines on the Koinos Network would put private source on other people's
+   * computers as a side effect of picking a faster box — a decision nobody
+   * would expect from a model dropdown. Chat offers the network because the
+   * person types what goes into it; here the agent decides, so it stays home.
+   */
+  async function loadModels() {
+    try {
+      const r = await fetch("/core/models", { headers: { "content-type": "application/json" } });
+      const j = await r.json();
+      kc.models = (j.aliases || [])
+        .filter((a) => a.status === "ready")
+        .map((a) => ({ v: a.alias, label: String(a.label || a.alias).split(" (")[0] }));
+    } catch {
+      kc.models = []; // Core unreachable: fall through to "app default"
+    }
+    renderModelPick();
+  }
+
+  function renderModelPick() {
+    const pick = $("kc-model");
+    const chosen = currentProject()?.model || "";
+    const appDefault = kc.models.find((m) => m.v === (typeof state === "object" ? state.alias : null));
+    const options = [
+      { v: "", label: appDefault ? `App default — ${appDefault.label}` : "App default" },
+      ...kc.models,
+    ];
+    const sig = options.map((o) => o.v).join(",");
+    if (pick.dataset.sig !== sig) {
+      pick.innerHTML = "";
+      for (const o of options) {
+        const el = document.createElement("option");
+        el.value = o.v;
+        el.textContent = o.label;
+        pick.appendChild(el);
+      }
+      pick.dataset.sig = sig;
+    }
+    // A pinned model that is no longer on the machine must not silently
+    // vanish into "App default" — name it, so the mismatch is visible.
+    if (chosen && !options.some((o) => o.v === chosen)) {
+      const el = document.createElement("option");
+      el.value = chosen;
+      el.textContent = `${chosen} — not installed`;
+      pick.appendChild(el);
+      pick.dataset.sig = "";
+    }
+    pick.value = chosen;
+  }
+
+  $("kc-model").addEventListener("change", async () => {
+    const p = currentProject();
+    if (!p) return;
+    const model = $("kc-model").value;
+    try {
+      const j = await api(`/core/code/projects/${encodeURIComponent(p.id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ model }),
+      });
+      p.model = j.project.model || "";
+      status(model ? `using ${$("kc-model").selectedOptions[0]?.textContent || model}` : "using the app's model");
+    } catch (e) {
+      status(e.message);
+      renderModelPick(); // put the box back to what is actually stored
+    }
+  });
+
+  /** What this run should ask for: the project's pin, else the app's model. */
+  function chosenModel() {
+    return $("kc-model").value || (typeof state === "object" && state.alias) || "";
+  }
+
   async function render() {
     try {
       try {
@@ -965,6 +1067,7 @@
         kc.toolsByProject = {};
       }
       await loadProjects();
+      await loadModels();
       await renderGitHub();
       renderToolsSummary();
       if (kc.projectId) await renderGit();

@@ -660,6 +660,42 @@ for dev/screenshots).
      observation — child reuses the PARENT's approval cards, gets no host
      tools, cannot delegate further (depth 1 = fork-bomb stop), smaller budget,
      max 3 per run.
+   - **v0.40.0 (2026-08-22): the agent said it wrote a file and did not.**
+     Field report with a screenshot: asked for calculator.html, the run printed
+     a `write_file` call as a chat bubble, said "done — 0 tool steps", showed
+     NO approval card, and on the next turn insisted the file already existed.
+     Root cause, and it is a class of bug not a typo: **a small model cannot
+     hand-escape a whole HTML page into a JSON string.** Fences, raw newlines
+     and the page's own `class="…"` quotes make the call unparseable, so
+     `extractJson` → null, the loop read null as "this is the final answer",
+     and the raw blob was surfaced as prose. Worse, the v0.38.0 nudge that
+     exists for exactly this case ALSO called `JSON.parse` — so it agreed the
+     call was not a call and stayed silent.
+     Three fixes, one per failure:
+     1. `salvageAction` (ui/agents.js) recovers a tool call by SHAPE when the
+        grammar fails: find the tool name, read known argument keys in order,
+        take the long value to the closing quote. Heuristics are acceptable
+        HERE and nowhere else **because a salvaged write goes through the same
+        approval card with the same full diff** — a garbled salvage is a
+        garbled diff the person declines. It can never write unattended what a
+        clean parse could not. Refuses to guess: unknown tool, or no tool name,
+        returns null so the nudge fires instead.
+     2. `looksLikeToolCall` no longer parses — shape only. That is the whole
+        point of a fallback check.
+     3. `truthfulAnswer`: the run tracks whether any write tool actually
+        succeeded (a helper's counts). An answer that claims a write when
+        nothing reached disk gets a correction appended, so the lie never
+        enters the session history for the next turn to believe.
+     Also: markdown fences are stripped from `content`/`find`/`replace` in the
+     file tools (a `.md` target keeps its fence — a fenced block is legitimate
+     content there), the clone destination now opens the SAME native OS window
+     as "Select a folder" (and where that window exists the typed-path row is
+     not offered at all), and Koinos Code has **its own model box**, pinned per
+     project and remembered. **Local models only, unlike Chat, on purpose:**
+     the coding agent reads your project's files into every prompt, so routing
+     it to volunteer machines would put private source on other people's
+     computers as a side effect of picking a faster box. A pin whose model was
+     later deleted is ignored with a note rather than bricking the project.
 10. **Moderation/AUP — owner-DEFERRED 2026-08-20**: owner agrees with the A40 reporter's
     finding but explicitly wants it on the future plan ("easier to understand the
     implications... with more nodes and network usage"). Design in kaiapp
@@ -693,7 +729,7 @@ for dev/screenshots).
     gates on every write and command, a terminal CLI, GitHub (clone → project,
     branch/commit/push/PR), a folder picker and clone-to-start flow, PLAN MODE,
     MCP tools inside the agent, CUSTOM SLASH COMMANDS, and SUBAGENTS (v0.37.0–
-    v0.39.0). NOT shipped: **background tasks** (detached runs whose approval
+    v0.39.0), a per-project MODEL PICKER (v0.40.0). NOT shipped: **background tasks** (detached runs whose approval
     cards survive a reload — real plumbing, worth doing when someone wants to
     walk away) and **hooks — deliberately declined, not deferred**: hooks are
     arbitrary shell commands fired automatically, and a `.koinos/hooks.json`
@@ -703,8 +739,11 @@ for dev/screenshots).
     may PROPOSE, arriving as an ordinary command approval card. It also runs on whatever the local gateway
     serves, so a small model behaves differently from a frontier one — that is
     the product's whole point, but it is a real difference in capability, not
-    just in branding. Next two worth closing: MCP inside the agent, and a
-    plan-then-act mode.
+    just in branding. Both of the "next two" named here are now shipped
+    (v0.38.0). The standing lesson from v0.40.0: with a 4B model the ACTION
+    GRAMMAR is the weakest link in this whole feature — not the tools, not the
+    permissions. Assume malformed output is the normal case and recover from
+    it; never let an unreadable tool call become an answer.
 
 ## 8. Working with the owner
 

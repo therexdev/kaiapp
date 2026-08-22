@@ -247,6 +247,153 @@
     return { tool: name, args: args && typeof args === "object" ? args : {} };
   }
 
+  /*
+   * SALVAGE — a tool call whose JSON does not parse.
+   *
+   * Field report (v0.39.0): "It did not make this file like it said the first
+   * time or the second." Asked to create calculator.html, a local model emits
+   *
+   *     {"tool":"write_file","args":{"path":"calculator.html","content":"```html
+   *     <meta charset="UTF-8">
+   *     ...
+   *     ```"}}
+   *
+   * — a markdown fence, raw newlines, and unescaped quotes out of the HTML
+   * itself. That is not valid JSON and no amount of prompting makes a 4B model
+   * reliably escape a whole web page by hand. extractJson returns null, the
+   * loop reads null as "this is the final answer", and the person is shown the
+   * tool call as prose while nothing whatsoever is written to disk.
+   *
+   * So when strict parsing fails, recover the call by SHAPE rather than by
+   * grammar: find the tool name, then read the arguments off one known key at
+   * a time, each value running to the start of the next known key. Long text
+   * (a file's content) is whatever is left before the closing quote.
+   *
+   * Heuristics are acceptable HERE and nowhere else, for one reason: a
+   * salvaged write goes through exactly the same approval card, showing
+   * exactly the same full diff, as a cleanly-parsed one. If the salvage
+   * garbles the content the person sees garbled content in the diff and says
+   * no. This can never write anything unattended that a clean parse could not.
+   */
+
+  // Only these spellings are treated as argument keys. Restricting the
+  // vocabulary is what keeps a `"foo": bar` INSIDE a broken content string
+  // from being mistaken for the next argument.
+  var ARG_KEYS = [
+    "path", "file", "filename", "dir", "directory",
+    "content", "text", "body", "data",
+    "find", "replace", "old", "new", "old_string", "new_string",
+    "cmd", "command", "query", "pattern", "search", "url", "task", "from", "to",
+  ];
+
+  /** JSON string escapes, applied by hand to a value we recovered by shape. */
+  function unescapeJsonish(s) {
+    return String(s).replace(/\\(u[0-9a-fA-F]{4}|.)/g, function (m, c) {
+      if (c[0] === "u") return String.fromCharCode(parseInt(c.slice(1), 16));
+      if (c === "n") return "\n";
+      if (c === "r") return "\r";
+      if (c === "t") return "\t";
+      if (c === "b") return "\b";
+      if (c === "f") return "\f";
+      return c; // \" \\ \/ and anything else: the character itself
+    });
+  }
+
+  /*
+   * A model told to produce a file's content very often wraps it in the
+   * markdown fence it would use in chat. Left in, the fence lands IN the file
+   * and the page is broken. Strip it only when it wraps the whole value, so a
+   * document that legitimately contains a fenced block keeps it.
+   */
+  var FENCE = /^\s*```[A-Za-z0-9+#.-]*[ \t]*\r?\n([\s\S]*?)\r?\n?[ \t]*```\s*$/;
+  function stripFence(s) {
+    var m = FENCE.exec(String(s));
+    return m ? m[1] : String(s);
+  }
+
+  /** Value text → the string the tool should receive. */
+  function finishValue(raw, quoted) {
+    var v = String(raw);
+    if (quoted) v = unescapeJsonish(v);
+    else {
+      v = v.trim();
+      if (v === "true") return true;
+      if (v === "false") return false;
+      if (v === "null") return null;
+      if (/^-?\d+(\.\d+)?$/.test(v)) return Number(v);
+    }
+    return stripFence(v);
+  }
+
+  /**
+   * Recover {tool, args} from output that failed strict parsing, or null.
+   * `opts.keys` overrides the argument-key vocabulary.
+   */
+  function salvageAction(text, toolNames, opts) {
+    var s = String(text || "");
+    var open = s.indexOf("{");
+    if (open < 0) return null;
+    s = s.slice(open);
+
+    var nameHit = /"(?:tool|name|action|tool_name|mcp|function)"\s*:\s*"([^"\\]{1,120})"/.exec(s);
+    if (!nameHit) return null;
+    var tool = toolAliases(toolNames || []).resolve(nameHit[1]);
+    if (!tool) return null; // an unknown tool is a nudge, never a guess
+
+    // Arguments start after the name, and after the args wrapper if there is
+    // one. Anything before that is the envelope, not a value.
+    var region = s.slice(nameHit.index + nameHit[0].length);
+    var wrap = /"(?:args|arguments|parameters|input)"\s*:\s*\{/.exec(region);
+    if (wrap) region = region.slice(wrap.index + wrap[0].length);
+
+    var keys = (opts && opts.keys) || ARG_KEYS;
+    var seen = Object.create(null);
+    var marks = [];
+    for (var i = 0; i < keys.length; i++) {
+      var re = new RegExp('"' + keys[i] + '"\\s*:\\s*', "g");
+      var m = re.exec(region);
+      if (m) marks.push({ key: keys[i], at: m.index, from: m.index + m[0].length });
+    }
+    if (!marks.length) return { tool: tool, args: {} };
+    marks.sort(function (a, b) { return a.at - b.at; });
+
+    var args = {};
+    for (var k = 0; k < marks.length; k++) {
+      var mk = marks[k];
+      if (seen[mk.key]) continue;
+      seen[mk.key] = true;
+      var slice = region.slice(mk.from, k + 1 < marks.length ? marks[k + 1].at : region.length);
+      var quoted = slice.charAt(0) === '"';
+      if (quoted) slice = slice.slice(1);
+
+      if (k + 1 < marks.length) {
+        // Bounded by the next key: drop the separator the model put between
+        // them, then the closing quote if the value had an opening one.
+        slice = slice.replace(/[\s,]+$/, "");
+        if (quoted) slice = slice.replace(/"$/, "");
+      } else if (quoted) {
+        /*
+         * The tail. Cut at the LAST quote that has nothing but closers after
+         * it — that is the string's real end even when the value itself
+         * contains braces (a CSS rule, a JS function) or stray quotes.
+         */
+        var end = -1;
+        for (var q = slice.length - 1; q >= 0; q--) {
+          if (slice.charAt(q) !== '"') continue;
+          if (/^[\s}\],]*$/.test(slice.slice(q + 1))) { end = q; break; }
+        }
+        slice = end >= 0 ? slice.slice(0, end) : slice.replace(/[\s}\],]+$/, "");
+      } else {
+        slice = slice.replace(/[\s}\],]+$/, "");
+      }
+      args[mk.key] = finishValue(slice, quoted);
+    }
+    // Aliases the tools do not know by that name.
+    if (args.file && !args.path) args.path = args.file;
+    if (args.command && !args.cmd) args.cmd = args.command;
+    return { tool: tool, args: args };
+  }
+
   /**
    * The tool menu. opts.allNames is the FULL registry list so aliases stay
    * stable no matter which subset this question selected; opts.question
@@ -405,7 +552,8 @@
           if (n > AGENT_MAX_STEPS) return Promise.resolve();
           setStatus("🤖 Step " + n + ": deciding…" + menu);
           return askModelOnce(trimConvo(convo), model).then(function (out) {
-            var action = parseAgentAction(out, toolNames);
+            // Strict first; salvage only what strict could not read.
+            var action = parseAgentAction(out, toolNames) || salvageAction(out, toolNames);
             if (!action) {
               // Model refused the format twice = it wants to answer.
               convo.push({ role: "user", content: 'Respond with ONLY JSON: {"tool": ..., "args": ...} or {"answer": true}' });
@@ -456,6 +604,8 @@
   return {
     extractJson: extractJson,
     parseAgentAction: parseAgentAction,
+    salvageAction: salvageAction,
+    stripFence: stripFence,
     buildAgentSystem: buildAgentSystem,
     toolAliases: toolAliases,
     selectTools: selectTools,

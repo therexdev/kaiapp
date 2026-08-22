@@ -26,7 +26,7 @@ const path = require("path");
 const readline = require("readline");
 const { exec } = require("child_process");
 
-const { buildAgentSystem, parseAgentAction, trimConvo } = require(path.join(__dirname, "..", "ui", "agents"));
+const { buildAgentSystem, parseAgentAction, salvageAction, stripFence, trimConvo } = require(path.join(__dirname, "..", "ui", "agents"));
 
 const PREAMBLE =
   "You are Koinos Code, a careful coding agent working inside the person's project directory. " +
@@ -363,7 +363,7 @@ function makeTools(root, opts) {
         } catch (e) {
           return `cannot read ${p}: ${e.code || e.message} — edit_file only changes existing files; use write_file to create one`;
         }
-        const needle = String(find ?? "");
+        const needle = stripFence(String(find ?? ""));
         if (!needle) return "give find: the exact text to replace";
         const first = old.indexOf(needle);
         if (first === -1) {
@@ -373,7 +373,7 @@ function makeTools(root, opts) {
           const count = old.split(needle).length - 1;
           return `ambiguous: that text occurs ${count} times in ${p} — include more surrounding lines in find so it matches exactly once`;
         }
-        const next = old.slice(0, first) + String(replace ?? "") + old.slice(first + needle.length);
+        const next = old.slice(0, first) + stripFence(String(replace ?? "")) + old.slice(first + needle.length);
         if (next === old) return "no change: the replacement equals the existing text";
         return approveAndWrite(abs, p, old, next);
       },
@@ -385,7 +385,11 @@ function makeTools(root, opts) {
       handler: async ({ path: p, content }) => {
         const abs = jailed(root, p);
         if (!abs) return "refused: path escapes the project directory";
-        const next = String(content ?? "");
+        // A model asked for a file's content very often hands back the
+        // markdown fence it would use in chat. Left in, ```html lands as the
+        // first line OF THE FILE. Markdown files keep theirs — a fenced block
+        // is legitimate content there.
+        const next = /\.(?:md|markdown|mdx)$/i.test(String(p || "")) ? String(content ?? "") : stripFence(String(content ?? ""));
         let old = "";
         try {
           old = fs.readFileSync(abs, "utf8");
@@ -545,7 +549,9 @@ async function runTask(opts, tools, convo, task) {
   convo.push({ role: "user", content: task });
   for (let step = 0; step < opts.maxSteps; step++) {
     const out = await complete(opts, trimConvo(convo));
-    const action = parseAgentAction(out, names);
+    // Strict parse first; salvage a tool call whose JSON does not parse
+    // (a model hand-escaping a whole HTML file gets it wrong every time).
+    const action = parseAgentAction(out, names) || salvageAction(out, names);
     if (!action) {
       // No parsable action: with small models that IS the final answer.
       convo.push({ role: "assistant", content: out });
