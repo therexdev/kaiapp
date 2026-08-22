@@ -133,7 +133,41 @@ for dev/screenshots).
   aliases that are non-dev, non-custom, and RAM-fit (`minRamGb <= machine RAM`).
 
 **kai** — Express site (views/, public/) + in-process scheduler mounted at **`/scheduler`**
-(`lib/scheduler.js`), deploys as one process.
+(`lib/scheduler.js`) + accounts (`lib/accounts.js`) + the web app (`views/app.html`,
+`views/app.js`, `lib/appdata.js`), all one process.
+
+- **Koinos AI Web** (`/app`, shipped 2026-08-22): Chat, Docs, Tasks, Memory, Wallet.
+  The shell lives in **`views/`, never `public/`** — `express.static(PUBLIC_DIR)` serves
+  that whole tree ungated, so a gated page cannot exist inside it. One route serves it,
+  gated by `accounts.accountOf` (resolve-don't-answer, so a signed-out browser gets a
+  redirect to `/account?next=/app` rather than a JSON 401 it would render as text).
+  `requireAccount` is built ON `accountOf`, so there is one definition of a valid session.
+- **How the web app spends**: a **spend grant** — the wallet signs ONCE over
+  `spend|address|accountId|cap|expiry|ts`, and the site may then draw up to that cap until
+  that date. One live grant per wallet (a new one revokes the old). The cap is enforced
+  **in SQL** (`spent_micro + ? <= max_micro` in the UPDATE's WHERE). Grants are created
+  only from the DESKTOP app (Settings → Koinos AI account) because only that machine holds
+  the key; the website can show and revoke, never create. Unlinking a wallet, and signing
+  out everywhere, both revoke grants.
+- **A grant is PERMISSION, not FUNDS.** The wallet still needs KAI capacity in the
+  scheduler ledger (free allowance / deposits / epoch earnings). Both failures look
+  identical from outside — "I authorised it and it still refuses" — so the gate copy, the
+  Settings hint and the docs all say it explicitly.
+- **The one hop the browser cannot make**: its session cookie is HttpOnly and must stay
+  that way (that token now authorizes spending), but the scheduler's grant lane wants the
+  token. `askNetwork()` in `server.js` reads the cookie server-side and passes it in
+  process — ONE place, asserted by probe. The scheduler is called with a **synthetic
+  request** (a `Readable` with `.url/.method/.headers`), and the real `res` goes straight
+  through, which is what makes SSE streaming work with no proxying.
+- **Tasks run with nobody signed in**, so the account is asserted on the request OBJECT as
+  `req.trustedAccountId`. A request off a socket can never carry it — headers land on
+  `req.headers`, the body is parsed separately. It widens WHO may ask, never WHAT may be
+  spent (the grant is still re-checked). `accounts.accountById` exists only for this.
+  `CapturingResponse` lets the runner reuse `scheduler.handle`, so scheduled and
+  interactive runs are the same path.
+- **Probes**: `probe-app.js` (43 — the key one tries five spellings of the shell through
+  the static tree and requires every one to miss), `probe-app-features.js` (10 sections,
+  with a fake provider that registers/polls/streams/signs), `probe-web-spend.js` (16).
 
 - **Scheduler state**: in-memory + `workers.json` persistence (roster survives deploys).
   15-min epochs; receipts → Merkle settlement on Koinos testnet (contract
@@ -426,6 +460,23 @@ for dev/screenshots).
    Loose end, unchecked because the digest has no assertion for it: waitlist
    signup notifications need `SMTP_TO` as well as `SMTP_HOST`. Sign-in works
    without it; those notification emails do not.
+
+0a. **Koinos AI Web v1 — SHIPPED 2026-08-22 (kai PRs #21-#25, kaiapp v0.42.0).**
+   Chat, Docs, Tasks, Memory, Wallet at koinosai.com/app. Live-verified from
+   outside the box: `app HTTP 302 -> /account?next=/app`,
+   `shell body not served anonymously (correct)`, `app/app.js HTTP 200`,
+   `api/chats HTTP 401 {"ok":false,"error":"sign in first"}`,
+   `robots.txt disallows /app`, digest `fails=0`.
+   Not in v1, deliberately: Compare, Tools, Agent mode, Teams, voice, images,
+   local models — each needs the caller's own hardware or the desktop tool
+   layer. Web tasks get the model and nothing else (no tools, no search).
+   **STILL UNVERIFIED, and only a human can do it**: nobody has completed the
+   loop end to end — authorise a grant in the desktop app, open /app, send a
+   message, watch KAI leave the wallet. Every piece is probe-covered against a
+   fake provider; none of it has met a real one with a real person driving.
+   Next natural steps if the field report is good: the account page should
+   surface grants and sessions (routes exist, UI does not), and web tasks want
+   a per-task spend ceiling below the grant cap.
 
 0b. **v0.41.0 (2026-08-22): Settings, a Network icon, and one Koinos Node
    entry.** Field report opened with a real bug: *"Koinos Code and Developer

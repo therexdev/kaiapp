@@ -1,6 +1,31 @@
 # Koinos AI Web — architecture
 
-**Status: RESEARCHED 2026-08-22, four forks await the owner. Nothing built.**
+**Status: v1 SHIPPED 2026-08-22 — koinosai.com/app (kai PRs #21-#25, kaiapp
+v0.42.0).** Chat, Docs, Tasks, Memory and Wallet are live; §4 was built as
+written. What is below stays as the record of WHY, because every constraint in
+it turned out to be load-bearing — especially §3, which is the reason spending
+is a grant rather than a key in a browser.
+
+Two things the build changed from this document:
+
+- **§4 said "no Compare, no Tools".** Still true, and the reason is now written
+  where users see it (docs.koinosai.com → Koinos AI on the web): those need the
+  caller's own hardware or the desktop tool layer. Web tasks get the model and
+  nothing else — no tools, no search.
+- **A grant is PERMISSION, not FUNDS.** This document assumed a linked wallet
+  with a balance. In practice the two failures are indistinguishable from
+  outside ("I authorised it and it still refuses"), so the wallet-capacity
+  requirement is now stated in the gate copy, the desktop Settings hint and the
+  docs. That was the one real gap between the design and what a person meets.
+
+**STILL UNVERIFIED, and only a human can close it**: nobody has driven the loop
+end to end with a real wallet and a real provider. Every path is probe-covered
+against a fake provider; none has met a real one with a person at the keyboard.
+
+---
+
+*Original status when this was written:*
+**RESEARCHED 2026-08-22, four forks await the owner. Nothing built.**
 Owner asked for a web app with Chat / Docs / Compare / Tasks / Tools, the same
 login as koinosai.com/account, gated on a connected wallet, spending KAI from
 linked wallets — with a stated future of account-generated wallets and buying
