@@ -477,6 +477,44 @@ for dev/screenshots).
      pairing code was 24px with 4px tracking and NO monospace face — the one
      place proportional digits actually cost you, since you read it off one
      screen and type it into another) and `.cmp-pane-label`.
+0c. **Cloud GPU (RunPod et al) — EXPLORED 2026-08-22, nothing built, owner
+   decision pending.** Full analysis in `docs/cloud-gpu-design.md`. Owner asked
+   how someone could rent a GPU to run bigger models AND serve them to the
+   network. **The two halves are not the same product and only one is a good
+   idea today:**
+   - **Using a rented GPU yourself is a strong offer and mostly a missing
+     SETTING.** Headless Core already runs (`node core/server.js`), CUDA
+     already auto-provisions. What does not exist anywhere is a remote-Core or
+     remote-model concept: the only non-local lane is `koinos-network` to the
+     public scheduler. Recommended shape is a REMOTE MODEL alongside the local
+     ones (RunPod's vLLM template already speaks OpenAI), because it puts the
+     trust boundary in the model picker where a person makes the choice —
+     rather than relocating Core, which would move chats, memory and Koinos
+     Code's view of your source tree onto rented hardware all at once.
+   - **Renting a GPU to SERVE the network loses money, by arithmetic, not by
+     any missing feature.** Break-even on the top class ($4.00/1M output, 90%
+     to compute) is `T = hourly cost / 0.0144` — about **28 tok/s sustained at
+     100% utilisation** for a ~$0.40/hr card. That is roughly what a 32B Q4
+     does flat out, so it needs the card generating every second it is rented.
+     And the subsidy cannot rescue it BY DESIGN: the bootstrap pool is 1,500
+     KAI/day NETWORK-WIDE ≈ **$13.45/day total** at the live oracle price,
+     while one A40 costs $9.60/day. `scheduler.js` says it itself — "spinning
+     up N machines does not raise total protocol expense, it only dilutes each
+     machine's share". The anti-Sybil property is working; it also means honest
+     cloud operators cannot be paid rent. **Do not market cloud hosting as an
+     earning opportunity at current rates.**
+   Three findings worth acting on regardless of the above:
+   1. **The RAM gate is blind to the GPU.** `fits()` compares `minRamGb` to
+      `os.totalmem()`, so a 48 GB A40 with modest system RAM is refused classes
+      it would serve well, and a RAM-rich CPU box is waved into classes it
+      serves at a crawl. Wrong on consumer hardware too, not just cloud.
+   2. **Fingerprint vs cloud — decide BEFORE the gate arms (~Sep 2).** Every
+      honest renter of the same pod template collides with every other honest
+      renter they have never met; cloud hardware is fungible by definition.
+      It is currently shadow-only and NOT in the reputation formula
+      (`scheduler.js:767-793`). Recommendation: leave it out.
+   3. **The catalog stops at 32B**, so "rent a GPU for bigger models" has no
+      bigger models to run yet.
 1. ~~Azure Trusted Signing~~ — **SHIPPED 2026-08-17, v0.25.11 signed** (see §2 for the
    secret layout and the 403/AADSTS debug trail). Watch the field: SmartScreen reputation
    still accrues per-file over downloads; signed ≠ instant zero warnings on day one.
