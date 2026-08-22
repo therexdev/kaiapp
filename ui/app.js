@@ -1461,6 +1461,10 @@ $("btn-wallet-balances").addEventListener("click", async () => {
  * Local-Only privacy mode with words. */
 let accountFetchedAt = 0;
 let accountPolling = false;
+// The grant this window may revoke: this machine's wallet, resolved server-
+// side in account.status(). Held here so the revoke button never has to guess
+// which of several grants it means.
+let accountGrantId = null;
 
 function accountMsg(text, ok) {
   const el = $("account-msg");
@@ -1508,9 +1512,11 @@ async function renderAccount(force) {
     ];
     $("account-stats").innerHTML = rows.map(([k, v]) => `<span class="k">${k}</span><span>${esc(v)}</span>`).join("");
     $("btn-account-linkwallet").hidden = Boolean(j.thisWalletLinked);
+    renderWebAccess(j);
   } else {
     si.hidden = true;
     so.hidden = false;
+    $("account-web").hidden = true;
     if (j.pendingCode) {
       $("account-code-row").hidden = false;
       $("account-code").textContent = j.pendingCode;
@@ -1587,6 +1593,88 @@ $("btn-account-signout").addEventListener("click", async () => {
   $("btn-account-signin").disabled = false;
   accountMsg("Signed out on this device.", true);
   renderAccount(true);
+});
+
+/* ---- web access: a signed spending cap for koinosai.com ----
+ *
+ * The website cannot create this. It has no key — nothing in a browser does —
+ * so the authorisation has to be signed here, on the machine that holds the
+ * wallet. What the site gets is a cap and an expiry, and it can never draw
+ * past either. That is the entire trust model, and it is worth the extra
+ * click it costs.
+ *
+ * Only offered once this wallet is LINKED: granting spend from a wallet the
+ * account has never proven it owns would be authorising a stranger.
+ */
+function renderWebAccess(j) {
+  const box = $("account-web");
+  box.hidden = !j.thisWalletLinked;
+  if (!j.thisWalletLinked) return;
+  const g = j.thisWalletGrant;
+  accountGrantId = g ? g.id : null;
+  $("account-grant-none").hidden = Boolean(g);
+  $("account-grant-live").hidden = !g;
+  if (j.site) $("account-web-open").href = j.site.replace(/\/$/, "") + "/app";
+  if (!g) return;
+  const days = Math.max(0, Math.round((g.expiresAt - Date.now()) / 86400000));
+  const rows = [
+    ["Authorised", `$${g.maxUsd.toFixed(2)} of model usage`],
+    ["Used so far", `$${g.spentUsd.toFixed(4)}`],
+    ["Left", `$${g.remainingUsd.toFixed(4)}`],
+    ["Expires", days > 1 ? `in ${days} days` : days === 1 ? "tomorrow" : "today"],
+  ];
+  $("account-grant-stats").innerHTML = rows
+    .map(([k, v]) => `<span class="k">${k}</span><span>${esc(v)}</span>`).join("");
+}
+
+$("btn-account-grant").addEventListener("click", async () => {
+  const btn = $("btn-account-grant");
+  const maxUsd = Number($("account-grant-cap").value);
+  const days = Number($("account-grant-days").value);
+  if (!isFinite(maxUsd) || maxUsd <= 0) return accountMsg("Set a spending cap above zero.");
+  // Say the number back before signing it. This is the only moment the cap
+  // is chosen, and it is the only thing standing between the website and the
+  // wallet — a typo here is not something to discover later.
+  if (!confirm(`Authorise koinosai.com to spend up to $${maxUsd.toFixed(2)} of model usage from this wallet over the next ${days} days?\n\nYou can end this at any time, from here or from the website.`)) return;
+  btn.disabled = true;
+  accountMsg("");
+  try {
+    const r = await fetch("/core/account/grant", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ maxUsd, days }),
+    });
+    const j = await r.json();
+    if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    accountMsg(`Web access authorised — up to $${maxUsd.toFixed(2)} for ${days} days.`, true);
+    renderAccount(true);
+  } catch (e) {
+    accountMsg(e.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+$("btn-account-grant-revoke").addEventListener("click", async () => {
+  const btn = $("btn-account-grant-revoke");
+  if (!accountGrantId) return accountMsg("Nothing to end — reload Settings.");
+  if (!confirm("End web access now? The website stops being able to spend immediately. Anything already spent stays spent.")) return;
+  btn.disabled = true;
+  try {
+    const r = await fetch("/core/account/grant/revoke", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: accountGrantId }),
+    });
+    const j = await r.json();
+    if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    accountMsg("Web access ended.", true);
+    renderAccount(true);
+  } catch (e) {
+    accountMsg(e.message);
+  } finally {
+    btn.disabled = false;
+  }
 });
 
 // Two clicks to move real money: the first arms and repeats the exact

@@ -123,11 +123,25 @@ class AccountService {
     }
     if (!r.ok) return { ...base, signedIn: false, error: r.error || `account server answered ${r.status}` };
     const walletAddr = this.wallet?.address ?? null;
+    const thisWalletLinked = Boolean(walletAddr && r.account.wallets?.some((w) => w.address === walletAddr));
     return {
       ...base,
       signedIn: true,
       account: r.account,
-      thisWalletLinked: Boolean(walletAddr && r.account.wallets?.some((w) => w.address === walletAddr)),
+      thisWalletLinked,
+      /*
+       * The live spending grant for THIS machine's wallet, if there is one.
+       * Resolved here rather than in the UI because "which of my grants is
+       * the one this window can revoke" is a question about this machine,
+       * and the answer is only correct where the wallet address is known.
+       *
+       * Gated on the wallet still being LINKED, not merely on the grant row
+       * looking live. Production revokes grants when a wallet is unlinked, so
+       * the two should never disagree — but if they ever do, the safe answer
+       * is that this machine offers no web access it cannot prove it owns.
+       */
+      thisWalletGrant:
+        (thisWalletLinked && (r.account.grants || []).find((g) => g.live && g.address === walletAddr)) || null,
     };
   }
 
@@ -198,6 +212,53 @@ class AccountService {
   async unlinkWallet(address) {
     const r = await this._call(`/account/wallets/${encodeURIComponent(String(address || ""))}`, { method: "DELETE" });
     if (!r.ok) throw new Error(r.error || "unlink failed");
+    return r.account;
+  }
+
+  /* --------------------------------------------------- spend grants ---- */
+  /*
+   * Authorise koinosai.com to spend from this wallet, up to a cap, until a
+   * date. This lives HERE, in the desktop app, for one unavoidable reason:
+   * the signature has to come from the wallet's own key, and the key is on
+   * this machine. A browser has nothing to sign with, so the web app can
+   * show a grant and revoke it, but only this app can create one.
+   *
+   * The message names the cap and the expiry, so neither can be edited after
+   * the fact without a new signature. The verb is `spend`, not `link` —
+   * different verb, different hash, so a link proof can never be replayed as
+   * permission to spend money.
+   */
+  async grantSpend({ maxUsd, days } = {}) {
+    const st = this.wallet?.status?.();
+    if (!st?.unlocked || !st?.address) throw new Error("Unlock your earning account first — the wallet signs the spending grant");
+    const usd = Number(maxUsd);
+    if (!Number.isFinite(usd) || usd <= 0) throw new Error("Set a spending cap above zero");
+    const d = Number(days);
+    if (!Number.isFinite(d) || d <= 0) throw new Error("Set how long the grant should last");
+    const session = await this._call("/auth/session");
+    if (!session.ok) throw new Error("Sign in to your Koinos AI account first");
+
+    const address = st.address;
+    // Round to whole micro-dollars the same way the server does, and sign the
+    // ROUNDED value — signing 5.0000004 and sending 5000000 would recover a
+    // different hash and be refused as a bad signature.
+    const maxMicro = Math.floor(usd * 1e6);
+    const expiresAt = Date.now() + Math.round(d * 24 * 3600 * 1000);
+    const ts = Date.now();
+    const hash = crypto.createHash("sha256")
+      .update(`spend|${address}|${session.account.id}|${maxMicro}|${expiresAt}|${ts}`).digest();
+    const signature = await this.wallet.signHash(hash);
+    const r = await this._call("/account/grants", { method: "POST", body: { address, maxMicro, expiresAt, ts, signature } });
+    if (!r.ok) throw new Error(r.error || "the account server refused the spending grant");
+    this.onEvent({ type: "account:spend-granted", address, maxUsd: maxMicro / 1e6 });
+    return { grant: r.grant, account: r.account };
+  }
+
+  /** Revoking needs no key — only the session. Effective immediately. */
+  async revokeGrant(id) {
+    const r = await this._call(`/account/grants/${encodeURIComponent(String(id || ""))}`, { method: "DELETE" });
+    if (!r.ok) throw new Error(r.error || "revoke failed");
+    this.onEvent({ type: "account:spend-revoked", grant: String(id || "") });
     return r.account;
   }
 }

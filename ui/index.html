@@ -498,6 +498,36 @@
           </div>
           <p class="hint" id="account-msg" hidden></p>
 
+          <div id="account-web" hidden>
+            <h2>Use Koinos AI on the web</h2>
+            <p class="hint">
+              Chat and Docs in a browser, signed in to this same account — useful on a machine
+              that cannot run models. The website has no key of its own, so it can only spend
+              what you authorise here: a cap, and a date it stops. This app signs that once,
+              with this wallet, and you can end it from either side at any time.
+            </p>
+            <div id="account-grant-none">
+              <div class="form-row">
+                <label class="hint" for="account-grant-cap">Spend up to</label>
+                <input id="account-grant-cap" type="number" min="0.5" max="500" step="0.5" value="10" style="max-width:110px" />
+                <select id="account-grant-days">
+                  <option value="7">for 7 days</option>
+                  <option value="30" selected>for 30 days</option>
+                  <option value="90">for 90 days</option>
+                </select>
+                <button id="btn-account-grant" class="primary small">Authorise</button>
+              </div>
+              <p class="hint">In US dollars of model usage — the same rates the Network tab shows. Nothing is transferred now; the site draws against this as it is used.</p>
+            </div>
+            <div id="account-grant-live" hidden>
+              <div class="hw-summary" id="account-grant-stats"></div>
+              <div class="form-row">
+                <a id="account-web-open" class="link-btn" href="https://koinosai.com/app" target="_blank" rel="noopener">Open the web app</a>
+                <button id="btn-account-grant-revoke" class="small">End web access</button>
+              </div>
+            </div>
+          </div>
+
           <h2>Optional sections</h2>
           <p class="hint">Each of these adds its own entry to the sidebar. All of them are off until you switch them on, and switching one off only hides it — nothing you made is deleted.</p>
 

@@ -26,7 +26,7 @@ function fakeAccountServer() {
   const state = {
     approved: false,
     tokens: new Set(),
-    account: { id: "acc_test", email: "owner@test.co", google: false, passkeys: [], wallets: [], sessions: 1, createdAt: 1 },
+    account: { id: "acc_test", email: "owner@test.co", google: false, passkeys: [], wallets: [], grants: [], sessions: 1, createdAt: 1 },
   };
   const server = http.createServer((req, res) => {
     let raw = "";
@@ -72,6 +72,55 @@ function fakeAccountServer() {
         }
         if (signer !== address) return send(400, { ok: false, error: "signature does not match the wallet address" });
         state.account.wallets.push({ address, linkedAt: Date.now() });
+        return send(200, { ok: true, account: state.account });
+      }
+      /*
+       * Spend grants, verified the way production verifies them: recover the
+       * signer from sha256(`spend|address|accountId|cap|expiry|ts`) and
+       * demand it equal the address. The DIFFERENT VERB is the point — a
+       * `link` proof recovers a different hash here and is refused, which is
+       * what stops "I proved I own this wallet" from ever being replayed as
+       * "you may spend from it".
+       */
+      if (req.url === "/account/grants" && req.method === "POST") {
+        if (!authed) return send(401, { ok: false, error: "sign in first" });
+        const { address, maxMicro, expiresAt, ts, signature } = body;
+        if (!state.account.wallets.some((w) => w.address === address)) {
+          return send(409, { ok: false, error: "link this wallet to your account first" });
+        }
+        if (Math.abs(Date.now() - Number(ts)) > 5 * 60 * 1000) return send(400, { ok: false, error: "stale grant signature" });
+        const hash = crypto.createHash("sha256")
+          .update(`spend|${address}|${state.account.id}|${maxMicro}|${expiresAt}|${ts}`).digest();
+        let signer;
+        try {
+          signer = Signer.recoverAddress(hash, Buffer.from(String(signature), "base64"));
+        } catch {
+          return send(400, { ok: false, error: "bad grant signature" });
+        }
+        if (signer !== address) return send(400, { ok: false, error: "grant signature does not match the wallet address" });
+        // One live grant per wallet, as production does.
+        for (const g of state.account.grants) if (g.address === address) g.live = false;
+        const grant = {
+          id: "grant_test_" + state.account.grants.length,
+          address,
+          maxUsd: maxMicro / 1e6,
+          spentUsd: 0,
+          remainingUsd: maxMicro / 1e6,
+          createdAt: Date.now(),
+          expiresAt: Number(expiresAt),
+          revokedAt: null,
+          live: true,
+        };
+        state.account.grants.push(grant);
+        return send(200, { ok: true, grant, account: state.account });
+      }
+      const revoke = req.url.match(/^\/account\/grants\/(.+)$/);
+      if (revoke && req.method === "DELETE") {
+        if (!authed) return send(401, { ok: false, error: "sign in first" });
+        const g = state.account.grants.find((x) => x.id === decodeURIComponent(revoke[1]) && x.live);
+        if (!g) return send(404, { ok: false, error: "no live grant with that id" });
+        g.live = false;
+        g.revokedAt = Date.now();
         return send(200, { ok: true, account: state.account });
       }
       const unlink = req.url.match(/^\/account\/wallets\/(.+)$/);
@@ -185,6 +234,97 @@ test("account: a token the server no longer honors is cleared, not ghosted", { t
     const s = await get("/core/account");
     assert.strictEqual(s.signedIn, false);
     assert.ok(!fs.existsSync(path.join(dir, "account.cfg")), "stale token deleted on discovery");
+  } finally {
+    fake.server.close();
+    await core.stop();
+  }
+});
+
+/*
+ * Spend grants, app side.
+ *
+ * This is the ONLY place a grant can be created: the signature has to come
+ * from the wallet's own key, and no browser has one. So the test that matters
+ * is that the app produces a proof the server can actually verify — the same
+ * class of bug that once double-encoded a link signature, and would be
+ * invisible until someone tried to use the website.
+ */
+test("account: a spending grant is signed here, verifiable there, and revocable", { timeout: 60000 }, async () => {
+  const { core, fake, post, get } = await coreWithAccount();
+  try {
+    fake.state.approved = true;
+    await post("/core/account/link/start");
+    await post("/core/account/link/poll");
+
+    // Granting spend from a wallet the account has never proven it owns
+    // would be authorising a stranger. The server says so.
+    const early = await post("/core/account/grant", { maxUsd: 10, days: 30 });
+    assert.strictEqual(early.ok, false, "no grant before the wallet is linked");
+    assert.match(String(early.error), /link this wallet/i);
+
+    await post("/core/account/wallet");
+    let s = await get("/core/account");
+    assert.strictEqual(s.thisWalletLinked, true);
+    assert.strictEqual(s.thisWalletGrant, null, "nothing authorised until someone asks for it");
+
+    // The real thing: the fake server RECOVERS the address from the proof.
+    const g = await post("/core/account/grant", { maxUsd: 10, days: 30 });
+    assert.strictEqual(g.ok, true, `grant refused: ${g.error}`);
+    assert.strictEqual(g.grant.maxUsd, 10);
+    assert.ok(g.grant.expiresAt > Date.now() + 29 * 86400000, "the expiry is the window asked for");
+
+    // Status resolves THIS machine's grant, so the UI never has to guess.
+    s = await get("/core/account");
+    assert.ok(s.thisWalletGrant, "status names the live grant for this wallet");
+    assert.strictEqual(s.thisWalletGrant.address, s.account.wallets[0].address);
+    assert.strictEqual(s.thisWalletGrant.id, g.grant.id);
+
+    // A cap of zero is not a grant, it is a mistake — caught before signing.
+    const zero = await post("/core/account/grant", { maxUsd: 0, days: 30 });
+    assert.strictEqual(zero.ok, false);
+    assert.match(String(zero.error), /cap above zero/i);
+
+    // A second grant REPLACES the first: "how much may this site spend?"
+    // must always have exactly one answer.
+    const g2 = await post("/core/account/grant", { maxUsd: 25, days: 7 });
+    assert.strictEqual(g2.ok, true);
+    s = await get("/core/account");
+    assert.strictEqual(s.thisWalletGrant.id, g2.grant.id);
+    assert.strictEqual(s.account.grants.filter((x) => x.live).length, 1, "never two live caps on one wallet");
+
+    // Revoking needs no key, only the session — and it is immediate.
+    const rev = await post("/core/account/grant/revoke", { id: g2.grant.id });
+    assert.strictEqual(rev.ok, true);
+    s = await get("/core/account");
+    assert.strictEqual(s.thisWalletGrant, null, "web access is off again");
+  } finally {
+    fake.server.close();
+    await core.stop();
+  }
+});
+
+test("account: unlinking the wallet leaves no live grant behind it", { timeout: 60000 }, async () => {
+  const { core, fake, post, get } = await coreWithAccount();
+  try {
+    fake.state.approved = true;
+    await post("/core/account/link/start");
+    await post("/core/account/link/poll");
+    await post("/core/account/wallet");
+    await post("/core/account/grant", { maxUsd: 5, days: 7 });
+
+    let s = await get("/core/account");
+    const addr = s.account.wallets[0].address;
+    await post("/core/account/wallet/unlink", { address: addr });
+    s = await get("/core/account");
+    /*
+     * The production server revokes grants inside unlinkWallet; the fake one
+     * here deliberately does NOT, leaving a live-looking grant row behind on
+     * purpose. That makes this a test of the APP's own resolution rather than
+     * the server's cleanup: with the wallet unlinked, this machine must not
+     * offer to manage web access it can no longer prove it owns.
+     */
+    assert.strictEqual(s.thisWalletLinked, false);
+    assert.strictEqual(s.thisWalletGrant, null, "an unlinked wallet reports no grant on this machine");
   } finally {
     fake.server.close();
     await core.stop();

@@ -907,6 +907,16 @@ class Gateway {
           const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
           return this._json(res, 200, { ok: true, account: await this.account.unlinkWallet(body.address) });
         }
+        // Spend grants: only this machine can create one (the wallet key
+        // signs it here); revoking needs nothing but the session.
+        if (path === "/core/account/grant" && req.method === "POST") {
+          const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+          return this._json(res, 200, { ok: true, ...(await this.account.grantSpend(body)) });
+        }
+        if (path === "/core/account/grant/revoke" && req.method === "POST") {
+          const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+          return this._json(res, 200, { ok: true, account: await this.account.revokeGrant(body.id) });
+        }
       } catch (e) {
         return this._json(res, 400, { ok: false, error: String(e.message) });
       }

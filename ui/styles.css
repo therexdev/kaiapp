@@ -787,6 +787,17 @@ button.small:disabled { opacity: 0.5; cursor: default; }
 /* An oversized select (long catalog labels) shrinks to share its row
    instead of pushing the button beside it onto its own line (UI audit). */
 .form-row select { flex: 0 1 auto; min-width: 0; }
+
+/* An anchor that has to sit in a button row without pretending to be one:
+   same height and padding as `.small`, but still visibly a link. Electron's
+   setWindowOpenHandler turns target="_blank" into the system browser, which
+   is why external destinations stay anchors instead of becoming buttons. */
+.link-btn {
+  display: inline-flex; align-items: center; padding: 7px 12px;
+  border: 1px solid var(--border); border-radius: 8px;
+  color: var(--violet); text-decoration: none; font-size: 0.88em;
+}
+.link-btn:hover { border-color: var(--violet); background: var(--bg-input); }
 /* Small buttons paired with full-height inputs fill the row height. */
 .form-row button.small, .task-form-row button.small { align-self: stretch; }
 
