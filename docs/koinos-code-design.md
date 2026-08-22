@@ -212,14 +212,80 @@ deliberate act: the agent proposes edits through its approval cards, and
 commit / push / pull request each happen because a person asked for that
 specific thing.
 
+## v6 (shipped 0.37.0) — the workspace UI, and a bug worth remembering
+
+**window.prompt() does not exist in Electron.** It returns null without showing
+anything. v0.35.0/v0.36.0 drove all nine Koinos Code actions through it, so
+every button was dead in the packaged app — while the Chromium test passed,
+because Playwright IS a browser and no behavioural test can reproduce a missing
+browser API. The guard is therefore static (`electron-dialogs.test.js` greps
+`ui/*.js`), and it immediately found a third instance in app.js that nobody had
+reported. **Rule: never prompt() in ui/. alert()/confirm() are fine.**
+
+The UI became a workspace: projects rail + New chat; a start screen offering
+"Select a folder" (native picker in the app, in-app browser in the served UI)
+and "Clone from GitHub" (creates the folder, clones, registers, opens it);
+a real composer; inline forms everywhere. `/core/code/browse` lists DIRECTORIES
+ONLY, so it cannot enumerate documents.
+
+## v7 (shipped 0.38.0) — plan mode + MCP tools
+
+Plan mode is enforced by ABSENCE: the loop is handed list/read/search and
+nothing else, so it cannot write even if the model tries. The plan arrives as a
+card; approving re-runs the task with the plan as context. A plan is a proposal,
+not a session turn.
+
+Registry tools (MCP, memory, email, calendar, built-ins) can be lent to a
+project: opt-in, capped at 8 because a 4k context cannot hold more and still
+hold the task, and a `sensitive` tool routes to the SAME approval card as a
+shell command — the coding agent must never be a way around a gate the rest of
+the app enforces.
+
+Bug caught here and never plan-specific: `parseAgentAction` returns null for
+BOTH prose and a tool call naming something unavailable, and the loop treated
+null as "this is the final answer" — so a refused tool call was shown to the
+person as raw JSON pretending to be an answer. Now the loop recognises the
+attempt, states the real tool list, and lets it retry, bounded to two nudges.
+
+## v8 (shipped 0.39.0) — slash commands + subagents
+
+Commands are `.koinos/commands/*.md`; `/name` expands with `$ARGUMENTS` and runs
+as an ordinary task. **They are prompt templates and nothing else, and that is
+the point rather than a limitation** — these files arrive inside cloned
+repositories, so a command must never be able to execute, grant, or widen
+anything. It changes what is asked; every downstream write and command is still
+a card.
+
+Subagents: `delegate` spawns a child on the same project and returns ONE
+observation, for context rather than privilege. The child reuses the parent's
+io (its writes are the parent's cards), gets no host tools, cannot delegate
+further, has a smaller budget, and is capped at 3 per run.
+
 ## What "exactly like Claude Code" does and does not mean here
 
 Worth stating plainly rather than implying parity that does not exist. Koinos
 Code now matches the shape: its own place in the app, many projects, sessions
 that remember, a coding agent with approval gates, a terminal CLI, and GitHub.
-It does NOT have Claude Code's subagents, hooks, custom slash commands, MCP
-inside the coding agent, plan mode, or background tasks — and it runs on
-whatever model the local gateway serves, which is the whole point but does
-mean small models behave differently from a frontier one. Those are honest
-gaps, not oversights, and the next ones worth closing are MCP tools inside the
-agent and a plan-then-act mode.
+As of v0.39.0 it also has subagents, custom slash commands, MCP tools inside
+the coding agent, and plan mode. Two things remain different, and both are
+deliberate:
+
+**Background tasks are not built.** A run that outlives its connection needs
+its trace buffered and its approval cards to survive a reload — they currently
+die with their run. That is real plumbing, worth doing when someone actually
+wants to walk away mid-run.
+
+**Hooks are declined, not deferred.** Hooks are arbitrary shell commands fired
+automatically at lifecycle points. Everything here runs the other way:
+`spawn(argv, {shell:false})`, a canary test proving no shell sees a branch
+name, a human answering every write and command. And a `.koinos/hooks.json`
+would arrive INSIDE A CLONED REPOSITORY — so cloning a stranger's repo could
+execute their commands before anyone read a line of it. That is a supply-chain
+hole, not a feature. The safe version of the same outcome: named scripts in
+KOINOS.md that the agent may PROPOSE, arriving as an ordinary command approval
+card.
+
+The last real difference is the model. Koinos Code runs on whatever the local
+gateway serves — the whole point of the product, and a genuine difference in
+capability from a frontier model, which is exactly why plan mode matters here
+more than it would elsewhere.

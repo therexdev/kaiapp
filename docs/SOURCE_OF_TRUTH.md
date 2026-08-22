@@ -625,6 +625,41 @@ for dev/screenshots).
      `.`/`..` refused by name — they pass a character check and would escape
      `path.join(parent, repo)`, a real hole found by probing before wiring;
      every repo action names a PROJECT, never a request-supplied path.
+   - **v0.37.0 (2026-08-22): Koinos Code workspace UI — and a real bug.**
+     v0.35.0/v0.36.0 drove every action through `window.prompt()`, which **DOES
+     NOT EXIST IN ELECTRON** (returns null, shows nothing) — so all nine
+     Koinos Code buttons were dead in the packaged app while the Chromium test
+     passed, because Playwright IS a browser. The guard is therefore STATIC:
+     `core/test/electron-dialogs.test.js` greps `ui/*.js`. It immediately found
+     a THIRD instance nobody had reported — the API-key budget button in
+     app.js. **RULE: never use prompt() in ui/; alert()/confirm() are fine.**
+     UI rebuilt as a workspace: projects rail + "New chat", a start screen with
+     "Select a folder" (native `koinosShell.pickFolder` in the app, in-app
+     browser in the served UI) and "Clone from GitHub" (creates the folder,
+     clones, registers the project, opens it). New `/core/code/browse` lists
+     DIRECTORIES ONLY — never file names.
+   - **v0.38.0 (2026-08-22): plan mode + MCP tools in the coding agent.**
+     Plan mode hands the loop list/read/search and NOTHING else — it cannot
+     write because the tools do not exist, not because the model was asked
+     nicely. The plan is a card; approving re-runs the task with the plan as
+     context; a plan is not written to the session. Registry (MCP) tools are
+     opt-in per project, capped at 8 (a 4k context cannot hold more and still
+     hold the task), and a `sensitive` tool routes to the SAME approval card as
+     a shell command. **Bug found in the process, never plan-specific:**
+     `parseAgentAction` returns null for BOTH prose and a call naming an
+     unavailable tool, and the loop treated null as the final answer — so a
+     refused tool call was displayed as raw JSON pretending to be an answer.
+     Now nudged (bounded to 2) with the real tool list.
+   - **v0.39.0 (2026-08-22): slash commands + subagents.** `.koinos/commands/
+     *.md` in the project → `/name`, `$ARGUMENTS` substituted, expanded in Core
+     so UI/API match. **A command is a PROMPT TEMPLATE AND NOTHING ELSE** —
+     these files arrive inside CLONED REPOS, so a command can never execute,
+     grant, or widen anything; it only changes what is asked. (Same reason
+     hooks stay unbuilt: a hook IS execution arriving in a clone.) Subagents:
+     a `delegate` tool spawns a child on the same project returning ONE
+     observation — child reuses the PARENT's approval cards, gets no host
+     tools, cannot delegate further (depth 1 = fork-bomb stop), smaller budget,
+     max 3 per run.
 10. **Moderation/AUP — owner-DEFERRED 2026-08-20**: owner agrees with the A40 reporter's
     finding but explicitly wants it on the future plan ("easier to understand the
     implications... with more nodes and network usage"). Design in kaiapp
@@ -656,9 +691,16 @@ for dev/screenshots).
 12. **Koinos Code vs Claude Code — what parity does and does not mean.**
     Shipped: own menu item, many projects, sessions that remember, approval
     gates on every write and command, a terminal CLI, GitHub (clone → project,
-    branch/commit/push/PR). NOT shipped, and named rather than implied:
-    subagents, hooks, custom slash commands, MCP tools INSIDE the coding agent,
-    plan mode, background tasks. It also runs on whatever the local gateway
+    branch/commit/push/PR), a folder picker and clone-to-start flow, PLAN MODE,
+    MCP tools inside the agent, CUSTOM SLASH COMMANDS, and SUBAGENTS (v0.37.0–
+    v0.39.0). NOT shipped: **background tasks** (detached runs whose approval
+    cards survive a reload — real plumbing, worth doing when someone wants to
+    walk away) and **hooks — deliberately declined, not deferred**: hooks are
+    arbitrary shell commands fired automatically, and a `.koinos/hooks.json`
+    would arrive inside a CLONED REPOSITORY, so opening a stranger's repo could
+    execute their commands. That is a supply-chain hole, not a feature. The
+    safe version of the same outcome is named scripts in KOINOS.md the agent
+    may PROPOSE, arriving as an ordinary command approval card. It also runs on whatever the local gateway
     serves, so a small model behaves differently from a frontier one — that is
     the product's whole point, but it is a real difference in capability, not
     just in branding. Next two worth closing: MCP inside the agent, and a
