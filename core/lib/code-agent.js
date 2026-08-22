@@ -101,6 +101,28 @@ function registryTools(registry, { allow = [], io, runId, onTrace }) {
     }));
 }
 
+/*
+ * SUBAGENTS (task #76).
+ *
+ * A `delegate` tool spawns a CHILD run of the same agent on the same project
+ * with its own step budget, and hands its answer back as ONE observation. The
+ * point is context, not privilege: a big sub-task (read this whole subsystem
+ * and summarise what changes) can burn twenty steps in a child without filling
+ * the parent's 4k window with the trace.
+ *
+ * The child is deliberately WEAKER than its parent, never stronger:
+ *   - it inherits the SAME io, so every write it proposes is still a card the
+ *     person answers in the parent's conversation. A subagent is not a way to
+ *     get an unattended writer;
+ *   - it gets no host/MCP tools — those are lent to a project by a person, and
+ *     that consent does not silently extend to agents spawning agents;
+ *   - it cannot delegate further (depth 1), which is what stops a fork bomb;
+ *   - it has a smaller step budget than the parent, so N children cannot cost
+ *     more than the parent's own ceiling.
+ */
+const SUBAGENT_MAX_STEPS = 12;
+const SUBAGENT_LIMIT = 3; // per parent run
+
 class CodeAgent {
   /** chatFn({model, messages, maxTokens}) -> Promise<string> — the host's
    *  loopback lane, so runs inherit every routing/privacy rule. */
@@ -167,7 +189,7 @@ class CodeAgent {
    * Returns {runId, answer, steps, reason} — reason "answered" | "stopped" |
    * "budget" (step budget exhausted).
    */
-  async run({ dir, task, model = "", maxSteps, history = [], mode = "act", plan = "", tools: allowTools = [], onTrace = () => {} }) {
+  async run({ dir, task, model = "", maxSteps, history = [], mode = "act", plan = "", tools: allowTools = [], depth = 0, io: parentIo = null, parentRunId = null, onTrace = () => {} }) {
     const q = String(task || "").trim();
     if (!q) throw new Error("give the agent a task");
     const root = path.resolve(String(dir || ""));
@@ -187,7 +209,10 @@ class CodeAgent {
     this._runs.set(runId, run);
     const budget = Math.max(1, Math.min(HARD_MAX_STEPS, Number(maxSteps) || DEFAULT_MAX_STEPS));
 
-    const io = {
+    // A child reuses its parent's io, so its approval cards belong to the
+    // parent run: stopping the parent resolves them, and the person sees one
+    // conversation rather than two.
+    const io = parentIo || {
       showDiff: () => {}, // the diff travels INSIDE the approval card
       askEdit: (rel, diff) => this._ask(runId, { kind: "edit", path: rel, diff }, onTrace),
       askCommand: (cmd) => this._ask(runId, { kind: "command", cmd }, onTrace),
@@ -195,12 +220,59 @@ class CodeAgent {
     };
     // No --yes, no --allow-commands in the app: every gate routes to a card.
     const planning = mode === "plan";
+    /*
+     * Delegation is offered only to a top-level ACTING run: a child cannot
+     * spawn children (depth 1 stops a fork bomb), and planning is a reading
+     * pass that should not be farming work out.
+     */
+    let spawned = 0;
+    const delegateTool =
+      planning || depth > 0
+        ? []
+        : [
+            {
+              name: "delegate",
+              description:
+                "Hand a self-contained sub-task to a helper that works in this same project and reports back one answer. " +
+                "Use for work that needs many steps of reading. The helper cannot delegate further.",
+              params: { task: "what the helper should do" },
+              handler: async ({ task: sub }) => {
+                const t = String(sub || "").trim();
+                if (!t) return "give the helper a task";
+                if (spawned >= SUBAGENT_LIMIT) return `no more helpers available (limit ${SUBAGENT_LIMIT} per run)`;
+                spawned++;
+                onTrace({ type: "note", text: `delegating: ${t.slice(0, 120)}` });
+                try {
+                  const child = await this.run({
+                    dir: root,
+                    task: t,
+                    model,
+                    maxSteps: SUBAGENT_MAX_STEPS,
+                    depth: depth + 1,
+                    // The child answers through the PARENT's cards: a person is
+                    // still the one approving every write it proposes.
+                    io,
+                    parentRunId: runId,
+                    onTrace: (e) => onTrace({ ...e, from: "helper" }),
+                  });
+                  return child.answer ? `helper reported:\n${child.answer}` : `the helper finished without an answer (${child.reason})`;
+                } catch (e) {
+                  return `helper failed: ${e.message}`;
+                }
+              },
+            },
+          ];
     const tools = makeTools(root, {
       yes: false,
       allowCommands: false,
       io,
       readOnly: planning,
-      extraTools: registryTools(this.registry, { allow: allowTools, io, runId, onTrace }),
+      extraTools: [
+        // A child gets no host tools: lending a tool to a project is a
+        // person's decision and does not extend to agents spawning agents.
+        ...(depth > 0 ? [] : registryTools(this.registry, { allow: allowTools, io, runId, onTrace })),
+        ...delegateTool,
+      ],
     });
     const names = tools.map((t) => t.name);
 
@@ -298,4 +370,4 @@ class CodeAgent {
   }
 }
 
-module.exports = { CodeAgent, registryTools, MAX_EXTRA_TOOLS };
+module.exports = { CodeAgent, registryTools, MAX_EXTRA_TOOLS, SUBAGENT_MAX_STEPS, SUBAGENT_LIMIT };

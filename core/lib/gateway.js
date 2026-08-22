@@ -1137,6 +1137,19 @@ class Gateway {
       // Which registry tools this machine could lend the coding agent right
       // now. Privacy filtering is the registry's own — egress tools simply are
       // not in the list in Local-Only.
+      // A project's own slash commands, for the composer's list.
+      if (path === "/core/code/commands" && req.method === "POST") {
+        try {
+          const b = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+          const p = this.code.projects.get(String(b.projectId || ""));
+          const list = require("./code-commands")
+            .listCommands(p.path)
+            .map((c) => ({ name: c.name, description: c.description }));
+          return this._json(res, 200, { ok: true, commands: list, dir: require("./code-commands").DIR });
+        } catch (e) {
+          return this._json(res, 400, { ok: false, error: String(e.message) });
+        }
+      }
       if (path === "/core/code/tools" && req.method === "GET") {
         let list = [];
         try {
@@ -1299,11 +1312,28 @@ class Gateway {
           return this._json(res, 400, { ok: false, error: String(e.message) });
         }
 
+        /*
+         * Slash commands expand BEFORE the stream opens, so an unknown command
+         * is an ordinary 400 the caller can read — not an error buried in an
+         * SSE frame. A command is a prompt template and nothing more: it
+         * changes what is asked, never what is permitted.
+         */
+        let task = String(body.task || "");
+        let commandName = null;
+        {
+          const expanded = require("./code-commands").expand(dir, task);
+          if (expanded) {
+            if (expanded.error) return this._json(res, 400, { ok: false, error: expanded.error });
+            commandName = expanded.name;
+            task = expanded.task;
+          }
+        }
+
         // SSE with approval-request events: the run PAUSES on every write
         // and command until /core/code/approve answers that card.
         res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
         const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
-        const task = String(body.task || "");
+        if (commandName) send({ trace: { type: "note", text: `/${commandName}` } });
         if (project && sessionId) send({ session: { projectId: project.id, sessionId } });
         try {
           const r = await this.code.run({

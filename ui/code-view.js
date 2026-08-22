@@ -33,6 +33,8 @@
     allTools: [],
     maxTools: 8,
     toolsByProject: {}, // projectId -> [tool names] — opt-in, per project
+    commands: [],
+    commandsDir: "",
   };
 
   async function api(path, opts = {}) {
@@ -264,7 +266,9 @@
       await loadSessions();
       await renderGit();
       renderToolsSummary();
+      await loadCommands();
       $("kc-tools-panel").hidden = true;
+      $("kc-cmd-hints").hidden = true;
     } catch (e) {
       status(e.message);
     }
@@ -723,6 +727,7 @@
     bubble("You", task);
     $("kc-task").value = "";
     $("kc-task").style.height = "";
+    $("kc-cmd-hints").hidden = true;
     // "Plan first" makes the FIRST pass read-only: it looks, proposes, and
     // waits. Approving the plan runs the same task for real.
     return run(task, { mode: $("kc-plan").checked ? "plan" : "act" });
@@ -816,7 +821,63 @@
     const el = e.target;
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 180)}px`;
+    renderCommandHints();
   });
+
+  // ------------------------------------------------------------- commands
+
+  /*
+   * A project's own slash commands, listed when someone types "/". They are
+   * prompt templates living in .koinos/commands/*.md — expanded by Core, so
+   * the API behaves identically.
+   */
+  async function loadCommands() {
+    if (!kc.projectId) return;
+    try {
+      const j = await api("/core/code/commands", { method: "POST", body: JSON.stringify({ projectId: kc.projectId }) });
+      kc.commands = j.commands || [];
+      kc.commandsDir = j.dir || ".koinos/commands";
+    } catch {
+      kc.commands = [];
+    }
+  }
+
+  function renderCommandHints() {
+    const host = $("kc-cmd-hints");
+    const text = $("kc-task").value;
+    // Only while typing the command itself — it must not sit in the way once
+    // there are arguments.
+    const m = text.match(/^\/([A-Za-z0-9_-]*)$/);
+    if (!m) {
+      host.hidden = true;
+      return;
+    }
+    const q = m[1].toLowerCase();
+    const hits = (kc.commands || []).filter((c) => c.name.startsWith(q));
+    host.innerHTML = "";
+    if (!hits.length) {
+      const none = document.createElement("div");
+      none.className = "kc-browse-item up";
+      none.textContent = (kc.commands || []).length
+        ? "no command matches"
+        : `no commands yet — add one as ${kc.commandsDir || ".koinos/commands"}/name.md`;
+      host.appendChild(none);
+      host.hidden = false;
+      return;
+    }
+    for (const c of hits) {
+      const b = document.createElement("button");
+      b.className = "kc-browse-item";
+      b.textContent = `/${c.name}${c.description ? ` — ${c.description}` : ""}`;
+      b.addEventListener("click", () => {
+        $("kc-task").value = `/${c.name} `;
+        host.hidden = true;
+        $("kc-task").focus();
+      });
+      host.appendChild(b);
+    }
+    host.hidden = false;
+  }
 
   // ---------------------------------------------------------------- tools
 

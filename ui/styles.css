@@ -927,3 +927,5 @@ button.small:disabled { opacity: 0.5; cursor: default; }
 
 .budget-edit { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; flex-wrap: wrap; }
 .budget-edit input { max-width: 220px; }
+
+.kc-cmd-hints { margin: 0 20px; max-height: 180px; }
