@@ -1,8 +1,14 @@
 # Cloud GPU (RunPod and friends) — design exploration
 
-**Status: DIRECTION SET by the owner 2026-08-22 — first-party seed capacity.
-The user-integration half is declined. VRAM gate fixed; everything else below
-awaits a spend decision.**
+**Status: PARKED by the owner 2026-08-22 — revisit AT BETA or just before.**
+*"Lets put this on hold until we officially move into beta or right before
+then. I think this needs some more thought before implementing."*
+
+Direction is set (§6): first-party seed capacity; the user-integration half is
+declined. Nothing further is built and nothing should be started until the
+owner reopens it — see `docs/beta-readiness.md` §5, which is where this
+resurfaces. The VRAM gate fix (§1) already shipped in v0.41.2 and is NOT
+parked: it was a standing consumer-hardware bug that stands on its own.
 Owner asked how someone could use a service like RunPod to host bigger models
 for their own Koinos AI *and* offer them to the network.
 

@@ -477,7 +477,14 @@ for dev/screenshots).
      pairing code was 24px with 4px tracking and NO monospace face — the one
      place proportional digits actually cost you, since you read it off one
      screen and type it into another) and `.cmp-pane-label`.
-0c. **Cloud GPU — DIRECTION SET 2026-08-22: FIRST-PARTY SEED CAPACITY ONLY.**
+0c. **Cloud GPU — PARKED by the owner 2026-08-22 until BETA or just before.**
+   *"Lets put this on hold until we officially move into beta or right before
+   then. I think this needs some more thought before implementing."* **DO NOT
+   ACT** until he reopens it — same posture as task #63. It resurfaces via
+   `docs/beta-readiness.md` §5. The direction below is settled and is kept so
+   it does not get re-explored from scratch; the VRAM gate fix already shipped
+   (v0.41.2) and is NOT parked — it was a standing consumer-hardware bug.
+   DIRECTION (settled, not started): **FIRST-PARTY SEED CAPACITY ONLY.**
    Owner's call after reading the exploration: *"the real goal is to get bigger
    models available on the network... If we offer that capability then people
    don't really need the capability of integrating cloud hosting to access them

@@ -143,3 +143,43 @@ which is the thing Beta is supposed to measure.
   wasm to mainnet behind the kill switch with claims disabled, list on
   tradekoinos, verify dust trades, open claims at launch. Executes once
   testnet settlement is proven end-to-end.
+
+## 5. Parked until beta — first-party big-model capacity (owner, 2026-08-22)
+
+**Do not start this before beta. The owner parked it wanting more thought:
+*"Lets put this on hold until we officially move into beta or right before
+then."* This section exists so it surfaces THEN, rather than being
+rediscovered.**
+
+Direction is already set (`docs/cloud-gpu-design.md` §6): Koinos AI runs
+big-model capacity itself as inventory, rather than teaching users to
+integrate cloud hosting. The exploration behind it is finished and the
+arithmetic is in that doc — a network worker renting a GPU loses money at
+current rates, and the bootstrap pool cannot rescue it by design.
+
+**Already shipped and NOT parked:** VRAM now counts in the advertise gate
+(v0.41.2). That was a standing bug on consumer hardware — a 24 GB 4090 beside
+16 GB of DDR4 was refused the classes it serves fastest — and it stands on its
+own merits.
+
+When this reopens, three things are settled and should not be re-litigated:
+
+1. **Seed workers draw ZERO from the bootstrap pool.** The pool divides
+   pro-rata across all honest receipts, so a first-party worker earning subsidy
+   dilutes every volunteer. Build the exclusion BEFORE any pod reaches
+   production — retrofitting means volunteers were already shorted.
+2. **It must be visible on the stats page that we run them**, and seed pods
+   must be excluded from the anti-Sybil shadow calibration.
+3. **The catalog blocks it, not the hardware** — nothing above 32B exists to
+   serve, and a 70B needs a real artifact URL + sha256.
+
+Three things still need the owner and were NOT answered:
+
+- Budget cap and trial length. An always-on 70B is order **$1,200-1,500/month**
+  and recovers a minority of that even at full utilisation.
+- Which 70B, and its price (the ladder suggests $2.00/$8.00 per 1M — a market
+  call, not an engineering one).
+- Whether scale-to-zero gets designed first. It is structural, not a
+  nice-to-have: a worker that is not running is not in the roster, so nothing
+  routes to it, so it never wakes. `PREFER_WINDOW_MS` + `/worker/warming` are
+  the pieces. It is the difference between $1,400/month and paying for use.
