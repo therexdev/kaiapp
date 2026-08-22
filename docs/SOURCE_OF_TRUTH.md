@@ -461,7 +461,7 @@ for dev/screenshots).
    signup notifications need `SMTP_TO` as well as `SMTP_HOST`. Sign-in works
    without it; those notification emails do not.
 
-0a. **Koinos AI Web v1 — SHIPPED 2026-08-22 (kai PRs #21-#25, kaiapp v0.42.0).**
+0a. **Koinos AI Web v1 — SHIPPED 2026-08-22 (kai PRs #21-#29, kaiapp v0.42.0).**
    Chat, Docs, Tasks, Memory, Wallet at koinosai.com/app. Live-verified from
    outside the box: `app HTTP 302 -> /account?next=/app`,
    `shell body not served anonymously (correct)`, `app/app.js HTTP 200`,
@@ -474,9 +474,26 @@ for dev/screenshots).
    loop end to end — authorise a grant in the desktop app, open /app, send a
    message, watch KAI leave the wallet. Every piece is probe-covered against a
    fake provider; none of it has met a real one with a real person driving.
-   Next natural steps if the field report is good: the account page should
-   surface grants and sessions (routes exist, UI does not), and web tasks want
-   a per-task spend ceiling below the grant cap.
+   Shipped after the five parts, same day: the account page now surfaces and
+   revokes grants and sessions (#26); a model picker with prices, and the cost
+   of each answer carried on the scheduler's final frame (#27); delete-my-data
+   plus a browser-shaped balance refusal (#28); a responsive layout so the
+   thing works on the phone its own pitch describes (#29).
+   Still open, in priority order: a per-task spend ceiling below the grant cap;
+   web-app usage history on the account page.
+
+   **Two operational lessons from shipping it, both already fixed:**
+   - `npm test` runs the suite's files IN PARALLEL. Adding two account tests
+     that each derive a scrypt wallet starved a browser test in another file
+     and blew its 15s inner timeout — CI went red, both build jobs are gated
+     behind `test`, and v0.42.0 produced no installer until it was found. When
+     a browser test fails on CI and passes locally, suspect contention before
+     suspecting the feature.
+   - `health-digest.py` NOW EXITS NON-ZERO on a FAIL. The old rule — "it never
+     exits non-zero, the DIGEST line is the verdict" — was followed and still
+     failed: a netcheck run went green with `DIGEST FAIL fails=1` inside it.
+     A verdict nobody can see from outside is not a verdict. WARNs stay silent
+     deliberately (the oracle holds stale for ~45 min after every restart).
 
 0b. **v0.41.0 (2026-08-22): Settings, a Network icon, and one Koinos Node
    entry.** Field report opened with a real bug: *"Koinos Code and Developer
