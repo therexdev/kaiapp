@@ -2076,8 +2076,20 @@ async function renderModels() {
       } else {
         action = `<button class="primary small" data-get="${esc2(a.alias)}">Download</button>`;
       }
+      /*
+       * Removing an installed model. Two different things wear the same word,
+       * so the labels do not pretend otherwise: an imported model is the
+       * user's own file and only leaves the list, while a downloaded one is
+       * ours and really goes. A partly-downloaded file counts as installed
+       * too — a cancelled download still occupies the disk, and until now
+       * there was no way at all to get those bytes back.
+       */
       if (a.custom) {
         action += ` <button class="chat-del" data-remove-custom="${esc2(a.alias)}" title="Remove from the list (your file is not deleted)">×</button>`;
+      } else if (a.status === "ready" || a.status === "partial") {
+        action += inUse
+          ? ` <button class="chat-del" disabled title="This model is loaded — switch to another first">×</button>`
+          : ` <button class="chat-del" data-uninstall="${esc2(a.package)}" data-uninstall-name="${esc2(a.label.split(" (")[0])}" title="Remove this model from your disk">×</button>`;
       }
       const fitNote = tight && !hopeless ? ` · tight fit on this machine (~${a.minRamGb} GB RAM recommended)` : "";
       // The last load failure shows on the card of the model it hit, so a
@@ -2113,11 +2125,50 @@ async function renderModels() {
   }
 }
 
+/*
+ * Ask Core what removing this would delete, say so, then do it.
+ *
+ * The size is quoted from the plan rather than the catalog because they can
+ * disagree — a half-finished download frees less than the full model, and
+ * telling someone they will get 4.1 GB back when it is 900 MB is the kind of
+ * small lie that makes people stop trusting the number.
+ */
+async function uninstallModel(packageId, name) {
+  let plan;
+  try {
+    plan = await coreGet(`/core/models/installed/${encodeURIComponent(packageId)}`);
+  } catch (err) {
+    alert(`Could not check that model: ${err.message}`);
+    return;
+  }
+  if (plan.inUse) {
+    alert(`“${name}” is the model in use right now. Switch to another model first, then remove it.`);
+    return;
+  }
+  const frees = plan.freesBytes >= 1e9
+    ? `${(plan.freesBytes / 1e9).toFixed(1)} GB`
+    : `${Math.max(1, Math.round(plan.freesBytes / 1e6))} MB`;
+  if (!confirm(`Remove “${name}” from this machine?\n\nThis frees ${frees}. You can download it again from Models at any time.`)) return;
+
+  const r = await fetch(`/core/models/installed/${encodeURIComponent(packageId)}`, { method: "DELETE" });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok || !body.ok) {
+    alert(`Could not remove it: ${body.error?.message || r.statusText}`);
+    return;
+  }
+  renderModels();
+}
+
 $("models-list").addEventListener("click", async (e) => {
   const rm = e.target.closest("[data-remove-custom]");
   if (rm) {
     await fetch(`/core/models/custom/${encodeURIComponent(rm.dataset.removeCustom)}`, { method: "DELETE" });
     renderModels();
+    return;
+  }
+  const un = e.target.closest("[data-uninstall]");
+  if (un) {
+    await uninstallModel(un.dataset.uninstall, un.dataset.uninstallName);
     return;
   }
   const get = e.target.closest("[data-get]");

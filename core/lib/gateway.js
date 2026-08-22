@@ -707,6 +707,42 @@ class Gateway {
         return this._json(res, 400, { ok: false, error: { message: String(e.message) } });
       }
     }
+    /*
+     * Removing an installed model. GET answers "what would this delete?" so
+     * the UI can say it plainly before the user commits; DELETE does it.
+     *
+     * The in-use check lives HERE because the runtime is what knows which
+     * model is loaded — model-manager deliberately does not reach into it.
+     */
+    if (this.models && path.startsWith("/core/models/installed/") && req.method === "GET") {
+      try {
+        const id = decodeURIComponent(path.slice("/core/models/installed/".length));
+        const plan = this.models.removalPlan(id);
+        const alias = this.runtime?.status().activeAlias || null;
+        let inUse = false;
+        try {
+          // resolveAlias throws on a quarantined package; a model we cannot
+          // resolve is certainly not the one currently serving.
+          inUse = !!alias && this.models.resolveAlias(alias).packageId === id;
+        } catch { /* not resolvable, so not in use */ }
+        return this._json(res, 200, { ok: true, ...plan, inUse });
+      } catch (e) {
+        return this._json(res, 400, { ok: false, error: { message: String(e.message) } });
+      }
+    }
+    if (this.models && path.startsWith("/core/models/installed/") && req.method === "DELETE") {
+      try {
+        const id = decodeURIComponent(path.slice("/core/models/installed/".length));
+        const alias = this.runtime?.status().activeAlias || null;
+        let inUse = false;
+        try {
+          inUse = !!alias && this.models.resolveAlias(alias).packageId === id;
+        } catch { /* the loaded alias no longer resolves; it cannot be this one */ }
+        return this._json(res, 200, { ok: true, ...this.models.removePackage(id, { isInUse: inUse }) });
+      } catch (e) {
+        return this._json(res, 400, { ok: false, error: { message: String(e.message) } });
+      }
+    }
     if (this.models && path.startsWith("/core/models/custom/") && req.method === "DELETE") {
       try {
         return this._json(res, 200, { ok: true, ...this.models.removeCustom(decodeURIComponent(path.split("/")[4])) });

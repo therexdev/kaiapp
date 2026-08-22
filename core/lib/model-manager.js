@@ -327,6 +327,107 @@ class ModelManager {
     }
   }
 
+  /**
+   * What removing this package would actually delete.
+   *
+   * Answered separately from doing it, because the two kinds of "installed"
+   * model are not the same thing and confusing them loses someone's file:
+   *
+   *   - a CATALOG package is a file this app downloaded into its own models
+   *     directory. Removing it frees real disk and can be re-downloaded.
+   *   - an IMPORTED model is the user's own .gguf, wherever they keep it. We
+   *     only ever hold a reference. Removing it forgets the reference and
+   *     MUST NOT touch the file — deleting it would be deleting something
+   *     out of their Downloads folder on their behalf.
+   */
+  removalPlan(packageId) {
+    const id = String(packageId);
+
+    if (id.startsWith("custom:")) {
+      const c = this._customs().find((x) => x.sha256 === id.slice(7));
+      if (!c) throw new Error(`Unknown package: ${id}`);
+      return {
+        kind: "imported",
+        label: c.label,
+        deletesFiles: [],          // deliberately empty
+        keepsFile: c.path,
+        freesBytes: 0,
+        redownloadable: false,     // it came from them, not from us
+      };
+    }
+
+    const pkg = this.catalog.packages[id];
+    if (!pkg) throw new Error(`Unknown package: ${id}`);
+    const files = [];
+    let frees = 0;
+    const add = (f) => {
+      try {
+        frees += fs.statSync(f).size;
+        files.push(f);
+      } catch { /* not on disk: nothing to free */ }
+    };
+
+    add(this.packagePath(id));
+    add(this.packagePath(id) + ".part"); // a cancelled download still costs disk
+
+    /*
+     * The vision projector rides along with the model but is a separate file,
+     * and two packages can pin the SAME projector. Only remove it when no
+     * other package that is still on disk needs it, or removing gemma3-4b
+     * would quietly break every other vision model.
+     */
+    if (pkg.mmproj?.filename) {
+      const neededElsewhere = Object.entries(this.catalog.packages).some(([otherId, other]) =>
+        otherId !== id &&
+        other.mmproj?.filename === pkg.mmproj.filename &&
+        this.packageStatus(otherId).status !== "absent");
+      if (!neededElsewhere) add(path.join(this.modelsDir, pkg.mmproj.filename));
+    }
+
+    return {
+      kind: "downloaded",
+      label: pkg.filename,
+      deletesFiles: files,
+      keepsFile: null,
+      freesBytes: frees,
+      redownloadable: true,
+    };
+  }
+
+  /**
+   * Remove an installed model.
+   *
+   * `isInUse` is asked rather than assumed, so this module stays ignorant of
+   * the runtime: the caller knows what is loaded. Deleting the weights out
+   * from under a running llama.cpp is not a crash we want to debug from a
+   * field report.
+   */
+  removePackage(packageId, { isInUse = false } = {}) {
+    const plan = this.removalPlan(packageId);
+    if (isInUse) {
+      throw new Error("That model is loaded right now — switch to another model first, then remove it.");
+    }
+
+    if (plan.kind === "imported") {
+      // Forget the reference only. Same contract as removeCustom, which this
+      // now shares so there is one answer to "does removing delete my file".
+      const c = this._customs().find((x) => x.sha256 === String(packageId).slice(7));
+      this.removeCustom(c.alias);
+      this.onEvent({ type: "model:removed", packageId, kind: "imported", freedBytes: 0 });
+      return { removed: true, kind: "imported", freedBytes: 0, keptFile: plan.keepsFile };
+    }
+
+    for (const f of plan.deletesFiles) {
+      try {
+        fs.rmSync(f, { force: true });
+      } catch (e) {
+        throw new Error(`Could not remove ${path.basename(f)}: ${e.code || e.message}`);
+      }
+    }
+    this.onEvent({ type: "model:removed", packageId, kind: "downloaded", freedBytes: plan.freesBytes });
+    return { removed: true, kind: "downloaded", freedBytes: plan.freesBytes, files: plan.deletesFiles.length };
+  }
+
   /** Bytes used by the local model store (§5: storage limits surface later). */
   storageUsage() {
     let bytes = 0;

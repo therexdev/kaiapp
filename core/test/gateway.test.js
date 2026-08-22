@@ -199,3 +199,78 @@ test("§8 developer platform: per-key usage metering, budgets, embeddings passth
     await gateway.close();
   }
 });
+
+/* ------------------------------------------------------------------ */
+/* Uninstalling a model over HTTP.                                     */
+/*                                                                     */
+/* The in-use guard can only be tested here: model-manager is asked     */
+/* whether the model is loaded, it does not know, and the gateway is    */
+/* the piece that consults the runtime. A unit test of removePackage    */
+/* proves the refusal works when told; this proves it is TOLD.          */
+
+test("GET /core/models/installed/:id explains what removal would delete", async () => {
+  const { gateway, base } = await makeStack();
+  try {
+    const r = await fetch(`${base}/core/models/installed/${encodeURIComponent("tiny@1")}`);
+    const body = await r.json();
+    assert.equal(r.status, 200);
+    assert.equal(body.kind, "downloaded");
+    assert.equal(body.redownloadable, true);
+    assert.equal(body.inUse, false, "nothing is loaded yet");
+    assert.ok(body.freesBytes > 0, "it quotes real bytes from disk");
+  } finally {
+    await gateway.close();
+  }
+});
+
+test("DELETE /core/models/installed/:id removes the file", async () => {
+  const { gateway, base } = await makeStack();
+  try {
+    const before = await (await fetch(`${base}/core/models`)).json();
+    assert.equal(before.aliases.find((a) => a.alias === "dev-tiny").status, "ready");
+
+    const r = await fetch(`${base}/core/models/installed/${encodeURIComponent("tiny@1")}`, { method: "DELETE" });
+    const body = await r.json();
+    assert.equal(r.status, 200);
+    assert.equal(body.ok, true);
+    assert.equal(body.kind, "downloaded");
+
+    const after = await (await fetch(`${base}/core/models`)).json();
+    assert.equal(after.aliases.find((a) => a.alias === "dev-tiny").status, "absent",
+      "the Models screen sees it gone on the next poll");
+    assert.equal(after.storage.bytes, 0, "and the storage figure drops");
+  } finally {
+    await gateway.close();
+  }
+});
+
+test("a loaded model is refused over HTTP, and survives the attempt", async () => {
+  const { gateway, runtime, base } = await makeStack();
+  try {
+    await runtime.ensure("dev-tiny");            // now it is the live model
+    assert.equal(runtime.status().activeAlias, "dev-tiny");
+
+    const r = await fetch(`${base}/core/models/installed/${encodeURIComponent("tiny@1")}`, { method: "DELETE" });
+    const body = await r.json();
+    assert.equal(r.status, 400);
+    assert.match(body.error.message, /loaded right now/i);
+
+    const after = await (await fetch(`${base}/core/models`)).json();
+    assert.equal(after.aliases.find((a) => a.alias === "dev-tiny").status, "ready",
+      "the model the runtime is serving is still on disk");
+  } finally {
+    runtime.stop();
+    await gateway.close();
+  }
+});
+
+test("an unknown package id is a 400, not a 500", async () => {
+  const { gateway, base } = await makeStack();
+  try {
+    const r = await fetch(`${base}/core/models/installed/${encodeURIComponent("nope@1")}`, { method: "DELETE" });
+    assert.equal(r.status, 400);
+    assert.match((await r.json()).error.message, /Unknown package/);
+  } finally {
+    await gateway.close();
+  }
+});
