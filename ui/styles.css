@@ -93,6 +93,12 @@ body {
 @media (max-width: 900px) { .kn-shell { grid-template-columns: minmax(0, 1fr); } }
 .kn-shell #koinos-frame-host { flex: 1; min-height: 0; display: flex; }
 
+/* Monospace where the markup asks for it. The device-link pairing code was
+   set at 24px with 4px tracking and NO monospace face — a code you read off
+   one screen and type into another is the one place proportional digits
+   actually cost you. (Found by the unstyled-class guard.) */
+.mono { font-family: ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace; }
+
 .local-note { font-size: 0.75em; color: var(--text-dim); padding: 0 6px; }
 #app-version { display: block; font-weight: 600; letter-spacing: 0.02em; margin-bottom: 3px; }
 
@@ -649,8 +655,11 @@ button.linklike.danger { color: var(--danger); }
 #view-earn, #view-koinos { overflow-y: auto; }
 /* Every card view breathes and scrolls like #view-api does — headings were
    sitting flush against the window edge, and long content was unreachable
-   (UI audit; #view-koinos stays scroll-only, it hosts a full-bleed iframe). */
-#view-tasks, #view-network, #view-tools, #view-models, #view-devtools, #view-earn {
+   (UI audit; #view-koinos stays scroll-only, it hosts a full-bleed iframe).
+   A view MISSING from this list does not simply fail to scroll — it grows the
+   page instead, and the whole window scrolls WITH THE SIDEBAR. Field report on
+   #view-settings, which shipped without it. */
+#view-tasks, #view-network, #view-tools, #view-models, #view-devtools, #view-earn, #view-settings {
   overflow-y: auto; padding: 34px 8%;
 }
 #view-earn h2 { margin-top: 18px; }
@@ -832,6 +841,8 @@ button.small:disabled { opacity: 0.5; cursor: default; }
   border: 1px solid var(--border); border-radius: 10px; padding: 9px 12px; margin-bottom: 6px;
 }
 .kc-new:hover { border-color: var(--violet); }
+.cmp-pane-label { font-size: 0.78em; font-weight: 650; color: var(--text-dim); letter-spacing: 0.02em; }
+
 .kc-rail-label { font-size: 0.72em; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim); margin: 10px 2px 2px; }
 .kc-rail-sessions { margin-top: 14px; }
 .kc-list { display: flex; flex-direction: column; gap: 2px; }

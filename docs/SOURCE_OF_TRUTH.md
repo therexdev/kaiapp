@@ -455,6 +455,28 @@ for dev/screenshots).
      from the rail, in both directions — a rail that lost one would strand it.
    Selection now keys off `[data-view]` rather than `.nav-item`, so the icons
    and the rows navigate and highlight through the same single path.
+   - **v0.41.1**, two field reports from that screen, both invisible to every
+     test we had because both are pure CSS REACHABILITY:
+     1. *"when you scroll down on the settings page it scrolls the whole
+        sidebar too."* A `.view` missing from the scrolling rule does not
+        merely fail to scroll — it grows the PAGE, and the window scrolls with
+        the sidebar attached. `#view-settings` shipped without it.
+     2. *"make the toggle switch for koinos code justified to the right like
+        the rest and separate it from the developer tools toggles with a
+        line."* That block carried `class="switch-row"` — **a class this
+        stylesheet has never defined.** No flex, no justification, no rule
+        above it. It had been wrong since it was written in Local API; moving
+        it into Settings only put it beside correct rows where the difference
+        finally showed.
+     Both are one failure mode — markup naming something that does not exist —
+     so the guards are mechanical rather than per-case: every non-self-managing
+     view must appear in a scrolling rule, and **every class the markup uses
+     must be defined in the stylesheet**, with a short exempt list for the
+     behavioural hooks scripts select on (`koinos-view`, `showpw`). That second
+     guard immediately found two more real defects: `.mono` (the device-link
+     pairing code was 24px with 4px tracking and NO monospace face — the one
+     place proportional digits actually cost you, since you read it off one
+     screen and type it into another) and `.cmp-pane-label`.
 1. ~~Azure Trusted Signing~~ — **SHIPPED 2026-08-17, v0.25.11 signed** (see §2 for the
    secret layout and the 403/AADSTS debug trail). Watch the field: SmartScreen reputation
    still accrues per-file over downloads; signed ≠ instant zero warnings on day one.

@@ -153,6 +153,26 @@ test("sidebar: switches live in Settings, and what they reveal survives a reload
     );
     // Nothing was clicked between the reload and now — that is the whole point.
     assert.strictEqual(await page.$eval("#view-chat", (el) => el.hidden), false, "still on the view we booted onto");
+
+    /*
+     * Field report: "when you scroll down on the settings page it scrolls the
+     * whole sidebar too." A view outside the scrolling rule grows the PAGE
+     * rather than scrolling itself, and the window takes the sidebar with it.
+     * Squeeze the window so Settings certainly overflows, then scroll it.
+     */
+    await page.setViewportSize({ width: 1000, height: 420 });
+    await page.click('[data-view="settings"]');
+    await page.waitForSelector("#view-settings:not([hidden])");
+    const before = await page.$eval("#sidebar", (el) => el.getBoundingClientRect().top);
+    await page.$eval("#view-settings", (el) => { el.scrollTop = el.scrollHeight; });
+    await page.waitForFunction(() => document.getElementById("view-settings").scrollTop > 0, { timeout: 5000 });
+    const after = await page.$eval("#sidebar", (el) => el.getBoundingClientRect().top);
+    assert.strictEqual(after, before, "the sidebar must not move when Settings scrolls");
+    assert.strictEqual(
+      await page.evaluate(() => window.scrollY),
+      0,
+      "the PAGE must not scroll — the view scrolls inside itself"
+    );
   } finally {
     await browser.close();
     await core.stop();

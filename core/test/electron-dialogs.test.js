@@ -73,3 +73,59 @@ test("the preload actually exposes the picker the view depends on", () => {
   assert.match(main, /ipcMain\.handle\("dialog:pick-folder"/);
   assert.match(main, /openDirectory/);
 });
+
+/*
+ * v0.41.1 — two field reports from the same screen, both invisible to every
+ * test we had because both are pure CSS reachability.
+ *
+ * 1. "when you scroll down on the settings page it scrolls the whole sidebar
+ *    too." A .view that is not in the scrolling rule does not merely fail to
+ *    scroll — it GROWS THE PAGE, so the window scrolls and takes the sidebar
+ *    with it. #view-settings shipped without it.
+ * 2. "make the toggle switch for koinos code justified to the right like the
+ *    rest and separate it from the developer tools toggles with a line." That
+ *    block carried class="switch-row" — a class this stylesheet has NEVER
+ *    defined. It got no flex, no justification and no rule above it, and it
+ *    had been that way since it was written; moving it into Settings just put
+ *    it next to correct rows where the difference finally showed.
+ *
+ * Both are the same underlying failure: markup naming a class that does not
+ * exist, or a view missing from a list it had to be added to by hand. So the
+ * guard is mechanical — every class the markup uses must be defined somewhere.
+ */
+test("every card view scrolls itself, so the page never scrolls the sidebar", () => {
+  const html = fs.readFileSync(path.join(UI_DIR, "index.html"), "utf8");
+  const css = fs.readFileSync(path.join(UI_DIR, "styles.css"), "utf8");
+  // Views that are deliberately not scroll-and-pad: onboarding centres itself,
+  // chat scrolls #messages, docs/compare/code manage their own inner panes.
+  const SELF_MANAGED = new Set(["onboarding", "chat", "docs", "compare", "code", "koinos"]);
+  const views = [...html.matchAll(/id="view-([a-z-]+)" class="view/g)].map((m) => m[1]);
+  assert.ok(views.length > 8, `expected the full view list, got ${views.length}`);
+  for (const v of views) {
+    if (SELF_MANAGED.has(v)) continue;
+    assert.ok(
+      new RegExp(`#view-${v}[ ,{]`).test(css),
+      `#view-${v} is in no scrolling rule — it will grow the page and scroll the sidebar with it`
+    );
+  }
+});
+
+test("no markup names a class the stylesheet never defines", () => {
+  const html = fs.readFileSync(path.join(UI_DIR, "index.html"), "utf8");
+  const css = fs.readFileSync(path.join(UI_DIR, "styles.css"), "utf8");
+  const used = new Set();
+  for (const m of html.matchAll(/class="([^"]+)"/g)) {
+    for (const c of m[1].split(/\s+/)) if (c) used.add(c);
+  }
+  /*
+   * Behavioural hooks, exempt on purpose: these are markers the SCRIPTS select
+   * on and nothing else. Styling them would be the mistake. Anything not on
+   * this list that the stylesheet does not define is markup asking for a look
+   * it will never get — which is precisely how the Koinos Code switch spent
+   * its whole life un-justified with no rule above it.
+   */
+  const HOOKS = new Set(["koinos-view", "showpw"]);
+  for (const h of HOOKS) used.delete(h);
+  const missing = [...used].filter((c) => !new RegExp(`\\.${c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[\\s,.:>{)\\[]`).test(css));
+  assert.deepStrictEqual(missing, [], `these classes are styled nowhere: ${missing.join(", ")}`);
+});
