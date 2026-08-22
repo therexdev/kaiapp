@@ -127,7 +127,7 @@ test("code panel: run -> diff card -> approve -> file written -> answer bubble",
   }
 });
 
-test("plan mode: reads, proposes, changes nothing — then the approved plan does the work", { skip: !available }, async () => {
+test("plan mode: reads, proposes, changes nothing — then the approved plan does the work", { skip: !available, timeout: 180000 }, async () => {
   const { chromium } = require("playwright-core");
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-planui-"));
   fs.mkdirSync(path.join(dataDir, "models"), { recursive: true });
@@ -168,7 +168,16 @@ test("plan mode: reads, proposes, changes nothing — then the approved plan doe
     await page.waitForSelector("#kc-browse:not([hidden])");
     await page.fill("#kc-browse-path", project);
     await page.click("#btn-kc-browse-go");
-    await page.waitForFunction((d) => document.getElementById("kc-browse-here").textContent.includes(d), project, { timeout: 15000 });
+    /*
+     * 30s, matching the other waits in this test. The folder listing takes
+     * ~200ms locally; this bound exists so a hung UI cannot hang the suite,
+     * and the test-level timeout (added above — this test was the only one of
+     * the three without one) is the real backstop. 15s was arbitrary tightness
+     * on a machine running four test files at once: it is what blew up first
+     * when the account tests got heavier, which is a scheduling fact about the
+     * runner, not a fact about this feature.
+     */
+    await page.waitForFunction((d) => document.getElementById("kc-browse-here").textContent.includes(d), project, { timeout: 30000 });
     await page.click("#btn-kc-browse-use");
     await page.waitForSelector("#kc-chat:not([hidden])");
 

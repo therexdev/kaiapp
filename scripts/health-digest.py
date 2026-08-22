@@ -106,3 +106,17 @@ except Exception as e:
 print(f"\nDIGEST {'FAIL' if fails else ('WARN' if warns else 'HEALTHY')} fails={len(fails)} warns={len(warns)}")
 if fails: print("FAILING: " + "; ".join(fails))
 if warns: print("WARNING: " + "; ".join(warns))
+
+# Exit non-zero on a FAIL, so the workflow badge says what the digest says.
+#
+# This script used to always exit 0, and the operating rule was "read the
+# DIGEST line, the tick only means the script ran". That rule was followed and
+# it still failed: a run went green with `DIGEST FAIL fails=1` inside it, and
+# nothing surfaced. A verdict nobody can see from the outside is not a verdict.
+#
+# WARNs stay silent on purpose. The oracle sits in stale-hold for up to ~45
+# minutes after every restart, which is expected, and a check that cries wolf
+# after each deploy is one people learn to ignore — which is the same failure
+# in the opposite direction.
+import sys
+sys.exit(1 if fails else 0)

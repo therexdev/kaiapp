@@ -297,32 +297,25 @@ test("account: a spending grant is signed here, verifiable there, and revocable"
     assert.strictEqual(rev.ok, true);
     s = await get("/core/account");
     assert.strictEqual(s.thisWalletGrant, null, "web access is off again");
-  } finally {
-    fake.server.close();
-    await core.stop();
-  }
-});
 
-test("account: unlinking the wallet leaves no live grant behind it", { timeout: 60000 }, async () => {
-  const { core, fake, post, get } = await coreWithAccount();
-  try {
-    fake.state.approved = true;
-    await post("/core/account/link/start");
-    await post("/core/account/link/poll");
-    await post("/core/account/wallet");
-    await post("/core/account/grant", { maxUsd: 5, days: 7 });
-
-    let s = await get("/core/account");
-    const addr = s.account.wallets[0].address;
-    await post("/core/account/wallet/unlink", { address: addr });
-    s = await get("/core/account");
     /*
-     * The production server revokes grants inside unlinkWallet; the fake one
-     * here deliberately does NOT, leaving a live-looking grant row behind on
+     * Unlinking, in the same core rather than a second one. Standing up
+     * another costs a scrypt wallet derivation, and `node --test` runs the
+     * suite's files in parallel — one avoidable second of CPU here starves a
+     * browser test in another file, which is exactly how CI started failing.
+     *
+     * Production revokes grants inside unlinkWallet; the fake server here
+     * deliberately does NOT, leaving a live-looking grant row behind on
      * purpose. That makes this a test of the APP's own resolution rather than
      * the server's cleanup: with the wallet unlinked, this machine must not
      * offer to manage web access it can no longer prove it owns.
      */
+    await post("/core/account/wallet");                       // re-link
+    const g3 = await post("/core/account/grant", { maxUsd: 5, days: 7 });
+    assert.strictEqual(g3.ok, true);
+    assert.ok((await get("/core/account")).thisWalletGrant, "live again before unlinking");
+    await post("/core/account/wallet/unlink", { address: (await get("/core/account")).account.wallets[0].address });
+    s = await get("/core/account");
     assert.strictEqual(s.thisWalletLinked, false);
     assert.strictEqual(s.thisWalletGrant, null, "an unlinked wallet reports no grant on this machine");
   } finally {
