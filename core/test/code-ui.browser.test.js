@@ -126,3 +126,82 @@ test("code panel: run -> diff card -> approve -> file written -> answer bubble",
     await core.stop();
   }
 });
+
+test("plan mode: reads, proposes, changes nothing — then the approved plan does the work", { skip: !available }, async () => {
+  const { chromium } = require("playwright-core");
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-planui-"));
+  fs.mkdirSync(path.join(dataDir, "models"), { recursive: true });
+  fs.writeFileSync(path.join(dataDir, "models", "smollm2-135m-instruct-q8_0.gguf"), "weights");
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), "kai-planproj-"));
+  fs.writeFileSync(path.join(project, "app.js"), "console.log(1);\n");
+
+  const script = path.join(dataDir, "script.json");
+  fs.writeFileSync(
+    script,
+    JSON.stringify([
+      // PLAN pass: it tries to write. That tool does not exist in plan mode,
+      // so the loop tells it so (a bounded nudge) and it writes the plan.
+      '{"tool": "write_file", "args": {"path": "app.js", "content": "console.log(2);\\n"}}',
+      "1. Change app.js so it logs 2.",
+      // ACT pass, after the plan is approved.
+      '{"tool": "write_file", "args": {"path": "app.js", "content": "console.log(2);\\n"}}',
+      '{"answer": true}',
+      "Changed app.js to log 2.",
+    ])
+  );
+  process.env.FAKE_LLAMA_SCRIPT = script;
+
+  const { createCore } = require("../server");
+  const core = await createCore({ dataDir, port: 0, llamaBin: FAKE_BIN, onEvent: () => {} });
+  const base = `http://127.0.0.1:${await core.start()}`;
+  const browser = await chromium.launch({ executablePath: CHROMIUM });
+  try {
+    const page = await browser.newPage();
+    await page.goto(base);
+    await page.waitForSelector("#view-chat:not([hidden])");
+    await page.click('.nav-item[data-view="api"]');
+    await page.click("#btn-code-toggle");
+    await page.waitForSelector("#nav-code:not([hidden])");
+    await page.click("#nav-code");
+
+    await page.click("#btn-kc-pick");
+    await page.waitForSelector("#kc-browse:not([hidden])");
+    await page.fill("#kc-browse-path", project);
+    await page.click("#btn-kc-browse-go");
+    await page.waitForFunction((d) => document.getElementById("kc-browse-here").textContent.includes(d), project, { timeout: 15000 });
+    await page.click("#btn-kc-browse-use");
+    await page.waitForSelector("#kc-chat:not([hidden])");
+
+    // Plan first.
+    await page.check("#kc-plan");
+    await page.fill("#kc-task", "make it log 2");
+    await page.click("#btn-kc-run");
+
+    // A plan card arrives, and NOTHING has been written.
+    await page.waitForFunction(
+      () => document.getElementById("kc-status").textContent.includes("plan ready"),
+      { timeout: 30000 }
+    );
+    const planText = await page.$eval(".kc-approval .pg-msg", (el) => el.textContent);
+    assert.match(planText, /logs 2/);
+    assert.strictEqual(
+      fs.readFileSync(path.join(project, "app.js"), "utf8"),
+      "console.log(1);\n",
+      "planning must not touch the file"
+    );
+
+    // Approving runs it for real — and the write still needs its own card.
+    await page.click(".kc-approval button.primary");
+    await page.waitForSelector(".kc-approval:not(.answered)", { timeout: 30000 });
+    await page.click(".kc-approval:not(.answered) button.primary");
+    await page.waitForFunction(
+      () => document.getElementById("kc-status").textContent.includes("done"),
+      { timeout: 30000 }
+    );
+    assert.strictEqual(fs.readFileSync(path.join(project, "app.js"), "utf8"), "console.log(2);\n");
+  } finally {
+    delete process.env.FAKE_LLAMA_SCRIPT;
+    await browser.close();
+    await core.stop();
+  }
+});

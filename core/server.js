@@ -479,7 +479,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
       return codeSwitch.status();
     },
   };
-  const code = new CodeAgent({ chatFn: loopbackChat, onEvent: events });
+  const code = new CodeAgent({ chatFn: loopbackChat, registry, onEvent: events });
   code.projects = new CodeProjects(dataDir);
   code.switch = codeSwitch;
   // GitHub for Koinos Code (task #73): clone a repo into a project, and push

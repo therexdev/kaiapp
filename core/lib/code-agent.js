@@ -26,12 +26,87 @@ const HARD_MAX_STEPS = 50;
 const OBS_MAX_CHARS = 4000;
 const DEFAULT_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000;
 const MAX_TOKENS_PER_CALL = 900; // same as the CLI
+const MAX_NUDGES = 2; // bounded: a model that will not stop must still finish
+
+/*
+ * Did the model TRY to call a tool that is not in its hands?
+ *
+ * parseAgentAction returns null both for ordinary prose and for a tool call
+ * naming something unavailable — and the loop treats null as "this is the
+ * final answer". That meant a refused tool call was surfaced to the person as
+ * raw JSON masquerading as an answer. Most visible in plan mode, where the
+ * editing tools deliberately do not exist, but it was always wrong.
+ */
+function looksLikeToolCall(text) {
+  const t = String(text || "");
+  const i = t.indexOf("{");
+  if (i < 0) return false;
+  const j = t.lastIndexOf("}");
+  if (j <= i) return false;
+  try {
+    const o = JSON.parse(t.slice(i, j + 1));
+    return Boolean(o && typeof o === "object" && (o.tool || o.name || o.action || o.mcp || o.tool_name || o.function));
+  } catch {
+    return false;
+  }
+}
+
+/*
+ * MCP (and every other registry tool) inside the coding agent.
+ *
+ * Nothing is re-implemented: `ToolRegistry` already holds MCP servers, memory,
+ * email, calendar and the built-ins, already knows each tool's `egress` and
+ * `sensitive` flags, and already refuses egress tools in Local-Only. This just
+ * adapts its entries into the shape the coding loop's tool list uses.
+ *
+ * TWO RULES, both load-bearing:
+ *   1. A `sensitive` tool routes to the SAME approval card as run_cmd. The
+ *      coding agent must not become a way around a gate the rest of the app
+ *      enforces.
+ *   2. The list is BOUNDED and opt-in per project. A 4k local context cannot
+ *      hold thirty tool definitions and still have room for the task — handing
+ *      it everything would make the agent worse, not better.
+ */
+const MAX_EXTRA_TOOLS = 8;
+
+function registryTools(registry, { allow = [], io, runId, onTrace }) {
+  if (!registry || !allow.length) return [];
+  let available = [];
+  try {
+    available = registry.list(); // already filtered by privacy mode
+  } catch {
+    return [];
+  }
+  const wanted = new Set(allow.map(String));
+  return available
+    .filter((t) => wanted.has(t.name))
+    .slice(0, MAX_EXTRA_TOOLS)
+    .map((t) => ({
+      name: t.name,
+      description: t.description || t.name,
+      params: t.params || {},
+      handler: async (args) => {
+        // A sensitive tool asks, exactly like a shell command does.
+        if (t.sensitive) {
+          const verdict = await io.askCommand(`${t.name} ${JSON.stringify(args || {}).slice(0, 300)}`);
+          if (!verdict.approved) return verdict.reason || "the user declined this tool call";
+        }
+        try {
+          return await registry.call(t.name, args || {}, { confirmed: true });
+        } catch (e) {
+          // A refusal is an observation the model can route around, never a crash.
+          return `tool error: ${e.message}`;
+        }
+      },
+    }));
+}
 
 class CodeAgent {
   /** chatFn({model, messages, maxTokens}) -> Promise<string> — the host's
    *  loopback lane, so runs inherit every routing/privacy rule. */
-  constructor({ chatFn, onEvent = () => {}, approvalTimeoutMs = DEFAULT_APPROVAL_TIMEOUT_MS }) {
+  constructor({ chatFn, registry = null, onEvent = () => {}, approvalTimeoutMs = DEFAULT_APPROVAL_TIMEOUT_MS }) {
     this.chatFn = chatFn;
+    this.registry = registry; // unified tool registry (MCP + built-ins), optional
     this.onEvent = onEvent;
     this.approvalTimeoutMs = approvalTimeoutMs;
     this._pending = new Map(); // approvalId -> { resolve, timer, runId }
@@ -92,7 +167,7 @@ class CodeAgent {
    * Returns {runId, answer, steps, reason} — reason "answered" | "stopped" |
    * "budget" (step budget exhausted).
    */
-  async run({ dir, task, model = "", maxSteps, history = [], onTrace = () => {} }) {
+  async run({ dir, task, model = "", maxSteps, history = [], mode = "act", plan = "", tools: allowTools = [], onTrace = () => {} }) {
     const q = String(task || "").trim();
     if (!q) throw new Error("give the agent a task");
     const root = path.resolve(String(dir || ""));
@@ -119,7 +194,14 @@ class CodeAgent {
       note: (line) => onTrace({ type: "note", text: String(line).trim() }),
     };
     // No --yes, no --allow-commands in the app: every gate routes to a card.
-    const tools = makeTools(root, { yes: false, allowCommands: false, io });
+    const planning = mode === "plan";
+    const tools = makeTools(root, {
+      yes: false,
+      allowCommands: false,
+      io,
+      readOnly: planning,
+      extraTools: registryTools(this.registry, { allow: allowTools, io, runId, onTrace }),
+    });
     const names = tools.map((t) => t.name);
 
     try {
@@ -135,8 +217,20 @@ class CodeAgent {
       const prior = (Array.isArray(history) ? history : [])
         .filter((m) => m && (m.role === "user" || m.role === "assistant") && String(m.content || "").trim())
         .map((m) => ({ role: m.role, content: String(m.content) }));
+      /*
+       * Plan mode changes what the agent is FOR, so it changes the brief. It
+       * reads, then writes a plan — it cannot edit or run anything, because
+       * those tools were never put in its hands.
+       */
+      const brief = planning
+        ? "\n\nYOU ARE PLANNING. Read what you need, then answer with a short numbered plan of the " +
+          "changes you would make — files and what changes in each. Do NOT write code in the plan. " +
+          "You have no tools to edit files or run commands in this mode; do not claim to have made changes."
+        : plan
+          ? `\n\nTHE APPROVED PLAN — follow it, and say so if reality turns out to differ:\n${String(plan).slice(0, 4000)}`
+          : "";
       const convo = [
-        { role: "system", content: `${PREAMBLE}${projectContext(root)}\n\n${buildAgentSystem(tools, { question: q, allNames: names })}` },
+        { role: "system", content: `${PREAMBLE}${projectContext(root)}${brief}\n\n${buildAgentSystem(tools, { question: q, allNames: names })}` },
       ];
       if (prior.length) {
         convo.push({
@@ -147,20 +241,41 @@ class CodeAgent {
         });
       }
       convo.push({ role: "user", content: q });
+      let nudges = 0;
       for (let step = 0; step < budget; step++) {
         if (run.aborted) return { runId, answer: "", steps: step, reason: "stopped" };
         const out = String((await this.chatFn({ model, messages: trimConvo(convo), maxTokens: MAX_TOKENS_PER_CALL })) ?? "");
         if (run.aborted) return { runId, answer: "", steps: step, reason: "stopped" };
         const action = parseAgentAction(out, names);
         if (!action) {
-          // No parsable action: with small models that IS the final answer.
-          return { runId, answer: out.trim(), steps: step, reason: "answered" };
+          /*
+           * No parsable action. With small models that usually IS the final
+           * answer — but not when the model was clearly reaching for a tool it
+           * does not have. Returning that raw JSON as the answer is how a
+           * refused write ended up displayed as "the plan". Tell it what it
+           * actually has and let it try again, bounded so it always finishes.
+           */
+          if (looksLikeToolCall(out) && nudges < MAX_NUDGES) {
+            nudges++;
+            onTrace({ type: "note", text: planning ? "(that tool is not available while planning)" : "(that tool is not available)" });
+            convo.push({ role: "assistant", content: out });
+            convo.push({
+              role: "user",
+              content: planning
+                ? `You have no tools to change anything while planning — only ${names.join(", ")}. ` +
+                  "Write the plan as plain numbered text instead."
+                : `That tool is not available. The tools you have are: ${names.join(", ")}. ` +
+                  'Use one of those, or reply {"answer": true} if you are done.',
+            });
+            continue;
+          }
+          return { runId, answer: out.trim(), steps: step, reason: planning ? "planned" : "answered" };
         }
         if (action.answer) {
           convo.push({ role: "assistant", content: out });
           convo.push({ role: "user", content: "Give the final answer to the task now, as plain text." });
           const fin = String((await this.chatFn({ model, messages: trimConvo(convo), maxTokens: MAX_TOKENS_PER_CALL })) ?? "");
-          return { runId, answer: fin.trim(), steps: step, reason: "answered" };
+          return { runId, answer: fin.trim(), steps: step, reason: planning ? "planned" : "answered" };
         }
         const tool = tools.find((t) => t.name === action.tool);
         onTrace({ type: "tool", name: action.tool, args: JSON.stringify(action.args || {}).slice(0, 200) });
@@ -183,4 +298,4 @@ class CodeAgent {
   }
 }
 
-module.exports = { CodeAgent };
+module.exports = { CodeAgent, registryTools, MAX_EXTRA_TOOLS };

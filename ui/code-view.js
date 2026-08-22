@@ -30,6 +30,9 @@
     gh: null,
     browseFor: "project", // "project" | "clone"
     browsePath: "",
+    allTools: [],
+    maxTools: 8,
+    toolsByProject: {}, // projectId -> [tool names] — opt-in, per project
   };
 
   async function api(path, opts = {}) {
@@ -114,6 +117,47 @@
     row.appendChild(yes);
     row.appendChild(no);
     card.appendChild(row);
+    $("kc-trace").appendChild(card);
+    card.scrollIntoView({ block: "nearest" });
+  }
+
+  /*
+   * A PLAN is a proposal, so it gets a card rather than becoming a turn: the
+   * agent has read the project and written what it would do, and nothing has
+   * happened yet. Approving re-runs the same task in acting mode with the plan
+   * as the thing to follow.
+   */
+  function planCard(planText, task) {
+    const card = document.createElement("div");
+    card.className = "kc-approval";
+    const head = document.createElement("div");
+    head.className = "kc-approval-head";
+    head.textContent = "proposed plan — nothing has been changed yet";
+    const body = document.createElement("div");
+    body.className = "pg-msg";
+    body.textContent = planText;
+    const row = document.createElement("div");
+    row.className = "form-row";
+    const go = document.createElement("button");
+    go.className = "primary small";
+    go.textContent = "Approve and run";
+    const no = document.createElement("button");
+    no.className = "small";
+    no.textContent = "Discard";
+    go.addEventListener("click", () => {
+      go.disabled = no.disabled = true;
+      card.classList.add("answered");
+      head.textContent = "plan approved";
+      run(task, { plan: planText });
+    });
+    no.addEventListener("click", () => {
+      go.disabled = no.disabled = true;
+      card.classList.add("answered");
+      head.textContent = "plan discarded";
+      status("");
+    });
+    row.append(go, no);
+    card.append(head, body, row);
     $("kc-trace").appendChild(card);
     card.scrollIntoView({ block: "nearest" });
   }
@@ -219,6 +263,8 @@
     try {
       await loadSessions();
       await renderGit();
+      renderToolsSummary();
+      $("kc-tools-panel").hidden = true;
     } catch (e) {
       status(e.message);
     }
@@ -668,7 +714,7 @@
     }
   }
 
-  async function send() {
+  function send() {
     const p = currentProject();
     if (!p) return status("Choose a folder first.");
     if (p.missing) return status("That folder no longer exists — forget the project, or put the folder back.");
@@ -677,9 +723,17 @@
     bubble("You", task);
     $("kc-task").value = "";
     $("kc-task").style.height = "";
+    // "Plan first" makes the FIRST pass read-only: it looks, proposes, and
+    // waits. Approving the plan runs the same task for real.
+    return run(task, { mode: $("kc-plan").checked ? "plan" : "act" });
+  }
+
+  async function run(task, { mode = "act", plan = "" } = {}) {
+    const p = currentProject();
+    if (!p) return;
     $("btn-kc-run").disabled = true;
     $("btn-kc-stop").hidden = false;
-    status("running…");
+    status(mode === "plan" ? "reading the project…" : "running…");
     try {
       const resp = await fetch("/core/code/run", {
         method: "POST",
@@ -689,6 +743,9 @@
           sessionId: kc.sessionId || "",
           task,
           model: state.alias ?? "",
+          mode,
+          plan,
+          tools: allowedTools(),
         }),
       });
       if (!resp.ok || !resp.body) {
@@ -711,6 +768,13 @@
       });
       if (!done) throw new Error("the run ended without a result");
       if (done.error) throw new Error(done.error);
+      if (done.reason === "planned") {
+        // A plan is a proposal, not a turn: it is not written to the session
+        // and nothing has happened on disk.
+        if (done.answer) planCard(done.answer, task);
+        status("plan ready — approve it to make the changes");
+        return;
+      }
       if (done.answer) bubble("Koinos Code", done.answer);
       status(
         done.reason === "budget"
@@ -754,10 +818,94 @@
     el.style.height = `${Math.min(el.scrollHeight, 180)}px`;
   });
 
+  // ---------------------------------------------------------------- tools
+
+  function allowedTools() {
+    return kc.toolsByProject[kc.projectId] || [];
+  }
+
+  function renderToolsSummary() {
+    const n = allowedTools().length;
+    $("kc-tools-summary").textContent = n ? `${n} tool${n === 1 ? "" : "s"} lent` : "";
+  }
+
+  async function loadTools() {
+    try {
+      const j = await api("/core/code/tools");
+      kc.allTools = j.tools || [];
+      kc.maxTools = j.max || 8;
+    } catch {
+      kc.allTools = [];
+    }
+  }
+
+  function renderToolsPanel() {
+    const host = $("kc-tools-list");
+    host.innerHTML = "";
+    const chosen = new Set(allowedTools());
+    $("kc-tools-note").textContent = kc.allTools.length
+      ? `Off by default. Pick up to ${kc.maxTools} — a small local model cannot hold many tool descriptions and still have room for the task. Anything marked "asks first" still shows you a card before it runs.`
+      : "No tools are available right now. Add an MCP server under Tools, or switch off Local-Only if the tools you want reach the internet.";
+    for (const t of kc.allTools) {
+      const row = document.createElement("label");
+      row.className = "kc-tool-row";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = chosen.has(t.name);
+      cb.addEventListener("change", () => {
+        const now = new Set(allowedTools());
+        if (cb.checked) {
+          if (now.size >= kc.maxTools) {
+            cb.checked = false;
+            $("kc-tools-note").textContent = `That is the limit (${kc.maxTools}). Uncheck something first.`;
+            return;
+          }
+          now.add(t.name);
+        } else {
+          now.delete(t.name);
+        }
+        kc.toolsByProject[kc.projectId] = [...now];
+        try {
+          localStorage.setItem("kai-code-tools", JSON.stringify(kc.toolsByProject));
+        } catch {
+          /* storage off — the choice just does not outlive the session */
+        }
+        renderToolsSummary();
+      });
+      const text = document.createElement("span");
+      const name = document.createElement("b");
+      name.textContent = t.name;
+      const sub = document.createElement("span");
+      sub.className = "kc-sub";
+      sub.textContent = `${t.description || ""}${t.sensitive ? " — asks first" : ""}${t.egress ? " · leaves this machine" : ""}`;
+      text.append(name, sub);
+      row.append(cb, text);
+      host.appendChild(row);
+    }
+  }
+
+  $("btn-kc-tools").addEventListener("click", async () => {
+    const panel = $("kc-tools-panel");
+    if (!panel.hidden) {
+      panel.hidden = true;
+      return;
+    }
+    await loadTools();
+    renderToolsPanel();
+    panel.hidden = false;
+  });
+  $("btn-kc-tools-close").addEventListener("click", () => { $("kc-tools-panel").hidden = true; });
+
   async function render() {
     try {
+      try {
+        kc.toolsByProject = JSON.parse(localStorage.getItem("kai-code-tools") || "{}") || {};
+      } catch {
+        kc.toolsByProject = {};
+      }
       await loadProjects();
       await renderGitHub();
+      renderToolsSummary();
       if (kc.projectId) await renderGit();
     } catch (e) {
       startError(e.message);

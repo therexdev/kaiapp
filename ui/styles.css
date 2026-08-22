@@ -906,6 +906,13 @@ button.small:disabled { opacity: 0.5; cursor: default; }
 }
 .kc-composer textarea:focus { outline: none; border-color: var(--violet); }
 .kc-statusline { padding: 2px 20px 12px; min-height: 18px; }
+.kc-composer-opts { display: flex; align-items: center; gap: 12px; padding: 6px 20px 0; flex-wrap: wrap; }
+.kc-opt { font-size: 0.85em; color: var(--text-dim); }
+#kc-tools-panel { margin: 8px 20px 0; }
+.kc-tool-row { display: flex; align-items: flex-start; gap: 8px; padding: 7px 12px; font-size: 0.86em; }
+.kc-tool-row:hover { background: var(--bg-raised); }
+.kc-tool-row input { margin-top: 3px; }
+.kc-tool-row .kc-sub { display: block; color: var(--text-dim); font-size: 0.9em; }
 
 /* transcript pieces */
 #kc-trace .pg-msg { background: var(--bg-raised); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }

@@ -285,7 +285,8 @@ function makeTools(root, opts) {
     io.note(`  wrote ${rel}`);
     return `wrote ${rel} (${Buffer.byteLength(next)} bytes)`;
   }
-  return [
+  const READ_ONLY = new Set(["list_files", "read_file", "search_files"]);
+  const all = [
     {
       name: "list_files",
       description: "List the project's files as relative paths.",
@@ -413,6 +414,19 @@ function makeTools(root, opts) {
       },
     },
   ];
+  /*
+   * PLAN MODE (opts.readOnly): the agent may look but not touch — the three
+   * reading tools only, so a planning pass cannot edit a file or run a command
+   * even if the model tries. That is enforced by the tool list not existing,
+   * not by asking the model nicely.
+   *
+   * opts.extraTools appends host-provided tools (the app passes MCP tools this
+   * way). They are dropped in plan mode too, since a plan should be formed
+   * from the project, and an MCP tool may well have side effects.
+   */
+  const base = opts.readOnly ? all.filter((t) => READ_ONLY.has(t.name)) : all;
+  const extra = opts.readOnly ? [] : opts.extraTools || [];
+  return [...base, ...extra];
 }
 
 /* ------------------------------------------------------------ gateway ---- */

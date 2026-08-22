@@ -1134,6 +1134,23 @@ class Gateway {
           return this._json(res, 400, { ok: false, error: String(e.message) });
         }
       }
+      // Which registry tools this machine could lend the coding agent right
+      // now. Privacy filtering is the registry's own — egress tools simply are
+      // not in the list in Local-Only.
+      if (path === "/core/code/tools" && req.method === "GET") {
+        let list = [];
+        try {
+          list = (this.code.registry ? this.code.registry.list() : []).map((t) => ({
+            name: t.name,
+            description: t.description,
+            sensitive: t.sensitive === true,
+            egress: t.egress === true,
+          }));
+        } catch {
+          list = [];
+        }
+        return this._json(res, 200, { ok: true, tools: list, max: require("./code-agent").MAX_EXTRA_TOOLS });
+      }
       if (path === "/core/code/projects" && req.method === "GET") {
         return this._json(res, 200, { ok: true, projects: P.list() });
       }
@@ -1295,11 +1312,15 @@ class Gateway {
             model: String(body.model || ""),
             maxSteps: body.maxSteps,
             history,
+            // "plan" reads and proposes; "act" (the default) does the work.
+            mode: body.mode === "plan" ? "plan" : "act",
+            plan: String(body.plan || ""),
+            tools: Array.isArray(body.tools) ? body.tools : [],
             onTrace: (e) => send({ trace: e }),
           });
           // Record the exchange AFTER it happens, and never let a bookkeeping
           // failure swallow a result the person is waiting for.
-          if (project && sessionId) {
+          if (project && sessionId && r.reason !== "planned") {
             try {
               this.code.projects.appendTurn(project.id, sessionId, { role: "user", content: task });
               if (r.answer) this.code.projects.appendTurn(project.id, sessionId, { role: "assistant", content: r.answer });

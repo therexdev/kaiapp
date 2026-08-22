@@ -644,6 +644,19 @@
                 <button id="btn-kc-run" class="primary small">Send</button>
                 <button id="btn-kc-stop" class="small" hidden>Stop</button>
               </div>
+              <div class="kc-composer-opts">
+                <label class="check kc-opt"><input type="checkbox" id="kc-plan" /> Plan first</label>
+                <button id="btn-kc-tools" class="kc-link">Tools…</button>
+                <span id="kc-tools-summary" class="meta"></span>
+              </div>
+              <div id="kc-tools-panel" class="kc-panel" hidden>
+                <div class="kc-panel-head">
+                  <b>Tools this project may use</b>
+                  <button id="btn-kc-tools-close" class="kc-x" aria-label="Close">✕</button>
+                </div>
+                <p class="kc-choice-sub" id="kc-tools-note"></p>
+                <div id="kc-tools-list" class="kc-browse-list"></div>
+              </div>
               <div class="kc-statusline"><span id="kc-status" class="meta"></span></div>
             </div>
           </main>
