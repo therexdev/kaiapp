@@ -120,3 +120,120 @@ test("a broken or absent node never blocks earning", async () => {
   const hangs = new Worker({ schedulerUrl: "http://127.0.0.1:1", producer: () => { throw new Error("sync throw"); } });
   assert.equal(await hangs._producerSnapshot(), null, "including one that throws synchronously");
 });
+
+/* ---------------------------------------------------------------------------
+ * The wire. Everything above proves the pieces; this proves the snapshot
+ * actually leaves the machine inside the registration body, which is the only
+ * thing that makes the card appear on the account page.
+ * ------------------------------------------------------------------------ */
+const http = require("http");
+
+/** A stand-in scheduler that records exactly what it was sent. */
+async function stubScheduler() {
+  const seen = [];
+  const srv = http.createServer((req, res) => {
+    let body = "";
+    req.on("data", (c) => { body += c; });
+    req.on("end", () => {
+      seen.push({ url: req.url, body: JSON.parse(body || "{}") });
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true, token: "t" }));
+    });
+  });
+  await new Promise((r) => srv.listen(0, "127.0.0.1", r));
+  return { seen, srv, url: `http://127.0.0.1:${srv.address().port}` };
+}
+
+test("the producer snapshot is actually sent with the registration", async (t) => {
+  const { seen, srv, url } = await stubScheduler();
+  t.after(() => srv.close());
+
+  const w = new Worker({
+    schedulerUrl: url,
+    wallet: { address: "1Test", status: () => ({ unlocked: true }) },
+    runtime: { status: () => ({}) },
+    hardware: { capabilities: { ramGb: 16 } },
+    models: { aliases: () => [] },
+    producer: async () => ({ producingVhp: 659.46173948, networkVhp: 5298037.5, blocksPerDay: 3.5848 }),
+  });
+  await w._register();
+
+  const reg = seen.find((s) => s.url.includes("/worker/register"));
+  assert.ok(reg, "it registered");
+  assert.ok(reg.body.producer, "and the body carries a producer block");
+  assert.ok(close(reg.body.producer.producingVhp, 659.46173948));
+  assert.ok(close(reg.body.producer.blocksPerDay, 3.5848));
+});
+
+test("a machine with no Koinos node still registers, just without one", async (t) => {
+  const { seen, srv, url } = await stubScheduler();
+  t.after(() => srv.close());
+
+  const w = new Worker({
+    schedulerUrl: url,
+    wallet: { address: "1Test", status: () => ({ unlocked: true }) },
+    runtime: { status: () => ({}) },
+    hardware: { capabilities: { ramGb: 16 } },
+    models: { aliases: () => [] },
+  });
+  await w._register();
+
+  const reg = seen.find((s) => s.url.includes("/worker/register"));
+  assert.ok(reg, "it still registers");
+  assert.equal(reg.body.producer, null, "with an explicit null rather than a missing key");
+});
+
+/* ---------------------------------------------------------------------------
+ * Why the card is missing, said out loud.
+ *
+ * A tester ran a block producer and saw nothing on their account page. Every
+ * possible cause was invisible: an old build, a stopped node, an unreadable
+ * log, or — the one that catches people — Earning being off, since the report
+ * rides along with the worker's registration and there is no registration
+ * without it. Silence is the same shape for all four, so the worker now keeps
+ * the reason next to the value.
+ * ------------------------------------------------------------------------ */
+test("an absent producer always comes with a reason", async () => {
+  const base = {
+    schedulerUrl: "http://127.0.0.1:1",
+    wallet: { address: "1Test", status: () => ({ unlocked: true }) },
+    runtime: { status: () => ({}) },
+    hardware: { capabilities: { ramGb: 16 } },
+    models: { aliases: () => [] },
+  };
+
+  const noNode = new Worker({ ...base, producer: async () => null });
+  await noNode._producerSnapshot();
+  assert.match(noNode.status().producerNote, /stopped, still syncing, or not producing/i);
+  assert.equal(noNode.status().producer, null);
+
+  const unreadable = new Worker({ ...base, producer: async () => { throw new Error("docker: command not found"); } });
+  await unreadable._producerSnapshot();
+  assert.match(unreadable.status().producerNote, /Could not read the node's log/i);
+  assert.match(unreadable.status().producerNote, /docker: command not found/,
+    "and it repeats what actually went wrong, rather than a generic failure");
+
+  const old = new Worker({ ...base });
+  await old._producerSnapshot();
+  assert.match(old.status().producerNote, /does not report a block producer/i);
+
+  // Half a pair is not a producer either — a share cannot be computed from it.
+  const half = new Worker({ ...base, producer: async () => ({ producingVhp: null, networkVhp: null }) });
+  await half._producerSnapshot();
+  assert.ok(half.status().producerNote, "still a reason, never a blank");
+});
+
+test("a working producer reports itself and carries no complaint", async () => {
+  const w = new Worker({
+    schedulerUrl: "http://127.0.0.1:1",
+    wallet: { address: "1Test", status: () => ({ unlocked: true }) },
+    runtime: { status: () => ({}) },
+    hardware: { capabilities: { ramGb: 16 } },
+    models: { aliases: () => [] },
+    producer: async () => ({ producingVhp: 659.46173948, networkVhp: 5298037.5, blocksPerDay: 3.5848 }),
+  });
+  await w._producerSnapshot();
+  const st = w.status();
+  assert.ok(close(st.producer.producingVhp, 659.46173948));
+  assert.equal(st.producerNote, null, "nothing to explain when it works");
+});

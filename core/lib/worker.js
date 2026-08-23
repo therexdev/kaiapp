@@ -64,10 +64,28 @@ class Worker {
    *  that is stopped, unreadable or absent must not stop this machine
    *  earning, which is the thing the user actually switched on. */
   async _producerSnapshot() {
-    if (!this.producer) return null;
+    if (!this.producer) {
+      this.producerNote = "This build does not report a block producer.";
+      this.producerLast = null;
+      return null;
+    }
     try {
-      return (await this.producer()) || null;
-    } catch {
+      const p = await this.producer();
+      if (!p || (p.producingVhp == null && p.networkVhp == null)) {
+        // Overwhelmingly the ordinary case: the node is not running, or is
+        // running but not producing yet. Say so rather than showing nothing.
+        this.producerNote = "No block-producer activity found in the node's log — the Koinos node may be stopped, still syncing, or not producing.";
+        this.producerLast = null;
+        return null;
+      }
+      this.producerNote = null;
+      this.producerLast = p;
+      return p;
+    } catch (e) {
+      // A node whose log cannot be read at all: docker down, a container
+      // named differently, permissions. Naming it beats a blank card.
+      this.producerNote = `Could not read the node's log: ${String(e?.message || e).slice(0, 160)}`;
+      this.producerLast = null;
       return null;
     }
   }
@@ -80,6 +98,18 @@ class Worker {
       // one happens) — the UI's answer to "why isn't my model serving?".
       modelGate: this.modelGate ?? null,
       ramGb: this.ramGb ?? null,
+      /*
+       * What this machine last told the network about its Koinos block
+       * producer, and — when it told it nothing — why.
+       *
+       * The card on the account page is drawn from this, so an absent card has
+       * exactly one cause and the user should not have to guess which. The
+       * reason is kept next to the value for the same reason modelGate is:
+       * "why is my thing not showing up?" deserves the rule that actually
+       * fired, not silence.
+       */
+      producer: this.producerLast ?? null,
+      producerNote: this.producerNote ?? null,
       ...this.stats,
     };
   }

@@ -1302,6 +1302,26 @@ async function renderEarn() {
         "Free allowance",
         s.earnings?.freeTokensRemaining != null ? `${s.earnings.freeTokensRemaining.toLocaleString()} tokens left this epoch` : "—",
       ],
+      /*
+       * What this machine is telling the network about its Koinos block
+       * producer — which is exactly what draws the card on the account page.
+       *
+       * It lives here rather than only on the website because an absent card
+       * has several possible causes and none of them were visible: the node
+       * may be stopped, its log unreadable, or — the one that catches people —
+       * Earning may simply be off, since the producer report rides along with
+       * the worker's registration and there is no registration without it.
+       */
+      [
+        "Block producer",
+        !s.worker?.running
+          ? "Reported while Earning is on — start it to show this on your account page"
+          : s.worker.producer
+            ? `${Number(s.worker.producer.producingVhp).toFixed(2)} VHP` +
+              (s.worker.producer.blocksPerDay != null ? ` · ~${Number(s.worker.producer.blocksPerDay).toFixed(2)} blocks/day` : "") +
+              " · shown on your account page"
+            : s.worker.producerNote || "—",
+      ],
     ];
     $("earn-stats").innerHTML = rows.map(([k, v]) => `<span class="k">${k}</span><span>${esc(v)}</span>`).join("");
     // The wallet card's receive address — same wallet the worker earns with.
