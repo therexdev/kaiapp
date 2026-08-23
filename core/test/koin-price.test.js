@@ -179,3 +179,76 @@ test("a snapshot never waits on the network, and fills in on a later poll", asyn
   assert.ok(close(later.usdPerKoin, 0.05), "the next poll has it");
   assert.equal(later.pending, false);
 });
+
+/* ------------------------------------------------------------------------
+ * Matching what the rest of the world calls "the price".
+ *
+ * Reported from the field: the dashboard read $0.0091 while every other venue
+ * said $0.008928 — 1.93% high. That was not a bug in the quote; it was a quote
+ * being shown where a price was meant. Two effects, and only one of them is
+ * about size:
+ *
+ *   the 1% pool fee, which a buy quote carries at ANY size, and
+ *   price impact, which a 100 USDT probe incurs in a ~$32k pool.
+ *
+ * So the fee comes out arithmetically (exact) and the probe shrank to 10 USDT
+ * (impact ~0.06%). These tests simulate the pool to prove the pipeline
+ * recovers the true mid — and that the old settings would not have.
+ * --------------------------------------------------------------------- */
+
+const { removePoolFee, DEFAULT_PROBE_USDT } = require("../lib/koinos/koin-price");
+const POOL_FEE = require("../lib/koinos/route-constants").VKOIN_USDT_POOL.fee;
+
+/** What quoteVkoinOut would return for a probe against a pool at `mid`. */
+function simulateQuote({ mid, poolUsdDepth, probeUsdt, fee = POOL_FEE }) {
+  const f = Number(fee) / 1e6;
+  const afterFee = probeUsdt * (1 - f);          // the fee is taken from the input
+  const impact = afterFee / (poolUsdDepth / 2);  // rough constant-product move
+  const koinOut = afterFee / mid / (1 + impact);
+  return {
+    usdtSats: BigInt(Math.round(probeUsdt * USDT_UNITS)),
+    vkoinSats: BigInt(Math.round(koinOut * SATS)),
+  };
+}
+
+const priceFrom = (q, fee = POOL_FEE) => removePoolFee(computeUsdPerKoin(q), fee);
+
+test("the pool's fee comes out exactly — it is taken from the input, so mid = quote x (1 - f)", () => {
+  // Paying 100 at a 1% fee swaps 99, so a quote reads 1/0.99 high.
+  assert.ok(close(removePoolFee(0.01 / 0.99, 10000), 0.01, 1e-12));
+  assert.ok(close(removePoolFee(0.05, 0), 0.05), "a zero-fee pool needs no correction");
+  assert.equal(removePoolFee(null, 10000), null);
+});
+
+test("the shipped probe size recovers the market price to within a tenth of a percent", () => {
+  const mid = 0.008928;                       // what other venues reported that day
+  const q = simulateQuote({ mid, poolUsdDepth: 32000, probeUsdt: DEFAULT_PROBE_USDT });
+  const got = priceFrom(q);
+  const errPct = Math.abs(got / mid - 1) * 100;
+  assert.ok(errPct < 0.1, `expected within 0.1% of ${mid}, got ${got.toFixed(6)} (${errPct.toFixed(3)}%)`);
+});
+
+test("the settings that produced the field report would still be visibly wrong", () => {
+  const mid = 0.008928;
+  const q100 = simulateQuote({ mid, poolUsdDepth: 32000, probeUsdt: 100 });
+
+  // What shipped in v0.45.0: 100 USDT, fee left in. This is the $0.0091.
+  const asShipped = computeUsdPerKoin(q100);
+  assert.ok(asShipped / mid - 1 > 0.015,
+    `the old path reads >1.5% high (${asShipped.toFixed(6)} vs ${mid})`);
+
+  // Removing the fee alone is not enough — impact at that size still shows.
+  const feeOnly = priceFrom(q100);
+  assert.ok(feeOnly / mid - 1 > 0.005, "a 100 USDT probe still carries visible impact");
+
+  // Both changes together are what land it.
+  const fixed = priceFrom(simulateQuote({ mid, poolUsdDepth: 32000, probeUsdt: DEFAULT_PROBE_USDT }));
+  assert.ok(Math.abs(fixed / mid - 1) < 0.001);
+});
+
+test("a thinner pool than assumed does not break the small probe", () => {
+  // Half the assumed depth doubles the impact; 10 USDT still lands inside 0.2%.
+  const mid = 0.008928;
+  const got = priceFrom(simulateQuote({ mid, poolUsdDepth: 16000, probeUsdt: DEFAULT_PROBE_USDT }));
+  assert.ok(Math.abs(got / mid - 1) < 0.002, `got ${got.toFixed(6)}`);
+});

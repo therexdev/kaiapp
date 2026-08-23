@@ -10,11 +10,25 @@
  * Two things about that pool govern everything here, and both are stated in
  * the numbers this module returns rather than hidden behind a clean figure:
  *
- *   THE POOL IS THIN — about $32k. A quote is what you would actually receive
- *   for a specific size, not a mid-price, so a large probe quotes its own
- *   price impact and reads low. The probe is therefore small and its size is
- *   reported, because "one KOIN is worth $X" and "you could sell your whole
- *   stack at $X" are different claims and only the first is being made.
+ *   A QUOTE IS NOT A PRICE. Two things separate what the pool quotes from what
+ *   every price site reports, and both have to be handled or the dashboard
+ *   disagrees with the rest of the world:
+ *
+ *     THE FEE. This pool's tier is 1%, taken out of the input. Buying with
+ *     `x` USDT swaps only `x * (1 - fee)`, so the quote implies a price of
+ *     mid / (1 - fee) — about 1% high — no matter how small the trade. No
+ *     probe size escapes it; it is removed arithmetically instead, which is
+ *     exact rather than approximate.
+ *
+ *     PRICE IMPACT. The pool is thin, about $32k, so the probe moves it. This
+ *     scales with size, so the probe is small: 10 USDT costs roughly 0.06%,
+ *     where 100 USDT cost 0.6%.
+ *
+ *   Field-checked. With a 100 USDT probe and the fee left in, the dashboard
+ *   read $0.0091 while every other venue said $0.008928 — 1.93% high, which
+ *   is 1% fee plus 0.9% impact almost exactly. Both figures are kept: the
+ *   market price is what a person means by "the price", and the executable
+ *   one is what they would actually pay.
  *
  *   IT IS A DOLLAR VALUE OF A VOLATILE ASSET. Everything downstream is an
  *   estimate, and the yearly figure is an estimate built on an estimate: a
@@ -30,9 +44,10 @@
 const SATS = 100000000;      // KOIN and vKOIN both carry 8 decimals
 const USDT_UNITS = 1000000;  // USDT carries 6
 
-// Small enough that its own price impact stays negligible in a ~$32k pool,
-// large enough not to be dust the pool rounds away.
-const DEFAULT_PROBE_USDT = 100;
+// Small enough that its own price impact stays negligible in a ~$32k pool
+// (~0.06%), large enough not to be dust the pool rounds away. It was 100,
+// which cost 0.6% of impact and visibly disagreed with every price site.
+const DEFAULT_PROBE_USDT = 10;
 
 // A price is re-fetched at most this often. The dashboard polls every few
 // seconds; an Ethereum RPC round trip on every poll would be rude to the
@@ -55,6 +70,23 @@ function computeUsdPerKoin({ usdtSats, vkoinSats }) {
   const koin = Number(vkoinSats) / SATS;
   if (!(usdt > 0) || !(koin > 0)) return null;
   return usdt / koin;
+}
+
+/**
+ * Take the pool's fee back out of a buy quote.
+ *
+ * Uniswap charges the fee on the INPUT: paying `x` swaps `x * (1 - f)`, so
+ * `quoted = mid / (1 - f)` and `mid = quoted * (1 - f)`. Exact for the fee
+ * component — the only residue is price impact, which is why the probe is
+ * small rather than why this is approximate.
+ *
+ * v4 fees are in hundredths of a basis point: 10000 = 1%.
+ */
+function removePoolFee(quotedUsdPerKoin, feeHundredthsBips) {
+  if (quotedUsdPerKoin == null) return null;
+  const f = Number(feeHundredthsBips) / 1e6;
+  if (!(f >= 0) || f >= 1) return quotedUsdPerKoin;
+  return quotedUsdPerKoin * (1 - f);
 }
 
 /** KOIN satoshis → dollars. Null in, null out. */
@@ -123,11 +155,19 @@ async function fetchUsdPerKoin({ provider, probeUsdt = DEFAULT_PROBE_USDT, now =
   try {
     const p = provider || (await require("./eth-bridge").makeProvider());
     const vkoinSats = await quoteVkoinOut({ usdtSats, provider: p });
-    const usdPerKoin = computeUsdPerKoin({ usdtSats, vkoinSats });
-    if (usdPerKoin == null) {
+    const executable = computeUsdPerKoin({ usdtSats, vkoinSats });
+    if (executable == null) {
       return { usdPerKoin: null, at: now, probeUsdt, error: "The vKOIN/USDT pool returned no liquidity." };
     }
-    return { usdPerKoin, at: now, probeUsdt, source: "uniswap-v4:vKOIN/USDT", error: null };
+    const fee = require("./route-constants").VKOIN_USDT_POOL.fee;
+    return {
+      // What a person means by "the price", and what every other venue shows.
+      usdPerKoin: removePoolFee(executable, fee),
+      // What this size would actually cost, fee and impact included.
+      executableUsdPerKoin: executable,
+      feeHundredthsBips: fee,
+      at: now, probeUsdt, source: "uniswap-v4:vKOIN/USDT", error: null,
+    };
   } catch (e) {
     return { usdPerKoin: null, at: now, probeUsdt, error: String(e?.shortMessage || e?.message || e) };
   }
@@ -198,6 +238,7 @@ module.exports = {
   PRICE_TTL_MS,
   PRICE_STALE_MS,
   computeUsdPerKoin,
+  removePoolFee,
   satsToUsd,
   valuation,
   fetchUsdPerKoin,

@@ -484,7 +484,10 @@
   function usd(n) {
     if (n == null || !isFinite(n)) return "—";
     var abs = Math.abs(n);
-    var digits = abs >= 1000 ? 0 : abs >= 1 ? 2 : 4;
+    // KOIN trades below a cent, so four decimals would round the price to
+    // "$0.0089" — collapsing exactly the digits anyone comparing against
+    // another venue is looking at.
+    var digits = abs >= 1000 ? 0 : abs >= 1 ? 2 : abs >= 0.01 ? 4 : 6;
     return "$" + n.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
   }
 

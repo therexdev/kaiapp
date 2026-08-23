@@ -123,6 +123,9 @@ test("a producing node shows what it holds and what it earns", { skip: !availabl
   assert.match(r.weekly.label, /^Est\. weekly$/,
     "labels stay on one line, so the four values align across the row");
   assert.match(r.note, /Uniswap/, "names where the price came from");
+  // A sub-cent asset needs the digits people actually compare.
+  const shown = await page.evaluate(() => window.KaiNodeValue.usd(0.008928));
+  assert.equal(shown, "$0.008928", "the price is not rounded to $0.0089");
   assert.match(r.note, /not a forecast/i, "and does not let a projection read as a promise");
 });
 
