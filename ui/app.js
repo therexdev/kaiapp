@@ -450,7 +450,61 @@ function currentNodeScreen() {
  * how to render itself; what changed is that they are asked from ONE place a
  * person can find, instead of as a side effect of opening Earn or Local API.
  */
+/*
+ * Where this install stands. A packaged build has an updater and says so; a
+ * source checkout has nothing but git, and until now had no way to tell anyone
+ * it was behind — which is how a machine sat eighteen versions back looking
+ * perfectly healthy. Cheap by default: the version line costs nothing, and the
+ * network round trip only happens when someone presses the button.
+ */
+async function renderUpdateStatus({ fetchRemote = false } = {}) {
+  const host = $("update-status");
+  if (!host) return;
+  let s;
+  try {
+    s = await coreGet(`/core/update${fetchRemote ? "?fetch=1" : ""}`);
+  } catch {
+    host.textContent = "Couldn't check — Core is not answering.";
+    return;
+  }
+  const version = $("app-version")?.textContent || "";
+  if (s.kind === "packaged") {
+    host.textContent = `${version} — updates install themselves.`;
+    return;
+  }
+  if (s.kind !== "source") {
+    host.textContent = `${version} — ${s.reason || "update state unknown."}`;
+    return;
+  }
+  const where = s.detached ? "not on a branch" : `on ${s.branch}`;
+  if (s.behind > 0) {
+    host.textContent =
+      `${version} — ${s.behind} update${s.behind === 1 ? "" : "s"} behind (${where}). ` +
+      (s.canApply
+        ? "The app will offer to update and restart."
+        : `${s.reason} Fix it from a terminal, then restart.`);
+  } else if (s.canCheck) {
+    host.textContent = `${version} — up to date (${where}), installed from source.`;
+  } else {
+    host.textContent = `${version} — installed from source, ${where}. ${s.reason || ""}`;
+  }
+}
+
+$("btn-update-check")?.addEventListener("click", async (e) => {
+  const b = e.currentTarget;
+  b.disabled = true;
+  const was = b.textContent;
+  b.textContent = "Checking…";
+  try {
+    await renderUpdateStatus({ fetchRemote: true });   // the round trip they asked for
+  } finally {
+    b.disabled = false;
+    b.textContent = was;
+  }
+});
+
 function renderSettings() {
+  renderUpdateStatus();
   renderAccount?.();
   renderDev();
   renderCodeSwitch();

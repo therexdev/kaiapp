@@ -296,6 +296,33 @@ class Gateway {
       return this._json(res, 401, { ok: false, error: "This deployment requires a core token: Authorization: Bearer <KAI_CORE_TOKEN>." });
     }
 
+    /*
+     * Is this source checkout behind its remote?
+     *
+     * READ-ONLY on purpose. Applying an update means running git and possibly
+     * npm, and this endpoint is reachable from the page — so it answers the
+     * question and nothing more. The applying lives in the Electron layer,
+     * behind a dialog the user has to agree to.
+     *
+     * Packaged builds have electron-updater and answer "packaged" here, so the
+     * UI can say nothing rather than something wrong.
+     */
+    if (path === "/core/update" && req.method === "GET") {
+      const { inspect, isGitCheckout } = require("./source-update");
+      const repoDir = nodePath.join(__dirname, "..", "..");
+      if (!isGitCheckout(repoDir)) {
+        return this._json(res, 200, { ok: true, kind: "packaged", canCheck: false });
+      }
+      // `fetch` costs a network round trip, so the UI asks for it explicitly
+      // rather than paying for it on every settings repaint.
+      const wantFetch = /[?&]fetch=1(&|$)/.test(req.url || "");
+      try {
+        return this._json(res, 200, { ok: true, ...(await inspect(repoDir, { fetch: wantFetch })) });
+      } catch (e) {
+        return this._json(res, 200, { ok: true, kind: "error", canCheck: false, reason: String(e.message) });
+      }
+    }
+
     // ----- control plane -----
     if (path === "/core/health" && req.method === "GET") {
       return this._json(res, 200, { ok: true, ...this.coreInfo(), modules: this._modules() });

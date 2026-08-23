@@ -207,6 +207,116 @@ async function start() {
     } catch {
       /* updater unavailable (e.g. unpacked build) — never block the app */
     }
+  } else {
+    /*
+     * Installed from source — the case electron-updater cannot serve.
+     *
+     * A git checkout has no update feed and no installer, so the block above
+     * is skipped entirely and nothing ever mentions a new version. A Pi ran
+     * eighteen versions behind for weeks on exactly this, and the reason it
+     * went unnoticed is that `git pull` was being run faithfully and reporting
+     * success — the checkout was on a TAG, so HEAD was detached and there was
+     * no branch to pull into.
+     *
+     * So this asks git where it stands and says so out loud. When it is a
+     * clean fast-forward it offers to do it; when it is not — detached, or
+     * local edits — it explains which, because that is the part no amount of
+     * `git pull` would have revealed.
+     */
+    const repoDir = app.getAppPath();
+    const { inspect, apply, isGitCheckout } = require("../core/lib/source-update");
+    if (isGitCheckout(repoDir)) {
+      // Never ask twice about the same target in one session: "Later" should
+      // mean later, not again in four hours' time about the same commit.
+      let declined = null;
+
+      const runNpmInstall = () =>
+        new Promise((resolve, reject) => {
+          const { execFile } = require("child_process");
+          execFile(
+            process.platform === "win32" ? "npm.cmd" : "npm",
+            ["install", "--no-audit", "--no-fund"],
+            { cwd: repoDir, timeout: 30 * 60 * 1000, maxBuffer: 16 * 1024 * 1024 },
+            (err, _out, errOut) => (err ? reject(new Error(String(errOut || err.message).slice(0, 500))) : resolve()),
+          );
+        });
+
+      const checkSource = async () => {
+        let state;
+        try {
+          state = await inspect(repoDir, { fetch: true });
+        } catch (e) {
+          console.error("[update] source check failed:", e.message);
+          return;
+        }
+        if (!win || !state.behind) return;
+
+        if (!state.canApply) {
+          // Behind, but not safely fast-forwardable. Saying nothing here is
+          // what let the Pi rot; the reason IS the actionable part.
+          if (declined === state.head) return;
+          declined = state.head;
+          await dialog.showMessageBox(win, {
+            type: "warning",
+            title: "This copy is out of date",
+            message: `Koinos AI is ${state.behind} update${state.behind === 1 ? "" : "s"} behind`,
+            detail: `${state.reason}\n\nIt was installed from source, so updates come from git rather than an installer. In a terminal:\n\n  cd ${repoDir}\n  git checkout ${state.upstream ? state.upstream.replace(/^origin\//, "") : "<branch>"}\n  git pull && npm install`,
+            buttons: ["OK"],
+            noLink: true,
+          });
+          return;
+        }
+
+        if (declined === state.head) return;
+        const { response } = await dialog.showMessageBox(win, {
+          type: "info",
+          title: "Update available",
+          message: `Koinos AI is ${state.behind} update${state.behind === 1 ? "" : "s"} behind`,
+          detail: `You're on ${app.getVersion()}. This copy runs from source, so updating means fast-forwarding the checkout and restarting.`,
+          buttons: ["Update and restart", "Later"],
+          defaultId: 0,
+          cancelId: 1,
+          noLink: true,
+        });
+        if (response !== 0) { declined = state.head; return; }
+
+        try {
+          const result = await apply(repoDir, { install: true });
+          if (result.depsChanged) {
+            await dialog.showMessageBox(win, {
+              type: "info",
+              title: "Installing dependencies",
+              message: "This update changes dependencies",
+              detail: "Installing them now — on a Raspberry Pi this can take several minutes. The app will restart on its own when it finishes.",
+              buttons: ["OK"],
+              noLink: true,
+            });
+            await runNpmInstall();
+          }
+          app.relaunch();
+          app.quit();
+        } catch (e) {
+          /*
+           * The code may already be fast-forwarded while npm install failed,
+           * which leaves new code against old dependencies — the one state
+           * that must never be reported as "something went wrong". Name the
+           * command that finishes the job.
+           */
+          await dialog.showMessageBox(win, {
+            type: "error",
+            title: "Update could not finish",
+            message: "Koinos AI could not finish updating itself",
+            detail: `${e.message}\n\nFinish it in a terminal:\n\n  cd ${repoDir}\n  git pull && npm install\n\nThen restart the app.`,
+            buttons: ["OK"],
+            noLink: true,
+          });
+        }
+      };
+
+      // A moment after boot, so it never competes with the first paint.
+      setTimeout(() => { checkSource().catch(() => {}); }, 8000);
+      setInterval(() => { checkSource().catch(() => {}); }, 4 * 3600 * 1000);
+    }
   }
 }
 
