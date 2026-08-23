@@ -49,6 +49,13 @@ class TaskRunner {
     this.tasks = [];
     this._timer = null;
     this._running = false;
+    /*
+     * Which tasks are running RIGHT NOW. In memory on purpose: it is a fact
+     * about this process, not about the task, so it must never be persisted —
+     * a crash mid-run would otherwise leave a task marked "running" forever
+     * with nothing left alive to finish it.
+     */
+    this._runningIds = new Set();
     try {
       this.tasks = JSON.parse(fs.readFileSync(file, "utf8")).tasks || [];
     } catch {
@@ -61,8 +68,17 @@ class TaskRunner {
     fs.writeFileSync(this.file, JSON.stringify({ tasks: this.tasks }));
   }
 
+  /*
+   * Tasks, plus whether each is running at this moment.
+   *
+   * The UI needs this and cannot infer it. A task's answer takes as long as
+   * the model takes, and the first run of the day usually includes loading
+   * that model — tens of seconds during which nothing about the stored task
+   * changes. Without a flag to render, the list looks exactly as it did
+   * before the user pressed anything.
+   */
   list() {
-    return this.tasks;
+    return this.tasks.map((t) => ({ ...t, running: this._runningIds.has(t.id) }));
   }
 
   create({ name, prompt, model, schedule }) {
@@ -136,6 +152,8 @@ class TaskRunner {
   async _run(t) {
     // Advance the clock FIRST so a crashing run can't tight-loop.
     t.nextRunAt = computeNext(t.schedule).toISOString();
+    this._runningIds.add(t.id);
+    this.onEvent({ type: "task:started", id: t.id, name: t.name });
     try {
       const answer = await this.runChat({ model: t.model, prompt: t.prompt });
       const { id: chatId } = this.chats.save({
@@ -153,6 +171,8 @@ class TaskRunner {
       t.lastRunAt = new Date().toISOString();
       t.lastError = String(e.message || e).slice(0, 300);
       this.onEvent({ type: "task:failed", id: t.id, name: t.name, error: t.lastError });
+    } finally {
+      this._runningIds.delete(t.id);
     }
     this._persist();
   }

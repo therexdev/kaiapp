@@ -268,6 +268,9 @@ $("cmp-vote").addEventListener("click", (e) => {
 // ---------- scheduled tasks view ----------
 
 let tasksTimer = null;
+// Runs this window kicked off and is still waiting on. Bridges the gap
+// between the click and Core reporting `running` on the next poll.
+const tasksStarting = new Set();
 const tasksLastRunSeen = {};
 
 function taskHourOptions() {
@@ -328,18 +331,33 @@ async function renderTasks() {
   host.innerHTML = tasks.length
     ? tasks
         .map((t) => {
-          const last = t.lastError
-            ? `<span class="task-err">last run failed: ${esc2(t.lastError)}</span>`
-            : t.lastChatId
-              ? `<button class="linklike" data-open-chat="${esc2(t.lastChatId)}">last result</button>`
-              : `<span class="hint">hasn't run yet</span>`;
+          /*
+           * A run in flight has to be visible, and it has to SURVIVE this
+           * render. The list repaints every 5 seconds, so the old code — which
+           * only set "Running…" on the clicked button — had its own feedback
+           * wiped by the next poll a moment later, and the row went back to
+           * reading "hasn't run yet" for the whole run. Since the first run of
+           * the day also loads the model, that is a minute of the app looking
+           * like the click never landed. Reported as exactly that.
+           *
+           * `t.running` comes from Core, so this is also right for a task that
+           * fires on its own schedule while the user happens to be looking.
+           */
+          const running = t.running || tasksStarting.has(t.id);
+          const last = running
+            ? `<span class="hint">running now — the model may need to load first</span>`
+            : t.lastError
+              ? `<span class="task-err">last run failed: ${esc2(t.lastError)}</span>`
+              : t.lastChatId
+                ? `<button class="linklike" data-open-chat="${esc2(t.lastChatId)}">last result</button>`
+                : `<span class="hint">hasn't run yet</span>`;
           return `<div class="task-row${t.enabled ? "" : " off"}">
             <div class="task-main">
               <div class="task-name">${esc2(t.name)} <span class="hint">· ${esc2(scheduleText(t.schedule))} · ${esc2(cmpLabelOf(t.model))}</span></div>
               <div class="task-sub">${last}</div>
             </div>
             <div class="task-btns">
-              <button class="task-btn" data-run="${esc2(t.id)}" title="Run now">Run now</button>
+              <button class="task-btn" data-run="${esc2(t.id)}" title="Run now"${running ? " disabled" : ""}>${running ? "Running…" : "Run now"}</button>
               <button class="task-btn" data-toggle="${esc2(t.id)}" data-on="${t.enabled}">${t.enabled ? "Pause" : "Resume"}</button>
               <button class="card-del" data-del="${esc2(t.id)}" title="Delete task">×</button>
             </div>
@@ -393,10 +411,26 @@ $("task-list").addEventListener("click", async (e) => {
   }
   const run = e.target.closest("[data-run]");
   if (run) {
+    const id = run.dataset.run;
+    if (tasksStarting.has(id)) return;      // double-click is not a second run
+    tasksStarting.add(id);
     run.disabled = true;
     run.textContent = "Running…";
-    await fetch(`/core/tasks/${run.dataset.run}/run`, { method: "POST" }).catch(() => {});
-    renderTasks();
+    renderTasks();                          // paint the running state at once
+    try {
+      const r = await fetch(`/core/tasks/${id}/run`, { method: "POST" });
+      if (!r.ok) {
+        // Previously swallowed with an empty catch, which is how a failed run
+        // became "nothing happened".
+        const j = await r.json().catch(() => ({}));
+        alert(`That task could not run: ${j?.error || r.statusText}`);
+      }
+    } catch (err) {
+      alert(`That task could not run: ${err.message}`);
+    } finally {
+      tasksStarting.delete(id);
+      renderTasks();
+    }
     return;
   }
   const tog = e.target.closest("[data-toggle]");

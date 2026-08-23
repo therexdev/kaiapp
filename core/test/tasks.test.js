@@ -106,3 +106,51 @@ test("tasks persist across a restart", () => {
   assert.strictEqual(b.list()[0].name, "keep me");
   assert.strictEqual(b.list()[0].schedule.hour, 8);
 });
+
+/* --------------------------------------------------------------------------
+ * "I clicked Run now and nothing happened."
+ *
+ * Nothing was wrong with the run. The Tasks list repaints every 5 seconds, and
+ * the only sign a run had started was text the click handler wrote onto the
+ * button — which the very next repaint threw away. The row went back to
+ * reading "hasn't run yet" while the run was still going, and since the first
+ * run of the day also loads the model, that is a minute of the app looking
+ * like the click never landed.
+ *
+ * Feedback that a repaint can destroy is not feedback, so the fact now lives
+ * in Core and the UI renders it. That also covers the case the click handler
+ * never could: a task firing on its own schedule while someone is watching.
+ * ----------------------------------------------------------------------- */
+test("a task in flight reports itself as running, and stops when it finishes", async () => {
+  let release;
+  const held = new Promise((r) => { release = r; });
+  const { runner, dir } = mk(async () => { await held; return "the answer"; });
+  const t = runner.create({ name: "Night", prompt: "anything?", model: "m", schedule: { kind: "daily", hour: 9 } });
+
+  const flag = () => runner.list().find((x) => x.id === t.id).running;
+  assert.equal(flag(), false, "idle before anything is asked of it");
+
+  const inFlight = runner.runNow(t.id);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(flag(), true, "running, and it says so while the answer is still coming");
+
+  release();
+  await inFlight;
+  assert.equal(flag(), false, "and it stops saying so the moment it is done");
+
+  // Never written to disk: it is a fact about this process, not about the
+  // task. Persisted, a crash mid-run would strand a task as "running" forever.
+  const onDisk = JSON.parse(fs.readFileSync(path.join(dir, "tasks.json"), "utf8"));
+  assert.equal("running" in onDisk.tasks[0], false, "the flag is not persisted");
+});
+
+test("a run that fails still clears the running flag", async () => {
+  const { runner } = mk(async () => { throw new Error("model is not installed"); });
+  const t = runner.create({ name: "Night", prompt: "anything?", model: "gone", schedule: { kind: "daily", hour: 9 } });
+
+  await runner.runNow(t.id);
+
+  const after = runner.list().find((x) => x.id === t.id);
+  assert.equal(after.running, false, "a failure must not leave the row stuck on Running…");
+  assert.match(after.lastError, /not installed/, "and the reason is kept, to be shown");
+});
