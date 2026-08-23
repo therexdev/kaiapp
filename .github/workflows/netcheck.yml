@@ -183,7 +183,14 @@ jobs:
         run: |
           npm i --no-save koilib >/dev/null 2>&1
           ADDR=$(printf '%s' "${{ github.event.head_commit.message }}" | grep -oE '\[vhpcheck:[a-zA-Z0-9]+\]' | head -1 | sed 's/\[vhpcheck://; s/\]//')
-          if [ -z "$ADDR" ]; then echo "no address in the commit message — use [vhpcheck:<address>]"; exit 1; fi
+          # A commit that merely DESCRIBES this job carries the tag in its prose
+          # and lands here with nothing to probe. That is not a broken build —
+          # it is someone writing a sentence — so say so and stop, rather than
+          # painting the run red and training everyone to ignore it.
+          if [ -z "$ADDR" ]; then
+            echo "::notice::[vhpcheck] no address to probe — the tag appears in prose, not as [vhpcheck:<koinos-address>]. Nothing to do."
+            exit 0
+          fi
           node core/scripts/vhp-probe.js "$ADDR"
 
   voicecheck:
