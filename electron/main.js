@@ -190,7 +190,18 @@ async function start() {
         // Silent install + relaunch: the app closes, updates, and reopens.
         if (response === 0) autoUpdater.quitAndInstall(true, true);
       });
-      const check = () => autoUpdater.checkForUpdates().catch(() => {});
+      /*
+       * Log why a check failed instead of discarding it. A silent catch is how
+       * "the Pi never offers an update" went unnoticed: on arm64 the updater
+       * asks for latest-linux-arm64.yml, there was no arm64 build publishing
+       * one, every check 404'd, and the error went straight into an empty
+       * function. Still non-fatal — an unreachable update feed must never
+       * block the app — but now it leaves a trace.
+       */
+      const check = () =>
+        autoUpdater.checkForUpdates().catch((e) => {
+          console.error("[update] check failed:", String(e?.message || e));
+        });
       check();
       setInterval(check, 4 * 3600 * 1000);
     } catch {

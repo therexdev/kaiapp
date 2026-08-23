@@ -101,8 +101,14 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
-      - name: Build AppImage
-        run: npm run dist -- --linux --publish ${{ (startsWith(github.ref, 'refs/tags/v') || contains(github.event.head_commit.message, '[release]')) && 'always' || 'never' }}
+      # x64 AND arm64. The Raspberry Pi is an arm64 machine and there was
+      # never a build for it: `--linux` on an x64 runner produces x86_64 only,
+      # so a Pi had no AppImage it could even run, and electron-updater — which
+      # looks for latest-linux-arm64.yml on that architecture — found nothing
+      # and said nothing. Cross-building arm64 here works (verified: the packed
+      # binary is a real ELF aarch64) and costs one extra Electron download.
+      - name: Build AppImage (x64 + arm64)
+        run: npm run dist -- --linux --x64 --arm64 --publish ${{ (startsWith(github.ref, 'refs/tags/v') || contains(github.event.head_commit.message, '[release]')) && 'always' || 'never' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/upload-artifact@v4
