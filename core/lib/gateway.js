@@ -738,7 +738,7 @@ class Gateway {
         try {
           inUse = !!alias && this.models.resolveAlias(alias).packageId === id;
         } catch { /* the loaded alias no longer resolves; it cannot be this one */ }
-        return this._json(res, 200, { ok: true, ...this.models.removePackage(id, { isInUse: inUse }) });
+        return this._json(res, 200, { ok: true, ...(await this.models.removePackage(id, { isInUse: inUse })) });
       } catch (e) {
         return this._json(res, 400, { ok: false, error: { message: String(e.message) } });
       }

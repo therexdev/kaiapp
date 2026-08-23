@@ -1,6 +1,7 @@
 "use strict";
 
 const fs = require("fs");
+const fsp = require("fs/promises");
 const crypto = require("crypto");
 
 /**
@@ -49,8 +50,11 @@ async function downloadFile(url, dest, { sha256, sizeBytes, onProgress, signal, 
     throw new Error(`Download failed: HTTP ${resp.status}`);
   }
   // A server that ignores Range restarts the file — start the .part over.
+  // Async, like every discard here: a half-downloaded model is gigabytes, and
+  // Core runs in the Electron main process, so a synchronous delete freezes
+  // the whole window until the filesystem is done.
   if (!resumed && from > 0) {
-    fs.rmSync(part, { force: true });
+    await fsp.rm(part, { force: true });
     from = 0;
   }
 
@@ -80,7 +84,7 @@ async function downloadFile(url, dest, { sha256, sizeBytes, onProgress, signal, 
       .on("error", reject);
   });
   if (hash.digest("hex") !== String(sha256).toLowerCase()) {
-    fs.rmSync(part, { force: true });
+    await fsp.rm(part, { force: true });
     throw new Error("Downloaded file failed SHA-256 verification — discarded. Retry; if it persists the catalog or mirror is wrong.");
   }
   fs.renameSync(part, dest);

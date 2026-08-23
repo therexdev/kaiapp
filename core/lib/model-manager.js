@@ -1,6 +1,7 @@
 "use strict";
 
 const fs = require("fs");
+const fsp = require("fs/promises");
 const path = require("path");
 
 const { downloadFile } = require("./download");
@@ -402,7 +403,23 @@ class ModelManager {
    * from under a running llama.cpp is not a crash we want to debug from a
    * field report.
    */
-  removePackage(packageId, { isInUse = false } = {}) {
+  /*
+   * Delete an installed model's files.
+   *
+   * ASYNC, and the `await` on each rm is the whole point — not style. Core
+   * runs INSIDE the Electron main process, which is Chromium's browser
+   * process: the one that receives OS input and hands it to the renderer, and
+   * the one that draws native <select> popups. `fs.rmSync` on a 4.7 GB file
+   * blocks that process for as long as the filesystem takes, and while it is
+   * blocked the whole window is dead — keystrokes go nowhere, dropdowns do not
+   * open, nothing repaints. It comes back when the delete finishes, which
+   * makes it read like a mystery freeze rather than like this line.
+   *
+   * That is exactly what a tester hit on v0.43.0: removed two models, lost the
+   * app for a while, got it back on its own. Nothing about the removal was
+   * wrong; it was just done on the thread that runs the user interface.
+   */
+  async removePackage(packageId, { isInUse = false } = {}) {
     const plan = this.removalPlan(packageId);
     if (isInUse) {
       throw new Error("That model is loaded right now — switch to another model first, then remove it.");
@@ -419,7 +436,7 @@ class ModelManager {
 
     for (const f of plan.deletesFiles) {
       try {
-        fs.rmSync(f, { force: true });
+        await fsp.rm(f, { force: true });
       } catch (e) {
         throw new Error(`Could not remove ${path.basename(f)}: ${e.code || e.message}`);
       }

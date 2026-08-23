@@ -57,7 +57,7 @@ function firstPlainPackage(models) {
 
 // ------------------------------------------------- downloaded models really go
 
-test("removing a downloaded model deletes the weights and reports what it freed", () => {
+test("removing a downloaded model deletes the weights and reports what it freed", async () => {
   const { models } = mk();
   const id = firstPlainPackage(models);
   const file = install(models, id, 10000);
@@ -68,14 +68,14 @@ test("removing a downloaded model deletes the weights and reports what it freed"
   assert.equal(plan.freesBytes, 10000, "the plan quotes what is actually on disk");
   assert.equal(plan.redownloadable, true);
 
-  const r = models.removePackage(id);
+  const r = await models.removePackage(id);
   assert.equal(r.removed, true);
   assert.equal(r.freedBytes, 10000);
   assert.equal(fs.existsSync(file), false, "the file is gone");
   assert.equal(models.packageStatus(id).status, "absent", "and the catalog agrees it is gone");
 });
 
-test("a cancelled download's .part file is removed too", () => {
+test("a cancelled download's .part file is removed too", async () => {
   /*
    * These were unreachable before: a cancelled download leaves a .part taking
    * gigabytes, the UI offers only "Download" on that row, and nothing in the
@@ -91,28 +91,28 @@ test("a cancelled download's .part file is removed too", () => {
   const plan = models.removalPlan(id);
   assert.equal(plan.freesBytes, 2500, "a half-finished download frees what it actually holds, not the full size");
 
-  models.removePackage(id);
+  await models.removePackage(id);
   assert.equal(fs.existsSync(part), false);
   assert.equal(models.packageStatus(id).status, "absent");
 });
 
-test("removing a model that was never downloaded is harmless, not an error", () => {
+test("removing a model that was never downloaded is harmless, not an error", async () => {
   const { models } = mk();
   const id = firstPlainPackage(models);
   const plan = models.removalPlan(id);
   assert.equal(plan.freesBytes, 0);
   assert.deepEqual(plan.deletesFiles, []);
-  const r = models.removePackage(id);
+  const r = await models.removePackage(id);
   assert.equal(r.removed, true, "nothing to do is still success — the end state is what was asked for");
 });
 
-test("storage usage drops by what was removed", () => {
+test("storage usage drops by what was removed", async () => {
   const { models } = mk();
   const ids = Object.keys(models.catalog.packages).filter((i) => !models.catalog.packages[i].mmproj).slice(0, 2);
   install(models, ids[0], 6000);
   install(models, ids[1], 4000);
   assert.equal(models.storageUsage().bytes, 10000);
-  models.removePackage(ids[0]);
+  await models.removePackage(ids[0]);
   assert.equal(models.storageUsage().bytes, 4000, "the number the Models screen shows is now honest");
 });
 
@@ -133,7 +133,7 @@ test("removing an imported model forgets it WITHOUT deleting the user's file", a
   assert.equal(plan.keepsFile, mine, "and names the file it is leaving alone");
   assert.equal(plan.freesBytes, 0, "so it must not claim to free space it will not free");
 
-  const r = models.removePackage(pkgId);
+  const r = await models.removePackage(pkgId);
   assert.equal(r.removed, true);
   assert.equal(r.kind, "imported");
 
@@ -148,12 +148,12 @@ test("removing an imported model forgets it WITHOUT deleting the user's file", a
 
 // ----------------------------------------------------- the loaded model is safe
 
-test("the model currently loaded cannot be removed out from under the runtime", () => {
+test("the model currently loaded cannot be removed out from under the runtime", async () => {
   const { models } = mk();
   const id = firstPlainPackage(models);
   const file = install(models, id);
 
-  assert.throws(
+  await assert.rejects(
     () => models.removePackage(id, { isInUse: true }),
     /loaded right now/i,
     "and the message says what to do about it",
@@ -163,7 +163,7 @@ test("the model currently loaded cannot be removed out from under the runtime", 
 
 // ------------------------------------------- the vision projector is shared state
 
-test("the vision projector goes with the last model that needs it", () => {
+test("the vision projector goes with the last model that needs it", async () => {
   const { models, modelsDir } = mk();
   const visionId = Object.keys(models.catalog.packages).find((i) => models.catalog.packages[i].mmproj);
   assert.ok(visionId, "the catalog still ships a vision package");
@@ -176,11 +176,11 @@ test("the vision projector goes with the last model that needs it", () => {
   assert.ok(plan.deletesFiles.includes(mmproj), "the projector is removed with the model that needs it");
   assert.equal(plan.freesBytes, 6500, "and counts toward what is freed");
 
-  models.removePackage(visionId);
+  await models.removePackage(visionId);
   assert.equal(fs.existsSync(mmproj), false);
 });
 
-test("a projector another installed model still needs is KEPT", () => {
+test("a projector another installed model still needs is KEPT", async () => {
   /*
    * Two packages can pin the same projector. Removing one must not break
    * vision for the other — a bug that would only show up as "images stopped
@@ -213,32 +213,74 @@ test("a projector another installed model still needs is KEPT", () => {
 
   const plan = models.removalPlan("vision-a@1");
   assert.ok(!plan.deletesFiles.includes(mm), "B still needs it, so it stays");
-  models.removePackage("vision-a@1");
+  await models.removePackage("vision-a@1");
   assert.equal(fs.existsSync(mm), true, "vision still works for B");
   assert.equal(fs.existsSync(path.join(modelsDir, "b.gguf")), true);
 
   // Now B goes too: the projector has no one left to serve.
   const plan2 = models.removalPlan("vision-b@1");
   assert.ok(plan2.deletesFiles.includes(mm), "the last one out takes it");
-  models.removePackage("vision-b@1");
+  await models.removePackage("vision-b@1");
   assert.equal(fs.existsSync(mm), false, "no orphaned projector left behind");
 });
 
 // ------------------------------------------------------------------- reporting
 
-test("removal is announced, so anything watching can refresh", () => {
+test("removal is announced, so anything watching can refresh", async () => {
   const { models, events } = mk();
   const id = firstPlainPackage(models);
   install(models, id, 3000);
-  models.removePackage(id);
+  await models.removePackage(id);
   const ev = events.find((e) => e.type === "model:removed");
   assert.ok(ev, "an event is emitted");
   assert.equal(ev.freedBytes, 3000);
   assert.equal(ev.kind, "downloaded");
 });
 
-test("an unknown package is rejected rather than silently doing nothing", () => {
+test("an unknown package is rejected rather than silently doing nothing", async () => {
   const { models } = mk();
   assert.throws(() => models.removalPlan("not-a-real-package@9"), /Unknown package/);
-  assert.throws(() => models.removePackage("custom:deadbeef"), /Unknown package/);
+  await assert.rejects(() => models.removePackage("custom:deadbeef"), /Unknown package/);
+});
+
+/* --------------------------------------------------------------------------
+ * Removal must not block the thread that runs the user interface.
+ *
+ * This is the bug a tester hit on v0.43.0, and it did not look like a delete
+ * bug at all: they removed two models and the whole app went dead — could not
+ * type, could not open a dropdown — then it came back on its own a while
+ * later. Nothing about the removal was wrong. It was `fs.rmSync`.
+ *
+ * Core runs INSIDE the Electron main process, which is Chromium's browser
+ * process: the one that takes OS input and hands it to the renderer, and the
+ * one that draws native <select> popups. Multi-gigabyte deletes on that thread
+ * freeze the window for as long as the filesystem takes.
+ *
+ * "Is the event loop free?" is awkward to assert directly, so this asserts the
+ * thing that makes it true: the deletion must NOT have finished by the time
+ * removePackage hands control back to its caller. Synchronous code cannot
+ * satisfy that — rmSync completes before it returns — so this fails on the old
+ * implementation and can only be made to pass by yielding.
+ * ----------------------------------------------------------------------- */
+test("removing a model yields the event loop instead of blocking the UI thread", async () => {
+  const { models } = mk();
+  const id = firstPlainPackage(models);
+  const file = install(models, id);
+  assert.equal(fs.existsSync(file), true, "precondition: the model is on disk");
+
+  const pending = models.removePackage(id);
+  assert.ok(typeof pending?.then === "function", "removal is awaitable, not a blocking call");
+
+  // Same tick, before awaiting: with a synchronous delete the file would
+  // already be gone here, which is exactly the freeze.
+  assert.equal(
+    fs.existsSync(file), true,
+    "the delete had not already run to completion on the caller's thread",
+  );
+  // The loop is genuinely free while it runs.
+  const ticked = await new Promise((r) => setImmediate(() => r(true)));
+  assert.equal(ticked, true, "a timer scheduled during the removal still fires");
+
+  await pending;
+  assert.equal(fs.existsSync(file), false, "and it really is deleted once awaited");
 });
