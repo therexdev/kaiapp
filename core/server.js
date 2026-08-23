@@ -579,16 +579,23 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
         file: path.join(dataDir, "tasks.json"),
         chats: gateway.chats,
         onEvent: events,
-        runChat: async ({ model, prompt }) => {
-          const r = await fetch(`http://127.0.0.1:${p}/v1/chat/completions`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }] }),
-          });
-          const j = await r.json();
-          if (!r.ok) throw new Error(j?.error?.message || `chat failed (${r.status})`);
-          return j.choices?.[0]?.message?.content ?? "";
-        },
+        /*
+         * Through the SAME loopback lane teams and bench use — the control
+         * plane's /core/chat/completions, not the public /v1 API.
+         *
+         * This used to POST to /v1/chat/completions with no credentials, which
+         * worked right up until the user created an API key: from that moment
+         * `keys.required()` is true, every /v1 call needs a bearer token, and
+         * every scheduled task failed with "Missing or invalid API key" — a
+         * message about the external API, for a task the user set up in the
+         * app and never gave a key to. The control-plane lane exists precisely
+         * so that creating an external key cannot lock the app's own features
+         * out of their own engine, and it carries KAI_CORE_TOKEN for headless
+         * deployments as a bonus. A scheduled task is the app asking a
+         * question on the user's behalf, so it goes where the app goes.
+         */
+        runChat: ({ model, prompt }) =>
+          loopbackChat({ model, messages: [{ role: "user", content: prompt }] }),
       });
       gateway.tasks = this.tasks;
       this.tasks.start();
