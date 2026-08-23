@@ -14,6 +14,7 @@ const { SetupService } = require("./koinos/setup");
 const { RewardEngine } = require("./koinos/rewards");
 const { ProducerStats } = require("./koinos/producer-stats");
 const { projectReturns } = require("./koinos/profit-metrics");
+const { valuation, createPriceCache } = require("./koinos/koin-price");
 const { parseAmount, formatAmount, subSats, cmpSats } = require("./koinos/format");
 const { weiToEth } = require("./koinos/eth");
 const { BridgeOrchestrator, MAX_BRIDGE_ETH } = require("./koinos/bridge-orchestrator");
@@ -66,6 +67,11 @@ const ONRAMP_APP_KEY = "kkapp_71854dc40591df1aeb8811a514e3dbc302bb382f";
 function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards, stats, bridge, routeC, userData, appVersion, defaultNodeData = null, onEvent = () => {} }) {
   const channels = new Map();
   const handle = (channel, fn) => channels.set(channel, fn);
+
+  // One KOIN price for this Core, refreshed at most every few minutes and kept
+  // across failures. Scoped here rather than module-level so a second Core in
+  // the same process (the tests make them) does not share one.
+  const priceCache = createPriceCache();
 
   /*
    * The wallet is the SAME wallet Koinos AI earns with, and core/server.js
@@ -466,6 +472,20 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
       ? projectReturns({ avgDailyProfitSats: windows.avgDailyProfit, stakeSats, reburnFraction })
       : null;
 
+    /*
+     * What all of that is worth in dollars, priced off the Uniswap v4
+     * vKOIN/USDT pool (vKOIN is KOIN bridged 1:1, and that pool is the only
+     * meaningful liquidity).
+     *
+     * `snapshot` deliberately does NOT await the quote. This handler is polled
+     * every few seconds and paints the whole dashboard; putting an Ethereum
+     * round trip in front of balances, sync state and the activity feed would
+     * make the whole screen wait on a number that is merely nice to have. The
+     * first poll after launch carries no price and the next one does.
+     */
+    out.price = priceCache.snapshot();
+    out.value = valuation({ balances, windows, usdPerKoin: out.price.usdPerKoin });
+
     // Screenshot/demo-only override (never set in production): present a
     // running, synced node with representative balances so marketing shots
     // show a live dashboard.
@@ -481,6 +501,10 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
       const demoWindows = { last24h: "31200000", last7d: "216500000", last30d: "934800000", avgDailyProfit: "31160000", daysTracked: 30 };
       out.stats = { available: true, network: net.id, totals: out.stats?.totals ?? null, feed: out.stats?.feed ?? [], windows: demoWindows, syncing: false };
       out.returns = projectReturns({ avgDailyProfitSats: demoWindows.avgDailyProfit, stakeSats: out.balances.vhp, reburnFraction: 0.5 });
+      // A representative price, so a demo shot shows the value box populated
+      // rather than a row of dashes. Never reached in production.
+      out.price = { usdPerKoin: 0.0512, at: Date.now(), ageMs: 0, stale: false, error: null, probeUsdt: 100 };
+      out.value = valuation({ balances: out.balances, windows: demoWindows, usdPerKoin: out.price.usdPerKoin });
     }
     return out;
   });

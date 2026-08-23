@@ -18,6 +18,12 @@
  *      standalone app doesn't send one, so this file intercepts those six
  *      and asks — with the app's own modal, so it looks native — then
  *      attaches what was typed to that one call and forgets it.
+ *   4. WHAT IT IS WORTH, IN DOLLARS. The standalone app talks only in KOIN.
+ *      A tester deciding whether a machine is worth running wants the answer
+ *      in the currency they pay the electricity bill in, so a "Node value"
+ *      card is added here — priced off the Uniswap v4 vKOIN/USDT pool that
+ *      the funding route already uses. It reuses the vendored .card/.tile
+ *      classes, so styles.css stays byte-identical too.
  *   3. THE CHAIN DATA FOLDER IS A CHOICE. The standalone app puts tens of
  *      gigabytes wherever its own data lives and never mentions it, which is
  *      wrong for anyone with a small system drive. Here it is offered — with
@@ -127,6 +133,11 @@
     return rpc(channel, payload).then(function (res) {
       // Links Core hands back are opened here, where a window exists.
       if (res && res.ok && res.data && res.data.openUrl) window.open(res.data.openUrl, "_blank");
+      // The value card rides on the dashboard's own poll — no extra request,
+      // and it updates in step with everything else on the screen.
+      if (channel === "dashboard:summary" && res && res.ok) {
+        try { paintValue(res.data); } catch (e) { /* never break the dashboard over a number */ }
+      }
       return res;
     });
   }
@@ -462,6 +473,102 @@
     open.parentNode.insertBefore(btn, open.nextSibling);
   }
   setInterval(attachChangeButton, 500);
+
+  // ---- difference 4: node value and estimated earnings, in dollars ----
+
+  /*
+   * Money, formatted for a person. Small amounts keep cents; large ones drop
+   * them, because "$1,204.00 per year" implies a precision this figure does
+   * not have.
+   */
+  function usd(n) {
+    if (n == null || !isFinite(n)) return "—";
+    var abs = Math.abs(n);
+    var digits = abs >= 1000 ? 0 : abs >= 1 ? 2 : 4;
+    return "$" + n.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  }
+
+  function vtile(host, id, label, value, sub) {
+    var t = document.getElementById(id);
+    if (!t) {
+      t = el("div", "tile");
+      t.id = id;
+      t.appendChild(el("div", "t-label", label));
+      t.appendChild(el("div", "t-value", ""));
+      t.appendChild(el("div", "t-sub", ""));
+      host.appendChild(t);
+    }
+    // textContent throughout: these are numbers and short phrases, and none of
+    // it has any business being parsed as markup.
+    t.childNodes[1].textContent = value;
+    t.childNodes[2].textContent = sub || "";
+  }
+
+  /*
+   * Draw (or redraw) the card from a dashboard:summary payload.
+   *
+   * The rules it follows are all the same rule: never let an unknown render as
+   * a number. No price, unreachable balances, or a node too young to have
+   * produced anything all show "—" with the reason underneath — because
+   * "$0.00 per day" is a claim that the machine earns nothing, and that is a
+   * different statement from "nothing has been measured yet".
+   */
+  function paintValue(data) {
+    var root = document.getElementById("view-dashboard");
+    var tiles = document.getElementById("d-tiles");
+    if (!root || !tiles) return;             // dashboard not painted yet
+
+    var card = document.getElementById("kai-value-card");
+    if (!card) {
+      card = el("div", "card");
+      card.id = "kai-value-card";
+      var head = el("div", "row spread");
+      head.appendChild(el("h2", null, "\uD83C\uDFE0 Node value"));
+      var note = el("span", "muted small");
+      note.id = "kai-value-note";
+      head.appendChild(note);
+      card.appendChild(head);
+      var grid = el("div", "widget-grid");
+      grid.id = "kai-value-grid";
+      card.appendChild(grid);
+      // Above "Profit & projected return", which is the KOIN-denominated
+      // version of the same story.
+      tiles.parentNode.insertBefore(card, tiles.nextSibling);
+    }
+
+    var grid = document.getElementById("kai-value-grid");
+    var v = (data && data.value) || {};
+    var price = (data && data.price) || {};
+
+    var priceSub = price.usdPerKoin != null
+      ? "KOIN + VHP at " + usd(price.usdPerKoin) + " per KOIN"
+      : "waiting for a price";
+    vtile(grid, "kai-v-total", "Node value", usd(v.nodeValueUsd), priceSub);
+
+    var earnSub = v.basis === "measured"
+      ? "from " + v.daysTracked + " day" + (v.daysTracked === 1 ? "" : "s") + " measured"
+      : "not enough history yet";
+    vtile(grid, "kai-v-daily", "Est. daily", usd(v.dailyUsd), earnSub);
+    vtile(grid, "kai-v-weekly", "Est. weekly", usd(v.weeklyUsd), earnSub);
+    vtile(grid, "kai-v-yearly", "Est. yearly", usd(v.yearlyUsd), earnSub);
+
+    // The header note carries every caveat, so the tiles can stay clean.
+    var note = document.getElementById("kai-value-note");
+    var bits = [];
+    if (price.usdPerKoin != null) {
+      bits.push("Uniswap vKOIN/USDT");
+      if (price.stale) bits.push("price " + Math.round((price.ageMs || 0) / 60000) + " min old");
+    } else if (price.error) {
+      bits.push("no price: " + price.error);
+    } else if (price.pending) {
+      bits.push("fetching price\u2026");
+    }
+    if (v.basis === "measured") bits.push("estimates, not a forecast");
+    note.textContent = bits.join(" \u00B7 ");
+  }
+
+  // Reachable for tests, which cannot drive a live Ethereum quote.
+  window.KaiNodeValue = { paint: paintValue, usd: usd };
 
   // Reachable for tests, which cannot click through a native folder picker.
   window.KaiNodeData = {
