@@ -178,3 +178,70 @@ test("an imported model's control still promises not to delete the user's file",
       !!document.querySelector("[data-remove-custom][data-uninstall]"));
     assert.equal(isAlsoUninstall, false, "an imported model never gets the delete-from-disk control");
   });
+
+/*
+ * The bug this file did not catch the first time.
+ *
+ * Every assertion above passed while the control was, to a person, not there
+ * at all: it borrowed `.chat-del`, which is `opacity: 0` until you hover the
+ * row of a CHAT list, and a model card is not one. Playwright does not treat
+ * `opacity: 0` as hidden — a fully transparent element still has a box, still
+ * takes clicks, still answers `$()` — so a DOM-shaped test says yes to a
+ * feature nobody can find.
+ *
+ * The second half is the layout. `.model-offer` is a `space-between` flex row
+ * built for two children; a remove button dropped in as a third sibling turns
+ * the middle slot into a parking space, and "Use" drifts to a spot that moves
+ * with the length of each model's blurb. So: assert what the eye checks —
+ * the control is visible, and the buttons line up down the right edge.
+ */
+test("the remove control is actually visible, and the buttons stay right-aligned",
+  { skip: !available, timeout: 120000 }, async (t) => {
+    const { core, base } = await boot();
+    const { chromium } = require("playwright-core");
+    const browser = await chromium.launch({ executablePath: CHROMIUM });
+    t.after(async () => { await browser.close(); await core.stop?.(); });
+
+    const page = await browser.newPage();
+    await page.setViewportSize({ width: 1280, height: 900 });
+    page.on("dialog", (d) => d.dismiss());
+    await openModels(page, base);
+
+    // Visible WITHOUT hovering anything: read it cold, mouse parked far away.
+    await page.mouse.move(0, 0);
+    const del = await page.evaluate(() => {
+      const b = document.querySelector('[data-uninstall="gone@1"]');
+      if (!b) return null;
+      const r = b.getBoundingClientRect();
+      return {
+        opacity: Number(getComputedStyle(b).opacity),
+        visibility: getComputedStyle(b).visibility,
+        w: r.width, h: r.height,
+        inActions: !!b.closest(".model-actions"),
+      };
+    });
+    assert.ok(del, "the remove control is in the DOM");
+    assert.ok(del.opacity > 0.25,
+      `it is visible without hovering (opacity ${del.opacity})`);
+    assert.equal(del.visibility, "visible");
+    assert.ok(del.w > 8 && del.h > 8, `and big enough to aim at (${del.w}×${del.h})`);
+    assert.ok(del.inActions, "and it sits with the row's other actions");
+
+    // Right-aligned: every card's action group ends at the card's inner edge,
+    // and no card has grown a third top-level slot for space-between to fill.
+    const rows = await page.evaluate(() =>
+      [...document.querySelectorAll("#models-list .model-row")].map((row) => {
+        const acts = row.querySelector(".model-actions");
+        return {
+          children: row.children.length,
+          gap: acts ? row.getBoundingClientRect().right - acts.getBoundingClientRect().right : null,
+          text: row.querySelector(".model-name")?.textContent || "",
+        };
+      }));
+    assert.ok(rows.length >= 2, "there are cards to check");
+    for (const r of rows) {
+      assert.equal(r.children, 2, `“${r.text}” is a two-slot row, not three`);
+      assert.ok(r.gap != null && r.gap < 30,
+        `“${r.text}” keeps its buttons on the right edge (${Math.round(r.gap)}px in)`);
+    }
+  });

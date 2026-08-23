@@ -341,7 +341,7 @@ async function renderTasks() {
             <div class="task-btns">
               <button class="task-btn" data-run="${esc2(t.id)}" title="Run now">Run now</button>
               <button class="task-btn" data-toggle="${esc2(t.id)}" data-on="${t.enabled}">${t.enabled ? "Pause" : "Resume"}</button>
-              <button class="chat-del" data-del="${esc2(t.id)}" title="Delete task">×</button>
+              <button class="card-del" data-del="${esc2(t.id)}" title="Delete task">×</button>
             </div>
           </div>`;
         })

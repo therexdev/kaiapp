@@ -2085,11 +2085,11 @@ async function renderModels() {
        * there was no way at all to get those bytes back.
        */
       if (a.custom) {
-        action += ` <button class="chat-del" data-remove-custom="${esc2(a.alias)}" title="Remove from the list (your file is not deleted)">×</button>`;
+        action += ` <button class="card-del" data-remove-custom="${esc2(a.alias)}" title="Remove from the list (your file is not deleted)">×</button>`;
       } else if (a.status === "ready" || a.status === "partial") {
         action += inUse
-          ? ` <button class="chat-del" disabled title="This model is loaded — switch to another first">×</button>`
-          : ` <button class="chat-del" data-uninstall="${esc2(a.package)}" data-uninstall-name="${esc2(a.label.split(" (")[0])}" title="Remove this model from your disk">×</button>`;
+          ? ` <button class="card-del" disabled title="This model is loaded — switch to another first">×</button>`
+          : ` <button class="card-del" data-uninstall="${esc2(a.package)}" data-uninstall-name="${esc2(a.label.split(" (")[0])}" title="Remove this model from your disk">×</button>`;
       }
       const fitNote = tight && !hopeless ? ` · tight fit on this machine (~${a.minRamGb} GB RAM recommended)` : "";
       // The last load failure shows on the card of the model it hit, so a
@@ -2104,7 +2104,7 @@ async function renderModels() {
             .join(" · ")}${esc2(fitNote)}</div>
           ${loadErr ? `<div class="model-load-err">last load failed: ${esc2(loadErr)}</div>` : ""}
         </div>
-        ${action}
+        <div class="model-actions">${action}</div>
       </div>`;
     })
     .join("");

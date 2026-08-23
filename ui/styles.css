@@ -418,6 +418,34 @@ button.primary:hover:not(:disabled) { box-shadow: 0 4px 16px rgba(109, 62, 240, 
 
 /* ----- models view ----- */
 .model-row { margin-bottom: 10px; }
+
+/*
+ * The remove control on a CARD row — a model, a task — and the group it sits in.
+ *
+ * Two separate mistakes are fixed here, and both had already shipped.
+ *
+ * LAYOUT. `.model-offer` is a `space-between` flex row built for two children.
+ * A × dropped in as a third sibling does not sit beside the button; it becomes
+ * a third slot, and space-between parks "Use" in the MIDDLE of the card at a
+ * position that drifts with the length of each model's blurb. So the actions
+ * are wrapped, and the row is two slots again.
+ *
+ * VISIBILITY. `.chat-del` is `opacity: 0` until `.chat-row:hover` — right for a
+ * dense list where every row is removable and a column of ×s would be noise.
+ * Card rows are none of those things: removal is rare, the rows are tall and
+ * far apart, and outside a `.chat-row` that hover rule never matches at all, so
+ * the control is invisible at every moment of its life. Tasks borrowed it in
+ * v0.21.0 and models in v0.43.0; both had a delete button nobody could find.
+ * Dim but present, danger-coloured on hover.
+ */
+.model-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.card-del {
+  border: 0; background: none; color: var(--text-dim); font: inherit;
+  font-size: 1.2em; line-height: 1; padding: 3px 8px; border-radius: 8px;
+  cursor: pointer; opacity: 0.6;
+}
+.card-del:hover { color: var(--danger); background: var(--bg-input); opacity: 1; }
+.card-del[disabled] { cursor: not-allowed; opacity: 0.25; }
 .model-badge {
   font-size: 0.78em; font-weight: 700; letter-spacing: 0.04em;
   padding: 4px 10px; border-radius: 999px;
