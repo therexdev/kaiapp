@@ -1304,7 +1304,7 @@ async function renderEarn() {
       ],
       /*
        * What this machine is telling the network about its Koinos block
-       * producer — which is exactly what draws the card on the account page.
+       * producer — which is exactly what draws the card on the dashboard.
        *
        * It lives here rather than only on the website because an absent card
        * has several possible causes and none of them were visible: the node
@@ -1315,11 +1315,11 @@ async function renderEarn() {
       [
         "Block producer",
         !s.worker?.running
-          ? "Reported while Earning is on — start it to show this on your account page"
+          ? "Reported while Earning is on — start it to show this on your dashboard"
           : s.worker.producer
             ? `${Number(s.worker.producer.producingVhp).toFixed(2)} VHP` +
               (s.worker.producer.blocksPerDay != null ? ` · ~${Number(s.worker.producer.blocksPerDay).toFixed(2)} blocks/day` : "") +
-              " · shown on your account page"
+              " · shown on your dashboard at koinosai.com"
             : s.worker.producerNote || "—",
       ],
     ];

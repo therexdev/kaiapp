@@ -297,6 +297,15 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
             // "measured" or "no-history" — so the dashboard can say "not enough
             // history yet" instead of printing $0.00 at someone.
             basis: v.basis ?? null,
+            /*
+             * Which app built this snapshot. Older versions sent the block
+             * share and nothing else, so a dashboard with empty value tiles
+             * has two very different causes — a chain RPC that would not
+             * answer, or an app that never had the fields. Without this the
+             * website cannot tell them apart, and neither can the person
+             * looking at it.
+             */
+            appVersion: VERSION,
             reportedAt: new Date().toISOString(),
           };
         },
