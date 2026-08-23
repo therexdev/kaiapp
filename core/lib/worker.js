@@ -9,6 +9,11 @@ const crypto = require("crypto");
  * submits receipts signed with the wallet key (§17). Stop is immediate (§10):
  * the loop checks a flag between polls and in-flight work finishes cleanly.
  */
+// How often the block-producer snapshot is refreshed to the scheduler. Long
+// enough to be invisible (it is one small POST), short enough that a dashboard
+// is never showing numbers from a different hour.
+const PRODUCER_REPORT_MS = 5 * 60 * 1000;
+
 class Worker {
   /**
    * §7.4 anti-Sybil signal #3 — a deterministic DEVICE fingerprint: the hash
@@ -269,6 +274,32 @@ class Worker {
         this._startLoop();
         return;
       }
+      /*
+       * Refresh the block-producer snapshot on its own cadence.
+       *
+       * It used to ride ONLY on registration, and in steady state a healthy
+       * long-poll means this worker may not re-register for hours — so the
+       * website showed VHP and a block rate from whenever the app last
+       * started. Reported as "the account page isn't updating", and it wasn't.
+       *
+       * This is a small POST rather than a re-registration on purpose:
+       * registering mints a new token and kills the in-flight long poll, which
+       * is far too disruptive to do every few minutes just to freshen a number.
+       */
+      if (this.token && Date.now() - (this._producerSentAt || 0) > PRODUCER_REPORT_MS) {
+        this._producerSentAt = Date.now();
+        try {
+          const p = await this._producerSnapshot();
+          if (p) {
+            await fetch(`${this.schedulerUrl}/worker/producer?token=${encodeURIComponent(this.token)}`, {
+              method: "POST",
+              headers: { "content-type": "application/json", connection: "close" },
+              body: JSON.stringify({ producer: p }),
+            });
+          }
+        } catch { /* never let a cosmetic report disturb earning */ }
+      }
+
       const last = this.stats.lastPollOkAt ? new Date(this.stats.lastPollOkAt).getTime() : 0;
       if (!this._executing && Date.now() - last > 150000) {
         try {

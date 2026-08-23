@@ -64,14 +64,17 @@ const { compareRoutes, descriptor } = require("./koinos/fund-routes");
 const DEFAULT_ONRAMP_ENDPOINT = "https://koinos-node.vercel.app/api/session";
 const ONRAMP_APP_KEY = "kkapp_71854dc40591df1aeb8811a514e3dbc302bb382f";
 
-function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards, stats, bridge, routeC, userData, appVersion, defaultNodeData = null, onEvent = () => {} }) {
+function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards, stats, bridge, routeC, userData, appVersion, defaultNodeData = null, priceCache: injectedPriceCache = null, onEvent = () => {} }) {
   const channels = new Map();
   const handle = (channel, fn) => channels.set(channel, fn);
 
   // One KOIN price for this Core, refreshed at most every few minutes and kept
   // across failures. Scoped here rather than module-level so a second Core in
   // the same process (the tests make them) does not share one.
-  const priceCache = createPriceCache();
+  // Injected by createKoinosNode so the dashboard channel and the worker's
+  // report to the website quote the SAME price — two caches would drift and
+  // the two screens would disagree for no reason a user could explain.
+  const priceCache = injectedPriceCache || createPriceCache();
 
   /*
    * The wallet is the SAME wallet Koinos AI earns with, and core/server.js
@@ -881,15 +884,19 @@ function createKoinosNode({ dataDir, wallet, appVersion, onEvent = () => {} }) {
   bridgeTimer.unref?.();
   routeCTimer.unref?.();
 
+  const priceCache = createPriceCache();
   const channels = buildChannels({
     settings, state, wallet, chain, nodeMgr, setup, rewards, stats, bridge, routeC,
-    userData: root, appVersion, defaultNodeData,
+    userData: root, appVersion, defaultNodeData, priceCache,
   });
 
   return {
     channels,
     settings,
     nodeMgr,
+    /** The KOIN price as of now, without waiting on Ethereum. Shared with the
+     *  dashboard channel so both surfaces quote the same number. */
+    priceSnapshot: () => priceCache.snapshot(),
     async call(channel, payload) {
       const fn = channels.get(String(channel));
       if (!fn) throw new Error(`Unknown Koinos channel: ${channel}`);

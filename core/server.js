@@ -263,7 +263,42 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
           const text = await koinosNodeSvc.call("node:logs", { service: "block_producer", tail: 60 });
           const parsed = parseProducerLog(typeof text === "string" ? text : text?.logs || "");
           if (!parsed) return null;
-          return { ...summarize(parsed), at: parsed.at || null };
+
+          /*
+           * The rest comes from dashboard:summary — the SAME call the desktop
+           * Node screen draws from. Deriving a second, thinner version here
+           * would guarantee the website and the app eventually disagree about
+           * someone's money, and the one place that must never happen is the
+           * number a person checks on their phone.
+           *
+           * It is best-effort: a chain RPC that will not answer, or a price
+           * that has not arrived, leaves nulls that render as unknown. Only
+           * the share (which came from the log) is guaranteed.
+           */
+          let sum = null;
+          try {
+            sum = await koinosNodeSvc.call("dashboard:summary", {});
+          } catch { /* node down or RPC unreachable */ }
+          const v = sum?.value || {};
+          const price = sum?.price || {};
+
+          return {
+            ...summarize(parsed),
+            at: parsed.at || null,
+            koinSats: sum?.balances && !sum.balances.error ? String(sum.balances.koin ?? "") || null : null,
+            vhpSats: sum?.balances && !sum.balances.error ? String(sum.balances.vhp ?? "") || null : null,
+            usdPerKoin: price.usdPerKoin ?? null,
+            priceStale: price.stale ?? null,
+            nodeValueUsd: v.nodeValueUsd ?? null,
+            dailyUsd: v.dailyUsd ?? null,
+            weeklyUsd: v.weeklyUsd ?? null,
+            yearlyUsd: v.yearlyUsd ?? null,
+            daysTracked: v.daysTracked ?? null,
+            // "measured" or "no-history" — so the dashboard can say "not enough
+            // history yet" instead of printing $0.00 at someone.
+            basis: v.basis ?? null,
+            reportedAt: new Date().toISOString(),
+          };
         },
       });
       const st = await worker.start();
