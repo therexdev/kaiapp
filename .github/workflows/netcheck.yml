@@ -44,19 +44,6 @@ jobs:
         run: |
           npm i --no-save koilib >/dev/null 2>&1
           node core/scripts/chain-probe.js
-      - uses: actions/checkout@v4
-        if: contains(github.event.head_commit.message, '[vhpcheck:')
-      # Read-only balance/metadata lookup for ONE public mainnet address, to
-      # settle which VHP figure is real when the node's log and the app's
-      # balance disagree. Address comes from the commit message so no operator
-      # address is ever hard-coded into the repo.
-      - name: VHP truth probe
-        if: contains(github.event.head_commit.message, '[vhpcheck:')
-        run: |
-          npm i --no-save koilib >/dev/null 2>&1
-          ADDR=$(printf '%s' "${{ github.event.head_commit.message }}" | grep -oE '\[vhpcheck:[a-zA-Z0-9]+\]' | head -1 | sed 's/\[vhpcheck://; s/\]//')
-          if [ -z "$ADDR" ]; then echo "no address in the commit message — use [vhpcheck:<address>]"; exit 1; fi
-          node core/scripts/vhp-probe.js "$ADDR"
       - name: Public network status
         run: |
           # Tolerant: never abort on the first slow endpoint — probe ALL of
@@ -184,6 +171,21 @@ jobs:
   # asset (name drifts across tags), hash engine + model for catalog pinning,
   # and run a REAL transcription on the shipping OS — the full E2E the
   # sandbox can't do. Output feeds core/runtimes/catalog.json's whisper entry.
+  # Read-only balance/metadata lookup for ONE public mainnet address, when the
+  # node's log and the app's balance disagree about the same wallet. Its own
+  # job so the answer IS the log, instead of forty lines buried in nine hundred.
+  vhpcheck:
+    if: contains(github.event.head_commit.message, '[vhpcheck:')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: VHP truth probe
+        run: |
+          npm i --no-save koilib >/dev/null 2>&1
+          ADDR=$(printf '%s' "${{ github.event.head_commit.message }}" | grep -oE '\[vhpcheck:[a-zA-Z0-9]+\]' | head -1 | sed 's/\[vhpcheck://; s/\]//')
+          if [ -z "$ADDR" ]; then echo "no address in the commit message — use [vhpcheck:<address>]"; exit 1; fi
+          node core/scripts/vhp-probe.js "$ADDR"
+
   voicecheck:
     if: contains(github.event.head_commit.message, '[voicecheck]')
     runs-on: windows-latest
