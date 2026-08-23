@@ -250,7 +250,22 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
       const url = settings.get("earn.schedulerUrl", DEFAULT_SCHEDULER_URL);
       if (!url) throw new Error("Set the scheduler URL first");
       if (worker?.running) return worker.status();
-      worker = new Worker({ schedulerUrl: url, wallet, runtime, hardware: hw, models, onEvent: events });
+      worker = new Worker({
+        schedulerUrl: url, wallet, runtime, hardware: hw, models, onEvent: events,
+        /*
+         * Where the account page's Koinos node card comes from. Both numbers
+         * are taken from the SAME block_producer log lines so the ratio is
+         * self-consistent — a VHP balance read seconds apart from a network
+         * estimate is a subtly wrong share.
+         */
+        producer: async () => {
+          const { parseProducerLog, summarize } = require("./lib/koinos/producer-share");
+          const text = await koinosNodeSvc.call("node:logs", { service: "block_producer", tail: 60 });
+          const parsed = parseProducerLog(typeof text === "string" ? text : text?.logs || "");
+          if (!parsed) return null;
+          return { ...summarize(parsed), at: parsed.at || null };
+        },
+      });
       const st = await worker.start();
       settings.set("earn.autoStart", true);
       return st;

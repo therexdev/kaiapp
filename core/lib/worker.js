@@ -36,12 +36,20 @@ class Worker {
     return crypto.createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 16);
   }
 
-  constructor({ schedulerUrl, wallet, runtime, hardware, models, onEvent }) {
+  constructor({ schedulerUrl, wallet, runtime, hardware, models, producer, onEvent }) {
     this.schedulerUrl = String(schedulerUrl || "").replace(/\/$/, "");
     this.wallet = wallet; // WalletService (unlocked)
     this.runtime = runtime; // RuntimeManager
     this.hardware = hardware;
     this.models = models || null; // ModelManager — advertises what this machine can serve
+    /*
+     * Optional: an async () => producer snapshot, so the account page can show
+     * the Koinos block producer next to the AI worker. Injected rather than
+     * reached for, because the two are independent — plenty of machines earn
+     * with models and produce no blocks, and the reverse — and the worker must
+     * not grow a hard dependency on the node service to register.
+     */
+    this.producer = typeof producer === "function" ? producer : null;
     this.onEvent = onEvent || (() => {});
     this.running = false;
     this.token = null;
@@ -50,6 +58,18 @@ class Worker {
     this.stats = { jobsDone: 0, receiptsAccepted: 0, since: null, lastPollOkAt: null, lastJobAt: null, lastError: null };
     this._loop = null;
     this._pollAbort = null; // aborts the idle long-poll so stop is immediate (§10)
+  }
+
+  /** Producer stats for registration, or null. Swallows everything: a node
+   *  that is stopped, unreadable or absent must not stop this machine
+   *  earning, which is the thing the user actually switched on. */
+  async _producerSnapshot() {
+    if (!this.producer) return null;
+    try {
+      return (await this.producer()) || null;
+    } catch {
+      return null;
+    }
   }
 
   status() {
@@ -163,6 +183,9 @@ class Worker {
           // §7.4 anti-Sybil signal #3 (SHADOW): many wallets on one device —
           // or one device image cloned across a fleet — collide here.
           fingerprint: Worker.fingerprint(this.hardware),
+          // Block-producer snapshot, when this machine also runs a Koinos node.
+          // Never blocks or fails registration: earning must not depend on it.
+          producer: await this._producerSnapshot(),
         }),
       });
       const j = await r.json();
