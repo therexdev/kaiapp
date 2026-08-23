@@ -21,7 +21,7 @@ const { BridgeOrchestrator, MAX_BRIDGE_ETH } = require("./koinos/bridge-orchestr
 const { RouteCOrchestrator, MAX_ROUTE_C_ETH } = require("./koinos/route-c-orchestrator");
 const { quoteDeposit, maxBridgeable, makeProvider } = require("./koinos/eth-bridge");
 const { quoteSend, maxSendable, sendEth } = require("./koinos/eth-send");
-const { usdtBalance, quoteUsdtSend, maxUsdtSendable, sendUsdt } = require("./koinos/usdt-send");
+const { usdtBalance, quoteUsdtSend, maxUsdtSendable, sendUsdt, parseUsdt } = require("./koinos/usdt-send");
 const { vkoinBalance, quoteVkoinSend, maxVkoinSendable, sendVkoin } = require("./koinos/vkoin-send");
 const { quoteSwap } = require("./koinos/koindx");
 const { quoteEthToVkoin, quoteVkoinOut, applySlippage } = require("./koinos/eth-swap");
@@ -738,9 +738,14 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
   handle("fund:usdtFundQuote", async ({ amountUsdt, slippageBps = 150 } = {}) => {
     const address = wallet.ethAddress;
     if (!address) throw new Error("Create or unlock your wallet first.");
-    const provider = await makeProvider();
-    const usdtSats = require("./lib/usdt-send").parseUsdt(amountUsdt);
+    // Validate the amount BEFORE reaching for the network. It was the other
+    // way round, which meant typing a bad number bought an Ethereum round trip
+    // before being told, and meant this line only ran once a provider existed
+    // — so the broken require below it needed a working connection to reveal
+    // itself. Cheap checks first.
+    const usdtSats = parseUsdt(amountUsdt);
     if (usdtSats <= 0n) throw new Error("Amount must be greater than 0");
+    const provider = await makeProvider();
     const koin = await quoteVkoinOut({ usdtSats, provider });
     return { amountUsdt: String(amountUsdt), koinOut: koin.toString(), koinOutMin: applySlippage(koin, slippageBps).toString(), slippageBps };
   });
