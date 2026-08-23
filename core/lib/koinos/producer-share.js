@@ -109,4 +109,45 @@ function parseProducerLog(text) {
   return { producingVhp, networkVhp, at };
 }
 
-module.exports = { summarize, quietness, parseProducerLog, BLOCK_SECONDS };
+/**
+ * Is the node producing with everything the wallet holds?
+ *
+ * It is not always. On a real machine on 2026-08-23 the chain said the wallet
+ * held 41,123.92 VHP and the block producer said it was producing with
+ * 16,955.37 — 41% of the stake, for the same address, on the same computer.
+ * Nothing looked broken: the node was running, in sync, producing blocks, and
+ * every screen was internally consistent. It was simply entered in the lottery
+ * with a fraction of the tickets it had paid for.
+ *
+ * That is money. In proof-of-burn the producer derives, from its own VHP
+ * figure, the moment its proof becomes valid — understate the stake and it
+ * submits later and loses races it should have won. So this is worth checking
+ * on every reading, not worth waiting for someone to notice.
+ *
+ * Deliberately one-directional: producing MORE than the wallet holds is not
+ * flagged. The two numbers are read seconds apart while VHP is being consumed,
+ * so tiny disagreements in that direction are ordinary, and a false alarm that
+ * tells someone to restart a node is worse than silence.
+ *
+ * @param producingVhp   what the block_producer log says (a number)
+ * @param walletVhpSats  the chain balance, in satoshis (string or number)
+ * @param tolerance      fraction of the wallet stake to forgive; 2% covers a
+ *                       reading taken a few minutes apart on a busy producer.
+ */
+function stakeGap({ producingVhp, walletVhpSats, tolerance = 0.02 } = {}) {
+  const producing = Number(producingVhp);
+  const wallet = Number(walletVhpSats) / 1e8;
+  if (!Number.isFinite(producing) || !Number.isFinite(wallet) || wallet <= 0 || producing <= 0) {
+    return { walletVhp: null, producingVhp: null, shortfallPct: null, behind: false };
+  }
+  const shortfall = (wallet - producing) / wallet;
+  return {
+    walletVhp: wallet,
+    producingVhp: producing,
+    // Positive means the node is producing with LESS than it holds.
+    shortfallPct: shortfall * 100,
+    behind: shortfall > tolerance,
+  };
+}
+
+module.exports = { summarize, quietness, parseProducerLog, stakeGap, BLOCK_SECONDS };

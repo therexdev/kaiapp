@@ -1319,7 +1319,15 @@ async function renderEarn() {
           : s.worker.producer
             ? `${Number(s.worker.producer.producingVhp).toFixed(2)} VHP` +
               (s.worker.producer.blocksPerDay != null ? ` · ~${Number(s.worker.producer.blocksPerDay).toFixed(2)} blocks/day` : "") +
-              " · shown on your dashboard at koinosai.com"
+              /*
+               * The one thing here that is not cosmetic. A node can be entered
+               * in the block lottery with a fraction of the stake its wallet
+               * holds, and nothing else on any screen says so — both numbers
+               * are individually correct, so only the comparison finds it.
+               */
+              (s.worker.producer.stakeBehind
+                ? ` · ⚠ producing with ${Number(s.worker.producer.stakeShortfallPct).toFixed(0)}% less VHP than your wallet holds — restart the Koinos node so it re-reads your stake`
+                : " · shown on your dashboard at koinosai.com")
             : s.worker.producerNote || "—",
       ],
     ];

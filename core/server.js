@@ -259,7 +259,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
          * estimate is a subtly wrong share.
          */
         producer: async () => {
-          const { parseProducerLog, summarize } = require("./lib/koinos/producer-share");
+          const { parseProducerLog, summarize, stakeGap } = require("./lib/koinos/producer-share");
           const text = await koinosNodeSvc.call("node:logs", { service: "block_producer", tail: 60 });
           const parsed = parseProducerLog(typeof text === "string" ? text : text?.logs || "");
           if (!parsed) return null;
@@ -281,12 +281,27 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
           } catch { /* node down or RPC unreachable */ }
           const v = sum?.value || {};
           const price = sum?.price || {};
+          const vhpSats = sum?.balances && !sum.balances.error ? String(sum.balances.vhp ?? "") || null : null;
+
+          /*
+           * The two VHP numbers, compared. They are not always the same: a
+           * node can be entered in the block lottery with a fraction of the
+           * stake its wallet holds, and every screen still looks healthy.
+           * Nothing else in this snapshot would reveal it, because each side
+           * is individually correct.
+           */
+          const gap = stakeGap({ producingVhp: parsed.producingVhp, walletVhpSats: vhpSats });
 
           return {
             ...summarize(parsed),
             at: parsed.at || null,
             koinSats: sum?.balances && !sum.balances.error ? String(sum.balances.koin ?? "") || null : null,
-            vhpSats: sum?.balances && !sum.balances.error ? String(sum.balances.vhp ?? "") || null : null,
+            vhpSats,
+            // True when the node is producing with materially less than the
+            // wallet holds — worth a person's attention, and worth saying out
+            // loud rather than leaving two numbers side by side to be noticed.
+            stakeBehind: gap.behind,
+            stakeShortfallPct: gap.behind ? gap.shortfallPct : null,
             usdPerKoin: price.usdPerKoin ?? null,
             priceStale: price.stale ?? null,
             nodeValueUsd: v.nodeValueUsd ?? null,

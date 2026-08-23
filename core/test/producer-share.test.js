@@ -9,7 +9,7 @@
 
 const { test } = require("node:test");
 const assert = require("node:assert");
-const { summarize, quietness } = require("../lib/koinos/producer-share");
+const { summarize, quietness, stakeGap } = require("../lib/koinos/producer-share");
 
 const close = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
 
@@ -236,4 +236,51 @@ test("a working producer reports itself and carries no complaint", async () => {
   const st = w.status();
   assert.ok(close(st.producer.producingVhp, 659.46173948));
   assert.equal(st.producerNote, null, "nothing to explain when it works");
+});
+
+/*
+ * The stake gap — the check that found a real node producing with 41% of its
+ * own stake. Numbers below are that machine's, read off chain and off its log
+ * on 2026-08-23.
+ */
+test("stakeGap flags a node producing with less VHP than the wallet holds", () => {
+  const g = stakeGap({ producingVhp: 16955.37, walletVhpSats: "4112392378763" });
+  assert.equal(g.behind, true);
+  assert.ok(Math.abs(g.walletVhp - 41123.92378763) < 1e-6);
+  // 41% of the stake in the lottery, 59% of it sitting out.
+  assert.ok(g.shortfallPct > 58 && g.shortfallPct < 60, `shortfall ${g.shortfallPct}`);
+});
+
+test("stakeGap stays quiet when the two agree", () => {
+  const g = stakeGap({ producingVhp: 659.46173948, walletVhpSats: "65946173948" });
+  assert.equal(g.behind, false);
+  assert.ok(Math.abs(g.shortfallPct) < 1e-6);
+});
+
+test("stakeGap forgives a reading taken minutes apart on a busy producer", () => {
+  // VHP is consumed as blocks are produced, so the log figure trails the
+  // balance slightly. 1% must not raise an alarm.
+  const g = stakeGap({ producingVhp: 40712.7, walletVhpSats: "4112392378763" });
+  assert.equal(g.behind, false);
+});
+
+test("stakeGap never flags the harmless direction", () => {
+  // Producing with MORE than the wallet holds means the balance was read after
+  // some was consumed. Telling someone to restart over that is a false alarm.
+  const g = stakeGap({ producingVhp: 50000, walletVhpSats: "4112392378763" });
+  assert.equal(g.behind, false);
+});
+
+test("stakeGap returns unknown rather than a verdict on missing input", () => {
+  for (const bad of [
+    { producingVhp: null, walletVhpSats: "4112392378763" },
+    { producingVhp: 16955, walletVhpSats: null },
+    { producingVhp: 16955, walletVhpSats: "0" },
+    { producingVhp: NaN, walletVhpSats: "abc" },
+    {},
+  ]) {
+    const g = stakeGap(bad);
+    assert.equal(g.behind, false, JSON.stringify(bad));
+    assert.equal(g.shortfallPct, null, JSON.stringify(bad));
+  }
 });
