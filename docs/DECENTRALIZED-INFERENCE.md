@@ -49,8 +49,14 @@ per-token latency ≈ (hops) × (round-trip time) + compute
 | Topology | Hops × RTT | Per token | Speed |
 |---|---|---|---|
 | Global swarm | 8 × 50 ms | 400 ms | **2.5 tok/s** |
-| Regional cluster | 8 × 10 ms | 80 ms | **12 tok/s** |
+| Regional cluster | 8 × 20 ms | 160 ms | **6 tok/s** |
 | Same building | 8 × 1 ms | 8 ms | 125 tok/s |
+
+**The regional row was originally written as 8 × 10 ms, and that was datacenter
+thinking.** Consumer last-mile alone is 10–30 ms on cable and 2–5 ms on fibre,
+so two homes in the same city is realistically 15–40 ms, not 10. 20 ms is the
+honest placeholder — and it is a placeholder, because nobody has measured ours.
+That is Phase 0's entire job.
 
 The first row is roughly where **Petals** has sat since 2022 — about one decode
 step per second across volunteer GPUs. **Parallax** (2025) improved on that
@@ -156,12 +162,19 @@ node remains the backstop.
 
 ## 4. Phases
 
-| Phase | What | Touches | Risk |
-|---|---|---|---|
-| **0** | Worker-to-worker latency map, **shadow only** | worker report, scheduler storage | Low |
-| **1** | Local draft → network verify. **No sharding.** | worker, scheduler, app | Low–medium |
-| **2** | Regional 2–4 stage pipelines, **async workloads only** | routing | Medium |
-| **3** | MoE expert swarm + BitTorrent-style weight distribution | everything | The real prize |
+| Phase | What | Touches | Risk | Status |
+|---|---|---|---|---|
+| **0** | Worker-to-worker latency map, **shadow only** | worker report, scheduler storage | Low | **next** |
+| **1** | Local draft → network verify. **No sharding.** | worker, scheduler, app | Low–medium | **blocked** (§4a) |
+| **2** | Regional 2–4 stage pipelines, **async workloads only** | routing | Medium | gated on Phase 0 |
+| **3** | MoE expert swarm + BitTorrent-style weight distribution | everything | The real prize | gated on Phase 2 |
+
+Read §4a and §4b before this table. Phase 1 is blocked on an engine capability
+llama.cpp does not expose, and its benefit was mis-stated when it was written.
+Phase 2 is not merely "next after 1" — whether it is possible at all depends on
+what Phase 0 measures. And running unsharded on a single capable machine (§4b
+lever 4) stays the DEFAULT for chat; sharding is for models no single machine
+can hold, not a thing to reach for because it sounds more decentralized.
 
 ### Phase 0 — the latency map
 
@@ -261,6 +274,91 @@ place to start, because whether Phase 2 is possible at all depends on whether
 enough machines are close enough to each other to form a regional pipeline —
 and nobody knows that yet. Phase 1 is blocked on an engine capability and
 should not be built until that is settled.
+
+## 4b. Getting to chat speed — the latency budget
+
+Chat feels alive at roughly **10 tokens/second**, which is a **100 ms budget per
+token**. Everything below is about fitting `hops × RTT + compute` inside it.
+
+There are only four levers. None of them is sufficient alone. They multiply.
+
+### Lever 1 — fewer hops
+
+Under-weighted everywhere above. §1 assumed eight machines because it assumed
+each holds an eighth. But a 70B model at 4-bit is ~40 GB: that is **three**
+16 GB machines, not eight. And with the first chunk on the user's own machine
+(§3.1), only **two** hops leave their house.
+
+Hops are the cheapest thing to cut and the least explored.
+
+### Lever 2 — shorter hops
+
+Regional clustering. 50 ms → 20 ms. Bounded by physics and by consumer
+last-mile; see the corrected table in §1.
+
+### Lever 3 — more tokens per trip
+
+Speculative decoding (§2). 3–6× on top of whatever the first two levers give.
+
+### Lever 4 — do not shard at all when you do not have to
+
+Route chat to a single machine whenever one machine can hold the model. Shard
+only for models too big for any single machine. This is not a fallback, it is
+the correct default — see the tiering note below.
+
+### What stacking them does
+
+| | tok/s |
+|---|---|
+| 8 global hops @ 50 ms (§1 baseline) | 2.5 |
+| → cluster regionally (50 → 20 ms) | 6 |
+| → 3 fat nodes instead of 8 thin (8 → 3 hops) | 16 |
+| → first layers local (3 → 2 network hops) | 25 |
+| → speculative decoding (α = 0.8, k = 8) | **~60** |
+
+Sixty tokens a second is faster than a person reads. That is not one
+breakthrough; it is four modest wins multiplying.
+
+### A correction to §4a — the engine blocker is narrower than stated
+
+§4a concluded that llama.cpp cannot return per-draft-token probabilities and
+left the impression that speculative decoding is blocked outright. It is not.
+
+That limitation bites only when a node is treated as an **opaque llama-server
+over HTTP**, which is the Phase 1 shape. In a **sharded** design we execute the
+layers ourselves, so per-position logits are simply available in our own
+forward pass. The finding blocks Phase 1. It does not block Phase 2/3.
+
+The cost is that Phase 2/3 need our own pipeline runner rather than a fleet of
+llama-servers — a real lift, and one to size honestly before committing.
+
+### The tension nobody should paper over
+
+**Every latency fix pushes toward fewer, beefier machines.** Lever 1 wants
+three 16 GB boxes instead of eight 8 GB ones. That is the exact opposite of the
+brief at the top of this document, which is about letting the average PC owner
+take part.
+
+The resolution is **tiering**, and it is probably the right product rather than
+a compromise:
+
+- **Average PCs serve small models solo.** No sharding, no latency problem,
+  fast today. It is what that hardware is genuinely good at.
+- **Beefier clustered machines serve the big sharded model.** Slower per token,
+  but it is a model nobody else offers on consumer hardware at all.
+
+Both earn. Different work, different rates. Nobody with an 8 GB laptop is told
+they are not welcome — they are on a different tier, doing work that suits them.
+
+### What this means for sequencing
+
+Levers 1 and 2 are both bets on geography, and we have **zero measurements**.
+Phase 0 settles both:
+
+- If users cluster naturally, the whole chain above is reachable and Phase 2
+  is worth building.
+- If they are one-per-city, skip sharded chat entirely, go to async work and
+  tiering, and do not spend months on a pipeline that physics will not allow.
 
 ## 5. Open problems we have not solved
 

@@ -469,6 +469,20 @@ for dev/screenshots).
    Phase 0 (latency map) is a SHADOW rollout, same discipline as the anti-Sybil
    fingerprint signal: collect, watch, and only then let it touch routing or
    payouts. The revenue path does not get speculative surgery.
+   MEASURED 2026-08-24 (§4a): batching a draft is 6.7x cheaper than
+   token-by-token decoding — the premise holds — but llama.cpp will not return
+   per-draft-token probabilities, so PHASE 1 IS BLOCKED as an opaque-server
+   design. That limitation does NOT bind Phase 2/3, where we execute the layers
+   ourselves and the logits are simply there.
+   §4b is the chat-speed budget: 10 tok/s means 100 ms per token, and there are
+   exactly four levers — fewer hops, shorter hops, more tokens per trip, and not
+   sharding at all when one machine can hold the model. Stacked, they take
+   2.5 tok/s to ~60. The tension to keep in view: every latency fix pushes
+   toward fewer, beefier machines, which is the opposite of the brief. The
+   resolution is TIERING — average PCs serve small models solo, clustered
+   beefier machines serve the big sharded one. Both earn, at different rates.
+   The 10 ms regional RTT originally written in §1 was datacenter thinking and
+   has been corrected to 20 ms; consumer last-mile alone is 10-30 ms on cable.
 
 0. ~~Account creation shut on production~~ — **OPENED by the owner 2026-08-22
    05:02Z.** Verified from OUTSIDE the box, which is the only proof that
