@@ -164,6 +164,14 @@ async function start() {
   // report as malware-adjacent. A Settings toggle ships it properly later;
   // earners who want always-on can add the app to startup themselves.
 
+  /*
+   * Where "What's new" goes. The popup tells someone a version number; this
+   * tells them what is in it. Anchored per release so they land on the entry
+   * for the build they are actually installing, not the top of a list.
+   */
+  const notesUrl = (version) =>
+    `https://koinosai.com/updates${version ? `#v${encodeURIComponent(String(version))}` : ""}`;
+
   // Auto-update (§34; M1 ships the stable channel only): download in the
   // background, then ask — one dialog when the update is ready to apply,
   // with "Later" falling back to install-on-quit. Packaged builds only.
@@ -182,13 +190,16 @@ async function start() {
           title: "Update ready",
           message: `Koinos AI ${info.version} is ready to install`,
           detail: `You're on ${app.getVersion()}. Restart now to update, or keep working — it installs when you close the app.`,
-          buttons: ["Restart now", "Later"],
+          buttons: ["Restart now", "What's new", "Later"],
           defaultId: 0,
-          cancelId: 1,
+          cancelId: 2,
           noLink: true,
         });
         // Silent install + relaunch: the app closes, updates, and reopens.
-        if (response === 0) autoUpdater.quitAndInstall(true, true);
+        if (response === 0) return autoUpdater.quitAndInstall(true, true);
+        // Reading the notes is not declining the update — open them and leave
+        // the install queued for quit, exactly as "Later" would.
+        if (response === 1) shell.openExternal(notesUrl(info.version));
       });
       /*
        * Log why a check failed instead of discarding it. A silent catch is how
@@ -261,9 +272,11 @@ async function start() {
             title: "This copy is out of date",
             message: `Koinos AI is ${state.behind} update${state.behind === 1 ? "" : "s"} behind`,
             detail: `${state.reason}\n\nIt was installed from source, so updates come from git rather than an installer. In a terminal:\n\n  cd ${repoDir}\n  git checkout ${state.upstream ? state.upstream.replace(/^origin\//, "") : "<branch>"}\n  git pull && npm install`,
-            buttons: ["OK"],
+            buttons: ["OK", "What's new"],
+            defaultId: 0,
+            cancelId: 0,
             noLink: true,
-          });
+          }).then((r) => { if (r.response === 1) shell.openExternal(notesUrl(null)); });
           return;
         }
 
@@ -273,11 +286,17 @@ async function start() {
           title: "Update available",
           message: `Koinos AI is ${state.behind} update${state.behind === 1 ? "" : "s"} behind`,
           detail: `You're on ${app.getVersion()}. This copy runs from source, so updating means fast-forwarding the checkout and restarting.`,
-          buttons: ["Update and restart", "Later"],
+          buttons: ["Update and restart", "What's new", "Later"],
           defaultId: 0,
-          cancelId: 1,
+          cancelId: 2,
           noLink: true,
         });
+        if (response === 1) {
+          // Show the notes and ask again next cycle, rather than treating a
+          // request for information as a refusal.
+          shell.openExternal(notesUrl(null));
+          return;
+        }
         if (response !== 0) { declined = state.head; return; }
 
         try {

@@ -88,6 +88,35 @@ try:
 except Exception as e:
     check(False, "docs deploy is current", f"{DOCS_MARKER[0]} unreachable: {e}")
 
+# The release notes page, and whether it has heard of the version people are
+# actually being offered. The app's update popup deep-links to
+# /updates#v<version>; a release that ships without its entry sends a tester
+# to an anchor that does not exist. The page degrades gracefully, but the
+# right time to find out is here, not from a confused tester.
+try:
+    ust, uhdr, u = get("/updates.json")
+    rels = u.get("releases") or []
+    check(ust == 200 and len(rels) > 0, "updates page has releases", f"{len(rels)} listed")
+    check(uhdr.get("Cache-Control") == "no-store", "updates.json is no-store", uhdr.get("Cache-Control"))
+    # `latest` is what the page badges; it must be the newest entry, or the
+    # badge points at one release while the list leads with another.
+    check(rels and u.get("latest") == rels[0].get("version"),
+          "updates latest matches the newest entry",
+          f"latest={u.get('latest')} first={rels[0].get('version') if rels else None}")
+    # Read from the checkout the digest is running against, so this can never
+    # drift from what is actually being released.
+    import os
+    _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    APP_VERSION = json.load(open(os.path.join(_root, "package.json")))["version"]
+    have = {r.get("version") for r in rels}
+    check(APP_VERSION in have, "the shipping version has release notes",
+          f"v{APP_VERSION} listed" if APP_VERSION in have
+          else f"v{APP_VERSION} shipped with NO entry in updates.json — the What's new link lands on nothing")
+    ps, _, page = get("/updates", raw=True)
+    check(ps == 200 and "updates.js" in page, "/updates serves the page", f"HTTP {ps}")
+except Exception as e:
+    check(False, "updates page reachable", str(e))
+
 # Which sign-in doors are actually open in production. Reported as STATE, not
 # as an assertion: "Google is off" is a configuration CHOICE, not a fault, and
 # a digest that cried FAIL over it would be noise. But it must be VISIBLE —

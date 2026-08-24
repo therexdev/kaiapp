@@ -312,6 +312,16 @@ for dev/screenshots).
   server-side. Wallet WIF is revealed only while unlocked. Chats/docs/tasks are
   local-first and never leave the machine.
 - **AGPL**: Odysseus features were re-implemented from scratch — never copy its code.
+- **Release habit — release notes are part of the release, not paperwork.**
+  Every `[release]` MUST add its version to `public/updates.json` in the **kai**
+  repo, in the same session it ships. The app's update popup deep-links to
+  `koinosai.com/updates#v<version>`; ship without the entry and a tester clicks
+  "What's new" and lands on a page that has never heard of the build they are
+  installing. The page degrades gracefully and the health digest asserts
+  `the shipping version has release notes` — but the digest catches it AFTER a
+  tester could already have seen it. Write the notes with the code.
+  Notes are for the person, not the changelog: say what was broken and what it
+  cost them, not which function changed. Kinds are `new`, `fix`, `change`.
 - **Release habit**: after every `[release]` push, arm a silent check (~12–18 min) that
   verifies the GitHub release + installer assets exist; report to the user only on
   failure.

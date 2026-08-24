@@ -468,25 +468,38 @@ async function renderUpdateStatus({ fetchRemote = false } = {}) {
     return;
   }
   const version = $("app-version")?.textContent || "";
+  /*
+   * "What changed?" is the question every update prompt raises and none of
+   * them used to answer. The release notes live on the website, anchored per
+   * version, so this links straight to the entry for the build that is
+   * actually running. target=_blank goes to the system browser — the shell's
+   * window-open handler sends every http(s) link there.
+   */
+  const semver = (/(\d+\.\d+\.\d+)/.exec(version) || [])[1] || "";
+  const notes =
+    ` <a href="https://koinosai.com/updates${semver ? `#v${semver}` : ""}" target="_blank" rel="noreferrer">What's new</a>`;
+  const say = (text) => { host.innerHTML = esc(text) + notes; };
+
   if (s.kind === "packaged") {
-    host.textContent = `${version} — updates install themselves.`;
+    say(`${version} — updates install themselves.`);
     return;
   }
   if (s.kind !== "source") {
-    host.textContent = `${version} — ${s.reason || "update state unknown."}`;
+    say(`${version} — ${s.reason || "update state unknown."}`);
     return;
   }
   const where = s.detached ? "not on a branch" : `on ${s.branch}`;
   if (s.behind > 0) {
-    host.textContent =
+    say(
       `${version} — ${s.behind} update${s.behind === 1 ? "" : "s"} behind (${where}). ` +
       (s.canApply
         ? "The app will offer to update and restart."
-        : `${s.reason} Fix it from a terminal, then restart.`);
+        : `${s.reason} Fix it from a terminal, then restart.`)
+    );
   } else if (s.canCheck) {
-    host.textContent = `${version} — up to date (${where}), installed from source.`;
+    say(`${version} — up to date (${where}), installed from source.`);
   } else {
-    host.textContent = `${version} — installed from source, ${where}. ${s.reason || ""}`;
+    say(`${version} — installed from source, ${where}. ${s.reason || ""}`);
   }
 }
 
