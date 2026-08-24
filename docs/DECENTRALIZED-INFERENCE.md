@@ -205,6 +205,63 @@ specialized; routing follows the weights instead of moving them.
 
 ---
 
+## 4a. MEASURED, 2026-08-24 — what llama.cpp actually does
+
+Run 32682137327, job 97300522997, `core/scripts/spec-decode-probe.js` against
+a current llama.cpp release build. Two findings, one of which corrects this
+document.
+
+### The batching economics are real
+
+| | |
+|---|---|
+| 6 separate single-token decodes | 47 ms |
+| one pass over prompt + 6 drafts | 7 ms |
+| **ratio** | **6.7×** |
+
+Prompt processing clocked ~6,970 tok/s against a decode path an order of
+magnitude slower. Evaluating a draft in one batched pass is genuinely far
+cheaper than generating those tokens one at a time. The premise holds.
+
+### The API to exploit it is missing
+
+Fed `prompt + k drafts`, the server evaluates all of it (`tokens_evaluated: 42`)
+but reports `completion_probabilities` for **one position only** — the last.
+
+- **A**, `/v1/completions` with `echo:true, logprobs:1` → no per-prompt-token values.
+- **B**, `/completion` with `n_predict:0` → one entry, not k.
+- **C**, `n_predict:1` → confirms it: final position only.
+- **D**, a client-supplied `draft` field → accepted without error, which proves
+  only that unknown JSON fields are ignored. Not support.
+
+So the compute is cheap and available; the numbers just cannot be read back.
+Phase 1 needs a patched llama.cpp, a different engine, or a different
+formulation — and shipping a patched build across Windows, Linux, arm64 and a
+Pi is a real maintenance burden, not a footnote.
+
+### The correction — Phase 1 was mis-argued
+
+§4 claimed Phase 1 "wins immediately and independently" by making network chat
+faster. **That claim was wrong, and the probe is what exposed it.**
+
+With ONE node holding the whole model, network RTT is paid once per *request*,
+not per token — the server already generates many tokens per call and streams
+them back. There is no per-token network cost to amortise, so local drafting
+cannot make an unsharded request faster. Speculative decoding earns its keep
+when a model is SHARDED and every token crosses the wire N times. That is
+Phase 2/3, not Phase 1.
+
+Phase 1 does still have a real benefit, but it is a different one: **throughput,
+not latency.** Verifying k tokens costs one prefill pass where generating them
+costs k decode passes, so a drafting client frees ~6.7× the server work per
+token — the same supply serves more demand. Worth having. Not what was written.
+
+**Consequence for sequencing:** Phase 0 (the latency map) is now the honest
+place to start, because whether Phase 2 is possible at all depends on whether
+enough machines are close enough to each other to form a regional pipeline —
+and nobody knows that yet. Phase 1 is blocked on an engine capability and
+should not be built until that is settled.
+
 ## 5. Open problems we have not solved
 
 Written down because a plan that hides its unknowns is a plan that fails at the
