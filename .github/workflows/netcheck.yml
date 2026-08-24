@@ -205,25 +205,49 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Fetch llama.cpp + a tiny model
+        env:
+          # Unauthenticated api.github.com is 60 requests/hour PER IP, and
+          # Actions runners share IPs. The first version of this step hit that,
+          # got an error document instead of a release, and the grep found
+          # nothing — which under `set -o pipefail` killed the step in 0.2s
+          # with no output at all. Authenticate, and never fail silently again.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
           mkdir -p /tmp/lc && cd /tmp/lc
-          # Latest release build for ubuntu x64. Pinned to whatever is current
-          # ON PURPOSE: the answer we need is about the build our users would
-          # actually get, not about a version frozen months ago.
-          URL=$(curl -sSL https://api.github.com/repos/ggml-org/llama.cpp/releases/latest \
-                | grep -oE '"browser_download_url": *"[^"]*ubuntu-x64[^"]*\.zip"' \
+          # Whatever release is current, ON PURPOSE: the answer we need is about
+          # the build our users would actually get, not one frozen months ago.
+          curl -sSL -H "Authorization: Bearer $GH_TOKEN" \
+               -H "Accept: application/vnd.github+json" \
+               https://api.github.com/repos/ggml-org/llama.cpp/releases/latest > rel.json
+          URL=$(grep -oE '"browser_download_url": *"[^"]*ubuntu-x64[^"]*\.zip"' rel.json \
                 | head -1 | sed 's/.*": *"//; s/"$//')
+          if [ -z "$URL" ]; then
+            echo "::error::no ubuntu-x64 asset found in the latest llama.cpp release"
+            echo "--- what the API actually returned (first 40 lines) ---"
+            head -40 rel.json
+            echo "--- asset names on offer ---"
+            grep -oE '"name": *"[^"]*"' rel.json | head -30
+            exit 1
+          fi
           echo "build: $URL"
-          curl -sSL -o lc.zip "$URL"
+          curl -sSL -f -o lc.zip "$URL" || { echo "::error::build download failed"; exit 1; }
           unzip -q lc.zip -d build
           find build -name llama-server -type f -exec chmod +x {} \; -print
           # A genuinely tiny GGUF so the job stays minutes, not tens of minutes.
+          GOT=""
           for M in \
             "https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories260K.gguf" \
-            "https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories15M-q4_0.gguf" ; do
-            if curl -sSL -f -o model.gguf "$M"; then echo "model: $M"; break; fi
+            "https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories15M-q4_0.gguf" \
+            "https://huggingface.co/ggml-org/stories15M_MOE/resolve/main/stories15M_MOE-F16.gguf" ; do
+            echo "trying $M"
+            if curl -sSL -f -o model.gguf "$M" && [ -s model.gguf ]; then GOT="$M"; break; fi
           done
+          if [ -z "$GOT" ]; then
+            echo "::error::no tiny model could be fetched — every candidate 404'd or was empty"
+            exit 1
+          fi
+          echo "model: $GOT"
           ls -la model.gguf
       - name: Probe
         run: |
