@@ -439,6 +439,27 @@ for dev/screenshots).
 
 ## 7. Open threads (next work, in rough priority)
 
+00. **DECENTRALIZED INFERENCE — the driving focus, opened by the owner
+   2026-08-24.** Full program in `docs/DECENTRALIZED-INFERENCE.md`; read that
+   before touching any of it. The owner's framing: limiting hardware is what
+   caps both sides of the network — the average PC owner has 8–16 GB and no
+   real GPU, so we can only offer them small models and small earnings, and a
+   network of small models loses every comparison to a frontier API. One answer
+   fixes both: make many weak machines add up to one strong model.
+   The physics, so nobody relearns it: **bandwidth is not the problem**
+   (~16 KB per token per hop, ~2.6 Mbps at 20 tok/s) — **latency is**, because
+   generation is sequential and every token traverses the whole model. Tensor
+   parallelism over the internet is dead on arrival; do not reopen it.
+   The opening is **speculative decoding**: draft k tokens on the user's own
+   machine, verify all k in ONE network forward pass, pay the traversal once
+   per k tokens instead of once per token. Our unfair advantage is that we
+   already ship a working local model on Windows/Linux/arm64/Pi — every
+   competitor in this space has a thin client and would have to build our app
+   first.
+   Phase 0 (latency map) is a SHADOW rollout, same discipline as the anti-Sybil
+   fingerprint signal: collect, watch, and only then let it touch routing or
+   payouts. The revenue path does not get speculative surgery.
+
 0. ~~Account creation shut on production~~ — **OPENED by the owner 2026-08-22
    05:02Z.** Verified from OUTSIDE the box, which is the only proof that
    counts (the startup log says what the process thinks it has; `/auth/methods`
