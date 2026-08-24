@@ -320,6 +320,33 @@ for dev/screenshots).
   installing. The page degrades gracefully and the health digest asserts
   `the shipping version has release notes` — but the digest catches it AFTER a
   tester could already have seen it. Write the notes with the code.
+  Those notes now also reach the **GitHub Release body** — `[release]` and
+  `[notes]` both fire `.github/workflows/release-notes.yml`, which copies
+  `koinosai.com/updates.json` onto the releases via
+  `scripts/sync-release-notes.js`. It only ever fills an EMPTY body (so a
+  hand-edited release is never clobbered) and it backfills every release it
+  finds, so notes landing after a build are picked up on the next run. Reported
+  by a tester 2026-08-24: every release v0.5.0–v0.48.0 had an empty body, which
+  is the first thing anyone technical reads. `updates.json` stays the single
+  source — never hand-write a release body, or the two lists drift and nobody
+  can tell which is lying.
+
+- **PUBLISHED RELEASE TAGS POINT AT THE WRONG COMMIT — open, owner decision
+  needed (found 2026-08-24).** Every tag from at least `v0.45.0` to `v0.48.0`
+  points at `595610e`, which is `package.json` version **0.25.8** and 127 files.
+  So does the repo's default branch — kaiapp's HEAD is
+  `claude/kai-production-website-fqx4pf`. That is the mechanism: electron-builder
+  `--publish always` creates the Release, and when the tag does not exist GitHub
+  creates it at `target_commitish`, which defaults to the DEFAULT BRANCH — not
+  the commit that was built. Builds run on `claude/koinos-ai-takeover-co25fw`,
+  so every tag landed on the stale default branch instead.
+  A tester's agent found this independently and described it exactly right:
+  *"its gateway.js is byte-identical across tags and still ends at the 0.25-era
+  surface."* Of course it is — every tag is the same commit.
+  Do NOT "fix" this by pushing current source to the default branch or by moving
+  118 published tags. Which source is public is the owner's call, not a build
+  detail to be tidied up. The forward fix (tag the built commit) is easy and
+  waits on that decision.
   Notes are for the person, not the changelog: say what was broken and what it
   cost them, not which function changed. Kinds are `new`, `fix`, `change`.
 - **Release habit**: after every `[release]` push, arm a silent check (~12–18 min) that

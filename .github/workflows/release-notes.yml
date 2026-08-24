@@ -1,0 +1,63 @@
+name: Release notes
+
+# Copy the notes we already write onto the GitHub Releases themselves.
+#
+# Every release from v0.5.0 to v0.48.0 shipped with an EMPTY body. The notes
+# existed the whole time — in the kai repo as public/updates.json, rendered at
+# koinosai.com/updates — they just never reached the one place a packager, an
+# auto-updater, or a technical tester looks first. A tester reported it.
+#
+# Two triggers, because there are two jobs to do:
+#   [release]  the normal path — describe the release that just shipped
+#   [notes]    on demand — backfill, or re-run after the notes deploy late
+#
+# NOT triggered by `release: published`. electron-builder creates the release
+# using GITHUB_TOKEN, and GitHub deliberately does not fire workflow events for
+# actions taken with that token — a recursion guard. Wiring it that way looks
+# correct and never runs, which is the worst of both.
+
+on:
+  push:
+    branches: ["main", "claude/**"]
+
+jobs:
+  notes:
+    if: contains(github.event.head_commit.message, '[release]') || contains(github.event.head_commit.message, '[notes]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # On a [release] commit the installers are still building, so the release
+      # this commit is FOR may not exist yet. Wait for it rather than racing —
+      # but never fail on the timeout: the sync backfills every empty body it
+      # finds, so a miss here is simply picked up next run.
+      - name: Wait for the release to exist
+        if: contains(github.event.head_commit.message, '[release]')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          V="v$(node -p "require('./package.json').version")"
+          echo "waiting for release $V (up to 20 min)"
+          for i in $(seq 1 40); do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+                   -H "Authorization: Bearer $GH_TOKEN" \
+                   -H "Accept: application/vnd.github+json" \
+                   "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/$V")
+            if [ "$CODE" = "200" ]; then echo "$V is published"; exit 0; fi
+            sleep 30
+          done
+          echo "::notice::$V has not appeared after 20 min — syncing whatever exists; a later [notes] run will backfill it"
+
+      - name: Sync notes onto the releases
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Dry-run switch for verifying a change to the sync itself without
+          # writing to a public repo: put [notes-dry] in the commit message.
+          KAI_NOTES_DRY: ${{ contains(github.event.head_commit.message, '[notes-dry]') && '1' || '0' }}
+        run: node scripts/sync-release-notes.js
