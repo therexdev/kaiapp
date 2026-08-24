@@ -206,45 +206,61 @@ jobs:
       - uses: actions/checkout@v4
       - name: Fetch llama.cpp + a tiny model
         env:
-          # Unauthenticated api.github.com is 60 requests/hour PER IP, and
-          # Actions runners share IPs. The first version of this step hit that,
-          # got an error document instead of a release, and the grep found
-          # nothing — which under `set -o pipefail` killed the step in 0.2s
-          # with no output at all. Authenticate, and never fail silently again.
+          # Unauthenticated api.github.com is 60 requests/hour PER IP and
+          # Actions runners share IPs.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -uo pipefail
+          # NO `set -e` here, and that is the entire point. GitHub already runs
+          # this step as `bash -e`, which aborts on the first failing command —
+          # including an assignment whose command substitution fails. Two
+          # earlier attempts died in 0.2 seconds with no output at all, because
+          # `URL=$(grep ... )` finding nothing killed the shell BEFORE the
+          # careful diagnostics written to explain it. Every failure below is
+          # reported by an explicit check, never by the shell exiting.
+          set +e
           mkdir -p /tmp/lc && cd /tmp/lc
-          # Whatever release is current, ON PURPOSE: the answer we need is about
-          # the build our users would actually get, not one frozen months ago.
-          curl -sSL -H "Authorization: Bearer $GH_TOKEN" \
-               -H "Accept: application/vnd.github+json" \
-               https://api.github.com/repos/ggml-org/llama.cpp/releases/latest > rel.json
+
+          CODE=$(curl -sSL -w '%{http_code}' -o rel.json \
+                 -H "Authorization: Bearer $GH_TOKEN" \
+                 -H "Accept: application/vnd.github+json" \
+                 https://api.github.com/repos/ggml-org/llama.cpp/releases/latest)
+          echo "release API: HTTP $CODE, $(wc -c < rel.json) bytes"
+
           URL=$(grep -oE '"browser_download_url": *"[^"]*ubuntu-x64[^"]*\.zip"' rel.json \
                 | head -1 | sed 's/.*": *"//; s/"$//')
           if [ -z "$URL" ]; then
-            echo "::error::no ubuntu-x64 asset found in the latest llama.cpp release"
-            echo "--- what the API actually returned (first 40 lines) ---"
-            head -40 rel.json
-            echo "--- asset names on offer ---"
-            grep -oE '"name": *"[^"]*"' rel.json | head -30
+            echo "::error::no ubuntu-x64 .zip asset in the latest llama.cpp release (API HTTP $CODE)"
+            echo "--- first 30 lines of the response ---"
+            head -30 rel.json
+            echo "--- every asset name on offer ---"
+            grep -oE '"name": *"[^"]*"' rel.json | head -40
             exit 1
           fi
           echo "build: $URL"
-          curl -sSL -f -o lc.zip "$URL" || { echo "::error::build download failed"; exit 1; }
+
+          curl -sSL -f -o lc.zip "$URL"
+          if [ $? -ne 0 ] || [ ! -s lc.zip ]; then echo "::error::build download failed"; exit 1; fi
           unzip -q lc.zip -d build
-          find build -name llama-server -type f -exec chmod +x {} \; -print
-          # A genuinely tiny GGUF so the job stays minutes, not tens of minutes.
+          find build -name 'llama-server' -type f -exec chmod +x {} \;
+          SERVER=$(find build -name 'llama-server' -type f | head -1)
+          if [ -z "$SERVER" ]; then
+            echo "::error::no llama-server binary inside the release zip"
+            find build -maxdepth 3 -type f | head -40
+            exit 1
+          fi
+          echo "server: $SERVER"
+
           GOT=""
           for M in \
             "https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories260K.gguf" \
             "https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories15M-q4_0.gguf" \
             "https://huggingface.co/ggml-org/stories15M_MOE/resolve/main/stories15M_MOE-F16.gguf" ; do
-            echo "trying $M"
-            if curl -sSL -f -o model.gguf "$M" && [ -s model.gguf ]; then GOT="$M"; break; fi
+            C=$(curl -sSL -w '%{http_code}' -o model.gguf "$M")
+            echo "  $C  $M  ($(wc -c < model.gguf 2>/dev/null || echo 0) bytes)"
+            if [ "$C" = "200" ] && [ -s model.gguf ]; then GOT="$M"; break; fi
           done
           if [ -z "$GOT" ]; then
-            echo "::error::no tiny model could be fetched — every candidate 404'd or was empty"
+            echo "::error::no tiny model could be fetched — see the status codes above"
             exit 1
           fi
           echo "model: $GOT"
