@@ -42,6 +42,13 @@ function versionOf(tag) {
   return String(tag || "").trim().replace(/^v/i, "");
 }
 
+/** Sortable numeric key; prerelease suffixes are ignored, which is fine for
+ *  the only question asked of it (is this older than the notes file?). */
+function versionKey(v) {
+  const [a = 0, b = 0, c = 0] = String(v).split("-")[0].split(".").map(Number);
+  return a * 1e6 + b * 1e3 + c;
+}
+
 /**
  * The release body, in GitHub-flavoured markdown.
  *
@@ -93,6 +100,11 @@ async function main() {
   if (!res.ok) throw new Error(`${NOTES_URL} → HTTP ${res.status}`);
   const notes = await res.json();
   const byVersion = new Map((notes.releases || []).map((r) => [String(r.version), r]));
+  /* The notes file starts at a version; everything below it is pre-history and
+     will never gain notes. Knowing where that line is turns 101 misleading
+     "will backfill later" lines into one honest summary — and a log that cries
+     wolf a hundred times is a log nobody reads. */
+  const oldestNoted = Math.min(...[...byVersion.keys()].map(versionKey));
   console.log(`notes source: ${NOTES_URL} — ${byVersion.size} versions on record\n`);
 
   /* Every release, not just the newest page: the whole point of the first run
@@ -105,7 +117,7 @@ async function main() {
   }
   console.log(`${releases.length} releases on ${REPO}\n`);
 
-  let updated = 0, hadBody = 0, noNotes = 0;
+  let updated = 0, hadBody = 0, noNotes = 0, preHistory = 0;
   for (const rel of releases) {
     const version = versionOf(rel.tag_name);
     const has = String(rel.body || "").trim().length > 0;
@@ -114,9 +126,15 @@ async function main() {
 
     const body = buildBody(byVersion.get(version));
     if (!body) {
-      // Expected for a release published before its notes were deployed.
-      noNotes++;
-      console.log(`  ${rel.tag_name.padEnd(10)} no notes on record yet — will backfill on a later run`);
+      if (versionKey(version) < oldestNoted) {
+        // Predates the notes file. Not a gap to chase — just history.
+        preHistory++;
+      } else {
+        // Newer than the notes file but absent from it: the release exists and
+        // its notes have not deployed yet. THIS one is worth naming.
+        noNotes++;
+        console.log(`  ${rel.tag_name.padEnd(10)} no notes on record yet — will backfill on a later run`);
+      }
       continue;
     }
 
@@ -130,7 +148,10 @@ async function main() {
     updated++;
   }
 
-  console.log(`\n${updated} written, ${hadBody} already had a body, ${noNotes} awaiting notes`);
+  console.log(
+    `\n${updated} written, ${hadBody} already had a body, ${noNotes} awaiting notes, ` +
+    `${preHistory} predate the notes file (nothing to write)`
+  );
   /* Exit 0 even with releases awaiting notes: a red X on a release build for
      "the website has not deployed yet" would be a false alarm every time. */
 }
