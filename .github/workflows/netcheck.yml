@@ -193,6 +193,44 @@ jobs:
           fi
           node core/scripts/vhp-probe.js "$ADDR"
 
+  # Can llama-server verify a draft it did not write? The gating question for
+  # docs/DECENTRALIZED-INFERENCE.md Phase 1 — speculative decoding across the
+  # network boundary only works if one forward pass can score k supplied
+  # tokens. Runs here because the dev sandbox reaches neither huggingface.co
+  # nor the llama.cpp releases. Read-only, nothing published.
+  speccheck:
+    if: contains(github.event.head_commit.message, '[speccheck]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch llama.cpp + a tiny model
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/lc && cd /tmp/lc
+          # Latest release build for ubuntu x64. Pinned to whatever is current
+          # ON PURPOSE: the answer we need is about the build our users would
+          # actually get, not about a version frozen months ago.
+          URL=$(curl -sSL https://api.github.com/repos/ggml-org/llama.cpp/releases/latest \
+                | grep -oE '"browser_download_url": *"[^"]*ubuntu-x64[^"]*\.zip"' \
+                | head -1 | sed 's/.*": *"//; s/"$//')
+          echo "build: $URL"
+          curl -sSL -o lc.zip "$URL"
+          unzip -q lc.zip -d build
+          find build -name llama-server -type f -exec chmod +x {} \; -print
+          # A genuinely tiny GGUF so the job stays minutes, not tens of minutes.
+          for M in \
+            "https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories260K.gguf" \
+            "https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories15M-q4_0.gguf" ; do
+            if curl -sSL -f -o model.gguf "$M"; then echo "model: $M"; break; fi
+          done
+          ls -la model.gguf
+      - name: Probe
+        run: |
+          SERVER=$(find /tmp/lc/build -name llama-server -type f | head -1)
+          echo "server: $SERVER"
+          node core/scripts/spec-decode-probe.js "$SERVER" /tmp/lc/model.gguf
+
   voicecheck:
     if: contains(github.event.head_commit.message, '[voicecheck]')
     runs-on: windows-latest
