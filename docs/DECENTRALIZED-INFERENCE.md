@@ -1,9 +1,41 @@
 # Decentralized Inference — the program
 
-**Status:** driving focus, opened by the owner 2026-08-24.
-**Owner's framing, verbatim:** *"limiting hardware seems like it will be a major
-obstacle on bringing on the average pc owner and still competing with major AI
-platforms."*
+**Status: RESEARCH ONLY — do not implement. Parked by the owner 2026-08-24,
+the same day it was opened.**
+
+**The owner's decision, verbatim:** *"I do want to hold off on any major setup or
+implementation for the sharding and decentralized LLMs. I just wanted to explore
+that solution and document it. I'm sure hardware and internet speeds will
+continue to get better and that will change things as well over time so not
+trying to solve this problem right now. I do wanna stay focused on the primary
+MVP which I feel like we have already built. Once we have more people on the
+network, we can explore how the nodes are clustered, and if there's an
+opportunity there for that, to be implemented, one way or another, and when we
+should decide to do that."*
+
+So this document is a **finished piece of research**, not a backlog. Nothing in
+it is scheduled. Phase 0 is NOT started. The reopening condition is stated
+above and it is a network-size condition, not a date: enough operators that
+node clustering is a real question with real data behind it. Until then the
+correct action on this document is to read it, not to build from it.
+
+Two of the owner's premises are worth keeping in front of whoever reopens it,
+because they change the answer:
+
+- **The hardware floor rises on its own.** Every year the average machine holds
+  a bigger model, and every year consumer upstream gets faster. Several of the
+  constraints below are therefore self-solving with time — which is an argument
+  for revisiting later with fresh measurements, not for building around today's
+  numbers now.
+- **Clustering is an observation before it is a feature.** Whether a regional
+  pipeline is even possible depends on where the operators actually are, and
+  with a handful of testers there is nothing to observe. That question answers
+  itself as the network grows.
+
+**Original framing when the program was opened, kept because the problem it
+names is real and has not gone away:** *"limiting hardware seems like it will be
+a major obstacle on bringing on the average pc owner and still competing with
+major AI platforms."*
 
 That sentence is the whole brief. Two constraints that look separate are the
 same constraint:
@@ -164,10 +196,15 @@ node remains the backstop.
 
 | Phase | What | Touches | Risk | Status |
 |---|---|---|---|---|
-| **0** | Worker-to-worker latency map, **shadow only** | worker report, scheduler storage | Low | **next** |
-| **1** | Local draft → network verify. **No sharding.** | worker, scheduler, app | Low–medium | **blocked** (§4a) |
-| **2** | Regional 2–4 stage pipelines, **async workloads only** | routing | Medium | gated on Phase 0 |
-| **3** | MoE expert swarm + BitTorrent-style weight distribution | everything | The real prize | gated on Phase 2 |
+| **0** | Worker-to-worker latency map, **shadow only** | worker report, scheduler storage | Low | **parked** — not started |
+| **1** | Local draft → network verify. **No sharding.** | worker, scheduler, app | Low–medium | **blocked** (§4a) + parked |
+| **2** | Regional 2–4 stage pipelines, **async workloads only** | routing | Medium | parked, gated on Phase 0 |
+| **3** | MoE expert swarm + BitTorrent-style weight distribution | everything | The real prize | parked, gated on Phase 2 |
+
+**Every phase is parked** (see Status at the top). This table describes what
+the phases WOULD be, in what order, if and when the owner reopens the program.
+None of it is scheduled and none of it should be started from a backlog sweep,
+a scheduled check, or an idle moment.
 
 Read §4a and §4b before this table. Phase 1 is blocked on an engine capability
 llama.cpp does not expose, and its benefit was mis-stated when it was written.
@@ -353,12 +390,19 @@ they are not welcome — they are on a different tier, doing work that suits the
 ### What this means for sequencing
 
 Levers 1 and 2 are both bets on geography, and we have **zero measurements**.
-Phase 0 settles both:
+Phase 0 would settle both:
 
 - If users cluster naturally, the whole chain above is reachable and Phase 2
   is worth building.
 - If they are one-per-city, skip sharded chat entirely, go to async work and
   tiering, and do not spend months on a pipeline that physics will not allow.
+
+And this is precisely why the program is parked rather than merely slow. With
+six or seven testers there is no geography to measure — any latency map we
+built today would describe our own test machines, not the network. The
+measurement only becomes meaningful at a scale we do not have yet, which makes
+"wait for more operators" the technically correct sequencing as well as the
+owner's call.
 
 ## 5. Open problems we have not solved
 

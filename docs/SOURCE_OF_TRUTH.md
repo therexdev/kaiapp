@@ -449,9 +449,25 @@ for dev/screenshots).
 
 ## 7. Open threads (next work, in rough priority)
 
-00. **DECENTRALIZED INFERENCE — the driving focus, opened by the owner
-   2026-08-24.** Full program in `docs/DECENTRALIZED-INFERENCE.md`; read that
-   before touching any of it. The owner's framing: limiting hardware is what
+00. **DECENTRALIZED INFERENCE — RESEARCH ONLY, PARKED by the owner 2026-08-24**
+   (opened and parked the same day). Full program in
+   `docs/DECENTRALIZED-INFERENCE.md`; read that before touching any of it.
+   **DO NOT IMPLEMENT ANY PHASE.** The owner: *"I just wanted to explore that
+   solution and document it… not trying to solve this problem right now. I do
+   wanna stay focused on the primary MVP which I feel like we have already
+   built. Once we have more people on the network, we can explore how the nodes
+   are clustered."* Reopening is a NETWORK-SIZE condition, not a date, and it is
+   the owner's to call. Phase 0 is NOT started. Do not start it from a backlog
+   sweep, a scheduled check, or an idle moment — this exact trap was flagged
+   before the park and it still applies.
+   Two of the owner's premises are load-bearing and should be re-checked, not
+   assumed, whenever it reopens: hardware and consumer upstream both improve on
+   their own, so some constraints below are self-solving with time; and with six
+   or seven testers there is no geography to measure, so a latency map today
+   would describe our own test machines rather than the network. That makes
+   waiting technically correct as well as the owner's preference.
+   The research below stands and is worth keeping — it is why the answer is
+   "later", not "never". The owner's framing: limiting hardware is what
    caps both sides of the network — the average PC owner has 8–16 GB and no
    real GPU, so we can only offer them small models and small earnings, and a
    network of small models loses every comparison to a frontier API. One answer
