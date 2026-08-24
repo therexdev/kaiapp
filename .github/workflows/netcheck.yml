@@ -220,20 +220,33 @@ jobs:
           set +e
           mkdir -p /tmp/lc && cd /tmp/lc
 
+          # NOT releases/latest. That endpoint skips prereleases, and for
+          # llama.cpp it returns a release tagged v0.2.0 whose only asset is
+          # nightly-tag.txt — the actual binary builds live under bNNNN tags
+          # it does not consider "latest". Take the LIST and pick the newest
+          # release that actually carries a linux x64 build.
           CODE=$(curl -sSL -w '%{http_code}' -o rel.json \
                  -H "Authorization: Bearer $GH_TOKEN" \
                  -H "Accept: application/vnd.github+json" \
-                 https://api.github.com/repos/ggml-org/llama.cpp/releases/latest)
-          echo "release API: HTTP $CODE, $(wc -c < rel.json) bytes"
+                 'https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=15')
+          echo "releases API: HTTP $CODE, $(wc -c < rel.json) bytes"
 
-          URL=$(grep -oE '"browser_download_url": *"[^"]*ubuntu-x64[^"]*\.zip"' rel.json \
-                | head -1 | sed 's/.*": *"//; s/"$//')
+          URL=$(node -e '
+            const rel = JSON.parse(require("fs").readFileSync("rel.json", "utf8"));
+            if (!Array.isArray(rel)) { console.error("not a list"); process.exit(0); }
+            for (const r of rel) {
+              // ubuntu-x64 is the plain CPU build; accept the older naming too.
+              const a = (r.assets || []).find((x) =>
+                /\.zip$/.test(x.name) && /(ubuntu|linux)/.test(x.name) && /x64/.test(x.name) && !/(cuda|vulkan|sycl|hip)/i.test(x.name));
+              if (a) { console.error("tag " + r.tag_name + " asset " + a.name); console.log(a.browser_download_url); break; }
+            }
+          ')
           if [ -z "$URL" ]; then
-            echo "::error::no ubuntu-x64 .zip asset in the latest llama.cpp release (API HTTP $CODE)"
-            echo "--- first 30 lines of the response ---"
-            head -30 rel.json
-            echo "--- every asset name on offer ---"
-            grep -oE '"name": *"[^"]*"' rel.json | head -40
+            echo "::error::no linux x64 .zip asset in any of the last 15 llama.cpp releases (API HTTP $CODE)"
+            echo "--- tags seen ---"
+            grep -oE '"tag_name": *"[^"]*"' rel.json | head -20
+            echo "--- asset names seen ---"
+            grep -oE '"name": *"[^"]*\.zip"' rel.json | head -40
             exit 1
           fi
           echo "build: $URL"
