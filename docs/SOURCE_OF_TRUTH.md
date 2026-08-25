@@ -476,6 +476,25 @@ for dev/screenshots).
 
 ## 7. Open threads (next work, in rough priority)
 
+000. **IMAGE GENERATION — SPEC ONLY, nothing approved or started
+   (opened 2026-08-25).** Full spec in `docs/IMAGE-GENERATION.md`. A tester
+   built a working ComfyUI + Gradio prototype and argued for ComfyUI; the owner
+   wants image generation in the MVP. The spec costs out three options and
+   recommends the cheap one FIRST: detect a ComfyUI the user already runs
+   (Option C), prove the product question, and only then decide whether to take
+   on the dependency (Option A: bundle ComfyUI — Python + PyTorch + CUDA + five
+   community node packs) or a native engine (Option B: stable-diffusion.cpp
+   style, small and supportable but a far narrower ecosystem).
+   Three things NOT to discover late, all recorded in the spec: model LICENCES
+   are unchecked and are a blocker for anything we redistribute; image jobs
+   CANNOT be verified the way token jobs can, so this stays LOCAL-ONLY and must
+   never enter the paid routing path; and image abuse has a far sharper profile
+   than text, so the network side must wait on task #63 (Moderation/AUP), which
+   is owner-DEFERRED. Also: never accept a raw ComfyUI graph from a client —
+   its API is an RCE surface by design, so ship a template with named slots and
+   fill them server-side, the same rule the site-agent proxy follows.
+   Do NOT start any of this. The owner picks the option first.
+
 00. **DECENTRALIZED INFERENCE — RESEARCH ONLY, PARKED by the owner 2026-08-24**
    (opened and parked the same day). Full program in
    `docs/DECENTRALIZED-INFERENCE.md`; read that before touching any of it.
