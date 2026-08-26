@@ -35,6 +35,13 @@ class RuntimeManager {
     return this.runtime?.servedName?.() ?? null;
   }
 
+  /** True while anything is streaming from the engine or a model is
+   *  mid-load. The load guard reads this for attribution: GPU activity
+   *  during our own work is ours, and never a reason to back off. */
+  busy() {
+    return this._inflight > 0 || !!this._loading;
+  }
+
   status() {
     return {
       activeAlias: this.activeAlias,

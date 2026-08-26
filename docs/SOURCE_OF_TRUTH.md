@@ -476,6 +476,38 @@ for dev/screenshots).
 
 ## 7. Open threads (next work, in rough priority)
 
+0000. **LOAD GUARD — earning must never win a fight with the machine's owner
+   (shipped v0.49.0, 2026-08-26).** Field report: a tester doing heavy GPU
+   design work with Earn on had their PC FREEZE; closing Koinos AI un-froze it
+   instantly. Diagnosis: VRAM oversubscription — GPU engine rungs boot
+   llama-server with `gpuLayers=999` (full offload), so the model's weights sit
+   in VRAM the whole time Earn is on, job or no job (eval jobs also arrive
+   every few minutes, so the engine loads within minutes of enabling Earn and
+   then NOTHING ever stops it). When another app wants that memory, the WDDM
+   memory manager pages VRAM and the whole desktop stalls; closing the app
+   frees gigabytes at once — hence instant recovery.
+   The fix (`core/lib/load-guard.js`, BOINC's rule — donate the machine when
+   idle, get out of the way when not): while Earn runs, sample total GPU
+   utilization via nvidia-smi every 10s; samples during OUR OWN
+   streaming/loading are SKIPPED (attribution — never back off from our own
+   work, and never count it as quiet either); 3 consecutive busy samples
+   (≥40%, i.e. 30s of someone else genuinely using the GPU) → worker stops
+   polling (leaves the roster — ordinary churn to the scheduler) AND the idle
+   engine is stopped, releasing all VRAM immediately; 2 minutes of quiet →
+   re-register and resume, model reloads lazily on the next job under the
+   scheduler's existing warming grace (built for the A40 cold-load case).
+   Plus: llama-server now spawns at BELOW_NORMAL CPU priority everywhere
+   (free on an idle machine, decisive under contention). The Earn pane renders
+   backoff as "Paused — your computer is busy…" in amber — a paused worker
+   must never look silently broken. `earn.courtesy: "off"` disables the guard
+   for dedicated rigs. NVIDIA-only measurement in v1 (nvidia-smi ships with
+   the driver; cudaEligible machines are the ones that offload anyway);
+   non-NVIDIA machines see guard.supported=false and only get the priority
+   courtesy. Deliberately NOT a signal: VRAM-percent-full — our own weights
+   push small cards near the top on an untouched machine, so a pressure
+   threshold would permanently pause earning on exactly the modest hardware
+   the network courts. Tests: `core/test/load-guard.test.js`.
+
 000. **IMAGE GENERATION — SPEC ONLY, nothing approved or started
    (opened 2026-08-25).** Full spec in `docs/IMAGE-GENERATION.md`. A tester
    built a working ComfyUI + Gradio prototype and argued for ComfyUI; the owner

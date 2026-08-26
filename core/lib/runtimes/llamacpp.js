@@ -306,6 +306,19 @@ class LlamaCppRuntime {
     this.child = child;
     this.model = modelPath;
 
+    /*
+     * Courtesy: the engine runs BELOW NORMAL priority (niceness 10 on
+     * POSIX). Earning shares the machine with whatever its owner is doing,
+     * and the OS scheduler resolves CPU contention in the owner's favour
+     * only if we say so. Costs nothing on an idle machine — a lone
+     * below-normal process still gets the whole CPU. (GPU contention is the
+     * load guard's job — priority classes don't reach the GPU.)
+     */
+    try {
+      const os = require("os");
+      os.setPriority(child.pid, os.constants.priority.PRIORITY_BELOW_NORMAL);
+    } catch { /* unsupported platform or the child already exited */ }
+
     let stderrTail = "";
     child.stderr.on("data", (d) => {
       stderrTail = (stderrTail + d.toString()).slice(-4000);

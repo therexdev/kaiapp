@@ -63,6 +63,39 @@ class Worker {
     this.stats = { jobsDone: 0, receiptsAccepted: 0, since: null, lastPollOkAt: null, lastJobAt: null, lastError: null };
     this._loop = null;
     this._pollAbort = null; // aborts the idle long-poll so stop is immediate (§10)
+    /*
+     * Courtesy backoff (load guard): while true, the loop does not poll for
+     * jobs at all, so this machine simply leaves the roster — the same thing
+     * that happens when a laptop lid closes, and the scheduler already
+     * treats it as ordinary churn. NOT the same as stop(): the worker stays
+     * "running" (the user's Earn switch is still on), the watchdog stays
+     * alive, and clearing the flag re-registers immediately.
+     */
+    this._backoff = false;
+    this.backoffReason = null;
+  }
+
+  /**
+   * Enter or leave courtesy backoff. Idempotent. On entry the in-flight
+   * idle poll is recalled so no job can be assigned to a machine whose
+   * owner needs it; on exit registration is immediate so the roster shows
+   * the machine again in seconds rather than at the watchdog's leisure.
+   */
+  setBackoff(on, reason) {
+    on = !!on;
+    if (on === this._backoff) return;
+    this._backoff = on;
+    this.backoffReason = on ? String(reason || "machine busy") : null;
+    if (on) {
+      this.stats.backoffs = (this.stats.backoffs || 0) + 1;
+      this.stats.backoffSince = new Date().toISOString();
+      this._pollAbort?.abort();
+      this.onEvent({ type: "worker:backoff", reason: this.backoffReason });
+    } else {
+      this.stats.backoffSince = null;
+      this.onEvent({ type: "worker:backoff-cleared" });
+      if (this.running) this._register().catch(() => {}); // watchdog retries on failure
+    }
   }
 
   /** Producer stats for registration, or null. Swallows everything: a node
@@ -115,6 +148,11 @@ class Worker {
        */
       producer: this.producerLast ?? null,
       producerNote: this.producerNote ?? null,
+      // Courtesy backoff: "paused, on purpose, because the owner is using
+      // the machine" — the Earn pane renders this instead of a dead-looking
+      // worker, which would be the next bug report.
+      backoff: this._backoff,
+      backoffReason: this.backoffReason,
       ...this.stats,
     };
   }
@@ -265,7 +303,7 @@ class Worker {
         this.stats.lastStandbyAt = new Date().toISOString();
         this.onEvent({ type: "worker:resumed-from-standby", suspendedSecs: Math.round(gap / 1000) });
         try {
-          await this._register();
+          if (!this._backoff) await this._register();
         } catch { /* next tick retries */ }
         return;
       }
@@ -301,7 +339,10 @@ class Worker {
       }
 
       const last = this.stats.lastPollOkAt ? new Date(this.stats.lastPollOkAt).getTime() : 0;
-      if (!this._executing && Date.now() - last > 150000) {
+      // Backoff makes polls silent ON PURPOSE — the watchdog re-registering
+      // through it would put the machine straight back on the roster the
+      // guard just took it off.
+      if (!this._executing && !this._backoff && Date.now() - last > 150000) {
         try {
           await this._register();
           this.onEvent({ type: "worker:watchdog-reregistered" });
@@ -325,6 +366,7 @@ class Worker {
    *  the native wake signal long before any timer notices). */
   async nudge() {
     if (!this.running) return { running: false };
+    if (this._backoff) return { running: true }; // quiet on purpose — stay quiet
     try {
       await this._register();
       this.onEvent({ type: "worker:nudged-reregistered" });
@@ -343,6 +385,14 @@ class Worker {
 
   async _run() {
     while (this.running) {
+      // Courtesy backoff: no polling at all — an assigned job on a machine
+      // whose owner needs it would either contend (the thing this exists to
+      // prevent) or strike the lease. Short sleeps so stop and resume are
+      // both prompt.
+      if (this._backoff) {
+        await new Promise((res) => setTimeout(res, 5000));
+        continue;
+      }
       let job = null;
       try {
         this._pollAbort = new AbortController();

@@ -106,8 +106,10 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
   // and stops immediately on request (§10).
   const { WalletService } = require("./lib/wallet");
   const { Worker } = require("./lib/worker");
+  const { LoadGuard } = require("./lib/load-guard");
   const wallet = new WalletService(path.join(dataDir, "wallet"));
   let worker = null;
+  let loadGuard = null; // lives exactly as long as the worker does
   // Machine session (§8-compatible): the Electron shell passes a secret held
   // by the OS (safeStorage/DPAPI); with it, an unlocked wallet survives app
   // restarts — no password re-typing — until the user presses Lock.
@@ -156,6 +158,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     status: async () => ({
       wallet: wallet.status(),
       worker: worker ? worker.status() : { running: false, jobsDone: 0, receiptsAccepted: 0 },
+      guard: loadGuard ? loadGuard.status() : null,
       schedulerUrl: settings.get("earn.schedulerUrl", DEFAULT_SCHEDULER_URL),
       earnings: await fetchEarnings(),
     }),
@@ -210,6 +213,8 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
       }
     },
     lock: async () => {
+      loadGuard?.stop();
+      loadGuard = null;
       if (worker) await worker.stop();
       wallet.lock(); // also ends the machine session
       settings.set("earn.autoStart", false);
@@ -326,6 +331,31 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
         },
       });
       const st = await worker.start();
+      /*
+       * Load guard (field report 2026-08-26: Earn + heavy GPU design work
+       * froze a tester's PC; closing the app un-froze it instantly — VRAM
+       * oversubscription). While the owner's other applications are working
+       * the GPU, earning backs off: stop polling for jobs, and unload the
+       * idle engine so its VRAM comes back RIGHT NOW — the exact relief
+       * closing the app gave, without closing the app. `earn.courtesy` set
+       * to "off" disables it for dedicated rigs that want every job.
+       */
+      if (settings.get("earn.courtesy", "auto") !== "off") {
+        loadGuard = new LoadGuard({
+          isOurLoad: () => runtime.busy(),
+          onContention: () => {
+            worker?.setBackoff(true, "your GPU is busy");
+            // Free the VRAM unless something is actually streaming from the
+            // engine (a local chat mid-answer must never be cut off — the
+            // guard re-calls this each contended sample, so the unload
+            // happens as soon as the stream ends).
+            if (!runtime.busy()) runtime.stop();
+          },
+          onQuiet: () => worker?.setBackoff(false),
+          onEvent: events,
+        });
+        loadGuard.start();
+      }
       settings.set("earn.autoStart", true);
       return st;
     },
@@ -334,6 +364,8 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     // the user's own Stop turns auto-resume off — a quit or update keeps
     // their "earning on" choice for the next launch.
     stop: async ({ userIntent = true } = {}) => {
+      loadGuard?.stop();
+      loadGuard = null;
       if (worker) await worker.stop();
       if (userIntent) settings.set("earn.autoStart", false);
       return earn.status();

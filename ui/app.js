@@ -1253,6 +1253,12 @@ async function renderEarn() {
     if (!s.worker.running) {
       dot.className = "dot err";
       stateEl.textContent = "Offline — not earning";
+    } else if (s.worker.backoff) {
+      // Courtesy pause, not a fault: the load guard saw other applications
+      // working the GPU and got out of their way. Without this branch a
+      // paused worker renders as silently broken — the next bug report.
+      dot.className = "dot busy";
+      stateEl.textContent = "Paused — your computer is busy with other work; earning resumes when it's free";
     } else if (s.worker.lastError) {
       dot.className = "dot busy";
       stateEl.textContent = `Online — ${s.worker.lastError}`;
