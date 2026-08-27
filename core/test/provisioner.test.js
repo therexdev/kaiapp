@@ -198,12 +198,18 @@ test("runtime manager falls back to CPU when the CUDA path fails", async () => {
     hardware: { capabilities: { cudaEligible: true } },
     onEvent: () => {},
   });
-  // A FIXED port made this test collide with itself: node --test runs files
-  // concurrently, so a neighbouring suite grabbing the same port failed this
-  // one with EADDRINUSE — a red suite with nothing to do with the code under
-  // test. Use a random high port; listen(0) is no help here because
-  // address() only becomes valid after the async 'listening' event.
-  const rtPort = 42000 + Math.floor(Math.random() * 20000);
+  // A FIXED port made this test collide under node --test concurrency; the
+  // random-high-port fix then failed the SAME way on CI (2026-08-27, port
+  // 58562) because 42000-62000 sits inside Linux's ephemeral range — every
+  // concurrent test's sockets draw from it, so guessing can never be safe.
+  // Ask the kernel instead: bind 0, read the assigned port, release it. The
+  // close-to-rebind window is real but tiny, and kernels don't hand a just
+  // released port straight back out.
+  const rtPort = await new Promise((resolve, reject) => {
+    const s = require("net").createServer();
+    s.on("error", reject);
+    s.listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => resolve(p)); });
+  });
   const rm = new RuntimeManager({
     models: new ModelManager({ catalogPath: mcat, modelsDir: path.join(dir, "models"), state: new JsonStore(path.join(dir, "s.json"), {}), onEvent: () => {} }),
     hardware: { capabilities: { cudaEligible: true } },
