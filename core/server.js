@@ -677,6 +677,22 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     async start() {
       const p = await gateway.listen();
       events({ type: "core:ready", message: `gateway on http://127.0.0.1:${p}` });
+      // Remote access (task #94): outbound long-poll to the relay so the
+      // local API works from anywhere with zero router setup. Off by
+      // default; resumes the user's last explicit choice, and start()
+      // itself refuses while no API key exists.
+      const { RemoteAccess } = require("./lib/remote-access");
+      this.remote = new RemoteAccess({
+        relayUrl: process.env.KAI_RELAY_URL || "https://koinosai.com",
+        settings,
+        keys,
+        localBase: () => `http://127.0.0.1:${p}`,
+        onEvent: events,
+      });
+      gateway.remote = this.remote;
+      if (settings.get("remote.enabled", false) === true) {
+        this.remote.start().catch((e) => events({ type: "remote:error", message: String(e.message) }));
+      }
       // Scheduled tasks call chat through our own front door, so §7
       // privacy routing, budgets, and the kill switch govern them exactly
       // like a typed message.

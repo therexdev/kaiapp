@@ -618,6 +618,21 @@
           </div>
           <ul id="key-list"></ul>
 
+          <div class="keys-head">
+            <h2>Remote access</h2>
+            <button id="btn-remote-toggle" class="switch" role="switch" aria-checked="false" aria-label="Remote access"></button>
+          </div>
+          <p class="hint">Use your API from anywhere — a phone, a server, another computer. The app keeps an
+            outbound connection to koinosai.com (nothing to install, no router setup) and your API key works
+            at the address below. Requests are answered by <b>this computer</b>, so it works while the app is
+            running. An API key is required — without one the switch refuses, so your API is never open to
+            the internet. Heads up: remote traffic passes through koinosai.com on its way here.</p>
+          <p class="hint strong" id="remote-error" hidden></p>
+          <div id="remote-info" hidden>
+            <pre class="snippet" id="remote-base"></pre>
+            <p class="hint" id="remote-state"></p>
+          </div>
+
         </div>
       </section>
 

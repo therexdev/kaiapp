@@ -1049,6 +1049,7 @@ async function renderApi() {
   ].join("\n");
   renderDev(); // developer-tools toggle + panel (task #61)
   renderCodeSwitch(); // Koinos Code toggle + its own sidebar item (task #72)
+  renderRemote(); // remote access toggle + public URL (task #94)
   const j = await coreGet("/core/keys");
   $("key-list").innerHTML = "";
   for (const k of j.keys) {
@@ -1192,6 +1193,47 @@ $("btn-dev-toggle").addEventListener("click", async () => {
     body: JSON.stringify({ enabled: !on }),
   });
   renderDev();
+});
+
+// ---------- remote access (task #94) ----------
+// One switch: the app long-polls koinosai.com outbound and the local API
+// answers at a stable public URL. Core refuses to enable it while no API
+// key exists — that refusal lands in #remote-error, not a silent no-op.
+
+async function renderRemote() {
+  try {
+    const r = await coreGet("/core/remote");
+    const on = r.enabled === true;
+    $("btn-remote-toggle").setAttribute("aria-checked", String(on));
+    $("remote-info").hidden = !on;
+    if (on) {
+      $("remote-base").textContent = r.base || "connecting…";
+      $("remote-state").textContent =
+        r.state === "connected" ? "Connected — this URL works from anywhere your key goes."
+        : r.state === "offline" ? "Reconnecting to koinosai.com…"
+        : "Connecting…";
+    }
+  } catch {
+    /* core not up yet — the next renderApi retries */
+  }
+}
+
+$("btn-remote-toggle").addEventListener("click", async () => {
+  const on = $("btn-remote-toggle").getAttribute("aria-checked") === "true";
+  $("remote-error").hidden = true;
+  const r = await fetch("/core/remote", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ enabled: !on }),
+  });
+  const j = await r.json().catch(() => null);
+  if (!r.ok || j?.ok === false) {
+    $("remote-error").textContent = j?.error || "Could not change remote access";
+    $("remote-error").hidden = false;
+  }
+  renderRemote();
+  // The URL settles a moment after the first hello round-trips.
+  setTimeout(renderRemote, 1500);
 });
 
 

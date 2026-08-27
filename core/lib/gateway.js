@@ -389,6 +389,21 @@ class Gateway {
     if (path === "/core/keys" && req.method === "GET") {
       return this._json(res, 200, { ok: true, required: this.keys.required(), keys: this.keys.list() });
     }
+    // Remote access (task #94): the Local API's "use it from anywhere"
+    // switch. The RemoteAccess instance is attached by the server after
+    // construction, same as tasks.
+    if (this.remote && path === "/core/remote" && req.method === "GET") {
+      return this._json(res, 200, { ok: true, ...this.remote.status() });
+    }
+    if (this.remote && path === "/core/remote" && req.method === "POST") {
+      const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+      try {
+        const s = body.enabled ? await this.remote.start() : this.remote.stop();
+        return this._json(res, 200, { ok: true, ...s });
+      } catch (e) {
+        return this._json(res, 400, { ok: false, error: String(e.message) });
+      }
+    }
     if (path === "/core/keys" && req.method === "POST") {
       const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
       return this._json(res, 200, { ok: true, ...this.keys.create({ name: body.name }) });

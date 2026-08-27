@@ -476,7 +476,36 @@ for dev/screenshots).
 
 ## 7. Open threads (next work, in rough priority)
 
-0000. **LOAD GUARD — earning must never win a fight with the machine's owner
+0000. **REMOTE ACCESS — the local API from anywhere, one switch (built
+   2026-08-27, ships with the next release; relay awaits kai production
+   merge).** Owner's bar: "simple to use just like OpenAI." Design: a
+   zero-dependency relay lives in kai (`lib/relay.js`, mounted at `/relay` +
+   `/r` raw before body parsers, status on /api/health.relay). The app
+   (`core/lib/remote-access.js`) keeps ~3 outbound long-polls open
+   (25s hold, Caddy-safe); public requests to
+   `https://koinosai.com/r/<tunnelId>/v1/...` become jobs the device picks
+   up, replays against 127.0.0.1:<gateway>, and streams back via a respond
+   POST (SSE chunk-by-chunk verified — 14ms first-chunk in integration).
+   IDENTITY IS STATELESS: tunnelId = sha256(device token), derived per
+   request — nothing persisted server-side, an id cannot be hijacked short
+   of a preimage, and the URL is stable for the life of the token
+   (settings `remote.token`). AUTH IS THE DEVICE'S: the relay forwards
+   Authorization untouched; the gateway's own API keys decide, and
+   start() REFUSES while keys.required() is false — remote must never
+   expose an open gateway. Only `/v1/*` crosses (relay refuses AND the
+   device re-checks — /core tools/UI never reach the internet). Limits:
+   2MB request body, 8 concurrent jobs/tunnel, 6s pickup (honest 503
+   "device offline"), 240s response cap. Privacy note recorded: TLS
+   terminates at koinosai.com, so remote LOCAL-model traffic transits our
+   box (network-model traffic already did); the Local API card says so.
+   UI: "Remote access" switch in Local API showing the public base URL +
+   live state. Toggle endpoints /core/remote GET/POST. Tests:
+   `core/test/remote-access.test.js` (4), kai `scripts/probe-relay.js`
+   (7), plus a cross-repo real-relay+real-client integration run.
+   ROLLOUT ORDER: kai merge FIRST (relay live), then app release — the
+   switch shows "Reconnecting…" until the relay exists.
+
+0001. **LOAD GUARD — earning must never win a fight with the machine's owner
    (shipped v0.49.0, 2026-08-26).** Field report: a tester doing heavy GPU
    design work with Earn on had their PC FREEZE; closing Koinos AI un-froze it
    instantly. Diagnosis: VRAM oversubscription — GPU engine rungs boot
