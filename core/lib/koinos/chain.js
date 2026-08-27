@@ -132,7 +132,15 @@ class ChainService {
       const [k, v, rc] = await Promise.all([
         koin.functions.balance_of({ owner: address }),
         vhp.functions.balance_of({ owner: address }),
-        provider.getAccountRc(address).catch(() => "0"),
+        /*
+         * No .catch(() => "0") here, deliberately (field bug, 2026-08-27):
+         * a flaky public RPC made this read time out and the dashboard
+         * showed "0 mana" as if it were true — and maxBurn computed against
+         * a mana of zero. "Couldn't read it" must FAIL like the balance
+         * reads above, never impersonate a value. A genuinely empty account
+         * is the ?? "0" below, on a SUCCESSFUL call.
+         */
+        provider.getAccountRc(address),
       ]);
       return {
         koin: k?.result?.value ?? "0",

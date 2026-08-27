@@ -33,6 +33,13 @@ check("degraded" not in store, "store NOT degraded", str(store.get("degraded", "
 check(isinstance(rt.get("bootCount"), int) and 0 < rt["bootCount"] < 10000, "bootCount sane", str(rt.get("bootCount")))
 check("uncaughtException" not in str(lx.get("reason", "")), "clean last exit", str(lx.get("reason")))
 print(f"STATE bootAt={rt.get('bootAt')} bootCount={rt.get('bootCount')} lastExit={lx.get('reason')}@{lx.get('at')}")
+# Device relay (remote access, task #94): present since kai PR #47. Its
+# absence means production is running pre-relay code — the app's Remote
+# access switch would connect to nothing.
+relay = h.get("relay")
+check(isinstance(relay, dict), "device relay mounted", str(relay))
+if isinstance(relay, dict):
+    print(f"STATE relay tunnels={relay.get('tunnels')} pollers={relay.get('pollers')} jobs={relay.get('jobs')}")
 
 _, _, s = get("/scheduler/network/status")
 ws = s.get("workers", [])

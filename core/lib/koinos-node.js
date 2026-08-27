@@ -428,6 +428,8 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
   handle("node:quickSyncCancel", () => nodeMgr.cancelQuickSync());
 
   // ----- dashboard -----
+  let lastGoodBalances = null; // { values, at, address }
+
   handle("dashboard:summary", async () => {
     const net = chain.network();
     const address = wallet.address;
@@ -458,10 +460,11 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
     }
     if (!address) return out;
     // Balances + producer stats (both hit the RPC).
-    const [balances, statsRes] = await Promise.all([
+    let [balances, statsRes] = await Promise.all([
       chain.balances(address).catch((e) => ({ error: String(e.message) })),
       stats.refresh(address).catch((e) => ({ available: false, error: String(e.message) })),
     ]);
+    ({ balances, lastGood: lastGoodBalances } = holdBalances(balances, lastGoodBalances, address, Date.now()));
     out.balances = balances;
     out.stats = statsRes;
 
@@ -914,4 +917,24 @@ function createKoinosNode({ dataDir, wallet, appVersion, onEvent = () => {} }) {
   };
 }
 
-module.exports = { createKoinosNode, buildChannels, ONRAMP_APP_KEY };
+/*
+ * The dashboard must never lie downward (field bug, 2026-08-27): the
+ * public RPC has flaky minutes, and a failed balance read used to paint
+ * 0 mana / $0.00 until the next poll succeeded. Real numbers do not
+ * teleport to zero — so a failed read serves the last good values for the
+ * SAME address, marked `stale: true` and carrying NO `error` field (the
+ * valuation and returns guards key on `error` and must keep computing).
+ * Past the hold window the honest error shows again: a wall of stale
+ * numbers would be the opposite lie.
+ */
+const BALANCE_HOLD_MS = 10 * 60_000;
+
+function holdBalances(fresh, lastGood, address, now) {
+  if (!fresh.error) return { balances: fresh, lastGood: { values: fresh, at: now, address } };
+  if (lastGood && lastGood.address === address && now - lastGood.at < BALANCE_HOLD_MS) {
+    return { balances: { ...lastGood.values, stale: true }, lastGood };
+  }
+  return { balances: fresh, lastGood };
+}
+
+module.exports = { createKoinosNode, buildChannels, holdBalances, ONRAMP_APP_KEY };

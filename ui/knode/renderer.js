@@ -149,7 +149,11 @@ async function refreshBalances(force = false) {
     S.balancesAt = Date.now();
     patchBalances();
   } catch (e) {
-    S.balances = { error: e.message };
+    // The public RPC has flaky minutes; real balances don't teleport to
+    // dashes. Keep showing the last good numbers (marked catching-up) for
+    // up to 10 minutes of consecutive failures, then be honestly broken.
+    const held = S.balances && !S.balances.error && Date.now() - S.balancesAt < 600000;
+    S.balances = held ? { ...S.balances, stale: true } : { error: e.message };
     patchBalances();
   }
 }
@@ -775,7 +779,11 @@ function patchBalances() {
     setText("#bal-vhp", fmtSat(b.vhp, 4));
     setText("#bal-mana", fmtSat(b.mana, 4));
     const note = $("#bal-note");
-    if (note) note.textContent = `Updated ${new Date(S.balancesAt).toLocaleTimeString()}`;
+    if (note) {
+      note.textContent = b.stale
+        ? `RPC catching up — showing ${new Date(S.balancesAt).toLocaleTimeString()}`
+        : `Updated ${new Date(S.balancesAt).toLocaleTimeString()}`;
+    }
   }
   patchBurnBalances();
 }
