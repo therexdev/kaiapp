@@ -52,13 +52,19 @@ function tmpProject() {
 }
 
 test("jailed: inside stays, any escape is null", () => {
-  const root = "/tmp/proj";
-  assert.strictEqual(jailed(root, "a/b.txt"), "/tmp/proj/a/b.txt");
-  assert.strictEqual(jailed(root, "."), "/tmp/proj");
+  // A real directory, because the jail now resolves against the real
+  // filesystem rather than comparing strings — a lexical check called a
+  // symlink out of the project "inside" it (core/lib/jail.js).
+  const root = fs.realpathSync(tmpProject());
+  assert.strictEqual(jailed(root, "a/b.txt"), path.join(root, "a", "b.txt"));
+  assert.strictEqual(jailed(root, "."), root);
   assert.strictEqual(jailed(root, "../other"), null);
   assert.strictEqual(jailed(root, "a/../../etc/passwd"), null);
   assert.strictEqual(jailed(root, "/etc/passwd"), null);
-  assert.strictEqual(jailed(root, "/tmp/projX/file"), null, "prefix trickery does not escape");
+  assert.strictEqual(jailed(root, `${root}X/file`), null, "prefix trickery does not escape");
+  // An unknown project directory denies outright rather than resolving names
+  // inside a folder that is not there.
+  assert.strictEqual(jailed(path.join(root, "gone"), "a.txt"), null);
 });
 
 test("unifiedDiff: additions, removals, context, and the no-change case", () => {

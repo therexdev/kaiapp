@@ -297,6 +297,34 @@ class Gateway {
     }
 
     /*
+     * The OpenAI-compatible surface is open to LOCAL callers on purpose —
+     * "point any SDK at this machine" is the whole feature — and until someone
+     * creates a key, _authed() lets every caller through. A web page is not a
+     * local caller, and the same hole that took /core/* out applies here:
+     * content-type text/plain is CORS-safelisted, so any site the user happens
+     * to be visiting can POST /v1/chat/completions with no preflight. It never
+     * sees the answer — nothing here sends CORS headers — but the model has
+     * already run on their machine, and in Local-First or Network mode their
+     * KAI has already been spent. A blind write that costs money is still an
+     * attack.
+     *
+     * Refusing outright rather than demanding a key: with no CORS headers, no
+     * browser could ever read a /v1 reply cross-origin anyway, so there is no
+     * working caller to break. The app's own UI is same-origin and passes;
+     * curl, SDKs and other local apps send no Origin at all and pass.
+     */
+    if (path.startsWith("/v1/") && !this._sameSite(req)) {
+      return this._json(res, 403, {
+        error: {
+          message:
+            "Refused: this local API does not answer other websites. Call it from this machine, or turn on Remote access for a URL that does.",
+          type: "invalid_request_error",
+          code: "cross_site_refused",
+        },
+      });
+    }
+
+    /*
      * Is this source checkout behind its remote?
      *
      * READ-ONLY on purpose. Applying an update means running git and possibly

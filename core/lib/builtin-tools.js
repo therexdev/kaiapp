@@ -5,6 +5,7 @@ const path = require("path");
 
 const { searchWeb, fetchPage } = require("./websearch");
 const { CodeRunner } = require("./code-runner");
+const { confine } = require("./jail");
 
 /*
  * Built-in agent tools. Two design lines drawn on purpose (documented for
@@ -27,11 +28,13 @@ function workspaceRoot(dataDir) {
   return root;
 }
 
-/** Resolve a user/model-supplied name inside the workspace, or throw. */
+/** Resolve a user/model-supplied name inside the workspace, or throw. Follows
+ *  symlinks — a lexical check would let one inside the workspace point out of
+ *  it (core/lib/jail.js). */
 function safePath(root, name) {
   const clean = String(name || "").replace(/\\/g, "/");
-  const full = path.resolve(root, clean);
-  if (full !== root && !full.startsWith(root + path.sep)) throw new Error("path escapes the agent workspace");
+  const full = confine(root, clean);
+  if (!full) throw new Error("path escapes the agent workspace");
   return full;
 }
 

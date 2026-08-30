@@ -49,6 +49,7 @@
     "asarUnpack": [
       "cli/**",
       "ui/agents.js",
+      "core/lib/jail.js",
       "build/icon.ico",
       "build/icon.png"
     ],

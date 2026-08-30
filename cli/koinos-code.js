@@ -133,11 +133,12 @@ function parseArgs(argv) {
   return opts;
 }
 
-/** Resolve p inside root, or null when it escapes — the jail every tool uses. */
+/** Resolve p inside root, or null when it escapes — the jail every tool uses.
+ *  Shared with Core so the two cannot drift; see core/lib/jail.js for why a
+ *  lexical startsWith() is not containment. */
+const { confine } = require(path.join(__dirname, "..", "core", "lib", "jail"));
 function jailed(root, p) {
-  const abs = path.resolve(root, String(p || ""));
-  if (abs !== root && !abs.startsWith(root + path.sep)) return null;
-  return abs;
+  return confine(root, p);
 }
 
 /** KOINOS.md project notes for the system prompt, or "". Read fresh every

@@ -135,11 +135,91 @@ test("control plane: the guard reads the header, not the attacker's promise", as
 test("the OpenAI-compatible API stays open to local callers by design", async () => {
   const { gw, base } = await startGateway();
   try {
-    // /v1/* exists so other programs on this machine can point at it. It is
-    // guarded by an API key once one is created, not by the same-site rule —
-    // locking it to the app would defeat its purpose.
-    const res = await fetch(`${base}/v1/models`, { headers: { origin: "https://somewhere.example" } });
-    assert.notStrictEqual(res.status, 403, "a local tool with a browser-ish Origin must still reach /v1");
+    /*
+     * This test used to assert the opposite: that a caller with a foreign
+     * Origin must still reach /v1, on the reasoning that locking the surface
+     * to the app would defeat its purpose. The reasoning holds; the test did
+     * not follow from it. A foreign Origin does not mean "a local tool" — it
+     * means "a browser, on a page that is not ours", and that caller could
+     * never use /v1 anyway, because nothing here sends CORS headers and so no
+     * cross-origin page can read a single byte of the reply. What it CAN do is
+     * make the request, which spends the machine's GPU and, off Local-Only,
+     * the user's KAI. So the exception protected no working caller and left
+     * every drive-by page a free ride.
+     *
+     * The purpose it was defending is real, and is what this test now pins:
+     * programs on this machine — SDKs, curl, other apps — reach /v1 freely,
+     * because they send no Origin at all.
+     */
+    const sdk = await fetch(`${base}/v1/models`);
+    assert.strictEqual(sdk.status, 200, "a local tool must still reach /v1 with no key");
+
+    const browserish = await fetch(`${base}/v1/models`, { headers: { origin: "https://somewhere.example" } });
+    assert.strictEqual(browserish.status, 403, "but a page on another site is not a local tool");
+  } finally {
+    await gw.close();
+  }
+});
+
+/*
+ * The same hole, one surface over. /v1/* is deliberately open to LOCAL
+ * callers — that is what "point any OpenAI SDK at this machine" means — and
+ * _authed() waves everything through until the user creates a key. A web page
+ * is not a local caller: text/plain is CORS-safelisted, so any site the user
+ * is visiting could POST /v1/chat/completions with no preflight. It cannot
+ * read the reply, but the model already ran on their machine and, off
+ * Local-Only, their KAI is already spent.
+ */
+
+test("local API: a drive-by POST from another site is refused, key or no key", async () => {
+  const { gw, base } = await startGateway();
+  try {
+    const res = await fetch(`${base}/v1/chat/completions`, {
+      method: "POST",
+      headers: {
+        "content-type": "text/plain;charset=UTF-8", // no preflight
+        origin: "https://evil.example",
+        "sec-fetch-site": "cross-site",
+      },
+      body: JSON.stringify({ model: "koinos-network", messages: [{ role: "user", content: "hi" }] }),
+    });
+    assert.strictEqual(res.status, 403, "a foreign page must not be able to spend the machine");
+    const j = await res.json();
+    assert.strictEqual(j.error.code, "cross_site_refused");
+  } finally {
+    await gw.close();
+  }
+});
+
+test("local API: listing models cross-site is refused too", async () => {
+  const { gw, base } = await startGateway();
+  try {
+    // Reads fingerprint the machine — which models are installed, whether the
+    // network is on — and are the cheap way to find a target worth POSTing to.
+    const res = await fetch(`${base}/v1/models`, {
+      headers: { origin: "https://evil.example", "sec-fetch-site": "cross-site" },
+    });
+    assert.strictEqual(res.status, 403);
+  } finally {
+    await gw.close();
+  }
+});
+
+test("local API: the callers that are supposed to reach it still do", async () => {
+  const { gw, base } = await startGateway();
+  try {
+    // An SDK, curl, another app: Node fetch sends no Origin at all.
+    const sdk = await fetch(`${base}/v1/models`);
+    assert.strictEqual(sdk.status, 200, "the whole point of the surface must keep working");
+
+    // The app's own UI, loaded from this very server.
+    const ui = await fetch(`${base}/v1/models`, {
+      headers: { origin: `http://127.0.0.1:${gw.port}`, "sec-fetch-site": "same-origin" },
+    });
+    assert.strictEqual(ui.status, 200);
+
+    // Remote access relays only authorization/content-type/accept, so a
+    // relayed call arrives header-less and lands in the first case above.
   } finally {
     await gw.close();
   }
