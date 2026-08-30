@@ -42,11 +42,15 @@
       "ui/**",
       "cli/**",
       "!core/test/**",
+      "build/icon.ico",
+      "build/icon.png",
       "package.json"
     ],
     "asarUnpack": [
       "cli/**",
-      "ui/agents.js"
+      "ui/agents.js",
+      "build/icon.ico",
+      "build/icon.png"
     ],
     "win": {
       "target": [

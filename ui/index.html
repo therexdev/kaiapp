@@ -540,6 +540,26 @@
             </div>
           </div>
 
+          <!-- Desktop shell only: a browser has no notification area, so this
+               whole block stays hidden unless the shell bridge is present. -->
+          <div id="settings-window" hidden>
+            <h2>Closing the window</h2>
+            <div class="koinos-toggle-row">
+              <div>
+                <b>Keep running in the notification area</b>
+                <div class="hint" id="tray-toggle-hint">
+                  Closing the window tucks Koinos AI down by the clock instead of shutting it
+                  down, so your node stays connected and keeps earning. Click that icon to bring
+                  the window back, or right-click it and choose Quit to stop the app completely.
+                  Switch this off and the X closes the app outright, the way it used to.
+                </div>
+              </div>
+              <button id="btn-tray-toggle" class="switch" role="switch" aria-checked="false" aria-label="Keep running in the notification area">
+                <span class="switch-track"><span class="switch-thumb"></span></span>
+              </button>
+            </div>
+          </div>
+
           <h2>Optional sections</h2>
           <p class="hint">Each of these adds its own entry to the sidebar. All of them are off until you switch them on, and switching one off only hides it — nothing you made is deleted.</p>
 

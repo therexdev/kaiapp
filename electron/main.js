@@ -8,20 +8,27 @@
  */
 
 const path = require("path");
-const { app, BrowserWindow, dialog, shell, ipcMain } = require("electron");
+const { app, BrowserWindow, Menu, Tray, dialog, nativeImage, shell, ipcMain } = require("electron");
 
 const { createCore } = require("../core/server");
 const { JsonStore } = require("../core/lib/store");
 
 let core = null;
 let win = null;
+let tray = null;
+// Set the moment a real quit begins, so the close handler below knows the
+// difference between "the user pressed X" and "the app is going down".
+let quitting = false;
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on("second-instance", () => {
+    // The window may be parked in the tray rather than merely minimized —
+    // launching the app again is a request to see it, either way.
     if (win) {
       if (win.isMinimized()) win.restore();
+      win.show();
       win.focus();
     }
   });
@@ -109,8 +116,116 @@ async function start() {
   win.on("maximize", sendMax);
   win.on("unmaximize", sendMax);
 
-  win.on("close", () => winState.set("bounds", win.getBounds()));
+  function showWindow() {
+    if (!win) return;
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  }
+
+  /*
+   * The notification-area icon. It is what makes closing-to-tray honest: hide
+   * the window with no icon to bring it back and the app is simply gone while
+   * still running. So the tray comes first, and if the platform will not give
+   * us one, closing keeps its old meaning and quits.
+   */
+  try {
+    let iconPath = path.join(
+      __dirname, "..", "build",
+      process.platform === "win32" ? "icon.ico" : "icon.png",
+    );
+    // Some Linux tray backends hand the path to another process, which cannot
+    // see inside the asar — prefer the unpacked copy when there is one.
+    const unpacked = iconPath.replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
+    if (unpacked !== iconPath && require("fs").existsSync(unpacked)) iconPath = unpacked;
+
+    let image = nativeImage.createFromPath(iconPath);
+    if (image.isEmpty()) throw new Error(`no usable icon at ${iconPath}`);
+    // Windows picks the right size out of the .ico itself; everywhere else a
+    // 512px PNG becomes a smear in a 22px slot.
+    if (process.platform !== "win32") image = image.resize({ width: 22, height: 22 });
+    if (process.platform === "darwin") image.setTemplateImage(true);
+
+    tray = new Tray(image);
+    tray.setToolTip("Koinos AI");
+    tray.setContextMenu(Menu.buildFromTemplate([
+      { label: "Open Koinos AI", click: showWindow },
+      { type: "separator" },
+      { label: "Quit Koinos AI", click: () => { quitting = true; app.quit(); } },
+    ]));
+    tray.on("click", showWindow);
+    tray.on("double-click", showWindow);
+  } catch (e) {
+    console.error("[tray] no notification-area icon, X will quit:", String(e?.message || e));
+    tray = null;
+  }
+
+  // macOS: the dock icon stays after hiding, and clicking it means "come back".
+  app.on("activate", showWindow);
+
+  const closeHidesWindow = () => !!tray && winState.get("closeToTray") !== false;
+
+  let noticeOpen = false;
+  async function hideToTray() {
+    /*
+     * First close only: an app that keeps running after you close it has to
+     * say so out loud. This one holds a power-save blocker and earns in the
+     * background — staying alive silently is precisely the behavior testers
+     * report as malware-adjacent, and the fix is one sentence at the moment
+     * it first happens, plus a way to decline it on the spot.
+     */
+    if (winState.get("trayNoticeSeen")) return void win.hide();
+    if (noticeOpen) return; // X pressed again while the notice is up
+    noticeOpen = true;
+    let response = 0;
+    try {
+      ({ response } = await dialog.showMessageBox(win, {
+        type: "info",
+        title: "Koinos AI is still running",
+        message: "Closing the window doesn\u2019t stop Koinos AI",
+        detail:
+          "It keeps running down by the clock, so your node stays connected and keeps earning. " +
+          "Click the Koinos AI icon there to bring this window back \u2014 if you don\u2019t see it, " +
+          "click the \u2303 arrow to show hidden icons. To stop the app for real, right-click that " +
+          "icon and choose Quit.\n\n" +
+          "Prefer the X to close the app outright? Choose that below \u2014 you can change it later " +
+          "under Settings \u203a Closing the window.",
+        buttons: ["Keep running", "Close the app instead"],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      }));
+    } finally {
+      noticeOpen = false;
+    }
+    winState.set("trayNoticeSeen", true);
+    if (response === 1) {
+      // They just told the X to mean "quit" — so honour it for this press too.
+      winState.set("closeToTray", false);
+      quitting = true;
+      return void app.quit();
+    }
+    win.hide();
+  }
+
+  win.on("close", (e) => {
+    winState.set("bounds", win.getBounds());
+    if (quitting || !closeHidesWindow()) return;
+    e.preventDefault();
+    hideToTray();
+  });
   win.on("closed", () => (win = null));
+
+  // Settings reads and writes this; in a plain browser the bridge is absent
+  // and the section stays hidden, which is correct — there is no tray there.
+  ipcMain.handle("shell:window-prefs", () => ({
+    trayAvailable: !!tray,
+    closeToTray: closeHidesWindow(),
+  }));
+  ipcMain.handle("shell:set-close-to-tray", (_e, on) => {
+    winState.set("closeToTray", !!on && !!tray);
+    return { trayAvailable: !!tray, closeToTray: closeHidesWindow() };
+  });
 
   // Any external link opens in the system browser, never inside the shell.
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -338,6 +453,11 @@ async function start() {
     }
   }
 }
+
+// Anything that quits — the tray menu, Cmd+Q, the updater's relaunch, the OS
+// logging out — passes through here first, which is what lets the close
+// handler above tell a quit apart from a trip to the tray.
+app.on("before-quit", () => { quitting = true; });
 
 app.on("window-all-closed", () => app.quit());
 

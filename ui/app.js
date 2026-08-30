@@ -1921,6 +1921,21 @@ if (window.koinosShell) {
     $("tb-max").title = max ? "Restore" : "Maximize";
     document.body.classList.toggle("maximized", max);
   });
+
+  /* What the X does. Older shells have no prefs bridge and no tray, so the
+     section only appears once the shell says a tray actually exists — an
+     offer to "keep running in the notification area" is a lie without one. */
+  if (typeof window.koinosShell.windowPrefs === "function") {
+    const paintTray = (p) => {
+      $("settings-window").hidden = !p || !p.trayAvailable;
+      $("btn-tray-toggle").setAttribute("aria-checked", String(!!p && !!p.closeToTray));
+    };
+    window.koinosShell.windowPrefs().then(paintTray).catch(() => {});
+    $("btn-tray-toggle").addEventListener("click", async () => {
+      const on = $("btn-tray-toggle").getAttribute("aria-checked") === "true";
+      paintTray(await window.koinosShell.setCloseToTray(!on));
+    });
+  }
 }
 
 // ---------- feedback ----------

@@ -22,4 +22,8 @@ contextBridge.exposeInMainWorld("koinosShell", {
   pickModelFile: () => ipcRenderer.invoke("dialog:pick-gguf"),
   // Folder-scoped tool servers ("Your files"): same reasoning, for folders.
   pickFolder: (title) => ipcRenderer.invoke("dialog:pick-folder", title),
+  // Whether the X parks the app in the notification area or quits it. Only
+  // the shell knows if there is a tray at all, so Settings has to ask.
+  windowPrefs: () => ipcRenderer.invoke("shell:window-prefs"),
+  setCloseToTray: (on) => ipcRenderer.invoke("shell:set-close-to-tray", on),
 });
