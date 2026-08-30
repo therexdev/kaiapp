@@ -5,7 +5,7 @@ const assert = require("node:assert");
 const crypto = require("crypto");
 
 const { ChainClient, rootToAnchorAddress, TESTNET } = require("../../server/chain");
-const { utils } = require("koilib");
+const { utils, Signer } = require("koilib");
 
 test("rootToAnchorAddress: deterministic, checksum-valid, input-strict", () => {
   const root = crypto.createHash("sha256").update("epoch-1").digest("hex");
@@ -86,8 +86,10 @@ test("sponsored deposit co-sign gate refuses everything but a real deposit (skip
   const { makeSettlement } = require("../../server/chain");
   const s = makeSettlement({
     // Operator authority isn't needed for rejection paths, any key works —
-    // the gate must throw BEFORE any signing or sending happens.
-    wif: "5KJvsngHeMpm884wtkJNzQGaCErckhHJBGFsvd3VyK5qMZXj3hS",
+    // the gate must throw BEFORE any signing or sending happens. Minted fresh
+    // per run and never funded: a checked-in key, even a famous throwaway,
+    // reads as a leaked operator secret to anyone scanning the repo.
+    wif: Signer.fromSeed(crypto.randomBytes(32).toString("hex")).getPrivateKey("wif"),
     contractId: "149YvYQfj4MNaFecd7Rm3Z2rK6y2fkPYXz",
     abiPath: require("path").join(__dirname, "..", "..", "contracts", "kai", "abi", "kai-abi.json"),
   });

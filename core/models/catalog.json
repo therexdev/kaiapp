@@ -52,7 +52,7 @@
     },
     "qwen25-14b": {
       "label": "Qwen 2.5 14B",
-      "blurb": "The biggest brain here · 9.0 GB",
+      "blurb": "A clear step up from the 8B models · 9.0 GB",
       "minRamGb": 24,
       "package": "qwen2.5-14b-instruct-q4_k_m@1"
     },
