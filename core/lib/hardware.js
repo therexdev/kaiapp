@@ -59,6 +59,22 @@ async function detectWindowsGpus() {
     });
 }
 
+/** Stable capability mapping, split out so platform behavior is testable on
+ * every CI host. The official llama.cpp Apple Silicon archive ships a Metal
+ * backend; its current Intel archive does not. */
+function capabilitiesFor({ platform = process.platform, arch = process.arch, gpus = [] } = {}) {
+  return {
+    cudaEligible: gpus.some((g) => g.vendor === "nvidia" && (g.vramMb ?? 0) >= 4096),
+    // Vulkan runs on any real GPU vendor (Intel Arc, AMD, NVIDIA) — basic
+    // display adapters (VMs, CI runners) classify as "other" and skip it.
+    vulkanEligible: platform !== "darwin" && gpus.some((g) => ["nvidia", "amd", "intel"].includes(g.vendor)),
+    // The pinned llama.cpp arm64 archive includes libggml-metal. Its x64
+    // counterpart is CPU-only, so Intel Macs must not enter a fake GPU rung.
+    metalEligible: platform === "darwin" && arch === "arm64",
+    cpuFallback: true,
+  };
+}
+
 async function detect({ dataDir } = {}) {
   let gpus = (await detectNvidia()) || [];
   if (gpus.length === 0) {
@@ -83,14 +99,8 @@ async function detect({ dataDir } = {}) {
     gpus,
     disk,
     // Conservative capability summary the runtime manager keys off.
-    capabilities: {
-      cudaEligible: gpus.some((g) => g.vendor === "nvidia" && (g.vramMb ?? 0) >= 4096),
-      // Vulkan runs on any real GPU vendor (Intel Arc, AMD, NVIDIA) — basic
-      // display adapters (VMs, CI runners) classify as "other" and skip it.
-      vulkanEligible: gpus.some((g) => ["nvidia", "amd", "intel"].includes(g.vendor)),
-      cpuFallback: true,
-    },
+    capabilities: capabilitiesFor({ platform: process.platform, arch: process.arch, gpus }),
   };
 }
 
-module.exports = { detect, detectNvidia, detectWindowsGpus };
+module.exports = { detect, detectNvidia, detectWindowsGpus, capabilitiesFor };

@@ -118,3 +118,103 @@ jobs:
             dist/*.AppImage
             dist/latest*.yml
           if-no-files-found: error
+
+  build-macos:
+    # Keep release publication serialized across platforms. This job always
+    # builds with --publish never and attaches assets only after macOS signing
+    # and notarization have both been configured and validated.
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[dist]') || contains(github.event.head_commit.message, '[release]')
+    needs: [test, build-windows]
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - name: Install Chromium for macOS browser tests
+        shell: bash
+        run: |
+          export PLAYWRIGHT_BROWSERS_PATH="$RUNNER_TEMP/pw-browsers"
+          npx playwright-core install chromium
+          chromium=$(find "$PLAYWRIGHT_BROWSERS_PATH" -type f \( -name Chromium -o -name chrome \) -print -quit)
+          test -x "$chromium"
+          echo "KAI_TEST_CHROMIUM=$chromium" >> "$GITHUB_ENV"
+      - name: Run tests on macOS
+        run: npm test
+      - name: Configure Developer ID signing and notarization when available
+        shell: bash
+        env:
+          MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          APPLE_API_KEY_ID_SECRET: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_SECRET: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          if [ -n "$MAC_CSC_LINK" ] && [ -n "$MAC_CSC_KEY_PASSWORD" ] && [ -n "$APPLE_API_KEY_BASE64" ] && [ -n "$APPLE_API_KEY_ID_SECRET" ] && [ -n "$APPLE_API_ISSUER_SECRET" ]; then
+            key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID_SECRET}.p8"
+            node -e "require('fs').writeFileSync(process.argv[1], Buffer.from(process.env.APPLE_API_KEY_BASE64, 'base64'))" "$key_path"
+            chmod 600 "$key_path"
+            echo "CSC_LINK=$MAC_CSC_LINK" >> "$GITHUB_ENV"
+            echo "CSC_KEY_PASSWORD=$MAC_CSC_KEY_PASSWORD" >> "$GITHUB_ENV"
+            echo "APPLE_API_KEY=$key_path" >> "$GITHUB_ENV"
+            echo "APPLE_API_KEY_ID=$APPLE_API_KEY_ID_SECRET" >> "$GITHUB_ENV"
+            echo "APPLE_API_ISSUER=$APPLE_API_ISSUER_SECRET" >> "$GITHUB_ENV"
+            echo "MAC_RELEASE_READY=true" >> "$GITHUB_ENV"
+            echo "Developer ID signing and notarization enabled"
+          else
+            echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
+            echo "MAC_RELEASE_READY=false" >> "$GITHUB_ENV"
+            echo "Signing/notarization incomplete — producing CI artifacts only"
+          fi
+      - name: Build DMG + updater ZIP (Apple Silicon + Intel)
+        run: npm run dist -- --mac --x64 --arm64 --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Validate packaged architectures and updater metadata
+        shell: bash
+        run: |
+          test -f dist/latest-mac.yml
+          arm64_app=$(find dist -type d -name '*.app' -path '*arm64*' -print -quit)
+          x64_app=$(find dist -type d -name '*.app' ! -path '*arm64*' -print -quit)
+          test -n "$arm64_app"
+          test -n "$x64_app"
+          file "$arm64_app/Contents/MacOS/Koinos AI" | grep -q 'arm64'
+          file "$x64_app/Contents/MacOS/Koinos AI" | grep -q 'x86_64'
+          grep -q 'arm64' dist/latest-mac.yml
+          grep -q 'x64' dist/latest-mac.yml
+          (
+            cd dist
+            shasum -a 256 ./*.dmg ./*.zip ./latest-mac.yml ./*.blockmap > SHA256SUMS-macos.txt
+          )
+      - name: Validate signing, Gatekeeper, and notarization
+        if: env.MAC_RELEASE_READY == 'true'
+        shell: bash
+        run: |
+          while IFS= read -r -d '' app; do
+            codesign --verify --deep --strict --verbose=2 "$app"
+            spctl --assess --type execute --verbose=2 "$app"
+            xcrun stapler validate "$app"
+          done < <(find dist -mindepth 2 -maxdepth 2 -type d -name '*.app' -print0)
+      - name: Upload macOS CI artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: koinos-ai-macos
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*.blockmap
+            dist/latest-mac.yml
+            dist/SHA256SUMS-macos.txt
+          if-no-files-found: error
+      - name: Attach signed and notarized assets to the GitHub release
+        if: startsWith(github.ref, 'refs/tags/v') && env.MAC_RELEASE_READY == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" dist/*.dmg dist/*.zip dist/*.blockmap dist/latest-mac.yml dist/SHA256SUMS-macos.txt --clobber
+      - name: Refuse unsigned macOS publication
+        if: startsWith(github.ref, 'refs/tags/v') && env.MAC_RELEASE_READY != 'true'
+        run: echo "macOS assets were built and retained in CI, but were not published because signing/notarization is not fully configured."

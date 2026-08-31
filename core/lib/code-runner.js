@@ -85,9 +85,15 @@ function minimalEnv() {
 
 class CodeRunner {
   constructor({ workspaceDir, nodeRuntime = null }) {
-    this.workspaceDir = workspaceDir;
+    // Node's permission model resolves the entry script before executing it.
+    // On macOS os.tmpdir() is commonly spelled /var/... while its canonical
+    // location is /private/var/...; allowing only the symlink spelling makes
+    // Node stop at realpath("/var") before the sandboxed script can start.
+    // Canonicalising the already-created workspace keeps the allow-list just
+    // as narrow while giving Node the exact path it will resolve internally.
+    this.workspaceDir = fs.realpathSync(path.resolve(workspaceDir));
     this.nodeRuntime = nodeRuntime;
-    this.preload = path.join(__dirname, "sandbox-preload.cjs");
+    this.preload = fs.realpathSync(path.join(__dirname, "sandbox-preload.cjs"));
     this._resolved = null; // { bin, env, flag } — probed once, lazily
   }
 

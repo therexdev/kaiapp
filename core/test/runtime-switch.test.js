@@ -37,7 +37,7 @@ function stubRuntime(log, { failStart } = {}) {
   let running = false;
   return {
     start: async (opts) => {
-      log.push({ op: "start", model: path.basename(opts.modelPath) });
+      log.push({ op: "start", model: path.basename(opts.modelPath), gpuLayers: opts.gpuLayers });
       if (failStart) throw new Error(failStart);
       running = true;
     },
@@ -124,4 +124,31 @@ test("runtime: a build that hard-crashes at startup is not retried on the next s
   await rm.ensure("b"); // the switch from the field log
   // One new start only (cpu with model b) — vulkan is not crash-tested again.
   assert.strictEqual(starts(), after1 + 1, "the switch goes straight to the build that works");
+});
+
+test("runtime: macOS tries Metal before CPU and disables GPU layers on fallback", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-rt-metal-"));
+  const log = [];
+  const caps = [];
+  const bins = {
+    metal: path.join(dir, "metal", "llama-server"),
+    cpu: path.join(dir, "cpu", "llama-server"),
+  };
+  const rm = new RuntimeManager({
+    models: makeModels(dir, ["a"]),
+    hardware: { capabilities: { metalEligible: true } },
+    onEvent: () => {},
+    provisioner: {
+      ensure: async (_kind, { cap }) => {
+        caps.push(cap);
+        return bins[cap];
+      },
+    },
+    makeRuntime: (binPath) => stubRuntime(log, binPath === bins.metal ? { failStart: "Metal startup failed" } : {}),
+  });
+  rm._testedBins.add(bins.metal).add(bins.cpu);
+
+  await rm.ensure("a");
+  assert.deepStrictEqual(caps, ["metal", "cpu"]);
+  assert.deepStrictEqual(log.filter((entry) => entry.op === "start").map((entry) => entry.gpuLayers), [999, 0]);
 });

@@ -58,13 +58,13 @@ class RuntimeProvisioner {
   selectBuild(kind, { cap } = {}) {
     const rt = this.catalog[kind];
     if (!rt) throw new Error(`Unknown runtime kind: ${kind}`);
-    // NVIDIA → CUDA. Modern Intel/AMD GPUs (Arc, Iris Xe, Radeon) → the
-    // Vulkan build, which llama.cpp runs well on — leaving an Arc iGPU on
-    // the CPU build wastes real speed. Conservative name allowlist: an
-    // unrecognized GPU stays on CPU, which always works.
+    // NVIDIA → CUDA. Modern Intel/AMD GPUs (Arc, Iris Xe, Radeon) → Vulkan.
+    // macOS → Metal. Conservative detection keeps unknown desktop GPUs on
+    // CPU, while every supported Mac has a Metal-capable graphics device.
     if (!cap) {
       if (this.hardware?.capabilities?.cudaEligible) cap = "cuda";
       else if ((this.hardware?.gpus || []).some((g) => /\b(arc|iris xe|radeon|rx \d{3,4})\b/i.test(String(g.name || "")))) cap = "vulkan";
+      else if (this.hardware?.capabilities?.metalEligible) cap = "metal";
       else cap = "cpu";
     }
     const keys = [`${process.platform}-${process.arch}-${cap}`, `${process.platform}-${process.arch}-cpu`];
