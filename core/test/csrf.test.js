@@ -132,6 +132,54 @@ test("control plane: the guard reads the header, not the attacker's promise", as
   }
 });
 
+/*
+ * A HEADER-LESS LOCAL CALLER MUST KEEP WORKING — and specifically, the exact
+ * headers Node's fetch puts on the wire must pass.
+ *
+ * Reported by a tester's review of v0.51.0, and it is a real landmine rather
+ * than a live bug. Node's undici fetch sends NO Origin and NO Sec-Fetch-Site
+ * (so _sameSite passes it, correctly — it is a local program, not a page),
+ * but it DOES send `sec-fetch-mode: cors` on every method. Measured on Node
+ * v22: GET, POST, PATCH and DELETE all carry it.
+ *
+ * That header is a browser-fetch-metadata name sitting on a request that no
+ * browser sent, which makes it exactly the kind of thing a later hardening
+ * pass would reach for — "we check sec-fetch-site, why not sec-fetch-mode
+ * too". Doing that would refuse every Node caller at once: the tester's own
+ * 52-tool MCP server, Koinos Code, and anything anyone wrote against the
+ * documented local API. Nothing would look wrong in review; the guard would
+ * simply start rejecting the callers it exists to protect.
+ *
+ * So the contract is pinned here rather than left as a comment. Sec-Fetch-Site
+ * and Origin are the ONLY headers that may decide this, because they are the
+ * only two a browser sets that a local program does not.
+ */
+test("the exact headers Node's fetch sends are accepted on /core and /v1", async () => {
+  const { gw, base } = await startGateway();
+  try {
+    // Real fetch, no headers of our own: whatever undici adds is what arrives.
+    for (const path of ["/core/health", "/v1/models"]) {
+      const r = await fetch(`${base}${path}`);
+      assert.notStrictEqual(r.status, 403, `${path} refused a plain Node fetch`);
+    }
+
+    // And spelled out, so this still fails if a future Node stops sending it.
+    const explicit = await fetch(`${base}/core/health`, {
+      headers: { "sec-fetch-mode": "cors", "sec-fetch-dest": "empty", "user-agent": "node" },
+    });
+    assert.notStrictEqual(explicit.status, 403,
+      "sec-fetch-mode/dest must not decide the cross-site guard — Node sends them and browsers are not the only caller");
+
+    // The guard still has to work: the two headers that DO decide it.
+    const foreign = await fetch(`${base}/core/health`, {
+      headers: { "sec-fetch-mode": "cors", "sec-fetch-site": "cross-site" },
+    });
+    assert.strictEqual(foreign.status, 403, "a genuinely cross-site request is still refused");
+  } finally {
+    await gw.close();
+  }
+});
+
 test("the OpenAI-compatible API stays open to local callers by design", async () => {
   const { gw, base } = await startGateway();
   try {
