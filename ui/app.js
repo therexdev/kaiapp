@@ -566,11 +566,16 @@ async function renderOnboarding(entry) {
       const h = await coreGet("/core/health");
       const hw = h.hardware || {};
       const gpu = hw.gpus?.[0];
+      const gpuSummary = gpu
+        ? `${gpu.name}${gpu.vramMb ? ` · ${(gpu.vramMb / 1024).toFixed(0)} GB VRAM` : ""}`
+        : hw.capabilities?.metalEligible
+          ? "Apple Silicon · Metal acceleration"
+          : "None detected — running on CPU";
       const rows = [
         ["System", `${hw.platform ?? "?"} · ${hw.arch ?? "?"}`],
         ["CPU", `${hw.cpu?.model ?? "?"} (${hw.cpu?.cores ?? "?"} threads)`],
         ["Memory", hw.ramBytes ? `${(hw.ramBytes / 1e9).toFixed(0)} GB` : "?"],
-        ["GPU", gpu ? `${gpu.name}${gpu.vramMb ? ` · ${(gpu.vramMb / 1024).toFixed(0)} GB VRAM` : ""}` : "None detected — running on CPU"],
+        ["GPU", gpuSummary],
       ];
       $("hw-summary").innerHTML = rows
         .map(([k, v]) => `<span class="k">${k}</span><span>${esc(v)}</span>`)

@@ -47,6 +47,10 @@ The runtime catalog pins the official llama.cpp `b10423` macOS archives by URL, 
 
 Managed Node.js packages are also pinned for both Darwin architectures, so MCP tools do not require a separate system Node installation.
 
+The managed Koinos node uses the same official Compose template and image tags as the other platforms, with one macOS-specific materialization step. Docker Desktop rejects file-backed Compose `configs` whose targets sit inside the separately bind-mounted `/koinos` tree. On macOS, Core therefore copies `config.yml`, `genesis_data.json`, and `koinos_descriptors.pb` into their normal paths under `BASEDIR` and removes only those nested config mounts from the generated Compose file. Linux and Windows keep the upstream-shaped Compose configuration unchanged.
+
+Mainnet JSON-RPC is exposed on `127.0.0.1:8085`, matching the current `koinos/koinos` example and avoiding the commonly occupied development port `8080`. The service still listens on port `8080` inside its container. Node startup requires Docker Desktop and sufficient disk for chain data; the application does not enable block production or register a signing key unless the user separately opts in.
+
 Voice transcription remains gracefully unavailable on macOS because upstream whisper.cpp `v1.9.2` does not publish the CLI archive that this application pins and verifies. Do not substitute an unversioned or unverified binary. The microphone usage description is already present so a future pinned implementation can request permission clearly.
 
 ## CI artifacts

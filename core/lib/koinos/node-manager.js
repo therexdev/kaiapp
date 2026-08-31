@@ -28,9 +28,10 @@ const MAX_BACKOFF_MS = 15 * 60 * 1000;
 // docker-compose.yml plus generated .env and config files, and drives it
 // through `docker compose`.
 class NodeManager {
-  constructor({ templateRoot, dataRoot, onEvent, autoRecover = true, probeHead = null }) {
+  constructor({ templateRoot, dataRoot, onEvent, autoRecover = true, probeHead = null, platform = process.platform }) {
     this.templateRoot = templateRoot;
     this.dataRoot = dataRoot;
+    this.platform = platform;
     this.onEvent = onEvent || (() => {});
     this._composeCmd = null;
     this._op = null; // { name, network, running, startedAt, lines, code, error }
@@ -61,12 +62,17 @@ class NodeManager {
     fs.mkdirSync(d.basedir, { recursive: true });
 
     const tpl = (...p) => path.join(this.templateRoot, ...p);
-    fs.copyFileSync(tpl("docker-compose.yml"), path.join(d.root, "docker-compose.yml"));
+    const composeSource = fs.readFileSync(tpl("docker-compose.yml"), "utf8");
+    fs.writeFileSync(
+      path.join(d.root, "docker-compose.yml"),
+      this.platform === "darwin" ? composeForMacos(composeSource) : composeSource
+    );
     fs.copyFileSync(tpl("common", "koinos_descriptors.pb"), path.join(d.config, "koinos_descriptors.pb"));
     fs.copyFileSync(tpl("common", "rabbitmq.conf"), path.join(d.config, "rabbitmq.conf"));
     fs.copyFileSync(tpl(net.templateDir, "genesis_data.json"), path.join(d.config, "genesis_data.json"));
 
     fs.writeFileSync(path.join(d.config, "config.yml"), buildConfigYml(net, producerAddress));
+    if (this.platform === "darwin") stageMacosConfig(d);
     fs.writeFileSync(path.join(d.root, ".env"), buildEnv(net, d.basedir, !!producerAddress, opts.memorySaver));
     return d;
   }
@@ -950,6 +956,60 @@ function parseComposePs(stdout) {
   return rows;
 }
 
+/*
+ * Docker Desktop for macOS rejects Compose's file-backed `configs` when their
+ * targets sit inside the separately bind-mounted BASEDIR (for example,
+ * /koinos/config.yml inside /koinos). Linux Docker accepts that nested mount,
+ * so the failure only surfaced in a packaged Mac smoke test.
+ *
+ * Keep the upstream-shaped template for Linux and Windows. On macOS, remove
+ * only the Compose config mounts and stage the same inputs at the paths the
+ * Koinos services already read through BASEDIR.
+ */
+function composeForMacos(text) {
+  const lines = String(text).split(/\r?\n/);
+  const out = ["# macOS: config files are staged inside BASEDIR; avoid Docker Desktop nested mounts."];
+  let skipping = null;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const indent = line.length - line.trimStart().length;
+
+    if (skipping === "service") {
+      if (!trimmed || indent > 6) continue;
+      skipping = null;
+    } else if (skipping === "top") {
+      if (!trimmed || indent > 0) continue;
+      skipping = null;
+    }
+
+    if (indent === 6 && trimmed === "configs:") {
+      skipping = "service";
+      continue;
+    }
+    if (indent === 0 && trimmed === "configs:") {
+      skipping = "top";
+      continue;
+    }
+    out.push(line);
+  }
+
+  return out.join("\n");
+}
+
+function stageMacosConfig(d) {
+  const chainDir = path.join(d.basedir, "chain");
+  const descriptorDir = path.join(d.basedir, "jsonrpc", "descriptors");
+  fs.mkdirSync(chainDir, { recursive: true });
+  fs.mkdirSync(descriptorDir, { recursive: true });
+  fs.copyFileSync(path.join(d.config, "config.yml"), path.join(d.basedir, "config.yml"));
+  fs.copyFileSync(path.join(d.config, "genesis_data.json"), path.join(chainDir, "genesis_data.json"));
+  fs.copyFileSync(
+    path.join(d.config, "koinos_descriptors.pb"),
+    path.join(descriptorDir, "koinos_descriptors.pb")
+  );
+}
+
 function buildEnv(net, basedirAbs, producing, memorySaver) {
   // Memory-saver drops the optional API tier (jsonrpc/grpc/rest/…) so a
   // low-memory PC only runs the core services (+ the block producer if minting),
@@ -1017,4 +1077,4 @@ ${seeds}
 `;
 }
 
-module.exports = { NodeManager, buildEnv, buildConfigYml, parseComposePs };
+module.exports = { NodeManager, buildEnv, buildConfigYml, parseComposePs, composeForMacos, stageMacosConfig };

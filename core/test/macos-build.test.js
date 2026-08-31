@@ -3,6 +3,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 
 const root = path.join(__dirname, "..", "..");
@@ -63,4 +64,57 @@ test("macOS CI cross-builds both architectures without implicit publication", ()
   assert.match(workflow, /MAC_RELEASE_READY == 'true'/);
   assert.match(workflow, /xcrun stapler validate "\$app"/);
   assert.match(workflow, /gh release upload/);
+});
+
+test("macOS node files avoid Docker Desktop nested config mounts", (t) => {
+  const { NodeManager } = require("../lib/koinos/node-manager");
+  const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "kai-macos-node-"));
+  t.after(() => fs.rmSync(dataRoot, { recursive: true, force: true }));
+
+  const manager = new NodeManager({
+    templateRoot: path.join(root, "core", "koinos-node-template"),
+    dataRoot,
+    platform: "darwin",
+  });
+  const dirs = manager.ensureFiles("mainnet", null);
+  const compose = fs.readFileSync(path.join(dirs.root, "docker-compose.yml"), "utf8");
+  const env = fs.readFileSync(path.join(dirs.root, ".env"), "utf8");
+
+  assert.doesNotMatch(compose, /^configs:/m, "top-level Compose configs are removed on macOS");
+  assert.doesNotMatch(compose, /^\s{6}configs:/m, "service config mounts are removed on macOS");
+  assert.match(compose, /\$\{BASEDIR\}:\/koinos/, "the durable node data mount remains");
+  assert.match(env, /^JSONRPC_PORT=8085$/m, "mainnet RPC follows the current official default");
+
+  const staged = [
+    [path.join(dirs.config, "config.yml"), path.join(dirs.basedir, "config.yml")],
+    [path.join(dirs.config, "genesis_data.json"), path.join(dirs.basedir, "chain", "genesis_data.json")],
+    [
+      path.join(dirs.config, "koinos_descriptors.pb"),
+      path.join(dirs.basedir, "jsonrpc", "descriptors", "koinos_descriptors.pb"),
+    ],
+  ];
+  for (const [source, destination] of staged) {
+    assert.deepStrictEqual(fs.readFileSync(destination), fs.readFileSync(source), destination);
+  }
+});
+
+test("non-macOS node generation keeps the upstream Compose config mounts", (t) => {
+  const { NodeManager } = require("../lib/koinos/node-manager");
+  const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "kai-linux-node-"));
+  t.after(() => fs.rmSync(dataRoot, { recursive: true, force: true }));
+  const manager = new NodeManager({
+    templateRoot: path.join(root, "core", "koinos-node-template"),
+    dataRoot,
+    platform: "linux",
+  });
+  const dirs = manager.ensureFiles("mainnet", null);
+  const compose = fs.readFileSync(path.join(dirs.root, "docker-compose.yml"), "utf8");
+  assert.match(compose, /^configs:/m);
+  assert.match(compose, /^\s{6}configs:/m);
+  assert.strictEqual(fs.existsSync(path.join(dirs.basedir, "config.yml")), false);
+});
+
+test("Apple Silicon onboarding names Metal instead of reporting CPU-only", () => {
+  const app = fs.readFileSync(path.join(root, "ui", "app.js"), "utf8");
+  assert.match(app, /metalEligible[\s\S]{0,120}Apple Silicon · Metal acceleration/);
 });
