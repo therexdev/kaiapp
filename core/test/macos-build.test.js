@@ -58,6 +58,7 @@ test("macOS CI cross-builds both architectures without implicit publication", ()
   assert.match(workflow, /build-macos:/);
   assert.match(workflow, /runs-on:\s+macos-latest/);
   assert.match(workflow, /Install Chromium for macOS browser tests/);
+  assert.match(workflow, /playwright-core"\)\.chromium\.executablePath\(\)/);
   assert.match(workflow, /KAI_TEST_CHROMIUM=\$chromium/);
   assert.match(workflow, /--mac --x64 --arm64 --publish never/);
   assert.match(workflow, /latest-mac\.yml/);

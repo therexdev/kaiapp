@@ -139,7 +139,7 @@ jobs:
         run: |
           export PLAYWRIGHT_BROWSERS_PATH="$RUNNER_TEMP/pw-browsers"
           npx playwright-core install chromium
-          chromium=$(find "$PLAYWRIGHT_BROWSERS_PATH" -type f \( -name Chromium -o -name chrome \) -print -quit)
+          chromium=$(node -e 'process.stdout.write(require("playwright-core").chromium.executablePath())')
           test -x "$chromium"
           echo "KAI_TEST_CHROMIUM=$chromium" >> "$GITHUB_ENV"
       - name: Run tests on macOS
