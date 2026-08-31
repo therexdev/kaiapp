@@ -100,6 +100,23 @@ check(s.get("queueDepth", 0) < 50, "queue not backed up", f"queue={s.get('queueD
 mods = s.get("models", [])
 check(len(mods) > 0, "network advertises a servable class", f"{len(mods)} classes")
 print("STATE models=%s" % " ".join(f"{m.get('model')}x{m.get('providers')}" for m in mods))
+# FIND-NET-001 rollout. Registration proofs deploy in SHADOW: a node running a
+# client too old to sign still registers, and is marked. That is a schedule,
+# not a resting state — until this reaches 0 the scheduler is still taking
+# some payee addresses on trust, which is the finding. Warn (not fail) while
+# it is non-zero and enforcement is off, because that is the expected shape
+# during rollout; FAIL if an unsigned worker is on the roster after
+# enforcement was supposed to close the door.
+unsigned = s.get("workersUnsigned")
+enforced = bool(s.get("workerProofEnforced"))
+if unsigned is None:
+    warn(False, "scheduler reports registration-proof state", "deploy predates FIND-NET-001")
+elif enforced:
+    check(unsigned == 0, "no unsigned worker survives enforcement", f"{unsigned} unsigned")
+else:
+    warn(unsigned == 0, "every worker proves the address it is paid as",
+         f"{unsigned} of {s.get('workersOnline')} still unsigned — shadow mode, arm KAI_WORKER_PROOF_ENFORCE once this is 0")
+print(f"STATE worker_proof enforced={enforced} unsigned={unsigned}")
 print("STATE instance=%s epoch_jobs=%s" % (s.get("instance"), [w.get("jobsThisEpoch") for w in ws]))
 print("STATE perf_jobs=%s" % [(w.get("perf") or {}).get("jobs") for w in ws])
 print("STATE ageDays=%s" % [d for _, d in ages])

@@ -243,11 +243,43 @@ class Worker {
           message: `No model on this machine fits its memory, so nothing is offered to the network: ${short}. Download a smaller model (like Koinos Fast) to serve and earn.`,
         });
       }
+      /*
+       * Prove the address belongs to this wallet (FIND-NET-001).
+       *
+       * The address IS the payee, and until now the scheduler took it on
+       * trust: anyone who could reach it could register under someone else's
+       * wallet and collect their jobs and their place on the payout roster.
+       * A signature over sha256("register|<address>|<ts>") settles it with
+       * the same key that already signs every receipt.
+       *
+       * The "register|" prefix is not decoration. A network chat request
+       * signs "consume|<address>|<ts>|<messages>" with this same key and
+       * sends it to this same server, so without separate domains this app
+       * would be handing out a reusable registration proof for its own
+       * wallet on every paid request.
+       *
+       * Never fatal. A machine that cannot sign right now should still be
+       * able to earn while the scheduler is in shadow mode; the event says
+       * what happened, and the scheduler's own refusal is what will say so
+       * unmissably once proofs are required.
+       */
+      let proof = null;
+      try {
+        const ts = Date.now();
+        const hash = crypto.createHash("sha256").update(`register|${address}|${ts}`).digest();
+        proof = { ts, signature: await this.wallet.signHash(hash) };
+      } catch (e) {
+        this.onEvent({
+          type: "worker:proof-failed",
+          message: `Could not sign the registration proof for ${address}: ${e?.message || e}. Earning still works for now, but a future scheduler will require it.`,
+        });
+      }
       const r = await fetch(`${this.schedulerUrl}/worker/register`, {
         method: "POST",
         headers: { "content-type": "application/json", connection: "close" },
         body: JSON.stringify({
           address,
+          ...(proof || {}),
           // RAM rides along so the scheduler can apply the same fit rule
           // server-side — the honest-client filter alone can't bind stale
           // or modified clients.
