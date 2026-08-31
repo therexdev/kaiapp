@@ -22,7 +22,7 @@ const os = require("os");
 
 const CHROMIUM = process.env.KAI_TEST_CHROMIUM || "/opt/pw-browsers/chromium";
 const FAKE_BIN = path.join(__dirname, "fixtures", "fake-llama-server");
-const UI_WAIT = 30000;
+const { UI_WAIT } = require("./ui-wait");
 
 // Longer than the Tasks list's own repaint interval, so the wait necessarily
 // spans at least one full re-render — that repaint is the bug.

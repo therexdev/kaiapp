@@ -24,7 +24,7 @@ const CHROMIUM = process.env.KAI_TEST_CHROMIUM || "/opt/pw-browsers/chromium";
 
 // Same reasoning as code-ui.browser.test.js: one bound for every in-page wait,
 // generous enough to survive `node --test` running files alongside this one.
-const UI_WAIT = 30000;
+const { UI_WAIT } = require("./ui-wait");
 
 const { chromium } = require("playwright-core");
 const { NodeManager } = require("../lib/koinos/node-manager");

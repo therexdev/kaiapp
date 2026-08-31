@@ -21,7 +21,7 @@ const path = require("path");
 const os = require("os");
 
 const CHROMIUM = process.env.KAI_TEST_CHROMIUM || "/opt/pw-browsers/chromium";
-const UI_WAIT = 30000;
+const { UI_WAIT } = require("./ui-wait");
 const SATS = 100000000;
 
 const available = (() => {

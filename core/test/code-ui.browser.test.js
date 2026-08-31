@@ -16,28 +16,15 @@ const CHROMIUM = process.env.KAI_TEST_CHROMIUM || "/opt/pw-browsers/chromium";
 const FAKE_BIN = path.join(__dirname, "fixtures", "fake-llama-server");
 
 /*
- * ONE bound for every in-page wait in this file.
+ * Both waits live in core/test/ui-wait.js — one number for the whole suite,
+ * because raising them file by file is what cost v0.42.1 and v0.51.0 a
+ * release each. The reasoning is recorded there.
  *
- * These waits are "has the UI got there yet", not performance budgets — the
- * folder listing they mostly wait on takes ~200ms locally. Their job is to
- * stop a genuinely hung page from hanging the suite, and each test's own
- * 180s test-level timeout is the real backstop for that.
- *
- * It is a CONSTANT because the alternative failed twice. v0.42.0's build
- * died on a 15s wait blown by `node --test` running files in parallel; the
- * fix raised THAT wait and left its five identical siblings at 15s, and
- * v0.42.1's build then died on one of the siblings. Patching the instance
- * instead of the class costs a release each time.
+ * They are "has the UI got there yet" bounds, not performance budgets: the
+ * folder listing they mostly wait on takes ~200ms locally, and each test's
+ * own 180s test-level timeout is the real backstop against a hung page.
  */
-const UI_WAIT = 30000;
-
-/*
- * Waits for a model RUN to finish are a different animal: a fake server still
- * has to be polled, a diff rendered, an approval round-tripped. One of these
- * was already 60s before the constants landed, and collapsing it into UI_WAIT
- * would have quietly halved it.
- */
-const RUN_WAIT = 90000;
+const { UI_WAIT, RUN_WAIT } = require("./ui-wait");
 
 const available = (() => {
   try {

@@ -27,7 +27,7 @@ const FAKE_BIN = path.join(__dirname, "fixtures", "fake-llama-server");
 // One bound for every in-page wait — same reasoning as the other browser
 // suites: these are "has the UI got there yet", not performance budgets, and
 // `node --test` runs files alongside each other.
-const UI_WAIT = 30000;
+const { UI_WAIT } = require("./ui-wait");
 
 const available = (() => {
   try {
