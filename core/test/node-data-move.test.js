@@ -37,12 +37,19 @@ function seedChain(root) {
   return base;
 }
 
-function mgr(dataRoot) {
-  return new NodeManager({
+function mgr(dataRoot, onEvent = () => {}) {
+  const manager = new NodeManager({
     templateRoot: path.join(__dirname, "..", "koinos-node-template"),
     dataRoot,
-    onEvent: () => {},
+    onEvent,
   });
+  // These tests exercise the atomic copy/verify/switch sequence, not Docker.
+  // A seeded Compose file makes moveData stop the node first; isolate that
+  // boundary so the suite also runs on hosts (including macOS CI) without a
+  // Docker daemon or Compose CLI.
+  manager.stop = async () => ({ stopped: true, note: "test double" });
+  manager._settle = async () => {};
+  return manager;
 }
 
 // ---------------------------------------------------------------- guardrails
@@ -323,11 +330,7 @@ test("progress is reported in bytes while the copy runs", async () => {
   const dst = path.join(tmp("dst"), "koinos");
   seedChain(src);
   const seen = [];
-  const m = new NodeManager({
-    templateRoot: path.join(__dirname, "..", "koinos-node-template"),
-    dataRoot: src,
-    onEvent: (e) => { if (e.type === "node:move") seen.push(e.move.phase); },
-  });
+  const m = mgr(src, (e) => { if (e.type === "node:move") seen.push(e.move.phase); });
   await m.moveData("mainnet", dst);
   // The phases a person watching the screen would expect to pass through.
   for (const phase of ["copying", "verifying", "checksumming", "switching", "done"]) {

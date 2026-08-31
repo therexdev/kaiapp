@@ -44,6 +44,16 @@ function seedChain(root) {
   fs.writeFileSync(path.join(base, "000002.sst"), "y".repeat(1024));
 }
 
+function moveManager(dataRoot) {
+  const manager = new NodeManager({ templateRoot: "/none", dataRoot, onEvent: () => {} });
+  // The browser test owns the real UI and move implementation, but Docker is
+  // outside its boundary. Keep the data move deterministic on CI hosts that
+  // do not provide a Docker daemon or Compose CLI.
+  manager.stop = async () => ({ stopped: true, note: "test double" });
+  manager._settle = async () => {};
+  return manager;
+}
+
 /**
  * A page carrying the real bridge.js, the DOM it expects, and a stub `rpc`
  * that dispatches straight into the real Core channel handlers over the
@@ -134,7 +144,7 @@ async function pageWith(mgrState) {
 test("the Node screen gains a Change data folder button next to the vendored one", async (t) => {
   const src = tmp("src");
   seedChain(src);
-  const state = { mgr: new NodeManager({ templateRoot: "/none", dataRoot: src, onEvent: () => {} }), defaultPath: src };
+  const state = { mgr: moveManager(src), defaultPath: src };
   const { browser, page } = await pageWith(state);
   t.after(() => browser.close());
 
@@ -156,7 +166,7 @@ test("the Node screen gains a Change data folder button next to the vendored one
 test("a folder inside the current one is refused in the UI, with the reason shown", async (t) => {
   const src = tmp("src");
   seedChain(src);
-  const state = { mgr: new NodeManager({ templateRoot: "/none", dataRoot: src, onEvent: () => {} }), defaultPath: src };
+  const state = { mgr: moveManager(src), defaultPath: src };
   const { browser, page } = await pageWith(state);
   t.after(() => browser.close());
 
@@ -186,7 +196,7 @@ test("confirming a move actually moves the bytes and repoints the node", async (
   seedChain(src);
   const before = dataMove.measure(src);
 
-  const state = { mgr: new NodeManager({ templateRoot: "/none", dataRoot: src, onEvent: () => {} }), defaultPath: src, persisted: null };
+  const state = { mgr: moveManager(src), defaultPath: src, persisted: null };
   const { browser, page } = await pageWith(state);
   t.after(() => browser.close());
 
@@ -225,7 +235,7 @@ test("confirming a move actually moves the bytes and repoints the node", async (
 test("with no data yet, changing the folder is a setting and says so", async (t) => {
   const src = tmp("empty");          // nothing seeded: nothing to move
   const dst = path.join(tmp("dst"), "elsewhere");
-  const state = { mgr: new NodeManager({ templateRoot: "/none", dataRoot: src, onEvent: () => {} }), defaultPath: src, persisted: null };
+  const state = { mgr: moveManager(src), defaultPath: src, persisted: null };
   const { browser, page } = await pageWith(state);
   t.after(() => browser.close());
 
@@ -252,7 +262,7 @@ test("with no data yet, changing the folder is a setting and says so", async (t)
 
 test("the setup flow offers the folder before quick sync, with the default filled in", async (t) => {
   const src = tmp("empty");
-  const state = { mgr: new NodeManager({ templateRoot: "/none", dataRoot: src, onEvent: () => {} }), defaultPath: src, persisted: null };
+  const state = { mgr: moveManager(src), defaultPath: src, persisted: null };
   const { browser, page } = await pageWith(state);
   t.after(() => browser.close());
 
