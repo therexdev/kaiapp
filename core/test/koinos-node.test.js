@@ -93,6 +93,97 @@ test("node: reburn is NOT password-gated — it must run unattended", async () =
   } finally { kn.stop(); }
 });
 
+/*
+ * Sending returns to ANOTHER address is the same class of act as chain:send,
+ * and for longer: it is a standing instruction that moves value repeatedly,
+ * on its own, while nobody is watching. The wallet auto-unlocks at start-up,
+ * so "unlocked" proves nothing about who is asking — which is the whole reason
+ * this file exists. Arming that destination went un-gated (FIND-KOI-001).
+ */
+
+test("node: arming automatic sends to another address proves the password", async () => {
+  const { kn } = boot();
+  const THEIRS = "1H7QvaYveeG4oBM7krKSpEMXwREv1RFjvK"; // not this wallet
+  try {
+    await assert.rejects(
+      () => kn.call("rewards:configure", { enabled: true, pct: 50, mode: "send", toAddress: THEIRS }),
+      /wallet password/i,
+      "a caller could arm returns to any address without proving anything",
+    );
+    await assert.rejects(
+      () => kn.call("rewards:configure", { enabled: true, pct: 50, mode: "send", toAddress: THEIRS, password: "not the password" }),
+      /.+/,
+      "a wrong password must not arm it either",
+    );
+
+    // Nothing was armed by either attempt.
+    let st = await kn.call("rewards:status");
+    assert.notStrictEqual(st.config.mode, "send", "a refused call must not have taken effect");
+
+    // With the password, the owner can still do it.
+    await kn.call("rewards:configure", { enabled: true, pct: 50, mode: "send", toAddress: THEIRS, password: PW });
+    st = await kn.call("rewards:status");
+    assert.strictEqual(st.config.mode, "send");
+    assert.strictEqual(st.config.toAddress, THEIRS);
+  } finally { kn.stop(); }
+});
+
+test("node: repointing an already-armed destination proves the password again", async () => {
+  const { kn } = boot();
+  const FIRST = "1H7QvaYveeG4oBM7krKSpEMXwREv1RFjvK";
+  const ELSEWHERE = "1NsyZDCnHcm1rGFoUaUgHWs2FrsbQFqp2Q";
+  try {
+    await kn.call("rewards:configure", { enabled: true, pct: 50, mode: "send", toAddress: FIRST, password: PW });
+    // The dangerous case: returns are already flowing, and the destination is
+    // quietly swapped. One proof at arming time would not have covered this.
+    await assert.rejects(
+      () => kn.call("rewards:configure", { toAddress: ELSEWHERE }),
+      /wallet password/i,
+      "the destination was changed with no proof",
+    );
+    const st = await kn.call("rewards:status");
+    assert.strictEqual(st.config.toAddress, FIRST, "the original destination must stand");
+  } finally { kn.stop(); }
+});
+
+test("node: the rest of the returns settings still need no password", async () => {
+  const { kn } = boot();
+  const THEIRS = "1H7QvaYveeG4oBM7krKSpEMXwREv1RFjvK";
+  try {
+    await kn.call("rewards:configure", { enabled: true, pct: 50, mode: "send", toAddress: THEIRS, password: PW });
+    // None of these can move a satoshi anywhere new, and a node operator has
+    // to be able to tune them without a password prompt every time.
+    for (const patch of [{ pct: 10 }, { minReturnKoin: "2" }, { maxReturnKoin: "5" }, { pollMinutes: 30 }, { enabled: false }]) {
+      await kn.call("rewards:configure", patch);
+    }
+    const st = await kn.call("rewards:status");
+    assert.strictEqual(st.config.pct, 10);
+    assert.strictEqual(st.config.enabled, false);
+  } finally { kn.stop(); }
+});
+
+test("node: the password is never written into the returns config", async () => {
+  const { kn, dir } = boot();
+  const THEIRS = "1H7QvaYveeG4oBM7krKSpEMXwREv1RFjvK";
+  try {
+    await kn.call("rewards:configure", { enabled: true, pct: 50, mode: "send", toAddress: THEIRS, password: PW });
+    const st = await kn.call("rewards:status");
+    assert.ok(!("password" in st.config), "the password must not survive into the config object");
+
+    // And it must not be sitting in any file this call wrote, which is the
+    // failure that would matter far more than the one being fixed.
+    const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => {
+      const full = path.join(d, e.name);
+      return e.isDirectory() ? walk(full) : [full];
+    });
+    for (const f of walk(dir)) {
+      let text = "";
+      try { text = fs.readFileSync(f, "utf8"); } catch { continue; } // binary/unreadable
+      assert.ok(!text.includes(PW), `the wallet password was written to ${f}`);
+    }
+  } finally { kn.stop(); }
+});
+
 test("node: an unknown channel is refused rather than silently ignored", async () => {
   const { kn } = boot();
   try {
@@ -139,11 +230,27 @@ test("node UI: the bridge's password gate covers exactly Core's outbound channel
     assert.ok(bridge.includes(`"${ch}"`), `${ch} is password-gated in the bridge`);
   }
   const coreSrc = fs.readFileSync(path.join(__dirname, "..", "lib", "koinos-node.js"), "utf8");
-  // The definition is an arrow (`requirePassword = (`), so these five are the
-  // five call sites: bridgeStart, routeCStart, ethSend, usdtSend, vkoinSend.
+  // The definition is an arrow (`requirePassword = (`), so these six are the
+  // six call sites: bridgeStart, routeCStart, ethSend, usdtSend, vkoinSend,
+  // and the returns destination added for FIND-KOI-001.
   const gated = coreSrc.match(/requirePassword\(password\)/g)?.length ?? 0;
-  assert.strictEqual(gated, 5, "Core still gates five channels via requirePassword");
+  assert.strictEqual(gated, 6, "Core still gates six channels via requirePassword");
   assert.match(coreSrc, /chain\.transfer\(wallet\.signerFor\(password\)/, "and chain:send proves the password via signerFor");
+
+  /*
+   * rewards:configure is the one CONDITIONALLY gated channel, and it must stay
+   * out of OUTBOUND. Everything in that map prompts on every call, which is
+   * right for "send this money now" and wrong here: most saves only move a
+   * percentage slider, and a password box in front of each one teaches people
+   * to type their wallet password without reading why. So the returns screen
+   * carries its own field, shown only when a destination is in play, and Core
+   * decides whether it was actually needed.
+   */
+  assert.ok(!/"rewards:configure"/.test(bridge.slice(bridge.indexOf("var OUTBOUND"), bridge.indexOf("/** Ask for the wallet password"))),
+    "rewards:configure must not be in OUTBOUND — it would prompt on every save");
+  const renderer = fs.readFileSync(path.join(__dirname, "..", "..", "ui", "knode", "renderer.js"), "utf8");
+  assert.match(renderer, /id="r-pass"[^>]*type="password"/, "the returns screen needs its own password field");
+  assert.match(renderer, /rewards:configure[\s\S]{0,600}password: pass/, "and it must actually send it");
 });
 
 test("node UI: the switch reveals every node menu, and the embedded app is wired in", async () => {

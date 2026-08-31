@@ -517,7 +517,41 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
 
   // ----- rewards -----
   handle("rewards:status", () => rewards.status());
-  handle("rewards:configure", (patch) => rewards.configure(patch));
+  /*
+   * Arming automatic returns to another address is the largest value-moving
+   * decision in this file, and the rule at the top of it already covered this
+   * case — it just was not being applied. A one-off ETH send proves the
+   * password; a standing instruction to send EVERY future block reward
+   * somewhere else did not, even though it moves value repeatedly, on its own,
+   * to an address the person may not control. The wallet is nearly always
+   * unlocked, so nothing else stood between a caller and that redirect.
+   *
+   * The password is proven when the destination is armed or changed. The rest
+   * of the returns settings — percentage, minimum, cap, poll interval, pausing,
+   * and compounding back into your own VHP — are untouched, because none of
+   * them can move a satoshi anywhere the wallet does not already own.
+   */
+  handle("rewards:configure", (patch) => {
+    // NEVER let the password reach rewards.configure: that object is persisted.
+    const { password, ...settingsPatch } = patch || {};
+    const before = rewards.config();
+    const after = { ...before, ...settingsPatch };
+
+    const sendingNow = after.mode === "send" && !!after.enabled;
+    const sendingBefore = before.mode === "send" && !!before.enabled;
+    const destChanged = String(after.toAddress || "") !== String(before.toAddress || "");
+
+    if ((sendingNow && !sendingBefore) || destChanged) {
+      if (!password) {
+        throw new Error(
+          "Enter your wallet password to change where returns go. This is the one return setting that can move " +
+          "KOIN to an address you may not control, so it asks even though the wallet is unlocked.",
+        );
+      }
+      requirePassword(password);
+    }
+    return rewards.configure(settingsPatch);
+  });
   handle("rewards:runNow", () => rewards.tick("manual"));
 
   // ----- fund node (Ethereum on-ramp — Phase 1) -----

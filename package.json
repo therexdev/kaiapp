@@ -3,7 +3,7 @@
   "productName": "Koinos AI",
   "version": "0.51.0",
   "private": true,
-  "description": "Koinos AI Core — local-first AI with a self-hosted OpenAI-compatible API",
+  "description": "Koinos AI Core \u2014 local-first AI with a self-hosted OpenAI-compatible API",
   "license": "MIT",
   "author": "therexdev",
   "repository": {
@@ -95,7 +95,7 @@
     "ethers": "^6.17.0",
     "imapflow": "^1.7.1",
     "koilib": "^9.3.0",
-    "mailparser": "^3.9.15",
+    "mailparser": "^3.9.17",
     "nodemailer": "^9.0.5"
   },
   "overrides": {

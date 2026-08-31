@@ -51,3 +51,43 @@ package's identity), and put a `llama-server` build at `~/.koinos-ai/runtimes/ll
 
 Related repositories: [`therexdev/kai`](https://github.com/therexdev/kai) (public website),
 `therexdev/koinos-node` (Koinos node manager / wallet / funding — the reuse foundation).
+
+## Dependency exception: protobufjs pinned at 7.4.0
+
+`package.json` pins `overrides.protobufjs` to `7.4.0`. That version carries
+published advisories, and the pin is deliberate. Please do not "fix" it
+without reading this.
+
+**Why it cannot be bumped.** protobufjs 7.6.3 tightened extension resolution.
+Koinos's own `.proto` files use `extend google.protobuf.FieldOptions` for the
+`btype` annotations that mark a field as an address or a hash, and every
+protobufjs from 7.6.3 up refuses to resolve them:
+
+```
+unresolvable extensions: 'extend google.protobuf.FieldOptions' in .koinos
+```
+
+The advisories are fixed in versions *above* 7.6.2, so there is no version
+that both closes them and loads Koinos. This was measured, not assumed —
+7.4.0, 7.6.3, 7.6.5 and 7.6.6 were each installed and tested, and everything
+from 7.6.3 up fails on the `Contract` constructor.
+
+**Why it is tolerable meanwhile.** The advisories are about parsing hostile
+input: crafted `.proto` descriptors, malicious field names, unbounded
+recursion in JSON descriptor expansion. protobufjs is never handed any of
+that here. It parses exactly two things — the Koinos schemas that ship inside
+koilib, and protocol responses from a Koinos RPC endpoint. No user, worker or
+web caller supplies a descriptor.
+
+**How the risk is held.** `core/test/settlement.test.js` builds a real chain
+client, so a protobufjs that cannot load Koinos turns three tests red rather
+than shipping. That is how this was caught: the bump looked safe, stayed
+inside the same major and satisfied koilib's declared `^7.4.0`, and it was
+only the settlement tests that noticed. The scheduler repo had no equivalent
+coverage at all — its twenty-seven probes all passed on the broken pin — so
+`scripts/probe-chain-encoding.js` was added there to close the same gap.
+
+**Exit condition.** Lift the pin when koilib ships schemas that resolve under a
+protobufjs above 7.6.2, or when it vendors its own descriptor build. The probe
+tells you the moment that is true: raise the override, run it, and if it passes
+the exception is over. Re-check at each dependency review.

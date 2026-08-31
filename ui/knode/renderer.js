@@ -2425,6 +2425,13 @@ function renderReturnsView() {
           </select></label>
         <label class="field" id="r-to-wrap" style="display:${cfg.mode === "send" ? "block" : "none"}"><span>Send returns to</span>
           <input id="r-to" type="text" class="mono" placeholder="1…" value="${esc(cfg.toAddress)}"></label>
+        <!-- Arming or repointing this destination is the one return setting
+             that can move KOIN somewhere the wallet does not own, so it proves
+             the password even though the wallet is unlocked. Changing the
+             percentage, the caps or compounding never asks. -->
+        <label class="field" id="r-pass-wrap" style="display:${cfg.mode === "send" ? "block" : "none"}">
+          <span>Wallet password <span class="small muted">— needed to arm or change where returns are sent</span></span>
+          <input id="r-pass" type="password" autocomplete="current-password" placeholder="Only required when the destination changes"></label>
         <div class="grid-2">
           <label class="field"><span>Minimum return (${esc(sym())})</span>
             <input id="r-min" type="text" class="mono" value="${esc(cfg.minReturnKoin)}"></label>
@@ -2455,7 +2462,9 @@ function renderReturnsView() {
     $("#r-pct-label").textContent = `${$("#r-pct").value}%`;
   });
   $("#r-mode").addEventListener("change", () => {
-    $("#r-to-wrap").style.display = $("#r-mode").value === "send" ? "block" : "none";
+    const sending = $("#r-mode").value === "send";
+    $("#r-to-wrap").style.display = sending ? "block" : "none";
+    $("#r-pass-wrap").style.display = sending ? "block" : "none";
   });
   $("#r-save").addEventListener("click", onSaveRewards);
   $("#r-now").addEventListener("click", onRunRewardsNow);
@@ -2466,6 +2475,7 @@ async function onSaveRewards() {
   const btn = $("#r-save");
   busyButton(btn, true, "Saving…");
   try {
+    const pass = $("#r-pass") ? $("#r-pass").value : "";
     await call("rewards:configure", {
       enabled: $("#r-enabled").checked,
       pct: Number($("#r-pct").value),
@@ -2474,7 +2484,11 @@ async function onSaveRewards() {
       minReturnKoin: $("#r-min").value.trim(),
       maxReturnKoin: $("#r-max").value.trim() || "0",
       pollMinutes: Number($("#r-poll").value),
+      // Core decides whether this is needed; it is never stored, and it is
+      // cleared here either way rather than left sitting in the field.
+      password: pass,
     });
+    if ($("#r-pass")) $("#r-pass").value = "";
     toast("Return settings saved", "good");
     refreshRewards();
   } catch (e) {

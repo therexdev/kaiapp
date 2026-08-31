@@ -1,4 +1,4 @@
-import json, sys, urllib.request, datetime
+import json, sys, urllib.request, urllib.error, datetime
 
 B = "https://koinosai.com"
 def get(p, raw=False):
@@ -40,6 +40,38 @@ relay = h.get("relay")
 check(isinstance(relay, dict), "device relay mounted", str(relay))
 if isinstance(relay, dict):
     print(f"STATE relay tunnels={relay.get('tunnels')} pollers={relay.get('pollers')} jobs={relay.get('jobs')}")
+
+"""
+Privileged scheduler routes must refuse an unauthenticated caller.
+
+FIND-CFG-001: these used to read `if (secret && header !== secret) refuse`,
+which refuses nobody when KAI_OPERATOR_SECRET is unset — so a deploy that
+forgot the variable published epoch closing, package revocation and job
+injection to the internet while looking completely healthy from out here.
+The code now fails closed, but "is the secret actually set on the box" is a
+question about the DEPLOY, not the code, and the only honest way to answer it
+is to knock without one and see what happens.
+
+401 = the secret is set and this call did not have it. 503 = fixed code with
+no secret configured, so the routes are disabled: safe, but the operator's own
+tooling will not work either. 200 = the pre-fix fail-open is live, which is an
+open door and the reason this check exists.
+"""
+try:
+    req = urllib.request.Request(B + "/scheduler/operator/epochs")
+    with urllib.request.urlopen(req, timeout=20) as r:
+        op_status = r.status
+except urllib.error.HTTPError as e:
+    op_status = e.code
+except Exception as e:  # network trouble is not evidence either way
+    op_status = None
+if op_status is None:
+    warn(False, "operator routes: could not be reached to check")
+else:
+    check(op_status != 200, "privileged routes refuse an unauthenticated caller", f"HTTP {op_status}")
+    warn(op_status != 503, "an operator secret is configured on the box",
+         "HTTP 503 — routes are closed but KAI_OPERATOR_SECRET is unset")
+    print(f"STATE operator_routes_unauthed=HTTP {op_status}")
 
 _, _, s = get("/scheduler/network/status")
 ws = s.get("workers", [])
