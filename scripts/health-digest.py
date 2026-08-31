@@ -93,6 +93,13 @@ ages = [(w["address"], w.get("reputation", {}).get("ageDays")) for w in ws]
 check(all(a is not None and a > 0 for _, a in ages), "ageDays accumulating on ALL workers",
       " ".join(f"{a}:{d}" for a, d in ages))
 check(s.get("queueDepth", 0) < 50, "queue not backed up", f"queue={s.get('queueDepth')} pending={s.get('pendingJobs')}")
+# Which classes a paying caller can actually BUY right now. A network that
+# drifts down to one servable class still passes every other line here —
+# workers online, perf populated, queue empty — because those count machines,
+# not menu. Print the menu, and fail if it empties out.
+mods = s.get("models", [])
+check(len(mods) > 0, "network advertises a servable class", f"{len(mods)} classes")
+print("STATE models=%s" % " ".join(f"{m.get('model')}x{m.get('providers')}" for m in mods))
 print("STATE instance=%s epoch_jobs=%s" % (s.get("instance"), [w.get("jobsThisEpoch") for w in ws]))
 print("STATE perf_jobs=%s" % [(w.get("perf") or {}).get("jobs") for w in ws])
 print("STATE ageDays=%s" % [d for _, d in ages])
