@@ -127,3 +127,39 @@ test("a package without a pinned sha256 refuses to download (fail closed)", asyn
   });
   await assert.rejects(() => mm.ensurePackage("t@1"), /no pinned sha256/);
 });
+
+/*
+ * Every alias in the catalog names the model it actually is — except the
+ * three Koinos-branded ones, which for a while did not. The cost of that
+ * showed up as the owner asking "do we even have Qwen 2.5 7B?" about a model
+ * that had been shipping as Koinos Smart the whole time. If the person who
+ * built it cannot tell, nobody choosing what to download can either.
+ */
+test("the Koinos-branded aliases say which model they are", () => {
+  const catalog = require("../models/catalog.json");
+  const expected = {
+    "koinos-fast": /Qwen 2\.5 1\.5B/,
+    "koinos-balanced": /Llama 3\.2 3B/,
+    "koinos-smart": /Qwen 2\.5 7B/,
+  };
+  for (const [alias, namePattern] of Object.entries(expected)) {
+    const entry = catalog.aliases[alias];
+    assert.ok(entry, `${alias} is missing from the catalog`);
+    assert.match(entry.blurb, namePattern,
+      `${alias} ("${entry.label}") must name the model it runs, or it cannot be found by that name`);
+  }
+});
+
+test("no alias claims to be the biggest, and every one has a size", () => {
+  const catalog = require("../models/catalog.json");
+  for (const [alias, entry] of Object.entries(catalog.aliases)) {
+    if (entry.dev) continue;
+    assert.ok(entry.blurb, `${alias} has no blurb`);
+    // Superlatives go stale the moment a bigger model lands — "the biggest
+    // brain here" outlived six larger models before anyone noticed.
+    assert.ok(!/biggest (brain|model) here/i.test(entry.blurb),
+      `${alias} claims to be the biggest; that ages badly — describe it instead`);
+    assert.match(entry.blurb, /·\s*[\d.]+\s*GB/,
+      `${alias} should tell you the download size`);
+  }
+});

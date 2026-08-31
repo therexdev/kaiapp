@@ -4,19 +4,19 @@
   "aliases": {
     "koinos-fast": {
       "label": "Koinos Fast",
-      "blurb": "Quick answers on any machine · 1 GB",
+      "blurb": "Qwen 2.5 1.5B — quick answers on any machine · 1 GB",
       "package": "qwen2.5-1.5b-instruct-q4_k_m@1",
       "minRamGb": 3
     },
     "koinos-balanced": {
       "label": "Koinos Balanced",
-      "blurb": "Noticeably smarter, still CPU-friendly · 2 GB",
+      "blurb": "Llama 3.2 3B — noticeably smarter, still CPU-friendly · 2 GB",
       "package": "llama-3.2-3b-instruct-q4_k_m@1",
       "minRamGb": 8
     },
     "koinos-smart": {
       "label": "Koinos Smart",
-      "blurb": "Best local quality — wants a GPU or 16 GB RAM · 4.7 GB",
+      "blurb": "Qwen 2.5 7B — best local quality, wants a GPU or 16 GB RAM · 4.7 GB",
       "package": "qwen2.5-7b-instruct-q4_k_m@1",
       "minRamGb": 12
     },
