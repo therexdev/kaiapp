@@ -70,7 +70,10 @@ if op_status is None:
 else:
     check(op_status != 200, "privileged routes refuse an unauthenticated caller", f"HTTP {op_status}")
     warn(op_status != 503, "an operator secret is configured on the box",
-         "HTTP 503 — routes are closed but KAI_OPERATOR_SECRET is unset")
+         f"HTTP {op_status} — the secret is set and this call did not have it"
+         if op_status != 503 else
+         "HTTP 503 — the routes fail closed, but KAI_OPERATOR_SECRET is unset "
+         "so the operator's own tooling cannot reach them either")
     print(f"STATE operator_routes_unauthed=HTTP {op_status}")
 
 _, _, s = get("/scheduler/network/status")
