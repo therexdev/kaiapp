@@ -30,6 +30,7 @@
     gh: null,
     browseFor: "project", // "project" | "clone"
     browsePath: "",
+    browseSeq: 0,
     allTools: [],
     maxTools: 8,
     toolsByProject: {}, // projectId -> [tool names] — opt-in, per project
@@ -355,8 +356,13 @@
   // ------------------------------------------------------------- browsing
 
   async function browse(dir) {
+    const seq = ++kc.browseSeq;
     try {
       const j = await api("/core/code/browse", { method: "POST", body: JSON.stringify({ dir }) });
+      // A person can paste a path while the initial directory request is
+      // still in flight. Never let that older response replace the newer
+      // selection when the requests complete out of order.
+      if (seq !== kc.browseSeq) return;
       kc.browsePath = j.path || "";
       $("kc-browse-path").value = kc.browsePath;
       $("kc-browse-here").textContent = kc.browsePath ? `Selected: ${kc.browsePath}` : "Pick a starting point";
@@ -386,11 +392,12 @@
       }
       startError("");
     } catch (e) {
-      startError(e.message);
+      if (seq === kc.browseSeq) startError(e.message);
     }
   }
 
   $("btn-kc-browse-go").addEventListener("click", () => browse($("kc-browse-path").value.trim()));
+  $("kc-browse-path").addEventListener("input", () => { kc.browseSeq += 1; });
   $("kc-browse-path").addEventListener("keydown", (e) => {
     if (e.key === "Enter") browse($("kc-browse-path").value.trim());
   });
