@@ -119,6 +119,15 @@ elif enforced:
 else:
     warn(unsigned == 0, "every worker proves the address it is paid as",
          f"{unsigned} of {s.get('workersOnline')} still unsigned — shadow mode, arm KAI_WORKER_PROOF_ENFORCE once this is 0")
+# WHICH nodes, not just how many. The count decides when to arm enforcement;
+# the addresses decide who to go and ask to update, and that is the action the
+# warn exists to prompt. Derived from the same rule the counter uses, and if
+# the two disagree that is itself worth seeing rather than papering over.
+named = [w["address"] for w in ws if (w.get("proof") or "unsigned") != "signed"]
+if unsigned:
+    print("STATE worker_proof_unsigned=%s%s" % (
+        " ".join(named) or "NAMES UNAVAILABLE (no per-worker proof field)",
+        "" if len(named) == unsigned else f"  [!] roster names {len(named)}, counter says {unsigned}"))
 print(f"STATE worker_proof enforced={enforced} unsigned={unsigned}")
 print("STATE instance=%s epoch_jobs=%s" % (s.get("instance"), [w.get("jobsThisEpoch") for w in ws]))
 print("STATE perf_jobs=%s" % [(w.get("perf") or {}).get("jobs") for w in ws])
