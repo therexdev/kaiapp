@@ -1050,3 +1050,10 @@ button.small:disabled { opacity: 0.5; cursor: default; }
 .budget-edit input { max-width: 220px; }
 
 .kc-cmd-hints { margin: 0 20px; max-height: 180px; }
+
+/* Account link screen. These two were inline style attributes, which this
+   window's CSP (style-src 'self') drops silently — the pairing code was
+   rendering at body size with no letter spacing, which is the opposite of
+   what a code read aloud to another device needs. */
+#account-code { font-size: 24px; letter-spacing: 4px; margin: 6px 0; }
+#account-grant-cap { max-width: 110px; }
