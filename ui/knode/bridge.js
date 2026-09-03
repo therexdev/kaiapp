@@ -30,6 +30,11 @@
  *      the default pre-filled — before quick sync downloads anything, and can
  *      be moved to another drive afterwards. Both are added from this file,
  *      so renderer.js stays byte-identical to the app it came from.
+ *   5. RECEIVE BY QR. Every address on these screens can be shown as a QR
+ *      code, because the realistic way to fund a node is from a phone wallet
+ *      or an exchange app, and neither can paste from this machine's
+ *      clipboard. Retyping a 42-character address by hand is the one mistake
+ *      here that cannot be undone.
  *
  * It also adapts the three Electron-only util channels (clipboard, external
  * links, folder opening) and lets the surrounding Koinos AI sidebar drive
@@ -579,6 +584,167 @@
     attach: attachChangeButton,
     askBeforeQuickSync: maybeAskBeforeQuickSync,
   };
+
+  // ---- 5. receive by QR ----
+  /*
+   * The addresses on the Wallet and Fund screens are copyable, which serves a
+   * desktop wallet and nothing else. Money arrives at a node from a phone
+   * wallet or an exchange app, and neither of those can reach this machine's
+   * clipboard — so today the only route is reading 42 characters across and
+   * typing them in, which is both miserable and the one error on these
+   * screens that burns real funds with no way back.
+   *
+   * Each target names the element it reads the address FROM rather than being
+   * handed a value. That is deliberate: it makes it impossible for the code
+   * on screen to encode anything other than the text printed beside it, even
+   * if a future refresh repaints one and not the other.
+   */
+  var QR_TARGETS = [
+    {
+      id: "kai-qr-koin",
+      afterButton: "w-copy",
+      addressFrom: function () {
+        var btn = document.getElementById("w-copy");
+        var row = btn && btn.parentNode;
+        return row && row.querySelector(".addr");
+      },
+      title: "Receive",
+      caption: "Scan to send KOIN or VHP to this node",
+      warning: "This is a <b>Koinos</b> address. Only KOIN or VHP should be sent here — " +
+               "ETH or USDT sent to it will be lost.",
+    },
+    {
+      id: "kai-qr-eth",
+      afterButton: "w-eth-copy",
+      addressFrom: function () { return document.getElementById("w-eth-addr"); },
+      title: "Receive ETH or USDT",
+      caption: "Scan to send ETH or USDT to this node's funding address",
+      warning: "Send only <b>ETH or USDT on Ethereum Mainnet</b>. " +
+               "Other networks or other tokens may be lost.",
+    },
+    {
+      id: "kai-qr-fund",
+      afterButton: "fund-copy",
+      addressFrom: function () {
+        var wrap = document.getElementById("fund-addr-wrap");
+        return wrap && wrap.querySelector(".mono");
+      },
+      title: "Fund this node",
+      caption: "Scan to send ETH from a phone wallet or an exchange",
+      warning: "Send only <b>ETH on Ethereum Mainnet</b> here. " +
+               "Funds on other networks or other tokens may be lost.",
+    },
+  ];
+
+  /** Is this actually an address, or the renderer's placeholder? */
+  function usableAddress(node) {
+    var text = node && (node.textContent || "").trim();
+    if (!text || text.length < 8) return null;
+    if (text.charAt(0) === "(" || text.indexOf("\u2026") === 0) return null; // "(unavailable)", "…"
+    return text;
+  }
+
+  function showQr(target) {
+    var address = usableAddress(target.addressFrom());
+    if (!address) {
+      if (window.toast) window.toast("No address to show yet", "bad");
+      return;
+    }
+    var art;
+    try {
+      // Level M recovers ~15% — the usual choice for an address on a screen.
+      // Enough for a phone camera held at an angle, without pushing the module
+      // count so high that the code renders too fine to read in a small window.
+      art = window.KQR.svg(window.KQR.encode(address, { ec: "M" }), { scale: 6, quiet: 4 });
+    } catch (e) {
+      if (window.toast) window.toast("Could not render a QR code: " + (e.message || e), "bad");
+      return;
+    }
+
+    var m = kaiModal(target.title);
+    if (!m) return;
+
+    var artWrap = el("div");
+    artWrap.style.display = "flex";
+    artWrap.style.justifyContent = "center";
+    artWrap.style.padding = "14px 0 4px";
+    artWrap.innerHTML = art;
+    // The code is drawn on its own white ground: scanners read dark-on-light
+    // and every surface around it in this app is dark.
+    var svgEl = artWrap.querySelector("svg");
+    if (svgEl) svgEl.style.borderRadius = "10px";
+    m.body.appendChild(artWrap);
+
+    if (target.caption) {
+      var cap = el("p", "hint", target.caption);
+      cap.style.textAlign = "center";
+      m.body.appendChild(cap);
+    }
+
+    // The address stays on screen under the code. A QR is unreadable to a
+    // human, and anyone who wants to check what they just scanned can compare
+    // the ends of it without closing the sheet.
+    var addr = el("div", "addr", address);
+    addr.style.marginTop = "12px";
+    m.body.appendChild(addr);
+
+    if (target.warning) {
+      var warn = el("div", "banner warn");
+      warn.style.marginTop = "12px";
+      // The surrounding screen carries this caveat too, but a QR invites a
+      // scan from a phone wallet that may be on another chain entirely, so it
+      // has to travel with the code rather than stay on the page behind it.
+      warn.innerHTML = target.warning;
+      m.body.appendChild(warn);
+    }
+
+    var copy = el("button", "btn", "Copy address");
+    copy.addEventListener("click", function () {
+      // invoke() resolves {ok:false} when the clipboard write is refused
+      // rather than rejecting, so saying "copied" unconditionally would be a
+      // lie exactly when the user needs to know to fall back to the QR.
+      window.koinos.invoke("util:copy", { text: address }).then(function (res) {
+        if (!window.toast) return;
+        if (res && res.ok) window.toast("Address copied", "good");
+        else window.toast("Could not copy — scan the code instead", "bad");
+      });
+    });
+    var done = el("button", "btn primary", "Done");
+    done.addEventListener("click", m.close);
+    m.actions.appendChild(copy);
+    m.actions.appendChild(done);
+  }
+
+  /** Put a QR button beside every copy button that has an address next to it. */
+  function attachQrButtons() {
+    if (!window.KQR) return; // qr.js absent: leave the screens exactly as they were
+    QR_TARGETS.forEach(function (target) {
+      // Already attached. This is not just tidiness: the observer below fires
+      // on our own insertion, so without this the two feed each other and the
+      // page wedges rather than merely growing a second button.
+      if (document.getElementById(target.id)) return;
+      var anchor = document.getElementById(target.afterButton);
+      if (!anchor || !anchor.parentNode) return;           // that view is not painted
+      var btn = el("button", "btn ghost", "QR Code");
+      btn.id = target.id;
+      btn.addEventListener("click", function () { showQr(target); });
+      anchor.parentNode.insertBefore(btn, anchor.nextSibling);
+    });
+  }
+
+  /*
+   * The renderer repaints whole views from innerHTML — on unlock, on every
+   * fund refresh — so the buttons have to be re-attached rather than added
+   * once. Watching the DOM covers every repaint path without this file having
+   * to know which channel caused it. Re-attaching is a no-op when they are
+   * already there, which is what stops this from feeding itself: the insert
+   * is a mutation, and the guard in attachQrButtons is what makes it settle.
+   */
+  if (typeof MutationObserver === "function") {
+    new MutationObserver(function () { attachQrButtons(); })
+      .observe(document.documentElement, { childList: true, subtree: true });
+  }
+  document.addEventListener("DOMContentLoaded", attachQrButtons);
 
   // ---- embedded in Koinos AI: its sidebar drives the views ----
   // The host hides this page's own sidebar (the menus live in Koinos AI's,
