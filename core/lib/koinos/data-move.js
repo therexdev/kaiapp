@@ -49,14 +49,52 @@ const { pipeline } = require("stream/promises");
 // makes an interrupted move recognisable as debris rather than data.
 const TEMP_SUFFIX = ".koinos-move-tmp";
 
+/*
+ * Everything below walks the tree asynchronously.
+ *
+ * Core runs in Electron's MAIN process, so a synchronous walk of a 50 GB chain
+ * directory freezes the window — the same class of bug as the v0.43.2 rmSync
+ * freeze, smaller only because this touches metadata rather than bytes. The
+ * copy and checksum passes were already streamed for exactly this reason; the
+ * measuring and checking passes were not, which meant the app locked up before
+ * the dialog that explains the move had even appeared.
+ *
+ * Files within one directory are statted with bounded concurrency rather than
+ * one at a time: a purely sequential await chain is non-blocking but markedly
+ * slower than the sync version it replaces, and this runs while someone is
+ * waiting for a folder-picker dialog to respond. The bound is what keeps a
+ * directory of ten thousand SST files from opening ten thousand handles at
+ * once and hitting EMFILE.
+ */
+const STAT_CONCURRENCY = 32;
+
+/** Run `fn` over `items` with at most `limit` in flight. Order is not kept. */
+async function mapLimit(items, limit, fn) {
+  let next = 0;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) await fn(items[next++]);
+  });
+  await Promise.all(runners);
+}
+
+/** Does `p` exist? Async, and never throws. */
+async function exists(p) {
+  try {
+    await fsp.access(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Bytes free on the filesystem holding `dir`, or null where unsupported. */
-function freeBytes(dir) {
+async function freeBytes(dir) {
   // statfs needs a path that exists; walk up until one does, since the
   // destination is usually about to be created.
   let probe = path.resolve(dir);
   for (let i = 0; i < 40; i++) {
     try {
-      const s = fs.statfsSync(probe);
+      const s = await fsp.statfs(probe);
       return Number(s.bavail) * Number(s.bsize);
     } catch {
       const up = path.dirname(probe);
@@ -68,28 +106,40 @@ function freeBytes(dir) {
 }
 
 /** Total bytes and file count under `dir`. Missing dir reads as empty. */
-function measure(dir) {
+async function measure(dir) {
   let bytes = 0;
   let files = 0;
-  const walk = (d) => {
+  const walk = async (d) => {
     let entries;
     try {
-      entries = fs.readdirSync(d, { withFileTypes: true });
+      entries = await fsp.readdir(d, { withFileTypes: true });
     } catch {
       return; // unreadable subtree: measured as empty, and the copy will report it
     }
+    const dirs = [];
+    const paths = [];
     for (const e of entries) {
       const p = path.join(d, e.name);
-      if (e.isDirectory()) walk(p);
-      else if (e.isFile()) {
-        try {
-          bytes += fs.statSync(p).size;
-          files += 1;
-        } catch { /* vanished mid-walk */ }
-      }
+      if (e.isDirectory()) dirs.push(p);
+      else if (e.isFile()) paths.push(p);
     }
+    await mapLimit(paths, STAT_CONCURRENCY, async (p) => {
+      let st;
+      try {
+        st = await fsp.stat(p);
+      } catch {
+        return; // vanished mid-walk
+      }
+      // Resolve the stat BEFORE touching the accumulators. `bytes += await …`
+      // reads `bytes` first and writes the sum back after the await, so with
+      // several stats in flight each one adds to a value it read before its
+      // neighbours had finished, and the total silently comes out short.
+      bytes += st.size;
+      files += 1;
+    });
+    for (const sub of dirs) await walk(sub);
   };
-  walk(path.resolve(dir));
+  await walk(path.resolve(dir));
   return { bytes, files };
 }
 
@@ -112,9 +162,15 @@ function isInside(parent, child) {
  * Everything that has to be true before a move is worth starting, answered in
  * one place so the UI can explain the "no" instead of just refusing.
  *
- * Returns { ok, reason } — reason is written for a person, not a log.
+ * Resolves { ok, reason } — reason is written for a person, not a log.
+ *
+ * `size` is an already-taken measurement of the source. Callers that need the
+ * size anyway pass theirs in, because inspecting a move used to walk the whole
+ * tree twice — once here for the headroom sum and once in the caller for the
+ * figure it shows the user — which on a 50 GB chain directory is the identical
+ * expensive walk done back to back for one dialog.
  */
-function checkTarget(source, target, { headroomBytes = 512 * 1024 * 1024 } = {}) {
+async function checkTarget(source, target, { headroomBytes = 512 * 1024 * 1024, size = null } = {}) {
   const src = path.resolve(source);
   const dst = path.resolve(target);
 
@@ -128,10 +184,11 @@ function checkTarget(source, target, { headroomBytes = 512 * 1024 * 1024 } = {})
     return { ok: false, reason: "The current data folder is inside that one — pick a different location." };
   }
 
-  if (fs.existsSync(dst)) {
+  const dstExists = await exists(dst);
+  if (dstExists) {
     let entries;
     try {
-      entries = fs.readdirSync(dst);
+      entries = await fsp.readdir(dst);
     } catch (e) {
       return { ok: false, reason: `That folder can't be read (${e.code || e.message}).` };
     }
@@ -141,18 +198,18 @@ function checkTarget(source, target, { headroomBytes = 512 * 1024 * 1024 } = {})
   }
 
   // Writable? Find out now, with a real file, rather than 40 GB in.
-  const probeDir = fs.existsSync(dst) ? dst : path.dirname(dst);
+  const probeDir = dstExists ? dst : path.dirname(dst);
   try {
-    fs.mkdirSync(probeDir, { recursive: true });
+    await fsp.mkdir(probeDir, { recursive: true });
     const probe = path.join(probeDir, `.koinos-write-test-${process.pid}`);
-    fs.writeFileSync(probe, "x");
-    fs.unlinkSync(probe);
+    await fsp.writeFile(probe, "x");
+    await fsp.unlink(probe);
   } catch (e) {
     return { ok: false, reason: `That location can't be written to (${e.code || e.message}).` };
   }
 
-  const need = measure(src).bytes;
-  const free = freeBytes(probeDir);
+  const need = (size || await measure(src)).bytes;
+  const free = await freeBytes(probeDir);
   if (free != null && free < need + headroomBytes) {
     return {
       ok: false,
@@ -302,35 +359,39 @@ async function checksumTree(dst, sums, { onProgress = () => {}, shouldCancel = (
  * file present at an identical size catches all of those. It is stated plainly
  * rather than described as "verified" so nobody mistakes it for a checksum.
  */
-function verifyTree(src, dst) {
+async function verifyTree(src, dst) {
   const missing = [];
   const wrongSize = [];
   let checked = 0;
 
-  const walk = (from, to) => {
-    const entries = fs.readdirSync(from, { withFileTypes: true });
+  const walk = async (from, to) => {
+    const entries = await fsp.readdir(from, { withFileTypes: true });
+    const dirs = [];
+    const files = [];
     for (const e of entries) {
-      const a = path.join(from, e.name);
-      const b = path.join(to, e.name);
-      if (e.isDirectory()) {
-        if (!fs.existsSync(b)) { missing.push(b); continue; }
-        walk(a, b);
-      } else if (e.isFile()) {
-        checked += 1;
-        let sb;
-        try {
-          sb = fs.statSync(b);
-        } catch {
-          missing.push(b);
-          continue;
-        }
-        const sa = fs.statSync(a);
-        if (sa.size !== sb.size) wrongSize.push({ path: b, expected: sa.size, got: sb.size });
+      const pair = { a: path.join(from, e.name), b: path.join(to, e.name) };
+      if (e.isDirectory()) dirs.push(pair);
+      else if (e.isFile()) files.push(pair);
+    }
+    checked += files.length;
+    await mapLimit(files, STAT_CONCURRENCY, async ({ a, b }) => {
+      let sb;
+      try {
+        sb = await fsp.stat(b);
+      } catch {
+        missing.push(b);
+        return;
       }
+      const sa = await fsp.stat(a);
+      if (sa.size !== sb.size) wrongSize.push({ path: b, expected: sa.size, got: sb.size });
+    });
+    for (const { a, b } of dirs) {
+      if (!(await exists(b))) { missing.push(b); continue; }
+      await walk(a, b);
     }
   };
 
-  walk(path.resolve(src), path.resolve(dst));
+  await walk(path.resolve(src), path.resolve(dst));
   return { ok: missing.length === 0 && wrongSize.length === 0, checked, missing, wrongSize };
 }
 

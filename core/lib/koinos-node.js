@@ -371,38 +371,38 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
    * moving tens of gigabytes, which is a real operation with a real chance of
    * going wrong; node:moveDataDir is the one that does it properly.
    */
-  handle("node:dataDir", () => {
+  handle("node:dataDir", async () => {
     const current = path.resolve(nodeMgr.dataRoot);
-    const size = dataMove.measure(current);
+    const size = await dataMove.measure(current);
     return {
       path: current,
       defaultPath: defaultNodeData ? path.resolve(defaultNodeData) : null,
       isDefault: defaultNodeData ? path.resolve(defaultNodeData) === current : true,
       sizeBytes: size.bytes,
       fileCount: size.files,
-      freeBytes: dataMove.freeBytes(current),
+      freeBytes: await dataMove.freeBytes(current),
       // Empty means nothing has been downloaded yet, so a change is free.
       hasData: size.files > 0,
       move: nodeMgr.moveStatus(),
     };
   });
 
-  handle("node:inspectDataDir", ({ path: target }) => {
+  handle("node:inspectDataDir", async ({ path: target }) => {
     if (!target) throw new Error("Pick a folder first");
     return nodeMgr.inspectMove(String(target));
   });
 
   /** Point at a new folder WITHOUT moving anything. Only legal while there is
    *  nothing to move — otherwise it would silently orphan a synced chain. */
-  handle("node:setDataDir", ({ path: target }) => {
+  handle("node:setDataDir", async ({ path: target }) => {
     if (!target) throw new Error("Pick a folder first");
     const next = path.resolve(String(target));
     const current = path.resolve(nodeMgr.dataRoot);
     if (next === current) return { path: current, changed: false };
-    if (dataMove.measure(current).files > 0) {
+    if ((await dataMove.measure(current)).files > 0) {
       throw new Error("There is already chain data here — use Move instead, so it comes with you.");
     }
-    const check = dataMove.checkTarget(current, next);
+    const check = await dataMove.checkTarget(current, next);
     if (!check.ok) throw new Error(check.reason);
     fs.mkdirSync(next, { recursive: true });
     settings.set("node.dataDir", next);

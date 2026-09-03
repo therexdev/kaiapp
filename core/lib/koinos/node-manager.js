@@ -449,17 +449,19 @@ class NodeManager {
   }
 
   /** What a move would involve, so the UI can ask before it commits. */
-  inspectMove(targetRoot) {
+  async inspectMove(targetRoot) {
     const source = path.resolve(this.dataRoot);
     const target = path.resolve(targetRoot);
-    const check = dataMove.checkTarget(source, target);
-    const size = dataMove.measure(source);
+    // Measured once and handed to checkTarget, which would otherwise walk the
+    // same tree again for its headroom sum.
+    const size = await dataMove.measure(source);
+    const check = await dataMove.checkTarget(source, target, { size });
     return {
       source,
       target,
       sizeBytes: size.bytes,
       fileCount: size.files,
-      targetFreeBytes: dataMove.freeBytes(fs.existsSync(target) ? target : path.dirname(target)),
+      targetFreeBytes: await dataMove.freeBytes(fs.existsSync(target) ? target : path.dirname(target)),
       ...check,
     };
   }
@@ -479,10 +481,10 @@ class NodeManager {
 
     const source = path.resolve(this.dataRoot);
     const target = path.resolve(targetRoot);
-    const pre = dataMove.checkTarget(source, target);
+    const size = await dataMove.measure(source);
+    const pre = await dataMove.checkTarget(source, target, { size });
     if (!pre.ok) throw new Error(pre.reason);
 
-    const size = dataMove.measure(source);
     const temp = target + dataMove.TEMP_SUFFIX;
 
     const m = {
@@ -534,7 +536,7 @@ class NodeManager {
       //    first: everything present, at the right length.
       m.phase = "verifying";
       emit();
-      const v = dataMove.verifyTree(source, temp);
+      const v = await dataMove.verifyTree(source, temp);
       if (!v.ok) {
         const detail = v.missing.length
           ? `${v.missing.length} file(s) missing`

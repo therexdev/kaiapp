@@ -57,24 +57,24 @@ async function pageWith(mgrState) {
 
   // The Core side, live, in this process.
   const handlers = {
-    "node:dataDir": () => {
+    "node:dataDir": async () => {
       const current = path.resolve(mgrState.mgr.dataRoot);
-      const size = dataMove.measure(current);
+      const size = await dataMove.measure(current);
       return {
         path: current,
         defaultPath: mgrState.defaultPath,
         isDefault: path.resolve(mgrState.defaultPath) === current,
         sizeBytes: size.bytes,
         fileCount: size.files,
-        freeBytes: dataMove.freeBytes(current),
+        freeBytes: await dataMove.freeBytes(current),
         hasData: size.files > 0,
         move: mgrState.mgr.moveStatus(),
       };
     },
     "node:inspectDataDir": ({ path: t }) => mgrState.mgr.inspectMove(String(t)),
-    "node:setDataDir": ({ path: t }) => {
+    "node:setDataDir": async ({ path: t }) => {
       const next = path.resolve(String(t));
-      const check = dataMove.checkTarget(path.resolve(mgrState.mgr.dataRoot), next);
+      const check = await dataMove.checkTarget(path.resolve(mgrState.mgr.dataRoot), next);
       if (!check.ok) throw new Error(check.reason);
       fs.mkdirSync(next, { recursive: true });
       mgrState.mgr.dataRoot = next;
@@ -184,7 +184,7 @@ test("confirming a move actually moves the bytes and repoints the node", async (
   const dstParent = tmp("dst");
   const dst = path.join(dstParent, "koinos-data");
   seedChain(src);
-  const before = dataMove.measure(src);
+  const before = await dataMove.measure(src);
 
   const state = { mgr: new NodeManager({ templateRoot: "/none", dataRoot: src, onEvent: () => {} }), defaultPath: src, persisted: null };
   const { browser, page } = await pageWith(state);
@@ -217,7 +217,7 @@ test("confirming a move actually moves the bytes and repoints the node", async (
   assert.equal(state.mgr.moveStatus().phase, "done", "the move reports itself finished");
   assert.equal(state.persisted, dst, "the new location was persisted");
   assert.equal(fs.existsSync(src), false, "the original is gone, once proven");
-  const after = dataMove.measure(dst);
+  const after = await dataMove.measure(dst);
   assert.equal(after.files, before.files, "every file arrived");
   assert.equal(after.bytes, before.bytes, "every byte arrived");
 });
