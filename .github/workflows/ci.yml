@@ -242,15 +242,24 @@ jobs:
       #
       # Both facts belong in the release notes, not in a silent difference
       # between platforms. Revisit when the repository has a Developer ID.
+      # This repo does NOT release by pushing a git tag: a release is a commit
+      # whose message carries [release], and electron-builder creates the
+      # v<package.json version> release itself. The contributed step gated on
+      # `refs/tags/v` and used $GITHUB_REF_NAME as the tag, so on v0.54.0 it
+      # skipped silently — every job green, Windows and Linux on the release,
+      # and no Mac download at all. Derive the tag from package.json, the way
+      # the provenance job already does, and trigger on the same condition the
+      # other build jobs use.
       - name: Attach the macOS assets to the GitHub release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || contains(github.event.head_commit.message, '[release]')
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          TAG="v$(node -p "require('./package.json').version")"
           if [ "$MAC_RELEASE_READY" = "true" ]; then
-            echo "Publishing signed + notarized macOS assets, updater metadata included."
-            gh release upload "$GITHUB_REF_NAME" dist/*.dmg dist/*.zip dist/*.blockmap dist/latest-mac.yml --clobber
+            echo "Publishing signed + notarized macOS assets to $TAG, updater metadata included."
+            gh release upload "$TAG" dist/*.dmg dist/*.zip dist/*.blockmap dist/latest-mac.yml --clobber
           else
             # latest-mac.yml is deliberately withheld. It is what tells an
             # installed app an update is available, and an unsigned bundle
@@ -258,7 +267,7 @@ jobs:
             # an update that fails halfway rather than one they never saw.
             echo "Publishing UNSIGNED macOS assets (no Developer ID on this repository)."
             echo "Gatekeeper will require right-click -> Open on first launch, and in-place updates are unavailable."
-            gh release upload "$GITHUB_REF_NAME" dist/*.dmg dist/*.zip --clobber
+            gh release upload "$TAG" dist/*.dmg dist/*.zip --clobber
           fi
 
   provenance:
