@@ -48,8 +48,35 @@ async function balanceOf(provider, contractId, owner) {
   }
 }
 
+/*
+ * A watchdog, because koilib's provider has no timeout of its own.
+ *
+ * On 2026-09-04 this script hung on a public RPC call that normally answers in
+ * milliseconds, and sat there. With no bound it would have held its runner for
+ * GitHub's default six hours — but the quiet damage is worse than the waste: a
+ * run that never finishes never becomes a COMPLETED run, so the next check
+ * looks for the latest completed one, finds the previous window's, and reads
+ * balances four hours stale as though they were current. The probe that exists
+ * to notice a stall would itself stall, silently, and still look fine.
+ *
+ * So: fail, say which call was outstanding, and exit non-zero. A red job is a
+ * fact somebody acts on. A hanging job is a fact nobody sees.
+ */
+const DEADLINE_MS = Number(process.env.KOINOS_PROBE_TIMEOUT_MS || 90_000);
+let currentStep = "starting up";
+const watchdog = setTimeout(() => {
+  console.error(
+    `\nTIMED OUT after ${DEADLINE_MS / 1000}s while: ${currentStep}\n` +
+    `RPC ${RPC} did not answer. The wallet reading for this window is MISSING — ` +
+    `do not treat the previous window's numbers as current.`
+  );
+  process.exit(1);
+}, DEADLINE_MS);
+watchdog.unref?.();
+
 (async () => {
   const provider = new Provider([RPC]);
+  currentStep = "fetching head info";
 
   const head = await provider.getHeadInfo().catch((e) => ({ error: String(e.message) }));
   console.log(`RPC        ${RPC}`);
@@ -78,14 +105,33 @@ async function balanceOf(provider, contractId, owner) {
   // 2. The balance, asked of EVERY VHP contract in play. If these disagree,
   //    that is the entire bug and it is not a rounding error.
   const vhpCandidates = [...new Set([resolved.vhp, FALLBACK.vhp].filter((x) => x && !String(x).startsWith("ERR")))];
+  currentStep = "reading the VHP balance";
+  /*
+   * A failed balance read must NOT pass for a successful one.
+   *
+   * balanceOf swallows its error and hands back an "ERR …" string, which
+   * sats() then renders as NaN — so an unreachable RPC used to print
+   * "NaN VHP" and exit ZERO. The job goes green, the run completes, and the
+   * only thing standing between that and a false all-clear is somebody
+   * reading the word NaN in a log. These two numbers are the entire point of
+   * the probe; if either is not a number, the probe did not do its job.
+   */
+  const failures = [];
   console.log("VHP BALANCE  (per contract asked)");
+  let vhpOk = false;
   for (const id of vhpCandidates) {
+    currentStep = `reading the VHP balance from ${id}`;
     const b = await balanceOf(provider, id, ADDRESS);
     console.log(`  ${id}  ${sats(b)} VHP   (raw ${b})`);
+    if (!String(b).startsWith("ERR")) vhpOk = true;
   }
+  if (!vhpOk) failures.push("VHP balance unreadable from every candidate contract");
+
   const koinId = String(resolved.koin || "").startsWith("ERR") ? FALLBACK.koin : resolved.koin;
+  currentStep = "reading the KOIN balance";
   const kb = await balanceOf(provider, koinId, ADDRESS);
   console.log(`KOIN BALANCE ${koinId}  ${sats(kb)} KOIN   (raw ${kb})`);
+  if (String(kb).startsWith("ERR")) failures.push("KOIN balance unreadable");
   console.log("");
 
   // 3. What the PoB contract itself thinks the network looks like — the
@@ -105,7 +151,20 @@ async function balanceOf(provider, contractId, owner) {
   } catch (e) {
     console.log("POB ERR", String(e.message || e).slice(0, 160));
   }
-})().catch((e) => {
-  console.error("PROBE FAILED", e);
-  process.exit(1);
-});
+
+  if (failures.length) {
+    console.error(
+      `\nPROBE INCOMPLETE — ${failures.join("; ")}. ` +
+      `The wallet reading for this window is MISSING; do not treat the previous ` +
+      `window's numbers as current.`
+    );
+    process.exitCode = 1;
+  }
+})().then(
+  () => clearTimeout(watchdog),
+  (e) => {
+    clearTimeout(watchdog);
+    console.error("PROBE FAILED", e);
+    process.exit(1);
+  }
+);

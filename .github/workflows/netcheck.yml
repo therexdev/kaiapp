@@ -177,6 +177,15 @@ jobs:
   vhpcheck:
     if: contains(github.event.head_commit.message, '[vhpcheck:')
     runs-on: ubuntu-latest
+    # A hung probe is worse than a failed one. This job reads a wallet over a
+    # public RPC with no timeout of its own, and on 2026-09-04 03:41Z it stuck
+    # on a step that normally takes ten seconds. Left alone it would have held
+    # a runner for GitHub's default six hours — but the real damage is that an
+    # unfinished run is invisible: the next check looks for the newest
+    # COMPLETED netcheck run, finds the previous window's, and reads balances
+    # that are four hours stale as if they were current. A silent stall in the
+    # thing that watches for silent stalls. Fail fast and loudly instead.
+    timeout-minutes: 6
     steps:
       - uses: actions/checkout@v4
       - name: VHP truth probe
