@@ -178,6 +178,27 @@ jobs:
       - name: SBOM (CycloneDX)
         run: npm sbom --sbom-format cyclonedx > artifacts/koinos-ai-sbom.cdx.json
 
+      # FIND-AI-001. A release could say nothing about what AI behaviour it had
+      # been checked against, and "we ran the bench" is a claim about a moving
+      # target unless the questions are pinned — 8/10 means nothing without
+      # knowing which ten.
+      #
+      # This records the suite's identity, not a score. Scoring needs model
+      # inference and this runner has neither a GPU nor weights, so the numbers
+      # are produced on a machine that has both; what ships here is the
+      # manifest that lets a score be tied back to the exact cases that
+      # produced it. A test pins the hash, so a case cannot change without a
+      # deliberate version bump — which is what makes the manifest worth
+      # anything.
+      - name: AI evaluation manifest
+        run: |
+          node -e "
+            const { suiteManifest } = require('./core/lib/bench.js');
+            const m = { ...suiteManifest(), appVersion: require('./package.json').version, commit: process.env.GITHUB_SHA };
+            require('fs').writeFileSync('artifacts/koinos-ai-eval-suite.json', JSON.stringify(m, null, 2) + '\n');
+            console.log('eval suite v' + m.suiteVersion + ':', m.suites.map(s => s.id + '@' + s.sha256.slice(0, 12)).join(' '));
+          "
+
       # Binds each artifact's digest to this repo, this commit and this
       # workflow run. Verifiable by anyone with:
       #   gh attestation verify <file> --repo therexdev/kaiapp
@@ -196,5 +217,6 @@ jobs:
           gh release upload "$TAG" \
             artifacts/SHA256SUMS \
             artifacts/koinos-ai-sbom.cdx.json \
+            artifacts/koinos-ai-eval-suite.json \
             --clobber --repo "$GITHUB_REPOSITORY"
-          echo "Attached SHA256SUMS and the SBOM to $TAG"
+          echo "Attached SHA256SUMS, the SBOM and the eval manifest to $TAG"

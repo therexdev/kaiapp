@@ -23,6 +23,29 @@ const path = require("path");
 
 const OUTPUT_KEEP = 300; // chars of raw model output kept per result row
 
+/*
+ * The suite's own version, and its identity.
+ *
+ * FIND-AI-001: a release could say nothing about what AI behaviour it had been
+ * checked against. The suite below is the check — but "we ran the bench" is a
+ * claim about a moving target unless the definition itself is pinned, because
+ * a score of 8/10 means nothing without knowing which ten questions.
+ *
+ * SUITE_VERSION is bumped BY HAND when a case changes, and the hash below is
+ * derived from the case definitions so the two cannot drift apart: a test
+ * pins the hash, so editing any prompt or expectation turns CI red until
+ * somebody bumps the version deliberately. That is the point — scores are
+ * only comparable across app versions if silently changing the questions is
+ * made impossible rather than merely discouraged.
+ *
+ * What this does NOT do, and should not be read as doing: it does not run the
+ * models. Scoring needs inference, and CI has no GPU and no model weights, so
+ * the numbers are produced on a machine that has both. What ships with a
+ * release is the manifest — which suite, which version, which hash — so a
+ * score can be tied back to exactly the questions that produced it.
+ */
+const SUITE_VERSION = 1;
+
 const SUITES = [
   {
     id: "core",
@@ -231,4 +254,46 @@ class BenchRunner {
   }
 }
 
-module.exports = { BenchRunner, SUITES, evaluate };
+/**
+ * Stable identity for a suite: the case definitions, canonicalised and hashed.
+ *
+ * Only the parts that decide whether an answer passes go in — id, kind,
+ * prompt, expect, and any team spec. Labels and blurbs are prose for the UI
+ * and are deliberately excluded, so rewording a description does not
+ * invalidate a score that is still measuring the same thing.
+ */
+function suiteHash(suite) {
+  const canonical = suite.cases.map((c) => ({
+    id: c.id,
+    kind: c.kind,
+    prompt: c.prompt ?? null,
+    expect: c.expect ?? null,
+    spec: c.spec ?? null,
+    template: c.template ?? null,
+  }));
+  return require("crypto")
+    .createHash("sha256")
+    .update(JSON.stringify(canonical))
+    .digest("hex");
+}
+
+/**
+ * What a release records about the evaluation it was gated on. Written next
+ * to the SBOM and the checksums, so "this build was checked against these
+ * questions" is answerable later by someone who was not there.
+ */
+function suiteManifest() {
+  return {
+    suiteVersion: SUITE_VERSION,
+    generatedBy: "core/lib/bench.js",
+    suites: SUITES.map((s) => ({
+      id: s.id,
+      label: s.label,
+      caseCount: s.cases.length,
+      cases: s.cases.map((c) => c.id),
+      sha256: suiteHash(s),
+    })),
+  };
+}
+
+module.exports = { BenchRunner, SUITES, evaluate, SUITE_VERSION, suiteHash, suiteManifest };

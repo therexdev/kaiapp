@@ -6,7 +6,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
-const { BenchRunner, SUITES, evaluate } = require("../lib/bench");
+const { BenchRunner, SUITES, evaluate, SUITE_VERSION, suiteHash, suiteManifest } = require("../lib/bench");
 
 /*
  * Bench (task #61, phase B). The model is scripted, so what's pinned here is
@@ -93,4 +93,61 @@ test("the suite definition itself: fixed size, objective checks only, no sensiti
     const tools = c.spec?.tools || [];
     assert.ok(!tools.includes("run_code"), "a benchmark must never be the thing that runs code");
   }
+});
+
+// ------------------------------------------------------- FIND-AI-001: the
+// suite has an identity, so a score can be tied to the questions that made it
+
+test("the suite is hash-pinned: changing a case forces a deliberate version bump", () => {
+  /*
+   * A release that says "8/10 on the core suite" is meaningless unless the ten
+   * questions are known. This pins the hash, so editing any prompt or
+   * expectation turns CI red and the person doing it has to bump
+   * SUITE_VERSION on purpose — which is the difference between a benchmark
+   * and a number that drifts.
+   *
+   * If this fires: decide whether the change is intended. If it is, bump
+   * SUITE_VERSION and update the hash here in the same commit, so the two
+   * always move together. Do NOT update the hash alone.
+   */
+  const core = SUITES.find((s) => s.id === "core");
+  assert.equal(SUITE_VERSION, 1, "bump this deliberately when the cases change");
+  assert.equal(
+    suiteHash(core),
+    "5a9f8f4987f59bb821a554b7cb05461a9e54092ff5ea4a86eaf94e9334000e07",
+    "a case changed — bump SUITE_VERSION and this hash together, or revert the edit"
+  );
+});
+
+test("the hash covers what decides pass/fail, and ignores what does not", () => {
+  // Rewording a UI blurb must not invalidate a score that measures the same
+  // thing; changing what an answer must contain must.
+  const core = SUITES.find((s) => s.id === "core");
+  const before = suiteHash(core);
+
+  const relabelled = { ...core, label: "Something else entirely", blurb: "reworded" };
+  assert.equal(suiteHash(relabelled), before, "prose is not part of the measurement");
+
+  const retuned = {
+    ...core,
+    cases: core.cases.map((c, i) => (i === 0 ? { ...c, expect: { regex: "\\b392\\b" } } : c)),
+  };
+  assert.notEqual(suiteHash(retuned), before, "a changed expectation MUST change the hash");
+
+  const reprompted = {
+    ...core,
+    cases: core.cases.map((c, i) => (i === 0 ? { ...c, prompt: "What is 2 plus 2?" } : c)),
+  };
+  assert.notEqual(suiteHash(reprompted), before, "a changed prompt MUST change the hash");
+});
+
+test("the manifest names every case, so a release records what it was checked against", () => {
+  const m = suiteManifest();
+  assert.equal(m.suiteVersion, SUITE_VERSION);
+  const core = m.suites.find((s) => s.id === "core");
+  assert.equal(core.caseCount, 10);
+  assert.equal(core.cases.length, 10, "every case listed by name, not just counted");
+  assert.match(core.sha256, /^[0-9a-f]{64}$/);
+  // The manifest must be serialisable — it ships as a release artifact.
+  assert.deepEqual(JSON.parse(JSON.stringify(m)), m);
 });

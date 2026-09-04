@@ -245,6 +245,29 @@ test("with no data yet, changing the folder is a setting and says so", async (t)
   await page.click("#kai-dd-confirm");
   await page.waitForFunction(() => !document.getElementById("kai-dd-confirm"), { timeout: UI_WAIT });
 
+  /*
+   * The modal closing is NOT the save landing. bridge.js resolves the folder
+   * dialog first and only then calls node:setDataDir, so "the confirm button
+   * is gone" happens strictly BEFORE the request that this test is about. It
+   * passed anyway for as long as the handler answered within a tick or two;
+   * making checkTarget do real filesystem work (v0.53.1) widened that gap
+   * enough for the assertion to start winning the race, and it began failing
+   * roughly one run in three — intermittently, which is the expensive kind.
+   *
+   * The app's own evidence that the save completed is the toast it raises
+   * from the RPC's `.then`. Waiting for that waits for the actual operation
+   * rather than for a side effect that precedes it. It is still a ceiling: a
+   * toast that never arrives fails the test, just later.
+   */
+  await page.waitForFunction(
+    (want) => {
+      const wrap = document.getElementById("toasts");
+      return !!wrap && Array.from(wrap.children).some((t) => t.textContent.includes(want));
+    },
+    dst,
+    { timeout: UI_WAIT },
+  );
+
   assert.equal(state.persisted, dst, "the choice was saved");
   assert.equal(path.resolve(state.mgr.dataRoot), dst, "and the node points at it");
   assert.equal(state.mgr.moveStatus(), null, "no move was run — there was nothing to move");
