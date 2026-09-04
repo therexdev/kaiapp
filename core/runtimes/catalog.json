@@ -1,5 +1,5 @@
 {
-  "comment": "Inference-engine builds, versioned + sha256-pinned like model packages (\u00a727). PENDING hashes fail closed until pinned: the Pin & Verify workflow (or pin-runtime.js on a networked machine) fills them and CI commits them back after the real E2E passes. binPath is the server binary inside the extracted archive; extras are companion archives extracted into the same directory (CUDA needs the cudart runtime). llama.cpp now publishes Linux tarballs (ubuntu x64/arm64, plain + vulkan) \u2014 pinned below; the provisioner extracts .tar.gz via the system tar. Raspberry Pi / arm64 rides linux-arm64-cpu.",
+  "comment": "Inference-engine builds, versioned + sha256-pinned like model packages (\u00a727). PENDING hashes fail closed until pinned: the Pin & Verify workflow (or pin-runtime.js on a networked machine) fills them and CI commits them back after the real E2E passes. binPath is the server binary inside the extracted archive; extras are companion archives extracted into the same directory (CUDA needs the cudart runtime). llama.cpp publishes Linux and macOS tarballs pinned below; the provisioner extracts .tar.gz via the system tar. Raspberry Pi / arm64 rides linux-arm64-cpu. Apple Silicon uses Metal first and the same official archive with GPU layers disabled as its CPU fallback; the official Intel archive is CPU-only.",
   "llamacpp": {
     "version": "b10423",
     "builds": {
@@ -50,6 +50,24 @@
         "url": "https://github.com/ggml-org/llama.cpp/releases/download/b10423/llama-b10423-bin-ubuntu-vulkan-arm64.tar.gz",
         "sha256": "67d76d0c1d0502a8df26a7d5aced801b64d33b1aa132e92adaf4fd5749c8332e",
         "sizeBytes": 26990350,
+        "binPath": "llama-b10423/llama-server"
+      },
+      "darwin-arm64-metal": {
+        "url": "https://github.com/ggml-org/llama.cpp/releases/download/b10423/llama-b10423-bin-macos-arm64.tar.gz",
+        "sha256": "83e7d54914f33e9dd902a62fcb75ce94c8d7ea7c21511e38375dc88ce22e05a5",
+        "sizeBytes": 11082893,
+        "binPath": "llama-b10423/llama-server"
+      },
+      "darwin-arm64-cpu": {
+        "url": "https://github.com/ggml-org/llama.cpp/releases/download/b10423/llama-b10423-bin-macos-arm64.tar.gz",
+        "sha256": "83e7d54914f33e9dd902a62fcb75ce94c8d7ea7c21511e38375dc88ce22e05a5",
+        "sizeBytes": 11082893,
+        "binPath": "llama-b10423/llama-server"
+      },
+      "darwin-x64-cpu": {
+        "url": "https://github.com/ggml-org/llama.cpp/releases/download/b10423/llama-b10423-bin-macos-x64.tar.gz",
+        "sha256": "499fdfd8729d815afa2b75a32fa45a6c9214e392c21f0ec289ecdd8d5e2182c6",
+        "sizeBytes": 11362759,
         "binPath": "llama-b10423/llama-server"
       }
     }

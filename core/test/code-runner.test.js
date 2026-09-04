@@ -27,6 +27,12 @@ function makeDirs() {
 
 const runner = () => new CodeRunner({ workspaceDir: makeDirs().workspaceDir });
 
+test("run_code: canonicalises a symlinked workspace before building its permission allow-list", () => {
+  const { workspaceDir } = makeDirs();
+  const r = new CodeRunner({ workspaceDir });
+  assert.strictEqual(r.workspaceDir, fs.realpathSync(workspaceDir));
+});
+
 test("run_code: availability probe finds a sandboxing node", () => {
   const r = runner();
   assert.deepStrictEqual(r.availability(), { ok: true });

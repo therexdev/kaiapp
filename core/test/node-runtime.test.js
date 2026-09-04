@@ -22,7 +22,7 @@ const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "kai-node-"));
 test("node runtime: catalog is pinned and installable on the shipping platforms", () => {
   const catalog = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "runtimes", "catalog.json"), "utf8"));
   const builds = catalog.node?.builds || {};
-  for (const key of ["win32-x64-cpu", "linux-x64-cpu", "linux-arm64-cpu", "darwin-arm64-cpu"]) {
+  for (const key of ["win32-x64-cpu", "linux-x64-cpu", "linux-arm64-cpu", "darwin-arm64-cpu", "darwin-x64-cpu"]) {
     assert.ok(builds[key], `${key} present`);
     assert.match(builds[key].sha256, /^[0-9a-f]{64}$/, `${key} hash pinned (fail-closed otherwise)`);
     assert.ok(builds[key].sizeBytes > 1e7, `${key} has a real size for the download prompt`);
@@ -32,6 +32,8 @@ test("node runtime: catalog is pinned and installable on the shipping platforms"
   // posix tarballs nest the binary under bin/.
   assert.strictEqual(builds["win32-x64-cpu"].binPath, "node-v24.19.0-win-x64/node.exe");
   assert.strictEqual(builds["linux-x64-cpu"].binPath, "node-v24.19.0-linux-x64/bin/node");
+  assert.strictEqual(builds["darwin-arm64-cpu"].binPath, "node-v24.19.0-darwin-arm64/bin/node");
+  assert.strictEqual(builds["darwin-x64-cpu"].binPath, "node-v24.19.0-darwin-x64/bin/node");
 });
 
 test("node runtime: status reports availability and a real download size", () => {

@@ -39,6 +39,19 @@ npm run core      # headless: Core + UI on http://127.0.0.1:41100
 npm start         # desktop shell (requires `npm install` for electron)
 ```
 
+Build macOS packages for Apple Silicon and Intel without signing or publishing:
+
+```bash
+npm ci
+npm test
+CSC_IDENTITY_AUTO_DISCOVERY=false npm run dist:mac
+```
+
+This produces updater-compatible DMG and ZIP artifacts. See
+[`docs/MACOS_BUILD.md`](docs/MACOS_BUILD.md) for supported versions, runtime
+behavior, signing/notarization secrets, CI publication gates, and the remaining
+physical Intel validation requirement.
+
 First run on a networked machine: `node core/scripts/pin-model.js smollm2-135m-instruct-q8_0@1 --write`
 to pin the dev model's hash (downloads refuse to run unverified — the catalog hash is the
 package's identity), and put a `llama-server` build at `~/.koinos-ai/runtimes/llamacpp/`

@@ -23,7 +23,10 @@ const NETWORKS = {
     tokenSymbol: "KOIN",
     // Public RPC endpoints tried in order.
     rpcUrls: ["https://api.koinos.io"],
-    localRpcUrl: "http://127.0.0.1:8080",
+    // Match the current koinos/koinos env.example default. 8080 is commonly
+    // occupied by local development servers and caused the packaged Mac node
+    // to stop after its other services had already started.
+    localRpcUrl: "http://127.0.0.1:8085",
     explorer: {
       tx: "https://koinosblocks.com/tx/",
       address: "https://koinosblocks.com/address/",
@@ -37,7 +40,7 @@ const NETWORKS = {
       pob: "159myq5YUhhoVWu3wsHKHiJYKPKGUrGiyv",
     },
     ports: {
-      jsonrpc: 8080,
+      jsonrpc: 8085,
       p2p: 8888,
       amqp: 5672,
       amqpAdmin: 15672,

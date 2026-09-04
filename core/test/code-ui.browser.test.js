@@ -76,6 +76,15 @@ test("code panel: run -> diff card -> approve -> file written -> answer bubble",
     await page.waitForSelector("#btn-kc-pick");
     await page.waitForSelector("#btn-kc-clone");
 
+    // Make the initial directory request finish after the typed destination.
+    // A stale response used to replace the path selected below, making this
+    // flow intermittently hang and reproducing the same race for fast users.
+    await page.route("**/core/code/browse", async (route) => {
+      const dir = JSON.parse(route.request().postData() || "{}").dir;
+      if (!dir) await new Promise((resolve) => setTimeout(resolve, 300));
+      await route.continue();
+    });
+
     /*
      * Choose a folder through the IN-APP browser — the path a served UI takes,
      * and the one a test can drive. (The packaged app calls the native picker

@@ -202,7 +202,7 @@ class RuntimeManager {
       this.activeAlias = null;
     }
 
-    // Escalation ladder (§5: never strand the user): CUDA build when
+    // Escalation ladder (§5: never strand the user): CUDA/Vulkan/Metal when
     // eligible -> CPU build -> external fallback runtime (Ollama) when one
     // is present. Every provisioned binary passes a self-test before boot,
     // so a build this machine can't run fails fast and quietly moves on.
@@ -281,11 +281,12 @@ class RuntimeManager {
 
     const bootLlama = async () => {
       if (!this.provisioner) return boot(null, wantGpu ? 999 : 0);
-      // Engine ladder by capability: CUDA (NVIDIA), Vulkan (any real GPU —
-      // Intel Arc, AMD, NVIDIA), then CPU. Each rung self-tests before boot.
+      // Engine ladder by capability: CUDA (NVIDIA), Vulkan (supported Linux/
+      // Windows GPUs), Metal (macOS), then CPU. Each rung self-tests first.
       const caps = [];
       if (wantGpu) caps.push("cuda");
       if (this.hardware?.capabilities?.vulkanEligible) caps.push("vulkan");
+      if (this.hardware?.capabilities?.metalEligible) caps.push("metal");
       caps.push("cpu");
       const rungErrors = [];
       const badBuilds = this.state?.get("badBuilds", {}) || {};

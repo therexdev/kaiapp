@@ -48,17 +48,20 @@ function freePort(host) {
  * (newest on the machine), fall back to Electron's only when there is no
  * redist at all, and overwrite a differing copy instead of keeping it.
  */
-/** Spawn env for the engine. Linux tarballs keep their .so files beside the
- *  binary — set LD_LIBRARY_PATH so the loader finds them even if the build
- *  lacks an $ORIGIN rpath. (KMP guards: see the selfTest comment.) */
-function engineEnv(binPath) {
+/** Spawn env for the engine. Official archives keep shared libraries beside
+ *  the binary — use the platform loader path so Linux .so and macOS .dylib
+ *  companions resolve even when a build lacks a relative rpath. */
+function engineEnv(binPath, { platform = process.platform, env = process.env } = {}) {
+  const libDir = path.dirname(binPath);
   return {
-    ...process.env,
+    ...env,
     KMP_AFFINITY: "disabled",
     KMP_DUPLICATE_LIB_OK: "TRUE",
-    ...(process.platform !== "win32"
-      ? { LD_LIBRARY_PATH: [path.dirname(binPath), process.env.LD_LIBRARY_PATH].filter(Boolean).join(":") }
-      : {}),
+    ...(platform === "linux"
+      ? { LD_LIBRARY_PATH: [libDir, env.LD_LIBRARY_PATH].filter(Boolean).join(":") }
+      : platform === "darwin"
+        ? { DYLD_LIBRARY_PATH: [libDir, env.DYLD_LIBRARY_PATH].filter(Boolean).join(":") }
+        : {}),
   };
 }
 
