@@ -161,6 +161,14 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
       guard: loadGuard ? loadGuard.status() : null,
       schedulerUrl: settings.get("earn.schedulerUrl", DEFAULT_SCHEDULER_URL),
       earnings: await fetchEarnings(),
+      /*
+       * Why this machine's Koinos node is — or is not — on the dashboard,
+       * independently of whether it is earning (#84). "My node disappeared"
+       * is the question this answers, and every quiet state it reports
+       * (locked wallet, local-only privacy, no node running) is a legitimate
+       * one that an absent card cannot be told apart from a broken report.
+       */
+      producerReport: producerReporter.status(),
     }),
     configure: ({ schedulerUrl }) => {
       let u = String(schedulerUrl || "").trim();
@@ -257,78 +265,10 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
       if (worker?.running) return worker.status();
       worker = new Worker({
         schedulerUrl: url, wallet, runtime, hardware: hw, models, onEvent: events,
-        /*
-         * Where the account page's Koinos node card comes from. Both numbers
-         * are taken from the SAME block_producer log lines so the ratio is
-         * self-consistent — a VHP balance read seconds apart from a network
-         * estimate is a subtly wrong share.
-         */
-        producer: async () => {
-          const { parseProducerLog, summarize, stakeGap } = require("./lib/koinos/producer-share");
-          const text = await koinosNodeSvc.call("node:logs", { service: "block_producer", tail: 60 });
-          const parsed = parseProducerLog(typeof text === "string" ? text : text?.logs || "");
-          if (!parsed) return null;
-
-          /*
-           * The rest comes from dashboard:summary — the SAME call the desktop
-           * Node screen draws from. Deriving a second, thinner version here
-           * would guarantee the website and the app eventually disagree about
-           * someone's money, and the one place that must never happen is the
-           * number a person checks on their phone.
-           *
-           * It is best-effort: a chain RPC that will not answer, or a price
-           * that has not arrived, leaves nulls that render as unknown. Only
-           * the share (which came from the log) is guaranteed.
-           */
-          let sum = null;
-          try {
-            sum = await koinosNodeSvc.call("dashboard:summary", {});
-          } catch { /* node down or RPC unreachable */ }
-          const v = sum?.value || {};
-          const price = sum?.price || {};
-          const vhpSats = sum?.balances && !sum.balances.error ? String(sum.balances.vhp ?? "") || null : null;
-
-          /*
-           * The two VHP numbers, compared. They are not always the same: a
-           * node can be entered in the block lottery with a fraction of the
-           * stake its wallet holds, and every screen still looks healthy.
-           * Nothing else in this snapshot would reveal it, because each side
-           * is individually correct.
-           */
-          const gap = stakeGap({ producingVhp: parsed.producingVhp, walletVhpSats: vhpSats });
-
-          return {
-            ...summarize(parsed),
-            at: parsed.at || null,
-            koinSats: sum?.balances && !sum.balances.error ? String(sum.balances.koin ?? "") || null : null,
-            vhpSats,
-            // True when the node is producing with materially less than the
-            // wallet holds — worth a person's attention, and worth saying out
-            // loud rather than leaving two numbers side by side to be noticed.
-            stakeBehind: gap.behind,
-            stakeShortfallPct: gap.behind ? gap.shortfallPct : null,
-            usdPerKoin: price.usdPerKoin ?? null,
-            priceStale: price.stale ?? null,
-            nodeValueUsd: v.nodeValueUsd ?? null,
-            dailyUsd: v.dailyUsd ?? null,
-            weeklyUsd: v.weeklyUsd ?? null,
-            yearlyUsd: v.yearlyUsd ?? null,
-            daysTracked: v.daysTracked ?? null,
-            // "measured" or "no-history" — so the dashboard can say "not enough
-            // history yet" instead of printing $0.00 at someone.
-            basis: v.basis ?? null,
-            /*
-             * Which app built this snapshot. Older versions sent the block
-             * share and nothing else, so a dashboard with empty value tiles
-             * has two very different causes — a chain RPC that would not
-             * answer, or an app that never had the fields. Without this the
-             * website cannot tell them apart, and neither can the person
-             * looking at it.
-             */
-            appVersion: VERSION,
-            reportedAt: new Date().toISOString(),
-          };
-        },
+        // The account page's Koinos node card. Built by the shared snapshot
+        // module so an earning machine and a node-only machine describe
+        // themselves to the dashboard in exactly the same words.
+        producer: producerSnapshot,
       });
       const st = await worker.start();
       /*
@@ -497,6 +437,35 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     },
   });
   registerCalendarTools(registry, calendarSvc);
+
+  /*
+   * One builder for the block-producer snapshot, shared by the earning Worker
+   * and by the standalone reporter below. `earn.start()` is declared above
+   * this line but only reads the const when the Worker is actually
+   * constructed, by which time it exists — the same arrangement the inline
+   * version had with `koinosNodeSvc`.
+   */
+  const { createProducerSnapshot } = require("./lib/koinos/producer-snapshot");
+  const producerSnapshot = createProducerSnapshot({
+    call: (method, args) => koinosNodeSvc.call(method, args),
+    appVersion: VERSION,
+  });
+
+  /*
+   * Task #84: the node reports itself even with Earning off. Constructed
+   * here, started in start() — it gates itself on privacy mode, the wallet,
+   * and whether the earning Worker is already doing the reporting, so it is
+   * safe to leave running for the life of the process.
+   */
+  const { ProducerReporter } = require("./lib/producer-reporter");
+  const producerReporter = new ProducerReporter({
+    schedulerUrl: () => settings.get("earn.schedulerUrl", DEFAULT_SCHEDULER_URL),
+    privacyMode: () => settings.get("network.privacyMode", "local-only"),
+    wallet,
+    snapshot: producerSnapshot,
+    earning: () => !!(worker && worker.status().running),
+    onEvent: events,
+  });
   const mcp = new McpManager({ settings, registry, nodeRuntime, onEvent: events });
   // Koinos AI account (task #49): device-link sign-in + wallet attach. The
   // bearer token is stored like email credentials (OS keychain when
@@ -737,6 +706,10 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
           (e) => events({ type: "earn:auto-resume-failed", message: String(e.message) })
         );
       }
+      // The Koinos node's own report to the dashboard — independent of the
+      // Earn toggle. No-ops on a machine with no node, no wallet, or
+      // local-only privacy.
+      producerReporter.start();
       syncKillSwitch().catch(() => {});
       this._policyTimer = setInterval(() => syncKillSwitch().catch(() => {}), 5 * 60 * 1000);
       this._policyTimer.unref?.();
@@ -744,6 +717,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     },
     async stop() {
       if (this._policyTimer) clearInterval(this._policyTimer);
+      producerReporter.stop();
       this.tasks?.stop();
       mcp.closeAll(); // stdio tool servers are child processes — never orphan them
       await earn.stop({ userIntent: false }).catch(() => {});
