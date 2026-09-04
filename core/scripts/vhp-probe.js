@@ -134,6 +134,50 @@ watchdog.unref?.();
   if (String(kb).startsWith("ERR")) failures.push("KOIN balance unreadable");
   console.log("");
 
+  /*
+   * Where this wallet's KOIN came from, most recent first.
+   *
+   * Balances alone cannot tell block production from a deposit, and I spent
+   * four windows reporting "unexplained KOIN inflow" at the owner before
+   * being told what it was: the project node makes daily drops rewarding
+   * testers for being on the network. The balance was never the missing
+   * information — the sender and the timestamp were, and both are public.
+   *
+   * Printed as STATE, not asserted. The real alarm worth having is "the
+   * tester rewards STOPPED", and setting that threshold needs the actual
+   * cadence, which this is here to measure. Guessing one from four samples
+   * is how the block-production stall got mis-reported at 3 zero windows
+   * when the honest number was 4; the same mistake is available here and I
+   * am not making it twice. Revisit once there are a couple of weeks of
+   * these lines to read a real interval off.
+   *
+   * Entirely best-effort: account_history is a separate microservice from
+   * the chain RPC and may not be exposed on every endpoint. It must never
+   * cost us the balance reading, which is this probe's actual job.
+   */
+  currentStep = "reading recent KOIN transfers";
+  try {
+    const hist = await provider.call("account_history.get_account_history", {
+      address: ADDRESS, limit: 8, ascending: false, irreversible: false,
+    });
+    const recs = hist?.values || [];
+    console.log(`KOIN HISTORY (${recs.length} most recent records)`);
+    for (const r of recs) {
+      const t = r?.trx?.transaction?.header?.payer;
+      // Timestamps arrive as ms-since-epoch strings on the block header.
+      const ms = Number(r?.trx?.transaction?.timestamp || r?.block?.header?.timestamp || 0);
+      const when = ms > 0 ? new Date(ms).toISOString() : "unknown-time";
+      const ops = r?.trx?.transaction?.operations || [];
+      const calls = ops.map((o) => o?.call_contract?.contract_id).filter(Boolean).join(",");
+      console.log(`  ${when}  payer=${t || "?"}  contracts=${calls || "-"}`);
+    }
+    if (recs.length === 0) console.log("  (none returned — endpoint may not expose account_history)");
+  } catch (e) {
+    // Not a failure: no reading is lost, only the extra colour.
+    console.log(`KOIN HISTORY unavailable — ${String(e?.message || e).slice(0, 160)}`);
+  }
+  console.log("");
+
   // 3. What the PoB contract itself thinks the network looks like — the
   //    denominator the block producer's "estimated total VHP" comes from.
   const pobId = String(resolved.pob || "").startsWith("ERR") ? FALLBACK.pob : resolved.pob;
