@@ -42,7 +42,19 @@ jobs:
       - name: Koinos RPC + DEX probe (chain constants live in kai lib/chain.js)
         if: contains(github.event.head_commit.message, '[chaincheck]')
         run: |
-          npm i --no-save koilib >/dev/null 2>&1
+          # Pin to the version the APP declares, not whatever the registry
+          # currently calls latest. Both probes compare what the chain resolves
+          # against what the app has vendored, and that comparison only means
+          # something if both sides read the chain through the same library.
+          # Installing "latest" also made every run do a fresh registry
+          # resolution — the source of the 03:41Z hang and of routine 2.5-4
+          # minute step times on a step whose actual work takes two seconds.
+          # From the LOCKFILE, not the package.json range: "^9.3.0" still
+          # floats (it resolves to 9.4.0 today) and would put the probe on a
+          # different build of koilib than the app actually ships, which is
+          # exactly the difference this comparison is supposed to be blind to.
+          KOILIB=$(node -p "require('./package-lock.json').packages['node_modules/koilib'].version")
+          npm i --no-save --prefer-offline --no-audit --no-fund "koilib@$KOILIB" >/dev/null 2>&1
           node core/scripts/chain-probe.js
       - name: Public network status
         run: |
@@ -190,7 +202,19 @@ jobs:
       - uses: actions/checkout@v4
       - name: VHP truth probe
         run: |
-          npm i --no-save koilib >/dev/null 2>&1
+          # Pin to the version the APP declares, not whatever the registry
+          # currently calls latest. Both probes compare what the chain resolves
+          # against what the app has vendored, and that comparison only means
+          # something if both sides read the chain through the same library.
+          # Installing "latest" also made every run do a fresh registry
+          # resolution — the source of the 03:41Z hang and of routine 2.5-4
+          # minute step times on a step whose actual work takes two seconds.
+          # From the LOCKFILE, not the package.json range: "^9.3.0" still
+          # floats (it resolves to 9.4.0 today) and would put the probe on a
+          # different build of koilib than the app actually ships, which is
+          # exactly the difference this comparison is supposed to be blind to.
+          KOILIB=$(node -p "require('./package-lock.json').packages['node_modules/koilib'].version")
+          npm i --no-save --prefer-offline --no-audit --no-fund "koilib@$KOILIB" >/dev/null 2>&1
           ADDR=$(printf '%s' "${{ github.event.head_commit.message }}" | grep -oE '\[vhpcheck:[a-zA-Z0-9]+\]' | head -1 | sed 's/\[vhpcheck://; s/\]//')
           # A commit that merely DESCRIBES this job carries the tag in its prose
           # and lands here with nothing to probe. That is not a broken build —

@@ -118,3 +118,83 @@ jobs:
             dist/*.AppImage
             dist/latest*.yml
           if-no-files-found: error
+
+  # ---------------------------------------------------------------- provenance
+  #
+  # FIND-SUP-001: a published installer said nothing about where it came from.
+  #
+  # The release carried a version tag and two binaries, and nothing tied one to
+  # the other. Anyone downloading an AppImage had no way to establish that it
+  # was built by this workflow, from this repository, at the commit the tag
+  # claims — which is the whole question a supply-chain attack turns on, and
+  # the one a tag alone cannot answer because a tag is just a name someone
+  # wrote. Three things close that, and they answer different questions:
+  #
+  #   SHA256SUMS      is this the same file I was served?
+  #   provenance      was it built here, from this commit, by this workflow?
+  #   SBOM            what is inside it?
+  #
+  # Deliberately a SEPARATE job that runs AFTER both builds have published.
+  # Attestation involves an OIDC exchange with GitHub's signing service, and if
+  # that service is having a bad day it must not be able to stop a release
+  # reaching testers. Failing here turns the run red — loudly, and worth
+  # fixing — with the installers already out.
+  provenance:
+    if: startsWith(github.ref, 'refs/tags/v') || contains(github.event.head_commit.message, '[release]')
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write      # attach SHA256SUMS and the SBOM to the release
+      id-token: write      # OIDC token the attestation is signed against
+      attestations: write  # record the attestation on the repository
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+
+      # Both platforms' outputs, side by side, so one checksum file covers the
+      # whole release rather than one per job that nobody can compare.
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: koinos-ai-*
+          merge-multiple: true
+
+      - name: Checksums for every published binary
+        run: |
+          cd artifacts
+          # The installers only. latest*.yml is electron-updater's own metadata
+          # and already carries its own hashes; listing it here would invite
+          # someone to check the wrong file.
+          sha256sum *.exe *.AppImage > SHA256SUMS
+          echo "--- SHA256SUMS ---"
+          cat SHA256SUMS
+
+      # npm's own SBOM: no extra action, no third-party tool in the release
+      # path, and it reads the same lockfile the build installed from.
+      - name: SBOM (CycloneDX)
+        run: npm sbom --sbom-format cyclonedx > artifacts/koinos-ai-sbom.cdx.json
+
+      # Binds each artifact's digest to this repo, this commit and this
+      # workflow run. Verifiable by anyone with:
+      #   gh attestation verify <file> --repo therexdev/kaiapp
+      - name: Attest the installers
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            artifacts/*.exe
+            artifacts/*.AppImage
+
+      - name: Attach the checksums and SBOM to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v$(node -p "require('./package.json').version")"
+          gh release upload "$TAG" \
+            artifacts/SHA256SUMS \
+            artifacts/koinos-ai-sbom.cdx.json \
+            --clobber --repo "$GITHUB_REPOSITORY"
+          echo "Attached SHA256SUMS and the SBOM to $TAG"
