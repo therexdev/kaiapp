@@ -192,6 +192,54 @@ try:
 except Exception as e:
     check(False, "updates page reachable", str(e))
 
+"""
+The alpha page's download offer, checked against what the release actually
+holds.
+
+v0.54.0 is why this exists. The macOS job built the disk images, validated
+both Mach-O architectures, and then skipped the upload step because its
+condition was written for a tag-based release flow this repo does not use.
+Every job went green. Windows and Linux landed on the release. Mac testers
+had a page announcing macOS support and nothing to download, and the only
+thing that would have caught it was somebody looking.
+
+So the assertion is not "does the page say Mac" or "does the release have a
+dmg" — it is BOTH, together. A page offering a download the release cannot
+supply is the failure, and either half alone looks fine.
+"""
+try:
+    ts, _, tp = get("/testers", raw=True)
+    check(ts == 200, "/testers serves the page", f"HTTP {ts}")
+    offers_mac = ".dmg" in tp
+    check("releases/latest" in tp, "/testers points at the latest release")
+
+    with urllib.request.urlopen(urllib.request.Request(
+        "https://api.github.com/repos/therexdev/kaiapp/releases/latest",
+        headers={"Accept": "application/vnd.github+json", "User-Agent": "koinos-netcheck"},
+    ), timeout=20) as r:
+        rel = json.loads(r.read().decode())
+    names = [a.get("name", "") for a in rel.get("assets", [])]
+    kinds = {ext: sorted(n for n in names if n.endswith(ext)) for ext in (".dmg", ".exe", ".AppImage")}
+    print(f"STATE release={rel.get('tag_name')} assets={len(names)} "
+          f"dmg={len(kinds['.dmg'])} exe={len(kinds['.exe'])} AppImage={len(kinds['.AppImage'])}")
+
+    # Every platform the page offers must be downloadable from that release.
+    for ext, label in ((".exe", "Windows"), (".AppImage", "Linux"), (".dmg", "macOS")):
+        if ext == ".dmg" and not offers_mac:
+            continue
+        check(len(kinds[ext]) > 0, f"{label} download exists on {rel.get('tag_name')}",
+              ", ".join(kinds[ext]) if kinds[ext]
+              else f"/testers offers {ext} and the release has none — the build skipped its upload")
+    check(offers_mac, "/testers offers the macOS build",
+          "shipped since v0.54.1" if offers_mac
+          else "the Mac download vanished from the alpha page")
+    # Both architectures, or half the Mac testers are stuck.
+    if offers_mac:
+        check(any("arm64" in n for n in kinds[".dmg"]) and any("x64" in n for n in kinds[".dmg"]),
+              "both Mac architectures published", ", ".join(kinds[".dmg"]))
+except Exception as e:
+    check(False, "testers page and its downloads", str(e))
+
 # Which sign-in doors are actually open in production. Reported as STATE, not
 # as an assertion: "Google is off" is a configuration CHOICE, not a fault, and
 # a digest that cried FAIL over it would be noise. But it must be VISIBLE —
