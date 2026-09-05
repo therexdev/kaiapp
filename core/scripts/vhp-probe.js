@@ -62,6 +62,16 @@ async function balanceOf(provider, contractId, owner) {
  * So: fail, say which call was outstanding, and exit non-zero. A red job is a
  * fact somebody acts on. A hanging job is a fact nobody sees.
  */
+/*
+ * Everything a reader actually needs, gathered as it is read and printed as a
+ * single LAST line. The rest of this output is worth having when something is
+ * wrong, but reading it costs a log fetch sized to a body whose length keeps
+ * changing — and undershooting means fetching again. The trailing runner noise
+ * is fixed-length, so one line at the very end is reachable with a small,
+ * STABLE tail every time.
+ */
+const summary = { vhp: "?", koin: "?", lastBlock: "" };
+
 const DEADLINE_MS = Number(process.env.KOINOS_PROBE_TIMEOUT_MS || 90_000);
 let currentStep = "starting up";
 const watchdog = setTimeout(() => {
@@ -119,11 +129,12 @@ watchdog.unref?.();
   const failures = [];
   console.log("VHP BALANCE  (per contract asked)");
   let vhpOk = false;
+  let vhpRaw = null;
   for (const id of vhpCandidates) {
     currentStep = `reading the VHP balance from ${id}`;
     const b = await balanceOf(provider, id, ADDRESS);
     console.log(`  ${id}  ${sats(b)} VHP   (raw ${b})`);
-    if (!String(b).startsWith("ERR")) vhpOk = true;
+    if (!String(b).startsWith("ERR")) { vhpOk = true; if (vhpRaw == null) vhpRaw = String(b); }
   }
   if (!vhpOk) failures.push("VHP balance unreadable from every candidate contract");
 
@@ -132,6 +143,8 @@ watchdog.unref?.();
   const kb = await balanceOf(provider, koinId, ADDRESS);
   console.log(`KOIN BALANCE ${koinId}  ${sats(kb)} KOIN   (raw ${kb})`);
   if (String(kb).startsWith("ERR")) failures.push("KOIN balance unreadable");
+  summary.vhp = vhpRaw == null ? "ERR" : vhpRaw;
+  summary.koin = String(kb).startsWith("ERR") ? "ERR" : String(kb);
   console.log("");
 
   /*
@@ -195,7 +208,9 @@ watchdog.unref?.();
         const calls = ops.map((o) => o?.call_contract?.contract_id).filter(Boolean).join(",");
         console.log(`  TRX   payer=${trx?.header?.payer || "?"}  contracts=${calls || "-"}  id=${String(trx.id || "").slice(0, 18)}`);
       } else {
-        console.log(`  BLOCK ${bms > 0 ? new Date(bms).toISOString() : "unknown-time"}`);
+        const iso = bms > 0 ? new Date(bms).toISOString() : "unknown-time";
+        if (bms > 0 && !summary.lastBlock) summary.lastBlock = iso; // newest first
+        console.log(`  BLOCK ${iso}`);
       }
     }
     if (recs.length === 0) console.log("  (none returned — endpoint may not expose account_history)");
@@ -222,6 +237,11 @@ watchdog.unref?.();
   } catch (e) {
     console.log("POB ERR", String(e.message || e).slice(0, 160));
   }
+
+  console.log(
+    `PROBE SUMMARY vhp=${summary.vhp} koin=${summary.koin} ` +
+    `lastBlock=${summary.lastBlock || "none"} ok=${failures.length === 0}`
+  );
 
   if (failures.length) {
     console.error(

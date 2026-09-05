@@ -7,6 +7,13 @@ def get(p, raw=False):
         return (r.status, dict(r.headers), body if raw else json.loads(body))
 
 fails, warns = [], []
+# Everything the scheduled stability check reads, gathered as it is computed
+# and printed as a single LAST line. The body of this digest grows and shrinks
+# as checks are added, so reading it from outside means guessing a log tail
+# length and fetching again when the guess is short — which it repeatedly was.
+# The runner's trailing noise IS fixed-length, so one line at the very end is
+# reachable with a small, stable tail forever.
+SUM = {}
 def check(cond, label, detail=""):
     (print if cond else print)(f"{'PASS' if cond else 'FAIL'}  {label}{' — ' + detail if detail else ''}")
     if not cond: fails.append(label)
@@ -79,6 +86,7 @@ else:
 _, _, s = get("/scheduler/network/status")
 ws = s.get("workers", [])
 check(s.get("workersOnline", 0) > 0, "workers online", str(s.get("workersOnline")))
+SUM["workers"] = s.get("workersOnline")
 # perf=null is a SCHEDULER fault only when a worker that ADVERTISES models
 # never receives work. Two innocent cases are excused (both field events):
 # a worker that joined minutes ago (2026-08-18: crashed this script), and a
@@ -96,6 +104,7 @@ ages = [(w["address"], w.get("reputation", {}).get("ageDays")) for w in ws]
 check(all(a is not None and a > 0 for _, a in ages), "ageDays accumulating on ALL workers",
       " ".join(f"{a}:{d}" for a, d in ages))
 check(s.get("queueDepth", 0) < 50, "queue not backed up", f"queue={s.get('queueDepth')} pending={s.get('pendingJobs')}")
+SUM["queue"] = s.get("queueDepth")
 # Which classes a paying caller can actually BUY right now. A network that
 # drifts down to one servable class still passes every other line here —
 # workers online, perf populated, queue empty — because those count machines,
@@ -103,6 +112,8 @@ check(s.get("queueDepth", 0) < 50, "queue not backed up", f"queue={s.get('queueD
 mods = s.get("models", [])
 check(len(mods) > 0, "network advertises a servable class", f"{len(mods)} classes")
 print("STATE models=%s" % " ".join(f"{m.get('model')}x{m.get('providers')}" for m in mods))
+SUM["classes"] = len(mods)
+SUM["models"] = ",".join(sorted(str(m.get("model")) for m in mods))
 # FIND-NET-001 rollout. Registration proofs deploy in SHADOW: a node running a
 # client too old to sign still registers, and is marked. That is a schedule,
 # not a resting state — until this reaches 0 the scheduler is still taking
@@ -132,6 +143,9 @@ print(f"STATE worker_proof enforced={enforced} unsigned={unsigned}")
 print("STATE instance=%s epoch_jobs=%s" % (s.get("instance"), [w.get("jobsThisEpoch") for w in ws]))
 print("STATE perf_jobs=%s" % [(w.get("perf") or {}).get("jobs") for w in ws])
 print("STATE ageDays=%s" % [d for _, d in ages])
+# SORTED, because the array order is not stable between runs and comparing by
+# position invents departures that never happened.
+SUM["ages"] = ",".join(str(d) for d in sorted(d for _, d in ages))
 
 rst, rhdr, r = get("/scheduler/network/roster")
 r = json.loads(r) if isinstance(r, str) else r
@@ -145,6 +159,7 @@ o = p.get("oracle", {}); sm = o.get("smoothing", {})
 warn(o.get("status") == "live", "oracle status", o.get("status"))
 check(sm.get("floorUsd", 0) <= o.get("usd", 0) <= sm.get("ceilUsd", 0), "price inside floor/ceil", str(o.get("usd")))
 warn(age_min(o["updatedAt"]) < 20, "oracle fresh", f"{age_min(o['updatedAt']):.1f} min old")
+SUM["oracle"] = f"{o.get('status')}/{age_min(o['updatedAt']):.1f}m"
 check(o.get("sources", 0) >= 2, "two price sources configured", str(o.get("sources")))
 print(f"STATE oracle={o.get('status')} usd={o.get('usd')} median={o.get('lastMedian')} updatedAt={o.get('updatedAt')}")
 
@@ -187,6 +202,7 @@ try:
     check(APP_VERSION in have, "the shipping version has release notes",
           f"v{APP_VERSION} listed" if APP_VERSION in have
           else f"v{APP_VERSION} shipped with NO entry in updates.json — the What's new link lands on nothing")
+    SUM["updates"] = u.get("latest")
     ps, _, page = get("/updates", raw=True)
     check(ps == 200 and "updates.js" in page, "/updates serves the page", f"HTTP {ps}")
 except Exception as e:
@@ -222,6 +238,8 @@ try:
     kinds = {ext: sorted(n for n in names if n.endswith(ext)) for ext in (".dmg", ".exe", ".AppImage")}
     print(f"STATE release={rel.get('tag_name')} assets={len(names)} "
           f"dmg={len(kinds['.dmg'])} exe={len(kinds['.exe'])} AppImage={len(kinds['.AppImage'])}")
+    SUM["release"] = rel.get("tag_name")
+    SUM["downloads"] = f"dmg{len(kinds['.dmg'])}/exe{len(kinds['.exe'])}/appimage{len(kinds['.AppImage'])}"
 
     # Every platform the page offers must be downloadable from that release.
     for ext, label in ((".exe", "Windows"), (".AppImage", "Linux"), (".dmg", "macOS")):
@@ -258,6 +276,21 @@ except Exception as e:
 print(f"\nDIGEST {'FAIL' if fails else ('WARN' if warns else 'HEALTHY')} fails={len(fails)} warns={len(warns)}")
 if fails: print("FAILING: " + "; ".join(fails))
 if warns: print("WARNING: " + "; ".join(warns))
+
+# The last line, and the only one a healthy run needs read.
+print(
+    "DIGEST SUMMARY"
+    f" fails={len(fails)} warns={len(warns)}"
+    f" workers={SUM.get('workers')}"
+    f" ages={SUM.get('ages', '?')}"
+    f" classes={SUM.get('classes')}"
+    f" queue={SUM.get('queue')}"
+    f" oracle={SUM.get('oracle', '?')}"
+    f" updates={SUM.get('updates', '?')}"
+    f" release={SUM.get('release', '?')}"
+    f" downloads={SUM.get('downloads', '?')}"
+    f" models={SUM.get('models', '?')}"
+)
 
 # Exit non-zero on a FAIL, so the workflow badge says what the digest says.
 #
