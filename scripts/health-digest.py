@@ -6,6 +6,23 @@ def get(p, raw=False):
         body = r.read().decode()
         return (r.status, dict(r.headers), body if raw else json.loads(body))
 
+def get_head(p, n=8):
+    """
+    Fetch a few bytes WITHOUT decoding them.
+
+    get() decodes every body as UTF-8. That is right for JSON and HTML and
+    wrong for a PNG, whose first magic byte is 0x89: the decode raises before
+    the caller ever looks at the status, and an icon the server delivered
+    perfectly gets reported as missing.
+
+    Headers come back as urllib's own object rather than the plain dict get()
+    returns, because here the header IS the diagnostic: when an icon route
+    answers 200 with the wrong thing, the message wants to name the content
+    type, and that lookup must not depend on the server's capitalisation.
+    """
+    with urllib.request.urlopen(B + p, timeout=20) as r:
+        return (r.status, r.headers, r.read(n))
+
 fails, warns = [], []
 # Everything the scheduled stability check reads, gathered as it is computed
 # and printed as a single LAST line. The body of this digest grows and shrinks
@@ -315,9 +332,15 @@ try:
     missing = []
     for ic in mf.get("icons") or []:
         try:
-            ist, _, _ = get(ic["src"], raw=True)
+            ist, ihdr, head = get_head(ic["src"])
             if ist != 200:
                 missing.append(f"{ic['src']}={ist}")
+            elif ic["src"].endswith(".png") and head[:8] != b"\x89PNG\r\n\x1a\n":
+                # A 200 that is not a PNG is the failure this check exists
+                # for. The sign-in page answers 200 too, so an icon route
+                # that has drifted behind the session gate looks healthy to
+                # a status check and is not installable to a browser.
+                missing.append(f"{ic['src']}=not-a-png({ihdr.get('Content-Type')})")
         except Exception as e:
             missing.append(f"{ic['src']}={e}")
     check(not missing, "every app icon the manifest promises is served", ", ".join(missing) or "all present")
@@ -327,7 +350,9 @@ try:
     # therefore the one page the homescreen icon opens.
     check(shdr.get("Service-Worker-Allowed") == "/app",
           "service worker may claim the start_url", shdr.get("Service-Worker-Allowed"))
-    SUM["pwa"] = f"ok/{len(mf.get('icons') or [])}icons"
+    # The summary line must not say ok while a check above it failed — being
+    # readable at a glance is the entire reason that line exists.
+    SUM["pwa"] = f"{'ok' if not missing else 'BADICONS'}/{len(mf.get('icons') or [])}icons"
 except Exception as e:
     check(False, "app is installable (PWA)", str(e))
     SUM["pwa"] = "FAIL"
