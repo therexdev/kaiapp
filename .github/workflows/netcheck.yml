@@ -147,6 +147,14 @@ jobs:
         # scheduled-stability assertions on the runner and prints ~25 lines,
         # so a check is read at a glance instead of by scrolling 300 lines of
         # JSON. STATE lines carry the values worth diffing between checks.
+        # The digest asks the GitHub API whether the release actually carries
+        # the installers the /testers page offers. Anonymous API access is 60
+        # requests/hour PER IP, shared across Actions runners, and it duly ran
+        # out and reported a FAIL for downloads it had simply been unable to
+        # check. The workflow's own token raises that ceiling and costs
+        # nothing; it is read-only and scoped to this repository.
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: python3 scripts/health-digest.py
       - name: ARM64 engine availability (Pi support — runtime catalog candidates)
         if: contains(github.event.head_commit.message, '[armcheck]')

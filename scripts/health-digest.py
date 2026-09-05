@@ -1,4 +1,4 @@
-import json, sys, urllib.request, urllib.error, datetime
+import json, os, sys, urllib.request, urllib.error, datetime
 
 B = "https://koinosai.com"
 def get(p, raw=False):
@@ -229,9 +229,24 @@ try:
     offers_mac = ".dmg" in tp
     check("releases/latest" in tp, "/testers points at the latest release")
 
+    """
+    Authenticated when a token is available.
+
+    The first version of this call was anonymous, and anonymous GitHub API
+    access is 60 requests/hour PER IP — shared across every Actions runner on
+    that address. It duly returned "403 rate limit exceeded" and the digest
+    reported a FAIL, which is the one thing this check must never do: it said
+    the downloads were broken when it had simply been unable to look. A
+    monitor that cries wolf gets ignored, and then it is worth nothing on the
+    day it is right.
+    """
+    _hdrs = {"Accept": "application/vnd.github+json", "User-Agent": "koinos-netcheck"}
+    _tok = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    if _tok:
+        _hdrs["Authorization"] = f"Bearer {_tok}"
     with urllib.request.urlopen(urllib.request.Request(
         "https://api.github.com/repos/therexdev/kaiapp/releases/latest",
-        headers={"Accept": "application/vnd.github+json", "User-Agent": "koinos-netcheck"},
+        headers=_hdrs,
     ), timeout=20) as r:
         rel = json.loads(r.read().decode())
     names = [a.get("name", "") for a in rel.get("assets", [])]
@@ -255,6 +270,18 @@ try:
     if offers_mac:
         check(any("arm64" in n for n in kinds[".dmg"]) and any("x64" in n for n in kinds[".dmg"]),
               "both Mac architectures published", ", ".join(kinds[".dmg"]))
+except urllib.error.HTTPError as e:
+    """
+    Could not ASK is not the same as the answer being bad.
+
+    A 403 (rate limit) or a 5xx from GitHub says nothing whatsoever about
+    whether the downloads exist. Reporting it as FAIL conflates "the release
+    is missing its installer" — which needs someone out of bed — with "the
+    API was busy", which needs nothing. WARN keeps it visible without the
+    alarm.
+    """
+    warn(False, "testers page and its downloads — could not check", f"HTTP {e.code}: {e.reason}")
+    SUM["release"] = f"unchecked({e.code})"
 except Exception as e:
     check(False, "testers page and its downloads", str(e))
 
