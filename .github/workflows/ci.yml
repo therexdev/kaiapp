@@ -295,12 +295,32 @@ jobs:
           merge-multiple: true
 
       - name: Checksums for every published binary
+        shell: bash
         run: |
           cd artifacts
           # The installers only. latest*.yml is electron-updater's own metadata
           # and already carries its own hashes; listing it here would invite
           # someone to check the wrong file.
-          sha256sum *.exe *.AppImage *.dmg *.zip > SHA256SUMS
+          #
+          # Names are written as GITHUB will serve them, not as electron-builder
+          # wrote them. The Windows and Linux artifacts are built with spaces
+          # ("Koinos AI 0.54.1.exe") and GitHub replaces every space with a dash
+          # when it stores a release asset, so a plain `sha256sum *` produced a
+          # file listing names that do not exist on the release page: anyone
+          # running `sha256sum -c SHA256SUMS` against their downloads got "No
+          # such file or directory" for the .exe and .AppImage, which reads
+          # exactly like a tampered download. The hashes were always right; the
+          # names were unusable, which for a verification file is the same
+          # thing as being wrong. (The .dmg and .zip were unaffected — the mac
+          # artifactName has no spaces — so this was invisible on the platform
+          # added last.)
+          for f in *.exe *.AppImage *.dmg *.zip; do
+            [ -e "$f" ] || continue
+            printf '%s  %s\n' "$(sha256sum "$f" | cut -d" " -f1)" "${f// /-}"
+          done > SHA256SUMS
+          # A silently empty checksum file is worse than a failed build: it
+          # publishes an assurance that assures nothing.
+          test -s SHA256SUMS
           echo "--- SHA256SUMS ---"
           cat SHA256SUMS
 
