@@ -174,6 +174,18 @@ watchdog.unref?.();
      *                  drops from the project node land here.
      *
      * Label them rather than printing a half-filled row for each.
+     *
+     * NO TIMESTAMP ON A TRX RECORD — settled by dumping a real one rather
+     * than guessing a third time. A Koinos transaction header carries
+     * chain_id, rc_limit, nonce, operation_merkle_root and payer, and that
+     * is all; only BLOCKS carry a timestamp. Getting the wall-clock time of
+     * a transfer would mean a second lookup to find its containing block.
+     *
+     * Not worth it, because we do not need it. This probe reads the balance
+     * every couple of hours, so a drop is already bracketed between two of
+     * our own timestamped readings — a 2-4h window, against a cadence the
+     * owner describes as daily. That is ample to establish the rhythm and to
+     * alarm when it breaks, and it costs no extra RPC calls.
      */
     for (const r of recs) {
       const trx = r?.trx?.transaction;
@@ -187,14 +199,6 @@ watchdog.unref?.();
       }
     }
     if (recs.length === 0) console.log("  (none returned — endpoint may not expose account_history)");
-    /*
-     * One raw record, keys and all. The drop TIMESTAMP is the number this is
-     * ultimately for and it is not where I first looked; rather than guess the
-     * field a second time, print the shape once and read it off a real
-     * response. Remove this line once the timestamp is being extracted.
-     */
-    const sample = recs.find((r) => r?.trx) || recs[0];
-    if (sample) console.log(`KOIN HISTORY SHAPE ${JSON.stringify(sample).slice(0, 700)}`);
   } catch (e) {
     // Not a failure: no reading is lost, only the extra colour.
     console.log(`KOIN HISTORY unavailable — ${String(e?.message || e).slice(0, 160)}`);
