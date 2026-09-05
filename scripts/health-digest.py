@@ -258,6 +258,53 @@ try:
 except Exception as e:
     check(False, "testers page and its downloads", str(e))
 
+"""
+The web app is installable — checked in production, not just merged.
+
+Same lesson as the /testers download check: "the change is on the branch" and
+"the thing works for a user" are different claims, and only the second one
+matters. A PWA fails in exactly the silent way that deserves a monitor — if
+the manifest 404s, comes back as the sign-in page, or loses a required icon
+size, browsers report NOTHING. The install option simply stops appearing and
+the page looks perfect.
+
+The manifest must answer ANONYMOUSLY, because browsers fetch it without
+credentials. The day someone moves it behind the /app session gate it starts
+returning a redirect to sign-in and the app quietly stops being installable.
+"""
+try:
+    mst, mhdr, mtext = get("/app/manifest.webmanifest", raw=True)
+    check(mst == 200, "app manifest answers anonymously", f"HTTP {mst}")
+    mf = json.loads(mtext)
+    check(mf.get("display") == "standalone",
+          "app manifest says standalone (the 'without the browser' bit)", mf.get("display"))
+    # scope must cover /account, or an expired session is ejected into a
+    # browser tab — which to the person holding the phone looks like a crash.
+    check(mf.get("scope") == "/", "app manifest scope covers sign-in", mf.get("scope"))
+    isizes = {i.get("sizes") for i in mf.get("icons") or []}
+    check({"192x192", "512x512"} <= isizes, "app manifest has both required icon sizes", " ".join(sorted(isizes)))
+    # Every icon it promises must actually be there. A manifest referencing a
+    # missing icon is not installable, and nothing says so out loud.
+    missing = []
+    for ic in mf.get("icons") or []:
+        try:
+            ist, _, _ = get(ic["src"], raw=True)
+            if ist != 200:
+                missing.append(f"{ic['src']}={ist}")
+        except Exception as e:
+            missing.append(f"{ic['src']}={e}")
+    check(not missing, "every app icon the manifest promises is served", ", ".join(missing) or "all present")
+    sst, shdr, _ = get("/app/sw.js", raw=True)
+    check(sst == 200, "app service worker serves", f"HTTP {sst}")
+    # Without this header the worker cannot claim "/app" — the start_url, and
+    # therefore the one page the homescreen icon opens.
+    check(shdr.get("Service-Worker-Allowed") == "/app",
+          "service worker may claim the start_url", shdr.get("Service-Worker-Allowed"))
+    SUM["pwa"] = f"ok/{len(mf.get('icons') or [])}icons"
+except Exception as e:
+    check(False, "app is installable (PWA)", str(e))
+    SUM["pwa"] = "FAIL"
+
 # Which sign-in doors are actually open in production. Reported as STATE, not
 # as an assertion: "Google is off" is a configuration CHOICE, not a fault, and
 # a digest that cried FAIL over it would be noise. But it must be VISIBLE —
@@ -289,6 +336,7 @@ print(
     f" updates={SUM.get('updates', '?')}"
     f" release={SUM.get('release', '?')}"
     f" downloads={SUM.get('downloads', '?')}"
+    f" pwa={SUM.get('pwa', '?')}"
     f" models={SUM.get('models', '?')}"
 )
 
