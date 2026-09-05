@@ -162,16 +162,39 @@ watchdog.unref?.();
     });
     const recs = hist?.values || [];
     console.log(`KOIN HISTORY (${recs.length} most recent records)`);
+    /*
+     * Two record shapes come back, and the first version of this block
+     * assumed one. A producer address appears in its own history both as the
+     * PRODUCER of blocks and as the RECIPIENT of transfers, so:
+     *
+     *   block records  carry block.header.timestamp and no payer — these are
+     *                  blocks this address produced, which is an independent
+     *                  witness for the VHP-burn arithmetic above;
+     *   trx records    carry a transaction with a payer — the tester-reward
+     *                  drops from the project node land here.
+     *
+     * Label them rather than printing a half-filled row for each.
+     */
     for (const r of recs) {
-      const t = r?.trx?.transaction?.header?.payer;
-      // Timestamps arrive as ms-since-epoch strings on the block header.
-      const ms = Number(r?.trx?.transaction?.timestamp || r?.block?.header?.timestamp || 0);
-      const when = ms > 0 ? new Date(ms).toISOString() : "unknown-time";
-      const ops = r?.trx?.transaction?.operations || [];
-      const calls = ops.map((o) => o?.call_contract?.contract_id).filter(Boolean).join(",");
-      console.log(`  ${when}  payer=${t || "?"}  contracts=${calls || "-"}`);
+      const trx = r?.trx?.transaction;
+      const bms = Number(r?.block?.header?.timestamp || 0);
+      if (trx) {
+        const ops = trx.operations || [];
+        const calls = ops.map((o) => o?.call_contract?.contract_id).filter(Boolean).join(",");
+        console.log(`  TRX   payer=${trx?.header?.payer || "?"}  contracts=${calls || "-"}  id=${String(trx.id || "").slice(0, 18)}`);
+      } else {
+        console.log(`  BLOCK ${bms > 0 ? new Date(bms).toISOString() : "unknown-time"}`);
+      }
     }
     if (recs.length === 0) console.log("  (none returned — endpoint may not expose account_history)");
+    /*
+     * One raw record, keys and all. The drop TIMESTAMP is the number this is
+     * ultimately for and it is not where I first looked; rather than guess the
+     * field a second time, print the shape once and read it off a real
+     * response. Remove this line once the timestamp is being extracted.
+     */
+    const sample = recs.find((r) => r?.trx) || recs[0];
+    if (sample) console.log(`KOIN HISTORY SHAPE ${JSON.stringify(sample).slice(0, 700)}`);
   } catch (e) {
     // Not a failure: no reading is lost, only the extra colour.
     console.log(`KOIN HISTORY unavailable — ${String(e?.message || e).slice(0, 160)}`);
