@@ -13,6 +13,12 @@ const { app, BrowserWindow, Menu, Tray, dialog, nativeImage, shell, ipcMain } = 
 const { createCore } = require("../core/server");
 const { JsonStore } = require("../core/lib/store");
 
+const { channelConfig, configureDesktop, configureUpdater } = require("../core/lib/release-channel");
+// Packaged identity is build metadata; shell environment cannot change its channel.
+const release = channelConfig(app.isPackaged ? (require("../package.json").kaiChannel || "stable") : undefined);
+configureDesktop(app, release);
+process.env.KAI_CHANNEL = release.channel;
+
 let core = null;
 let win = null;
 let tray = null;
@@ -147,7 +153,7 @@ async function start() {
     if (process.platform === "darwin") image.setTemplateImage(true);
 
     tray = new Tray(image);
-    tray.setToolTip("Koinos AI");
+    tray.setToolTip(release.productName);
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: "Open Koinos AI", click: showWindow },
       { type: "separator" },
@@ -285,6 +291,7 @@ async function start() {
    * for the build they are actually installing, not the top of a list.
    */
   const notesUrl = (version) =>
+    release.isTest ? "https://github.com/therexdev/kaiapp/releases/tag/test-build" :
     `https://koinosai.com/updates${version ? `#v${encodeURIComponent(String(version))}` : ""}`;
 
   // Auto-update (§34; M1 ships the stable channel only): download in the
@@ -293,9 +300,8 @@ async function start() {
   if (app.isPackaged) {
     try {
       const { autoUpdater } = require("electron-updater");
-      // 0.x releases may be flagged pre-release on GitHub; take them anyway —
-      // updaters that ignore the flag see no updates at all (field finding).
-      autoUpdater.allowPrerelease = true;
+      // Only Test follows the separate test feed; live follows stable releases.
+      configureUpdater(autoUpdater, release);
       autoUpdater.autoDownload = true;
       autoUpdater.autoInstallOnAppQuit = true;
       autoUpdater.on("update-downloaded", async (info) => {
@@ -303,7 +309,7 @@ async function start() {
         const { response } = await dialog.showMessageBox(win, {
           type: "info",
           title: "Update ready",
-          message: `Koinos AI ${info.version} is ready to install`,
+          message: `${release.productName} ${info.version} is ready to install`,
           detail: `You're on ${app.getVersion()}. Restart now to update, or keep working — it installs when you close the app.`,
           buttons: ["Restart now", "What's new", "Later"],
           defaultId: 0,

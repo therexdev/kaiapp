@@ -31,7 +31,7 @@ jobs:
     # Installer builds are heavy: run on release tags (published to a GitHub
     # Release), on demand, or when a commit message opts in with [dist]
     # (artifacts only, nothing published).
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[dist]') || contains(github.event.head_commit.message, '[release]')
+    if: github.ref != 'refs/heads/test' && (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[dist]') || contains(github.event.head_commit.message, '[release]'))
     # ALSO needs build-linux: both dist jobs racing `--publish always`
     # once created the same release simultaneously — linux won, windows
     # died on 422 already_exists and the release shipped half-empty
@@ -90,7 +90,7 @@ jobs:
           if-no-files-found: error
 
   build-linux:
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[dist]') || contains(github.event.head_commit.message, '[release]')
+    if: github.ref != 'refs/heads/test' && (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[dist]') || contains(github.event.head_commit.message, '[release]'))
     needs: test
     runs-on: ubuntu-latest
     permissions:
@@ -107,6 +107,11 @@ jobs:
       # looks for latest-linux-arm64.yml on that architecture — found nothing
       # and said nothing. Cross-building arm64 here works (verified: the packed
       # binary is a real ELF aarch64) and costs one extra Electron download.
+      - name: Bind the live release tag to its actual source
+        if: contains(github.event.head_commit.message, '[release]')
+        run: node scripts/ensure-release-tag.js
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Build AppImage (x64 + arm64)
         run: npm run dist -- --linux --x64 --arm64 --publish ${{ (startsWith(github.ref, 'refs/tags/v') || contains(github.event.head_commit.message, '[release]')) && 'always' || 'never' }}
         env:
@@ -143,7 +148,7 @@ jobs:
     # Keep release publication serialized across platforms. This job always
     # builds with --publish never and attaches assets only after macOS signing
     # and notarization have both been configured and validated.
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[dist]') || contains(github.event.head_commit.message, '[release]')
+    if: github.ref != 'refs/heads/test' && (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[dist]') || contains(github.event.head_commit.message, '[release]'))
     needs: [test, build-windows]
     runs-on: macos-latest
     permissions:
@@ -271,7 +276,7 @@ jobs:
           fi
 
   provenance:
-    if: startsWith(github.ref, 'refs/tags/v') || contains(github.event.head_commit.message, '[release]')
+    if: github.ref != 'refs/heads/test' && (startsWith(github.ref, 'refs/tags/v') || contains(github.event.head_commit.message, '[release]'))
     needs: [build-linux, build-windows, build-macos]
     runs-on: ubuntu-latest
     timeout-minutes: 20

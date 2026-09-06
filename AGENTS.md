@@ -1,0 +1,10 @@
+# KAI development and releases
+
+- Primary development branch: `test`. Begin from its latest pushed commit.
+- Live desktop release branch: `claude/koinos-ai-takeover-co25fw`. The repository's default branch is historical; do not base new work on it.
+- The owner authorized creating and pushing updates. Work on Test by default, validate changes, and promote ready work to live without asking for routine push permission. A push and a successful installer release are different states; verify both.
+- Every push to `test` runs `.github/workflows/test-release.yml` and publishes **Koinos AI Test** after verification. Keep its app identity, data, port and updater isolated.
+- Promote an exact successfully built test commit using `scripts/promote-test.js` or equivalent GitHub connector operations. Merge any intervening live changes into Test and rebuild before promotion. Use a new stable version and `[release]` on the live branch. Never force-push.
+- Do not publish test installers with live app IDs or live update feeds. The non-semver `test-build` release's `latest*.yml` files are compatibility pointers to the existing stable assets for legacy live updaters. Its `test*.yml` files serve only Test.
+- Repository docs: `docs/TEST_RELEASES.md`. Normal verification: `npm test`; packaging additionally runs `scripts/verify-test-package.js`.
+- Test uses the existing network services. It is not a separate blockchain, scheduler, Docker daemon, or remote account. Do not infer authorization for wallet transfers or changes to those services from app release authorization.

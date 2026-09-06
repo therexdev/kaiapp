@@ -24,6 +24,8 @@ const { LlamaCppRuntime } = require("./lib/runtimes/llamacpp");
 const { RuntimeManager } = require("./lib/runtime-manager");
 const { Gateway } = require("./lib/gateway");
 
+const { channelConfig } = require("./lib/release-channel");
+
 const VERSION = require("./package.json").version;
 // The project-operated scheduler (§12): baked in so Start Earning and
 // network mode work out of the box. KAI_SCHEDULER_URL overrides for
@@ -31,7 +33,8 @@ const VERSION = require("./package.json").version;
 const DEFAULT_SCHEDULER_URL = process.env.KAI_SCHEDULER_URL || "https://koinosai.com/scheduler";
 
 async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = {}) {
-  dataDir = dataDir || process.env.KAI_CORE_DATA || path.join(os.homedir(), ".koinos-ai");
+  const release = channelConfig();
+  dataDir = dataDir || process.env.KAI_CORE_DATA || path.join(os.homedir(), release.homeDirName);
   // Every event also lands in <dataDir>/core.log so packaged-app failures
   // in the field are diagnosable ("Model load failed" has a paper trail).
   const fsl = require("fs");
@@ -75,7 +78,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
   const { OllamaRuntime } = require("./lib/runtimes/ollama");
   const ollamaAddr = {
     host: process.env.KAI_OLLAMA_HOST || "127.0.0.1",
-    port: Number(process.env.KAI_OLLAMA_PORT || 11434),
+    port: Number(process.env.KAI_OLLAMA_PORT || release.ollamaPort),
   };
   const runtime = new RuntimeManager({
     models,
@@ -574,7 +577,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     onEvent: events,
   });
   const gateway = new Gateway({
-    port: port ?? Number(process.env.KAI_CORE_PORT || 41100),
+    port: port ?? Number(process.env.KAI_CORE_PORT || release.port),
     runtime,
     models,
     keys,
@@ -599,7 +602,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     code,
     chats: new ChatStore(path.join(dataDir, "chats")),
     docs: new (require("./lib/docs").DocStore)(path.join(dataDir, "docs")),
-    coreInfo: () => ({ version: VERSION, dataDir, hardware: hw }),
+    coreInfo: () => ({ version: VERSION, channel: release.channel, productName: release.productName, dataDir, hardware: hw }),
     // Feedback relay: one honest box in the app, straight to the project's
     // inbox. The diagnostic tail is core.log — events only, no chat
     // content and no keys ever land there.

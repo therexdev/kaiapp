@@ -4,8 +4,7 @@ The desktop application for **Koinos AI** — local-first AI (chat + self-hosted
 OpenAI-compatible API on your own hardware) with optional provider earning on the
 decentralized compute network, settled in KAI on Koinos.
 
-**Status: M1 (local core) in progress.** The Core service skeleton runs and is tested;
-the desktop UI, installer, and real-model verification are next.
+**Development:** use the `test` branch and [Koinos AI Test](https://github.com/therexdev/kaiapp/releases/tag/test-build) for ongoing work. See [Test and live releases](docs/TEST_RELEASES.md) for installation, isolation and promotion. Live desktop releases use `claude/koinos-ai-takeover-co25fw`; the repository default branch is historical.
 
 ```
 core/                 Koinos AI Core service (zero runtime dependencies, Node ≥22)

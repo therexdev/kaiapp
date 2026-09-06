@@ -110,7 +110,13 @@ async function refresh() {
 async function loadVersion() {
   try {
     const h = await coreGet("/core/health");
-    if (h.version) $("app-version").textContent = `Koinos AI v${h.version}`;
+    if (h.version) $("app-version").textContent = `${h.productName || "Koinos AI"} v${h.version}`;
+    document.body.dataset.releaseChannel = h.channel || "stable";
+    if (h.channel === "test") {
+      document.title = "Koinos AI Test";
+      const title = document.querySelector(".tb-title");
+      if (title) title.textContent = "Koinos AI Test";
+    }
   } catch {
     setTimeout(loadVersion, 3000);
   }
@@ -476,8 +482,9 @@ async function renderUpdateStatus({ fetchRemote = false } = {}) {
    * window-open handler sends every http(s) link there.
    */
   const semver = (/(\d+\.\d+\.\d+)/.exec(version) || [])[1] || "";
-  const notes =
-    ` <a href="https://koinosai.com/updates${semver ? `#v${semver}` : ""}" target="_blank" rel="noreferrer">What's new</a>`;
+  const notes = document.body.dataset.releaseChannel === "test"
+    ? ` <a href="https://github.com/therexdev/kaiapp/releases/tag/test-build" target="_blank" rel="noreferrer">Test builds</a>`
+    : ` <a href="https://koinosai.com/updates${semver ? `#v${semver}` : ""}" target="_blank" rel="noreferrer">What's new</a>`;
   const say = (text) => { host.innerHTML = esc(text) + notes; };
 
   if (s.kind === "packaged") {
