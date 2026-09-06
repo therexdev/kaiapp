@@ -8,7 +8,7 @@ const semver = require("semver");
 const yaml = require("js-yaml");
 const { channelConfig, configureDesktop, configureUpdater, TEST_FEED } = require("../lib/release-channel");
 const { prepare } = require("../../scripts/prepare-test-build");
-const { stableCompatibility } = require("../../scripts/publish-test-build");
+const { stableCompatibility, findTestRelease } = require("../../scripts/publish-test-build");
 const { GitHubProvider } = require("electron-updater/out/providers/GitHubProvider");
 const { GenericProvider } = require("electron-updater/out/providers/GenericProvider");
 
@@ -92,4 +92,19 @@ test("Compatibility feeds reject a prerelease version or untrusted asset path", 
   assert.throws(() => stableCompatibility(stableFeed, "v0.55.0-test.1"));
   assert.throws(() => stableCompatibility(stableFeed, "v0.55.0"), /mismatch/);
   assert.throws(() => stableCompatibility(stableFeed.replaceAll("Koinos-AI-Setup-0.54.1.exe", "https://example.com/installer.exe"), "v0.54.1"), /Unsafe/);
+});
+
+test("Release lookup requests only the rolling release and bounds its response", () => {
+  const result = findTestRelease((...args) => {
+    assert.deepEqual(args, ["api", "repos/therexdev/kaiapp/releases/tags/test-build", "--jq", "{prerelease,draft}"]);
+    return '{"prerelease":true,"draft":false}';
+  });
+  assert.deepEqual(result, { prerelease: true, draft: false });
+});
+
+test("Only a confirmed missing release permits creation; authentication errors propagate", () => {
+  const failure = (status) => () => { throw Object.assign(new Error("GitHub failed"), { status: 1, stderr: `gh: HTTP ${status}` }); };
+  assert.equal(findTestRelease(failure(404)), null);
+  assert.throws(() => findTestRelease(failure(403)), /GitHub failed/);
+  assert.throws(() => findTestRelease(() => { throw new Error("network unavailable"); }), /network unavailable/);
 });

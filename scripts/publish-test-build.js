@@ -9,6 +9,17 @@ const yaml = require("js-yaml");
 const TAG = "test-build"; // Deliberately NOT semver: legacy updaters use latest*.yml.
 const REPO = "therexdev/kaiapp";
 
+function findTestRelease(gh) {
+  try {
+    return JSON.parse(gh("api", `repos/${REPO}/releases/tags/${TAG}`, "--jq", "{prerelease,draft}"));
+  } catch (error) {
+    // A missing first release is expected. Auth/network failures must stop
+    // publication, rather than being mistaken for permission to create one.
+    if (error.status === 1 && /HTTP 404/.test(String(error.stderr))) return null;
+    throw error;
+  }
+}
+
 function stableCompatibility(text, tag) {
   if (!/^v\d+\.\d+\.\d+$/.test(tag)) throw new Error("Expected a stable release tag");
   const data = yaml.load(text);
@@ -28,8 +39,8 @@ function publish(dir) {
   if (process.env.GITHUB_REPOSITORY !== REPO || process.env.GITHUB_REF !== "refs/heads/test") {
     throw new Error("Test publication must run from therexdev/kaiapp:test");
   }
-  const gh = (...args) => execFileSync("gh", args, { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] });
-  const latest = JSON.parse(gh("api", `repos/${REPO}/releases/latest`));
+  const gh = (...args) => execFileSync("gh", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const latest = JSON.parse(gh("api", `repos/${REPO}/releases/latest`, "--jq", "{tag_name,prerelease,draft,assets:[.assets[]|{name}]}"));
   if (latest.prerelease || latest.draft) throw new Error("No published live release available");
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), "kai-test-release-"));
   try {
@@ -63,8 +74,7 @@ function publish(dir) {
     const body = path.join(temp, "notes.md");
     const setup = binaries.find(n => /^Koinos-AI-Test-Setup-.*\.exe$/.test(n));
     fs.writeFileSync(body, `## Koinos AI Test ${version}\n\n[Download the Windows test installer](https://github.com/${REPO}/releases/download/${TAG}/${setup})\n\nInstalls alongside Koinos AI with separate chats, settings, wallet files and models. Test updates stay on this channel. Local API: port 41101.\n\nThis is a test APP, connected to the existing network services; it is not a separate blockchain or scheduler. Start with a new test profile.\n\nSource commit: ${process.env.GITHUB_SHA}\nBuild: https://github.com/${REPO}/actions/runs/${process.env.GITHUB_RUN_ID}\n\nThe rolling tag identifies this download channel. The versioned build JSON and checksums identify each build's exact source and files. Older versioned binaries remain here for in-flight downloads. The latest*.yml files are compatibility pointers to live ${latest.tag_name}, never test installers.\n`);
-    const releases = JSON.parse(gh("api", `repos/${REPO}/releases?per_page=100`));
-    const existing = releases.find(r => r.tag_name === TAG);
+    const existing = findTestRelease(gh);
     if (!existing) {
       gh("release", "create", TAG, "--repo", REPO, "--target", process.env.GITHUB_SHA,
         "--draft", "--prerelease", "--latest=false", "--title", "Koinos AI Test", "--notes-file", body);
@@ -83,4 +93,4 @@ function publish(dir) {
 }
 
 if (require.main === module) publish(path.resolve(process.argv[2] || "artifacts"));
-module.exports = { stableCompatibility };
+module.exports = { stableCompatibility, findTestRelease };
