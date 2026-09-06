@@ -12,6 +12,7 @@ const { app, BrowserWindow, Menu, Tray, dialog, nativeImage, shell, ipcMain } = 
 
 const { createCore } = require("../core/server");
 const { JsonStore } = require("../core/lib/store");
+const { backupLiveProfile } = require("../core/lib/profile-backup");
 
 const { channelConfig, configureDesktop, configureUpdater } = require("../core/lib/release-channel");
 // Packaged identity is build metadata; shell environment cannot change its channel.
@@ -27,7 +28,17 @@ let tray = null;
 let quitting = false;
 
 if (!app.requestSingleInstanceLock()) {
-  app.quit();
+  if (release.isTest) {
+    app.whenReady().then(async () => {
+      await dialog.showMessageBox({
+        type: "info", title: "Koinos AI is already running",
+        message: "Quit the running app before opening Koinos AI Test.",
+        detail: "Live and Test use the same wallet, node and data. Choose Quit Koinos AI from the running app's tray menu, then open Test again. Closing its window may only hide it in the tray.",
+        buttons: ["OK"],
+      });
+      app.quit();
+    });
+  } else app.quit();
 } else {
   app.on("second-instance", () => {
     // The window may be parked in the tray rather than merely minimized —
@@ -63,6 +74,17 @@ function machineSecret(dataDir) {
 
 async function start() {
   const dataDir = process.env.KAI_CORE_DATA || path.join(app.getPath("userData"), "core");
+  // We hold the shared Electron lock now. Snapshot configuration before even
+  // machineSecret/createCore can write; never copy or relocate the node DB.
+  if (release.isTest) {
+    try { backupLiveProfile(dataDir, require("../package.json").version); }
+    catch (error) {
+      dialog.showErrorBox("Koinos AI Test could not back up your settings",
+        `Your live profile has not been opened. ${error.message}`);
+      app.quit();
+      return;
+    }
+  }
   const winState = new JsonStore(path.join(dataDir, "window.json"), {
     bounds: { width: 1100, height: 760 },
   });

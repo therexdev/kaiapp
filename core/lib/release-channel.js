@@ -12,18 +12,22 @@ function channelConfig(channel = process.env.KAI_CHANNEL || pkg.kaiChannel || "s
     channel, isTest,
     productName: isTest ? "Koinos AI Test" : "Koinos AI",
     appId: isTest ? "io.koinosai.desktop.test" : "io.koinosai.desktop",
-    port: isTest ? 41101 : 41100,
-    ollamaPort: isTest ? 11435 : 11434,
-    homeDirName: isTest ? ".koinos-ai-test" : ".koinos-ai",
+    // Test exercises the owner's existing live node and profile.
+    port: 41100,
+    ollamaPort: 11434,
+    homeDirName: ".koinos-ai",
   };
 }
 
 function configureDesktop(app, config) {
   if (config.isTest) {
-    // Before Electron's single-instance lock or any session is created.
-    // A fixed path also keeps development and installed test builds together.
-    app.setName(config.productName);
-    app.setPath("userData", path.join(app.getPath("appData"), config.productName));
+    // Keep the live OS credential identity and singleton/profile path. The
+    // installer, window/tray label and updater still use Test's own identity.
+    // This must run before the single-instance lock or any session is created.
+    app.setName("Koinos AI");
+    const liveProfile = path.join(app.getPath("appData"), "Koinos AI");
+    app.setPath("userData", liveProfile);
+    app.setPath("sessionData", liveProfile);
   }
   if (process.platform === "win32") app.setAppUserModelId(config.appId);
 }

@@ -41,8 +41,10 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
-      - name: Prepare isolated test identity
+      - name: Prepare test installer identity
         run: node scripts/prepare-test-build.js ${{ github.run_number }} ${{ github.run_attempt }}
+      - name: Verify live profile handoff and credential reuse
+        run: node scripts/verify-shared-profile.js
       - name: Enable code signing (when configured)
         shell: bash
         env:
@@ -93,7 +95,7 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
-      - name: Prepare isolated test identity
+      - name: Prepare test installer identity
         run: node scripts/prepare-test-build.js ${{ github.run_number }} ${{ github.run_attempt }}
       - run: npm run dist -- --linux --x64 --arm64 --publish never
       - run: node scripts/verify-test-package.js

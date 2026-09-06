@@ -12,16 +12,20 @@ const { stableCompatibility, findTestRelease } = require("../../scripts/publish-
 const { GitHubProvider } = require("electron-updater/out/providers/GitHubProvider");
 const { GenericProvider } = require("electron-updater/out/providers/GenericProvider");
 
-test("Test gets independent local resources; live retains its existing profile", () => {
+test("Test keeps its installer identity but opens the live profile and services", () => {
   const stable = channelConfig("stable");
   const test = channelConfig("test");
-  for (const key of ["appId", "productName", "port", "ollamaPort", "homeDirName"]) assert.notEqual(test[key], stable[key]);
+  for (const key of ["appId", "productName"]) assert.notEqual(test[key], stable[key]);
+  for (const key of ["port", "ollamaPort", "homeDirName"]) assert.equal(test[key], stable[key]);
   const paths = { appData: path.join(os.tmpdir(), "app-data"), userData: "existing-live-profile" };
-  const app = { getPath: key => paths[key], setPath: (key, value) => { paths[key] = value; }, setName() {}, setAppUserModelId() {} };
+  let credentialName;
+  const app = { getPath: key => paths[key], setPath: (key, value) => { paths[key] = value; }, setName(name) { credentialName = name; }, setAppUserModelId() {} };
   configureDesktop(app, stable);
   assert.equal(paths.userData, "existing-live-profile");
   configureDesktop(app, test);
-  assert.equal(paths.userData, path.join(paths.appData, "Koinos AI Test"));
+  assert.equal(paths.userData, path.join(paths.appData, "Koinos AI"));
+  assert.equal(paths.sessionData, paths.userData);
+  assert.equal(credentialName, "Koinos AI");
   assert.throws(() => channelConfig("beta"), /Unknown/);
 });
 
