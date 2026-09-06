@@ -73,7 +73,7 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, prefs, 
     if (!window || window.isDestroyed()) {
       const saved = prefs.get("mascot.position");
       const valid = saved && Number.isFinite(saved.x) && Number.isFinite(saved.y);
-      const point = valid ? saved : screen.getCursorScreenPoint();
+      const point = valid ? { x: saved.x - 1, y: saved.y - 1 } : screen.getCursorScreenPoint();
       const area = screen.getDisplayNearestPoint(point).workArea;
       const anchor = valid ? saved : { x: area.x + area.width - 24, y: area.y + area.height - 16 };
       expanded = false;

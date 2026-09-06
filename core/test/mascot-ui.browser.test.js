@@ -56,8 +56,9 @@ test("KAI desktop UI: chat, persisted history, cancellation, voice, microphone c
   assert.match(await page.textContent("#messages"), /What are you working on today/);
   assert.equal(fixture.chats.list().length, 1);
   await page.reload();
-  await page.waitForSelector(".message.assistant");
+  await page.waitForSelector(".message.assistant", { state: "attached" });
   await page.click("#toggle-chat");
+  await page.waitForSelector(".message.assistant");
   assert.equal(await page.locator(".message.user").count(), 1);
   if (process.env.KAI_MASCOT_QA_DIR) await page.screenshot({ path: path.join(process.env.KAI_MASCOT_QA_DIR, "kai-chat.png"), omitBackground: true, animations: "disabled" });
 

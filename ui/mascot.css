@@ -31,7 +31,7 @@ button svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.7
 #mascot-menu button{display:block;width:100%;text-align:left;padding:10px;background:none;border-radius:8px;font-size:12px}
 #mascot-menu button:hover{background:#ffffff09}
 #conversation{position:absolute;left:8px;right:260px;bottom:12px;top:10px;display:flex;flex-direction:column;background:linear-gradient(155deg,#172c3e 0,#0f1c2a 26%,#0d1723 100%);border:1px solid #9fdff02c;border-radius:22px;box-shadow:0 9px 20px #0003;overflow:hidden;animation:panel-in .24s ease-out}
-.chat-header{display:flex;align-items:center;gap:10px;padding:18px 13px 16px 18px;border-bottom:1px solid var(--border)}
+.chat-header{display:flex;align-items:center;gap:10px;padding:14px 13px 13px 18px;border-bottom:1px solid var(--border)}
 .kai-monogram{display:flex;align-items:center;justify-content:center;width:34px;height:37px;flex-shrink:0;color:#c3fffb;border:1px solid #88e9e745;border-radius:12px;background:linear-gradient(155deg,#48cfc425,#28819c0a);font-size:20px;font-weight:500;box-shadow:inset 0 1px #c9fffd26}
 .chat-heading{flex:1;min-width:0}
 h1{margin:0;font-size:16px;font-weight:650;letter-spacing:1.8px;line-height:1.2}
@@ -42,14 +42,14 @@ h1 span{display:block;color:#84a2b5;font-size:8px;font-weight:500;letter-spacing
 .model-row select{flex:1;min-width:0;max-width:250px;background:#132331;color:#c2d8e4;border:0;border-radius:5px;padding:3px;font-size:10px}
 .text-button{background:none;padding:2px;color:#91c9d1;font-size:10px}
 .text-button:hover{color:#d6ffff}
-#transcript{flex:1;min-height:0;overflow:auto;padding:20px 18px 14px;scrollbar-width:thin;scrollbar-color:#405768 transparent;-webkit-user-select:text;user-select:text}
+#transcript{flex:1;min-height:0;overflow:auto;padding:16px 18px 12px;scrollbar-width:thin;scrollbar-color:#405768 transparent;-webkit-user-select:text;user-select:text}
 #welcome{padding:2px 1px}
 .eyebrow{font-size:8px;letter-spacing:1.55px;color:#85a1b3}
-h2{font-weight:500;font-size:31px;letter-spacing:-1px;line-height:1.25;margin:13px 0 8px;color:#f1f8ff}
+h2{font-weight:500;font-size:29px;letter-spacing:-1px;line-height:1.25;margin:10px 0 7px;color:#f1f8ff}
 h2>span{color:var(--accent)}
-#welcome>p{font-size:12px;line-height:1.7;color:#94aebb;max-width:275px;margin:0 0 20px}
+#welcome>p{font-size:12px;line-height:1.6;color:#94aebb;max-width:275px;margin:0 0 14px}
 .suggestions{display:flex;flex-direction:column;gap:7px}
-.suggestions button{display:flex;align-items:center;gap:11px;text-align:left;width:100%;background:#ffffff03;border:1px solid #c5e8fa13;padding:10px 11px;border-radius:10px;color:#c3d7e3;font-size:11px;transition:background .2s,border-color .2s}
+.suggestions button{display:flex;align-items:center;gap:11px;text-align:left;width:100%;background:#ffffff03;border:1px solid #c5e8fa13;padding:8px 11px;border-radius:10px;color:#c3d7e3;font-size:11px;transition:background .2s,border-color .2s}
 .suggestions button:hover{background:#76e8e30c;border-color:#9cf4e93b}
 .suggestions span{font-size:9px;color:#5e8193;font-variant-numeric:tabular-nums}
 .suggestions b{margin-left:auto;color:#75c6cf;font-size:15px;font-weight:400}
