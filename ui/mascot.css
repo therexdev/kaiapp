@@ -1,0 +1,159 @@
+@font-face{font-family:KaiSystem;src:local("Segoe UI")}
+:root{font-family:KaiSystem,Inter,system-ui,sans-serif;color:#e6f4fc;color-scheme:dark;--accent:#78f4ec;--muted:#91a7b8;--border:#ffffff13;--panel:#101d2b;--gaze-x:0px;--gaze-y:0px}
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent!important}
+body{font-size:13px;-webkit-user-select:none;user-select:none}
+[hidden]{display:none!important}
+button,textarea,select{font:inherit}
+button{color:inherit;cursor:pointer;border:0}
+button:disabled{opacity:.45;cursor:default}
+button:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+button,select{-webkit-app-region:no-drag}
+button svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+#companion{position:relative;height:100%;width:100%}
+#mascot-stage{position:absolute;right:0;bottom:0;width:248px;height:304px}
+#robot{position:absolute;right:2px;bottom:38px;width:244px;height:240px;padding:0;background:none;touch-action:none;cursor:grab;outline-offset:-22px;transition:filter .25s}
+#robot:active{cursor:grabbing}
+#robot:hover{filter:drop-shadow(0 0 8px #6df5ff20)}
+#kai-art,#kai-art svg{display:block;width:100%;height:100%;overflow:visible}
+#status-pill{position:absolute;z-index:2;right:17px;top:5px;max-width:222px;display:flex;align-items:center;gap:7px;padding:7px 10px;border:1px solid #8bcfe322;border-radius:20px;background:#0d1b2ef2;box-shadow:0 4px 12px #0002;font-size:10px;color:#cae3ec;white-space:nowrap;pointer-events:none}
+#status-pill>span:first-child,.dock-dot,.status-light{height:5px;width:5px;background:var(--accent);border-radius:50%;flex-shrink:0;box-shadow:0 0 8px #6df5ed55}
+#mood-label{overflow:hidden;text-overflow:ellipsis}
+#mascot-dock{position:absolute;right:21px;bottom:8px;height:39px;display:flex;align-items:center;gap:2px;padding:3px 6px;border-radius:24px;background:#101e2ef5;border:1px solid #92cde72b;box-shadow:0 6px 16px #0003}
+#toggle-chat{display:flex;align-items:center;gap:9px;background:none;height:32px;padding:0 9px}
+#toggle-chat strong{font-size:12px;letter-spacing:2px;font-weight:650}
+#toggle-chat svg{width:15px;color:#acc8d4;margin-left:1px}
+.icon-button{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;background:transparent;border-radius:9px;flex-shrink:0;color:#a3bdcb;transition:background .15s,color .15s}
+.icon-button:hover{background:#ffffff0e;color:#e7ffff}
+#mascot-dock .icon-button{height:29px;width:29px;border-radius:50%}
+#mascot-menu{position:absolute;z-index:4;right:20px;bottom:54px;width:174px;padding:6px;background:#122132;border:1px solid #9bcee628;border-radius:14px;box-shadow:0 8px 25px #0005}
+#mascot-menu button{display:block;width:100%;text-align:left;padding:10px;background:none;border-radius:8px;font-size:12px}
+#mascot-menu button:hover{background:#ffffff09}
+#conversation{position:absolute;left:8px;right:260px;bottom:12px;top:10px;display:flex;flex-direction:column;background:linear-gradient(155deg,#172c3e 0,#0f1c2a 26%,#0d1723 100%);border:1px solid #9fdff02c;border-radius:22px;box-shadow:0 9px 20px #0003;overflow:hidden;animation:panel-in .24s ease-out}
+.chat-header{display:flex;align-items:center;gap:10px;padding:18px 13px 16px 18px;border-bottom:1px solid var(--border)}
+.kai-monogram{display:flex;align-items:center;justify-content:center;width:34px;height:37px;flex-shrink:0;color:#c3fffb;border:1px solid #88e9e745;border-radius:12px;background:linear-gradient(155deg,#48cfc425,#28819c0a);font-size:20px;font-weight:500;box-shadow:inset 0 1px #c9fffd26}
+.chat-heading{flex:1;min-width:0}
+h1{margin:0;font-size:16px;font-weight:650;letter-spacing:1.8px;line-height:1.2}
+h1 span{display:block;color:#84a2b5;font-size:8px;font-weight:500;letter-spacing:1.6px;margin-top:5px}
+.chat-heading p{margin:6px 0 0;font-size:10px;color:#8cb9bd;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chat-header .icon-button{width:27px;height:29px}
+.model-row{display:flex;align-items:center;gap:7px;padding:9px 19px;background:#030c141e;border-bottom:1px solid var(--border);font-size:10px;color:#7fa2b4}
+.model-row select{flex:1;min-width:0;max-width:250px;background:#132331;color:#c2d8e4;border:0;border-radius:5px;padding:3px;font-size:10px}
+.text-button{background:none;padding:2px;color:#91c9d1;font-size:10px}
+.text-button:hover{color:#d6ffff}
+#transcript{flex:1;min-height:0;overflow:auto;padding:20px 18px 14px;scrollbar-width:thin;scrollbar-color:#405768 transparent;-webkit-user-select:text;user-select:text}
+#welcome{padding:2px 1px}
+.eyebrow{font-size:8px;letter-spacing:1.55px;color:#85a1b3}
+h2{font-weight:500;font-size:31px;letter-spacing:-1px;line-height:1.25;margin:13px 0 8px;color:#f1f8ff}
+h2>span{color:var(--accent)}
+#welcome>p{font-size:12px;line-height:1.7;color:#94aebb;max-width:275px;margin:0 0 20px}
+.suggestions{display:flex;flex-direction:column;gap:7px}
+.suggestions button{display:flex;align-items:center;gap:11px;text-align:left;width:100%;background:#ffffff03;border:1px solid #c5e8fa13;padding:10px 11px;border-radius:10px;color:#c3d7e3;font-size:11px;transition:background .2s,border-color .2s}
+.suggestions button:hover{background:#76e8e30c;border-color:#9cf4e93b}
+.suggestions span{font-size:9px;color:#5e8193;font-variant-numeric:tabular-nums}
+.suggestions b{margin-left:auto;color:#75c6cf;font-size:15px;font-weight:400}
+.message{margin:0 0 17px;line-height:1.65;overflow-wrap:anywhere}
+.message .author{display:flex;align-items:center;gap:7px;color:#6caeb8;font-size:9px;text-transform:uppercase;letter-spacing:1.4px;margin-bottom:6px}
+.message.user .author{color:#859ba9}
+.message.user .content{background:#6db1db10;border:1px solid #a9cced0d;padding:10px 12px;border-radius:12px 12px 3px 12px;color:#d1e5ef}
+.message.assistant .content{color:#dbeaf3;padding:0 1px}
+.message .content p{margin:0 0 10px}.message .content p:last-child{margin-bottom:0}
+.message .content h1,.message .content h2,.message .content h3{font-size:15px;letter-spacing:0;margin:12px 0 6px}
+.message .content ul,.message .content ol{padding-left:20px;margin:7px 0}
+.message .content pre{white-space:pre-wrap;border:1px solid #ffffff12;border-radius:8px;background:#030c14;padding:10px;overflow:auto}
+.message .content code{font-size:11px;font-family:Consolas,monospace;background:#ffffff08;border-radius:3px}
+.message .content a{color:#80ddd8}
+.message .content blockquote{margin:8px 0;padding-left:12px;border-left:2px solid #79e5de6b;color:#acc5d5}
+.message .content table{display:block;max-width:100%;overflow:auto;border-collapse:collapse;font-size:11px}
+.message .content td,.message .content th{border:1px solid #fff2;padding:5px}
+.message.streaming .content:empty:after{content:"Thinking";color:#88a8b8;animation:breathe 1.5s infinite}
+.message .source{margin-top:5px;font-size:9px;color:#7496aa}
+#notice{margin:0 16px 8px;padding:9px 11px;background:#ffbb6b0d;border:1px solid #ffbc6b21;border-radius:10px;color:#e9c792;font-size:11px;line-height:1.5;max-height:90px;overflow:auto}
+#voice-setup{margin:0 16px 8px;border:1px solid #72ead737;border-radius:12px;padding:10px 12px;background:#38ab9e0c;font-size:11px}
+#voice-setup p{margin:0 0 8px;line-height:1.6;color:#b9d5df}
+#install-voice{background:#7febdf;color:#0a302f;padding:7px 12px;border-radius:7px;font-size:11px;font-weight:600;margin-right:8px}
+#composer{margin:0 14px;padding:11px 11px 8px;border:1px solid #a5cfed29;border-radius:14px;background:#0b1724;box-shadow:inset 0 1px 3px #0002}
+#composer:focus-within{border-color:#76dbd873}
+#question{display:block;width:100%;resize:none;max-height:90px;min-height:39px;padding:0 2px;border:0;outline:none!important;background:none;color:#e8f6ff;line-height:1.6;font-size:12px;-webkit-user-select:text;user-select:text}
+#question::placeholder{color:#6f8b9f}
+.composer-actions{display:flex;align-items:center;margin-top:4px;gap:7px}
+#composer-hint{font-size:9px;color:#617e91;flex:1}
+.send-button{display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:9px;color:#0e333a;background:linear-gradient(135deg,#b2fff3,#68d7e9);box-shadow:0 3px 12px #68ddea14}
+.send-button:hover{filter:brightness(1.1)}
+.stop-button{background:#edb078;color:#301d0b}
+.chat-footer{display:flex;align-items:center;justify-content:space-between;padding:11px 19px 13px}
+.chat-footer button{display:flex;align-items:center;gap:6px;font-size:9px;color:#7997aa;background:none;padding:0}
+.chat-footer button:hover{color:#b5efe8}
+.chat-footer svg{width:13px;height:13px}
+#read-aloud[aria-pressed=true]{color:#9cebdc}
+body[data-state=listening] #mic,body[data-state=listening] #quick-mic{color:#13382e;background:#9af7d1;box-shadow:0 0 0 4px #72ebc214}
+body[data-state=listening] #status-pill>span:first-child{background:#9affd0;animation:breathe .65s infinite}
+body[data-state=thinking] #status-pill>span:first-child,body[data-state=transcribing] #status-pill>span:first-child{animation:breathe .7s infinite;background:#c9b7ff}
+body[data-state=error] #status-pill>span:first-child{background:#ffc07b}
+
+/* Articulated vector rig: transforms stay on the compositor where possible;
+   there is no WebGL loop, video decoder, external art, or perpetual inference. */
+.kai-float{transform-origin:160px 190px;animation:kai-hover 4.6s ease-in-out infinite}
+.kai-head{transform-origin:160px 174px;animation:kai-look 13s ease-in-out infinite}
+.kai-arm-left{transform-origin:108px 207px;animation:kai-sway-left 4.6s ease-in-out infinite}
+.kai-arm-right{transform-origin:212px 207px;animation:kai-sway-right 4.6s ease-in-out infinite}
+.kai-leg-left{transform-origin:135px 279px;animation:kai-leg-left 4.6s ease-in-out infinite}
+.kai-leg-right{transform-origin:185px 279px;animation:kai-leg-right 4.6s ease-in-out infinite}
+.kai-gaze{transform:translate(var(--gaze-x),var(--gaze-y));transition:transform .25s ease-out}
+.kai-eyes{transform-origin:160px 120px;animation:kai-blink 5.3s infinite}
+.kai-shadow{transform-origin:160px 348px;animation:kai-shadow 4.6s ease-in-out infinite}
+.kai-core-halo{animation:breathe 3.3s ease-in-out infinite}
+.kai-thruster{transform-origin:160px 284px;animation:kai-jet 2.3s ease-in-out infinite}
+.kai-antenna-waves{opacity:0}
+.kai-voice-bars{opacity:0;transform-origin:160px 144px}
+.kai-sparks{opacity:0;animation:kai-sparkle 11s ease-in-out infinite}
+body[data-state=greeting] .kai-arm-right,body.waving .kai-arm-right{animation:kai-wave 2.4s ease-in-out}
+body[data-state=greeting] .kai-head,body.waving .kai-head{animation:kai-happy 2.4s ease-in-out}
+body[data-state=thinking] .kai-head,body[data-state=transcribing] .kai-head{animation:kai-think 2.6s ease-in-out infinite}
+body[data-state=thinking] .kai-arm-right,body[data-state=transcribing] .kai-arm-right{animation:kai-ponder 2.6s ease-in-out infinite}
+body[data-state=thinking] .kai-core-halo,body[data-state=transcribing] .kai-core-halo{fill:#bd9fff;animation:breathe .65s infinite}
+body[data-state=thinking] .kai-gaze{transform:translate(6px,-3px)}
+body[data-state=listening] .kai-head{animation:kai-listen 3s ease-in-out infinite}
+body[data-state=listening] .kai-antenna-waves{opacity:1;animation:breathe .8s infinite}
+body[data-state=listening] .kai-eye{fill:#b1ffdd}
+body[data-state=listening] .kai-arm-left{animation:kai-listen-arm 3s ease-in-out infinite}
+body[data-state=speaking] .kai-head{animation:kai-talk .85s ease-in-out infinite}
+body[data-state=speaking] .kai-smile{opacity:0}
+body[data-state=speaking] .kai-voice-bars{opacity:1;animation:kai-mouth .28s ease-in-out infinite alternate}
+body[data-state=speaking] .kai-arm-right{animation:kai-explain 2s ease-in-out infinite}
+body[data-state=speaking] .kai-core-halo{animation:breathe .45s infinite}
+body[data-state=error] .kai-head{animation:kai-confused 2s ease-in-out}
+body[data-state=error] .kai-eye{fill:#ffcd91}
+body[data-state=dragging] .kai-float{animation:none;transform:rotate(-5deg) translateY(-4px)}
+body[data-state=dragging] .kai-arm-left{animation:none;transform:rotate(22deg)}
+body[data-state=dragging] .kai-arm-right{animation:none;transform:rotate(-22deg)}
+body.asleep .kai-eyes{animation:none;transform:scaleY(.15)}
+body.asleep .kai-float{animation-duration:7s}
+body.asleep .kai-head{animation:none;transform:rotate(7deg)}
+body.motion-off #kai-art *,body.suspended #kai-art *{animation:none!important}
+body.motion-off .kai-gaze{transform:none}
+@keyframes kai-hover{0%,100%{transform:translateY(1px) rotate(-1deg)}50%{transform:translateY(-9px) rotate(1deg)}}
+@keyframes kai-look{0%,28%,100%{transform:rotate(0)}36%,42%{transform:rotate(-6deg) translateX(-2px)}52%,68%{transform:rotate(0)}76%,84%{transform:rotate(6deg) translateX(2px)}}
+@keyframes kai-sway-left{0%,100%{transform:rotate(3deg)}50%{transform:rotate(-6deg)}}
+@keyframes kai-sway-right{0%,100%{transform:rotate(-3deg)}50%{transform:rotate(6deg)}}
+@keyframes kai-leg-left{0%,100%{transform:rotate(2deg)}50%{transform:rotate(8deg)}}
+@keyframes kai-leg-right{0%,100%{transform:rotate(-2deg)}50%{transform:rotate(-8deg)}}
+@keyframes kai-blink{0%,40%,44%,72%,76%,100%{transform:scaleY(1)}42%,74%{transform:scaleY(.08)}}
+@keyframes kai-shadow{0%,100%{transform:scaleX(1);opacity:.8}50%{transform:scaleX(.8);opacity:.5}}
+@keyframes kai-jet{0%,100%{transform:scaleY(.8);opacity:.55}50%{transform:scaleY(1.08);opacity:.9}}
+@keyframes kai-wave{0%,100%{transform:rotate(0)}20%,45%,70%{transform:rotate(-128deg)}32%,57%,82%{transform:rotate(-98deg)}}
+@keyframes kai-happy{0%,100%{transform:rotate(0)}20%,80%{transform:rotate(-7deg) translateY(-3px)}}
+@keyframes kai-think{0%,100%{transform:rotate(7deg) translateY(-2px)}50%{transform:rotate(10deg) translateY(-4px)}}
+@keyframes kai-ponder{0%,100%{transform:rotate(-27deg)}50%{transform:rotate(-37deg)}}
+@keyframes kai-listen{0%,100%{transform:rotate(-8deg)}50%{transform:rotate(-5deg) translateY(-3px)}}
+@keyframes kai-listen-arm{0%,100%{transform:rotate(27deg)}50%{transform:rotate(31deg)}}
+@keyframes kai-talk{0%,100%{transform:rotate(-2deg) translateY(0)}50%{transform:rotate(2deg) translateY(2px)}}
+@keyframes kai-mouth{from{transform:scaleY(.35)}to{transform:scaleY(1.2)}}
+@keyframes kai-explain{0%,100%{transform:rotate(-15deg)}50%{transform:rotate(-45deg)}}
+@keyframes kai-confused{0%,100%{transform:rotate(0)}25%{transform:rotate(-8deg)}65%{transform:rotate(8deg)}}
+@keyframes kai-sparkle{0%,78%,100%{opacity:0}82%,94%{opacity:.8}}
+@keyframes breathe{0%,100%{opacity:.55}50%{opacity:1}}
+@keyframes panel-in{from{opacity:0;transform:translate(8px,5px) scale(.98)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
+@media(max-width:600px){body.expanded #mascot-stage{width:188px;transform:scale(.78);transform-origin:right bottom}body.expanded #conversation{right:192px}.chat-header{padding:12px 10px;gap:6px}h1 span{letter-spacing:.5px;font-size:7px}.model-row{padding:8px 11px}#transcript{padding:13px}h2{font-size:25px}}

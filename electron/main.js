@@ -23,6 +23,7 @@ process.env.KAI_CHANNEL = release.channel;
 let core = null;
 let win = null;
 let tray = null;
+let mascot = null;
 // Set the moment a real quit begins, so the close handler below knows the
 // difference between "the user pressed X" and "the app is going down".
 let quitting = false;
@@ -41,9 +42,9 @@ if (!app.requestSingleInstanceLock()) {
   } else app.quit();
 } else {
   app.on("second-instance", () => {
-    // The window may be parked in the tray rather than merely minimized —
-    // launching the app again is a request to see it, either way.
+    // Reopening restores the main window and parks the companion.
     if (win) {
+      mascot?.hide();
       if (win.isMinimized()) win.restore();
       win.show();
       win.focus();
@@ -146,10 +147,16 @@ async function start() {
 
   function showWindow() {
     if (!win) return;
+    mascot?.hide();
     if (win.isMinimized()) win.restore();
     win.show();
     win.focus();
   }
+
+  mascot = require("./mascot").createMascotController({
+    BrowserWindow, screen: require("electron").screen, ipcMain, shell,
+    prefs: winState, origin: "http://127.0.0.1:" + port, getMainWindow: () => win, hasTray: () => !!tray,
+  });
 
   /*
    * The notification-area icon. It is what makes closing-to-tray honest: hide
@@ -178,6 +185,9 @@ async function start() {
     tray.setToolTip(release.productName);
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: "Open Koinos AI", click: showWindow },
+      { label: "Launch KAI companion", click: () => mascot.launch().catch(error =>
+        dialog.showErrorBox("KAI could not open", error.message)) },
+      { label: "Hide KAI companion", click: () => mascot.hide() },
       { type: "separator" },
       { label: "Quit Koinos AI", click: () => { quitting = true; app.quit(); } },
     ]));
@@ -242,7 +252,12 @@ async function start() {
     e.preventDefault();
     hideToTray();
   });
-  win.on("closed", () => (win = null));
+  win.on("closed", () => {
+    win = null;
+    // A real main-window close still means quit when close-to-tray is off.
+    // The companion must not keep an otherwise closed app running invisibly.
+    if (!quitting) app.quit();
+  });
 
   // Settings reads and writes this; in a plain browser the bridge is absent
   // and the section stays hidden, which is correct — there is no tray there.
@@ -486,6 +501,7 @@ async function start() {
 // logging out — passes through here first, which is what lets the close
 // handler above tell a quit apart from a trip to the tray.
 app.on("before-quit", () => { quitting = true; });
+app.on("before-quit", () => mascot?.dispose());
 
 app.on("window-all-closed", () => app.quit());
 

@@ -20,5 +20,9 @@ for (const archive of archives) {
   assert.equal(config.provider, "generic");
   assert.equal(config.url, TEST_FEED);
   assert.equal(config.channel, "test");
+  for (const required of ["electron/mascot.js", "electron/mascot-preload.js", "ui/mascot.html",
+    "ui/mascot.js", "ui/mascot-client.js", "ui/mascot.css", "ui/kai-robot.svg", "ui/mascot-launcher.js"]) {
+    assert.ok(asar.extractFile(file, required).length > 0, "Missing companion asset: " + required);
+  }
   console.log(`Verified ${file}: ${pkg.version}`);
 }

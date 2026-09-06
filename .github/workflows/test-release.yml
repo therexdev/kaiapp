@@ -30,6 +30,15 @@ jobs:
           npx playwright-core install --with-deps chromium
           echo "KAI_TEST_CHROMIUM=$(node -e 'process.stdout.write(require("playwright-core").chromium.executablePath())')" >> "$GITHUB_ENV"
       - run: npm test
+        env:
+          KAI_MASCOT_QA_DIR: mascot-qa
+      - name: Save KAI visual checks
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mascot-visual-checks
+          path: mascot-qa/*.png
+          if-no-files-found: ignore
 
   windows:
     needs: verify
@@ -45,6 +54,8 @@ jobs:
         run: node scripts/prepare-test-build.js ${{ github.run_number }} ${{ github.run_attempt }}
       - name: Verify live profile handoff and credential reuse
         run: node scripts/verify-shared-profile.js
+      - name: Verify native KAI companion
+        run: node scripts/verify-mascot-window.js
       - name: Enable code signing (when configured)
         shell: bash
         env:

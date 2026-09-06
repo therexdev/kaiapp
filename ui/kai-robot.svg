@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 380" fill="none" role="img" aria-label="KAI, a floating pearl-white robot with luminous cyan eyes">
+  <defs>
+    <linearGradient id="kai-shell" x1="90" y1="55" x2="226" y2="191" gradientUnits="userSpaceOnUse"><stop stop-color="#fff"/><stop offset=".4" stop-color="#f0f7fa"/><stop offset=".74" stop-color="#afc5d3"/><stop offset="1" stop-color="#526c80"/></linearGradient>
+    <linearGradient id="kai-chest" x1="123" y1="183" x2="211" y2="282" gradientUnits="userSpaceOnUse"><stop stop-color="#fff"/><stop offset=".48" stop-color="#dae8f0"/><stop offset="1" stop-color="#6c8ba0"/></linearGradient>
+    <linearGradient id="kai-glass" x1="104" y1="78" x2="201" y2="167" gradientUnits="userSpaceOnUse"><stop stop-color="#203548"/><stop offset=".48" stop-color="#07121f"/><stop offset="1" stop-color="#102738"/></linearGradient>
+    <linearGradient id="kai-limb" x1="73" y1="207" x2="109" y2="269" gradientUnits="userSpaceOnUse"><stop stop-color="#f2faff"/><stop offset="1" stop-color="#809bae"/></linearGradient>
+    <linearGradient id="kai-energy" x1="160" y1="280" x2="160" y2="337" gradientUnits="userSpaceOnUse"><stop stop-color="#91faff" stop-opacity=".75"/><stop offset="1" stop-color="#1bcbff" stop-opacity="0"/></linearGradient>
+    <radialGradient id="kai-shadow"><stop stop-color="#061b2c" stop-opacity=".35"/><stop offset="1" stop-color="#05101a" stop-opacity="0"/></radialGradient>
+    <radialGradient id="kai-core"><stop stop-color="#f0ffff"/><stop offset=".35" stop-color="#9bffff"/><stop offset="1" stop-color="#24b9d6"/></radialGradient>
+    <filter id="kai-glow" x="-70%" y="-70%" width="240%" height="240%"><feGaussianBlur stdDeviation="3"/></filter>
+    <filter id="kai-soft" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="1.5"/></filter>
+  </defs>
+  <ellipse class="kai-shadow" cx="160" cy="348" rx="99" ry="16" fill="url(#kai-shadow)"/>
+  <g class="kai-orbit" opacity=".45" stroke="#5ce9f6"><ellipse cx="160" cy="342" rx="59" ry="8" stroke-width="1"/><ellipse cx="160" cy="342" rx="79" ry="12" stroke-dasharray="10 39 3 19" stroke-width="1.4"/></g>
+  <g class="kai-float">
+    <g class="kai-thruster"><path d="M142 280h36l-7 47h-22z" fill="url(#kai-energy)"/><path d="M152 288h16l-4 42h-8z" fill="url(#kai-energy)" filter="url(#kai-soft)"/></g>
+    <g class="kai-leg kai-leg-left"><path d="m118 273-2 23c1 11 8 16 19 15l11-3 1-28" fill="#283e52"/><path d="m113 286 24 1c11 6 13 18 8 25-13 6-28 2-34-5-3-6-2-14 2-21Z" fill="url(#kai-chest)" stroke="#506c82" stroke-width="1.5"/><path d="m114 302 29 2" stroke="#8af4ff" stroke-width="3" stroke-linecap="round"/></g>
+    <g class="kai-leg kai-leg-right"><path d="m174 280 1 28 11 3c11 1 18-4 19-15l-2-23" fill="#283e52"/><path d="m183 287 24-1c4 7 5 15 2 21-6 7-21 11-34 5-5-7-3-19 8-25Z" fill="url(#kai-chest)" stroke="#506c82" stroke-width="1.5"/><path d="m177 304 29-2" stroke="#8af4ff" stroke-width="3" stroke-linecap="round"/></g>
+    <g class="kai-arm kai-arm-left">
+      <circle cx="108" cy="207" r="18" fill="#243d50" stroke="#68879b" stroke-width="2"/><circle cx="108" cy="207" r="10" fill="#91bbcc"/>
+      <path d="M100 207c-10-2-21 4-24 16l-5 24c0 9 13 12 21 7l15-29c5-8 1-16-7-18Z" fill="url(#kai-limb)" stroke="#658197" stroke-width="1.5"/>
+      <path d="m77 239 19 7" stroke="#263d50" stroke-width="4"/>
+      <g class="kai-hand-left"><path d="M76 249c-9 1-13 9-11 20l6 10c5 5 15 4 20-2l5-13c1-8-6-16-13-15Z" fill="url(#kai-limb)" stroke="#627e92" stroke-width="1.4"/><path d="m74 266 1 10m7-10-1 11m8-13-2 9" stroke="#56758b" stroke-width="2" stroke-linecap="round"/><path d="m69 258-5 7" stroke="#cce8f6" stroke-width="6" stroke-linecap="round"/></g>
+    </g>
+    <g class="kai-arm kai-arm-right">
+      <circle cx="212" cy="207" r="18" fill="#243d50" stroke="#68879b" stroke-width="2"/><circle cx="212" cy="207" r="10" fill="#91bbcc"/>
+      <path d="M220 207c10-2 21 4 24 16l5 24c0 9-13 12-21 7l-15-29c-5-8-1-16 7-18Z" fill="url(#kai-limb)" stroke="#658197" stroke-width="1.5"/>
+      <path d="m224 246 19-7" stroke="#263d50" stroke-width="4"/>
+      <g class="kai-hand-right"><path d="M244 249c9 1 13 9 11 20l-6 10c-5 5-15 4-20-2l-5-13c-1-8 6-16 13-15Z" fill="url(#kai-limb)" stroke="#627e92" stroke-width="1.4"/><path d="m246 266-1 10m-7-10 1 11m-8-13 2 9" stroke="#56758b" stroke-width="2" stroke-linecap="round"/><path d="m251 258 5 7" stroke="#cce8f6" stroke-width="6" stroke-linecap="round"/></g>
+    </g>
+    <g class="kai-body">
+      <path d="M121 190c14-10 64-10 78 0l17 30-15 50c-13 22-69 22-82 0l-15-50Z" fill="#263e51" stroke="#0c2334" stroke-width="2"/>
+      <path d="M119 188c22-8 60-8 82 0 11 14 10 32 6 54l-10 27c-13 17-61 17-74 0l-10-27c-4-22-5-40 6-54Z" fill="url(#kai-chest)" stroke="#83a0b3" stroke-width="1.5"/>
+      <path d="M124 195c19-6 53-6 72 0" stroke="#fff" stroke-opacity=".85" stroke-width="3" stroke-linecap="round"/>
+      <path d="m113 224 10 6m84-6-10 6" stroke="#566f84" stroke-width="2" stroke-linecap="round"/>
+      <rect x="138" y="205" width="44" height="44" rx="18" fill="#183448" stroke="#809daf" stroke-width="1.5"/>
+      <circle class="kai-core-halo" cx="160" cy="227" r="15" fill="#4dedff" filter="url(#kai-glow)" opacity=".8"/>
+      <circle cx="160" cy="227" r="11" fill="url(#kai-core)"/>
+      <path d="m156 221-4 6 4 6m8-12 4 6-4 6" stroke="#087589" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="160" y="266" fill="#3c596c" font-family="Arial,sans-serif" font-size="10" font-weight="700" letter-spacing="4" text-anchor="middle">KAI</text>
+      <path d="M141 281h38" stroke="#8af4ff" stroke-width="3" stroke-linecap="round"/>
+    </g>
+    <g class="kai-head">
+      <rect x="142" y="171" width="36" height="20" rx="8" fill="#203a4d"/><path d="M143 180h34" stroke="#6adfed" stroke-width="2"/>
+      <g class="kai-antenna"><path d="M160 45V25" stroke="#66869a" stroke-width="5" stroke-linecap="round"/><circle cx="160" cy="22" r="7" fill="#1b4258"/><circle class="kai-core-halo" cx="160" cy="22" r="5" fill="#80f7ff"/><path d="M147 19c-3 4-3 9 0 13m26-13c3 4 3 9 0 13" class="kai-antenna-waves" stroke="#7ff6ff" stroke-width="2" stroke-linecap="round"/></g>
+      <rect x="62" y="97" width="18" height="49" rx="9" fill="#48667d" stroke="#b4d1df" stroke-width="1.5"/><rect x="240" y="97" width="18" height="49" rx="9" fill="#48667d" stroke="#b4d1df" stroke-width="1.5"/>
+      <path d="M67 111v18m186-18v18" stroke="#84faff" stroke-width="3" stroke-linecap="round"/>
+      <path d="M73 88c4-32 26-45 87-45s83 13 87 45l3 42c1 37-27 53-90 53s-91-16-90-53Z" fill="url(#kai-shell)" stroke="#56768d" stroke-width="1.8"/>
+      <path d="M89 78c9-20 36-26 72-26 36 0 58 5 70 20" stroke="#fff" stroke-opacity=".85" stroke-width="4" stroke-linecap="round"/>
+      <path d="M100 86c23-10 97-10 120 0 15 7 21 20 20 38-2 31-16 44-80 44s-78-13-80-44c-1-18 5-31 20-38Z" fill="url(#kai-glass)" stroke="#2d5268" stroke-width="2"/>
+      <path d="M96 96c17-12 75-14 102-10" stroke="#729aaf" stroke-opacity=".22" stroke-width="4" stroke-linecap="round"/>
+      <path d="M96 147c19 18 110 18 128 0" stroke="#51cad8" stroke-opacity=".25" stroke-width="1.2"/>
+      <g class="kai-gaze"><g class="kai-eyes">
+        <rect x="112" y="104" width="29" height="34" rx="12" fill="#42eaff" opacity=".55" filter="url(#kai-glow)"/><rect x="179" y="104" width="29" height="34" rx="12" fill="#42eaff" opacity=".55" filter="url(#kai-glow)"/>
+        <rect class="kai-eye" x="114" y="104" width="25" height="32" rx="11" fill="#83f8ff"/><rect class="kai-eye" x="181" y="104" width="25" height="32" rx="11" fill="#83f8ff"/>
+        <rect x="118" y="109" width="8" height="7" rx="3.5" fill="#edffff"/><rect x="185" y="109" width="8" height="7" rx="3.5" fill="#edffff"/>
+      </g></g>
+      <path class="kai-smile" d="M150 143q10 9 20 0" stroke="#7bf2fa" stroke-width="3.2" stroke-linecap="round"/>
+      <g class="kai-voice-bars" stroke="#9afaff" stroke-width="3" stroke-linecap="round"><path d="M150 140v7"/><path d="M156 138v11"/><path d="M162 139v9"/><path d="M168 141v5"/></g>
+      <path d="M99 138h6m110 0h6" stroke="#55d4e6" stroke-opacity=".6" stroke-width="2" stroke-linecap="round"/>
+      <path d="M94 168c17 9 43 11 66 11" stroke="#effbff" stroke-opacity=".7" stroke-width="2" stroke-linecap="round"/>
+    </g>
+  </g>
+  <g class="kai-sparks" fill="#a8faff"><path d="m49 77 2-7 2 7 7 2-7 2-2 7-2-7-7-2Z"/><path d="m270 184 2-5 2 5 5 2-5 2-2 5-2-5-5-2Z"/><circle cx="270" cy="59" r="2"/><circle cx="54" cy="210" r="2"/></g>
+</svg>

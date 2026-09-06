@@ -49,6 +49,11 @@
              the view, not seven things competing in the sidebar. -->
         <button class="nav-item koinos-nav" data-view="koinos" id="nav-koinos" hidden>Koinos Node</button>
       </nav>
+      <button id="launch-kai" class="kai-launch" hidden>
+        <img src="kai-robot.svg" alt="" aria-hidden="true" />
+        <span><strong>Launch KAI <b>↗</b></strong><small>Your desktop companion</small></span>
+      </button>
+      <p id="kai-launch-error" role="status" hidden></p>
       <div id="status-pane">
         <div class="status-row"><span id="status-dot" class="dot"></span><span id="status-text">Connecting…</span></div>
         <div class="status-sub" id="status-model"></div>
@@ -941,6 +946,7 @@
   <script src="audio-wav.js"></script>
   <script src="agents.js"></script>
   <script src="app.js"></script>
+  <script src="mascot-launcher.js"></script>
   <script src="devtools-view.js"></script>
   <script src="code-view.js"></script>
   <script src="tools-view.js"></script>

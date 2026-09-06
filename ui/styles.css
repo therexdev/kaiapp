@@ -1057,3 +1057,13 @@ button.small:disabled { opacity: 0.5; cursor: default; }
    what a code read aloud to another device needs. */
 #account-code { font-size: 24px; letter-spacing: 4px; margin: 6px 0; }
 #account-grant-cap { max-width: 110px; }
+
+/* KAI: a deliberate entry point into desktop companion mode. */
+.kai-launch{display:flex;align-items:center;gap:6px;margin:12px 10px 6px;padding:6px 10px 6px 1px;min-height:65px;border:1px solid #70dec330;border-radius:13px;background:linear-gradient(130deg,#1e48533b,#13283973);color:#e3f4f7;text-align:left;cursor:pointer;flex-shrink:0;transition:border-color .2s,background .2s}
+.kai-launch:hover{border-color:#82e8d780;background:#20464d66}
+.kai-launch img{width:48px;height:55px;object-fit:contain;flex-shrink:0}
+.kai-launch>span{flex:1;min-width:0}
+.kai-launch strong{display:flex;align-items:center;justify-content:space-between;font-size:12px;font-weight:600;letter-spacing:.1px}
+.kai-launch b{color:#82e8d7;font-weight:400;font-size:15px}
+.kai-launch small{display:block;color:#92b5c1;font-size:9px;margin-top:4px;white-space:nowrap}
+#kai-launch-error{margin:0 15px 8px;color:#e8b67f;font-size:11px}

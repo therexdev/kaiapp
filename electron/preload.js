@@ -26,4 +26,10 @@ contextBridge.exposeInMainWorld("koinosShell", {
   // the shell knows if there is a tray at all, so Settings has to ask.
   windowPrefs: () => ipcRenderer.invoke("shell:window-prefs"),
   setCloseToTray: (on) => ipcRenderer.invoke("shell:set-close-to-tray", on),
+  launchMascot: options => ipcRenderer.invoke("mascot:launch", options),
+  onMascotOpenView: callback => {
+    const listener = (_event, view) => callback(view);
+    ipcRenderer.on("mascot:open-view", listener);
+    return () => ipcRenderer.removeListener("mascot:open-view", listener);
+  },
 });
