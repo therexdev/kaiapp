@@ -1,3 +1,10 @@
+### KAI listening stability repair
+
+- Fixed a reply getting stuck on pause when another sound arrived during transcription.
+- Background noise no longer blocks a voice that is still being prepared. KAI briefly checks your microphone level when listening starts and filters steady hum more reliably.
+- The microphone indicator stays on while listening, recognizing words and replying. Temporary recognition errors keep the same microphone session open.
+- Unconfirmed interruptions have a time limit, so they cannot leave KAI silent indefinitely. Confirmed questions still interrupt and retain the conversation.
+
 ### Natural voice startup repair
 
 - KAI now automatically recovers when Windows cannot load its native voice DLL. The compatible engine uses the same local Heart, Bella, Puck and Emma voices and your existing voice download.

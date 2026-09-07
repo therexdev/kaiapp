@@ -84,7 +84,7 @@ test("Local activity catches quiet speech sooner, keeps the onset and bounds con
   let output; for (let i = 0; i < 5; i++) output = a.push(silence) || output;
   assert.ok(output instanceof Float32Array); assert.ok(output.some(v => v > .008));
   assert.ok(output.length <= 16000 * 1.3);
-  let bounded; for (let i = 0; i < 200; i++) bounded = a.push(speech) || bounded;
+  let bounded; for (let i = 0; i < 200; i++) bounded = a.push(new Float32Array(1600).fill(i % 10 < 5 ? .009 : .025)) || bounded;
   assert.ok(bounded.length <= 16000 * 20);
 });
 
@@ -93,6 +93,7 @@ function listening(options = {}) {
     onCommand() {}, onState() {}, onError: assert.fail, ...options });
   listener.active = true; listener.context = { sampleRate: 16000, close: async () => {} };
   listener.activity = new Activity(16000);
+  for (let i = 0; i < 6; i++) listener.frame(new Float32Array(1600));
   return listener;
 }
 function utterance(listener) {
@@ -142,7 +143,7 @@ test("Speech onset pauses a reply before ASR; speaker echo resumes it without a 
   const listener = listening({ transcribe: () => new Promise(resolve => pending.push(resolve)),
     onCommand: text => calls.push(text), onInterrupt: () => events.push("pause"), onResume: () => events.push("resume") });
   t.after(() => listener.stop());
-  listener.engage(); listener.setResponding(true); listener.hearOutput("Here is how to organize your pictures into albums.");
+  listener.engage(); listener.setResponding(true); listener.setPlayback(true); listener.hearOutput("Here is how to organize your pictures into albums.");
   const echo = utterance(listener);
   assert.equal(events[0], "pause"); assert.equal(calls.length, 0);
   pending.shift()({ text: "organize your pictures into albums" }); await echo;
@@ -190,4 +191,79 @@ test("Off during asynchronous microphone startup cannot reacquire capture afterw
   const start = listener.start();
   await listener.stop(); release(); await start;
   assert.equal(acquisitions, 0); assert.equal(listener.active, false);
+});
+
+test("Room calibration rejects a loud steady fan, still captures speech, and adapts to a new hum", () => {
+  const a = new Activity(16000), fan = new Float32Array(1600).fill(.02);
+  for (let i = 0; i < 100; i++) assert.equal(a.push(fan), null);
+  assert.equal(a.voiced, 0); assert.equal(a.frames.length, 0);
+  for (let i = 0; i < 4; i++) a.push(new Float32Array(1600).fill(.06));
+  let output; for (let i = 0; i < 6; i++) output = a.push(fan) || output;
+  assert.ok(output?.some(v => v > .05), "Speech above the room noise still has an endpoint");
+  const hum = new Float32Array(1600).fill(.045);
+  for (let i = 0; i < 400; i++) assert.equal(a.push(hum), null, "Sustained hum never becomes 20-second Whisper requests");
+  assert.equal(a.frames.length, 0);
+});
+
+test("A rejected interruption releases its own hold while a second sound is still arriving", async t => {
+  const pending = [], events = [];
+  const listener = listening({ transcribe: () => new Promise(resolve => pending.push(resolve)),
+    onInterrupt: () => events.push("pause"), onResume: () => events.push("resume") });
+  t.after(() => listener.stop());
+  listener.engage(); listener.setResponding(true); listener.setPlayback(true);
+  const first = utterance(listener);
+  for (let i = 0; i < 4; i++) listener.frame(new Float32Array(1600).fill(.03));
+  assert.equal(listener.segment.started, true);
+  assert.deepEqual(events, ["pause"], "The second sound cannot steal the first hold");
+  pending.shift()({ text: "" }); await first;
+  assert.deepEqual(events, ["pause", "resume"]);
+  assert.equal(listener.active, true); assert.equal(listener.segment.started, true);
+});
+
+test("Preparing a slow voice cannot be held by background activity; late playback overlap is echo", async t => {
+  const calls = [], events = [];
+  const listener = listening({ transcribe: async () => ({ text: "Of course" }), onCommand: text => calls.push(text),
+    onInterrupt: () => events.push("pause") });
+  t.after(() => listener.stop()); listener.engage(); listener.setResponding(true);
+  for (let i = 0; i < 3; i++) listener.frame(new Float32Array(1600).fill(.03));
+  assert.deepEqual(events, []);
+  listener.hearOutput("Of course. I can help you with that."); listener.setPlayback(true);
+  let job; for (let i = 0; i < 6; i++) job = listener.frame(new Float32Array(1600)) || job;
+  await job; assert.deepEqual(calls, [], "Output beginning mid-capture is never sent back as a user prompt");
+});
+
+test("A stalled recognition cannot hold playback forever or toggle microphone capture", async t => {
+  const events = [], calls = []; let complete;
+  const listener = listening({ interruptMs: 20, transcribe: () => new Promise(r => { complete = r; }),
+    onCommand: text => calls.push(text), onInterrupt: () => events.push("pause"), onResume: () => events.push("resume") });
+  t.after(() => listener.stop()); listener.engage(); listener.setResponding(true); listener.setPlayback(true);
+  const job = utterance(listener);
+  await new Promise(r => setTimeout(r, 35));
+  assert.deepEqual(events, ["pause", "resume"]); assert.equal(listener.active, true);
+  for (let i = 0; i < 3; i++) listener.frame(new Float32Array(1600).fill(.03));
+  assert.deepEqual(events, ["pause", "resume"], "Repeated candidates cannot re-pause this reply after timeout");
+  complete({ text: "Actually, change the subject." }); await job;
+  assert.deepEqual(calls, ["Actually, change the subject."], "A late confirmed interruption is still accepted");
+});
+
+test("Transient recognition failures keep one microphone session; repeated failures stop once", async t => {
+  let fail = true; const errors = [], commands = [];
+  const listener = listening({ transcribe: async () => { if (fail) throw new Error("Engine busy"); return { text: "Hello KAI" }; },
+    onCommand: text => commands.push(text), onError: (error, options) => errors.push({ error, options }) });
+  t.after(() => listener.stop()); listener.engage();
+  await utterance(listener); assert.equal(listener.active, true); assert.equal(errors[0].options.recoverable, true);
+  fail = false; await utterance(listener); assert.deepEqual(commands, ["Hello KAI"]);
+  fail = true;
+  await utterance(listener); await utterance(listener); assert.equal(listener.active, true);
+  await utterance(listener); assert.equal(listener.active, false); assert.match(errors.at(-1).error.message, /microphone is off/);
+});
+
+test("A hung transcription is aborted and returns to listening without reacquiring the device", async t => {
+  let signal; const errors = [];
+  const listener = listening({ transcribeMs: 20, transcribe: (audio, rate, abort) => { signal = abort; return new Promise(() => {}); },
+    onError: (error, options) => errors.push({ error, options }) });
+  t.after(() => listener.stop()); listener.engage();
+  await utterance(listener);
+  assert.equal(signal.aborted, true); assert.equal(listener.processing, false); assert.equal(listener.active, true);
+  assert.equal(errors[0].error.code, "VOICE_TIMEOUT"); assert.equal(errors[0].options.recoverable, true);
 });

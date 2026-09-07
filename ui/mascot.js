@@ -33,14 +33,16 @@
     speaking: "KAI is speaking", voicing: "Finding my voice…", error: "Let's try that again", dragging: "Coming with you!",
   };
   function mood(value) {
-    if (wakePhase === "capturing") value = "listening";
-    else if (wakePhase === "transcribing") value = "transcribing";
+    const engaged = wakeListener?.engaged;
+    if (wakePhase === "capturing" && engaged && ((!busy && !speaking) || speech.held)) value = "listening";
+    else if (wakePhase === "transcribing" && engaged && !busy && !speaking) value = "transcribing";
     document.body.dataset.state = value;
-    $("mood-label").textContent = value === "idle" && wakePhase === "waiting" ? "Say “Hey KAI” · mic on" :
-      value === "idle" && wakePhase === "listening" ? "Your turn · mic on" :
-      wakePhase === "capturing" ? "Listening…" : wakePhase === "transcribing" ? "Got it · one moment…" : labels[value] || labels.idle;
+    $("mood-label").textContent = wakePhase === "calibrating" ? "Getting microphone ready…" :
+      value === "idle" && wakeEnabled && !engaged ? "Say “Hey KAI” · mic on" :
+      value === "idle" && wakeEnabled && engaged ? "Your turn · mic on" : labels[value] || labels.idle;
     wake();
   }
+
   function wake() {
     document.body.classList.remove("asleep");
     clearTimeout(idleTimer);
@@ -89,7 +91,7 @@
     $("model").disabled = locked;
     for (const id of ["mic", "quick-mic"]) {
       $(id).disabled = voicePending;
-      $(id).setAttribute("aria-pressed", String(wakeEnabled && wakeListener.engaged));
+      $(id).setAttribute("aria-pressed", String(wakeEnabled && wakeListener.active));
       $(id).setAttribute("aria-label", busy || speaking ? "Interrupt KAI and talk" : "Talk to KAI");
       $(id).title = busy || speaking ? "Interrupt and talk" : "Talk now · no wake phrase needed";
     }
@@ -313,7 +315,7 @@
       headers: { "content-type": "audio/wav" }, body: KaiWav.encodeWav16kMono(samples, rate) }),
     onState: phase => {
       wakePhase = phase;
-      $("wake-label").textContent = phase === "off" ? "Hey KAI off" : phase === "waiting" ? "Hey KAI on" : "Conversation on";
+      $("wake-label").textContent = phase === "off" ? "Hey KAI off" : wakeListener.engaged ? "Conversation on" : "Hey KAI on";
       mood(busy ? "thinking" : speaking ? "speaking" : "idle");
       wakeUI();
     },
@@ -346,7 +348,7 @@
     $("quick-wake").title = active ? "Microphone on · click to turn off" : "Listen for Hey KAI";
     document.body.classList.toggle("wake-on", active);
     $("wake-toggle").disabled = wakeStarting; $("quick-wake").disabled = wakeStarting;
-    for (const id of ["mic", "quick-mic"]) $(id).setAttribute("aria-pressed", String(active && wakeListener.engaged));
+    for (const id of ["mic", "quick-mic"]) $(id).setAttribute("aria-pressed", String(active));
   }
   function stopWake() {
     voiceStartEpoch++; voiceCommandEpoch++; wakeEnabled = false; wakeStarting = false; voicePending = false;
@@ -354,6 +356,7 @@
   }
   function pauseWake() {
     wakeListener.pause(suspended);
+    wakeListener.setPlayback(speech.playing);
     wakeListener.setResponding(busy || speaking);
   }
   async function startListening(direct = false) {
@@ -390,7 +393,10 @@
   async function send({ source = "typed" } = {}) {
     const text = $("question").value.trim(), model = $("model").value;
     const folder = api.folderRequest(text);
-    if (!text || (!model && !folder) || busy || voicePending) return;
+    if (!text || busy || voicePending) return;
+    if (!model && !folder) {
+      notice("Open the full app to choose a chat model so KAI can answer, then try again."); mood("error"); return;
+    }
     stopSpeech(); notice(""); busy = true; mood("thinking");
     const request = currentRequest = { keepUser: source === "voice" };
     if (voiceReplies) ensureNatural();

@@ -15,7 +15,7 @@ test("KAI UI: natural default, compact voice, follow-ups, barge-in context, hist
   await context.addInitScript(() => {
     if (!localStorage.getItem("kai-mascot-natural-default-v3")) localStorage.setItem("kai-mascot-voice-choice", "system:test");
     window.__spoken = []; window.__streams = []; window.__mainRequests = []; window.__folderRequests = [];
-    window.__audio = []; window.__pauses = 0; window.__toneMedia = true;
+    window.__audio = []; window.__pauses = 0; window.__toneMedia = true; window.__roomNoise = .008;
     const NativeAudio = window.Audio;
     window.Audio = class extends NativeAudio {
       constructor(...args) { super(...args); window.__audio.push(this); }
@@ -37,7 +37,7 @@ test("KAI UI: natural default, compact voice, follow-ups, barge-in context, hist
       // ASR text is supplied by the local HTTP fixture, not claimed as real ASR.
       const ctx = new AudioContext(), oscillator = ctx.createOscillator(), gain = ctx.createGain();
       const destination = ctx.createMediaStreamDestination();
-      gain.gain.value = 0; oscillator.frequency.value = 240;
+      gain.gain.value = window.__roomNoise; oscillator.frequency.value = 240;
       oscillator.connect(gain); gain.connect(destination); oscillator.start(); await ctx.resume();
       window.__gain = gain;
       const stream = destination.stream;
@@ -64,7 +64,7 @@ test("KAI UI: natural default, compact voice, follow-ups, barge-in context, hist
     fixture.state.transcript = text;
     await page.evaluate(() => { window.__gain.gain.value = .06; });
     await page.waitForTimeout(400);
-    await page.evaluate(() => { window.__gain.gain.value = 0; });
+    await page.evaluate(() => { window.__gain.gain.value = window.__roomNoise; });
   };
   const screenshot = async name => {
     if (!process.env.KAI_MASCOT_QA_DIR) return;
@@ -90,6 +90,9 @@ test("KAI UI: natural default, compact voice, follow-ups, barge-in context, hist
   await page.click("#compact-natural");
   await page.waitForSelector("#natural-card", { state: "hidden" });
   assert.equal(await page.getAttribute("#quick-wake", "aria-pressed"), "true");
+  await page.waitForTimeout(1700);
+  assert.equal(fixture.state.transcriptions.length, 0, "Steady room noise must not start a transcription loop");
+  const streamCount = await page.evaluate(() => window.__streams.length);
   await utterance("Help me plan a trip to Seattle.");
   await page.waitForFunction(() => document.querySelector("#messages").textContent.includes("What are you working on today"));
   await idle(); await compact();
@@ -103,11 +106,25 @@ test("KAI UI: natural default, compact voice, follow-ups, barge-in context, hist
 
   // A long real WAV plays while SSE is still streaming. Speech onset must
   // pause it before ASR finishes, then cancel the old stream and retain context.
-  fixture.state.delay = 160; fixture.state.speechSeconds = 6;
+  fixture.state.delay = 350; fixture.state.speechSeconds = 6;
   fixture.state.reply = "Seattle is a lovely choice. I would start with a few layers for the weather and comfortable shoes for walking. There are several neighborhoods to explore, and I can help you make a plan for each day of your trip.";
   await utterance("Tell me more about the neighborhoods.");
   await page.waitForFunction(() => window.__audio.some(a => !a.paused && !a.ended));
   assert.ok(await page.locator(".message.streaming").count(), "Voice starts during text streaming");
+  // A rejected sound must release playback even with a second candidate
+  // arriving while the first transcription is still pending.
+  fixture.state.transcribeDelay = 1000;
+  const rejectedSound = page.waitForRequest(r => r.url().endsWith("/core/transcribe"));
+  await utterance(""); await rejectedSound;
+  await page.evaluate(() => { window.__gain.gain.value = .04; });
+  await page.waitForTimeout(250);
+  assert.ok(await page.evaluate(() => window.__audio.some(a => a.paused && !a.ended && a.currentTime > 0)));
+  await page.waitForFunction(() => window.__audio.some(a => !a.paused && !a.ended));
+  await page.evaluate(() => { window.__gain.gain.value = window.__roomNoise; });
+  fixture.state.transcribeDelay = 0;
+  await page.waitForTimeout(650);
+  assert.equal(await page.evaluate(() => window.__streams.length), streamCount, "Listening and transcription reuse one microphone stream");
+  assert.equal(await page.getAttribute("#quick-mic", "aria-pressed"), "true");
   const pausedBefore = await page.evaluate(() => window.__pauses), cancelledBefore = fixture.state.cancelled;
   await utterance("Actually, make it a two day trip.");
   assert.ok(await page.evaluate(() => window.__pauses) > pausedBefore, "Audio paused at voice onset before the silence endpoint");
