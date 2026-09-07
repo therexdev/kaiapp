@@ -1,3 +1,12 @@
+### Calmer listening with a TV nearby
+
+- **TV nearby** is the new default microphone setting. It requires stronger, longer speech and rejects more quiet background dialogue. **Voice & listening** also offers balanced and quiet-room settings, with a live microphone level indicator.
+- **Say “Hey KAI” to interrupt a reply** is on by default. Movie dialogue no longer pauses or replaces a reply unless the name is recognized. You can turn this option off for immediate speech-onset interruption in a quieter room. Follow-up questions after KAI finishes still need no wake phrase; tapping the mic always interrupts directly.
+- The mouth moves only when audio actually starts playing, and stops when audio pauses or ends. Preparing a voice no longer looks like silent talking.
+- KAI prepares a shorter first clause and loads the installed voice engine while listening or thinking. This reduces startup work after text arrives. Local voice generation, particularly compatibility mode, can still take several seconds.
+
+KAI does not recognize your individual voice yet. Sensitivity filters sound level, not speaker identity: a loud movie can still trigger a follow-up after the reply. Keep background sound below the listening level, move the microphone closer, or turn hands-free listening off when needed.
+
 ### KAI listening stability repair
 
 - Fixed a reply getting stuck on pause when another sound arrived during transcription.

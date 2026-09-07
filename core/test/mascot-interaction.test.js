@@ -92,7 +92,7 @@ function listening(options = {}) {
   const listener = new Listener({ transcribe: async () => ({ text: "" }), wakeRequest,
     onCommand() {}, onState() {}, onError: assert.fail, ...options });
   listener.active = true; listener.context = { sampleRate: 16000, close: async () => {} };
-  listener.activity = new Activity(16000);
+  listener.activity = new Activity(16000, { sensitivity: listener.sensitivity });
   for (let i = 0; i < 6; i++) listener.frame(new Float32Array(1600));
   return listener;
 }
@@ -266,4 +266,65 @@ test("A hung transcription is aborted and returns to listening without reacquiri
   await utterance(listener);
   assert.equal(signal.aborted, true); assert.equal(listener.processing, false); assert.equal(listener.active, true);
   assert.equal(errors[0].error.code, "VOICE_TIMEOUT"); assert.equal(errors[0].options.recoverable, true);
+});
+
+test("TV sensitivity ignores quieter changing dialogue but retains nearby speech and a quiet-room option", async t => {
+  let transcriptions = 0; const commands = [], holds = [];
+  const listener = listening({ transcribe: async () => { transcriptions++; return { text: "What comes next?" }; },
+    onCommand: text => commands.push(text), onInterrupt: () => holds.push(true) });
+  t.after(() => listener.stop()); listener.engage(); listener.setResponding(true); listener.setPlayback(true);
+  // Changing syllable levels with pauses: this is deliberately not a constant
+  // fan, and remains well above the former .004 onset threshold.
+  const dialogue = [.007, .014, .009, .016, .011, .006, 0, 0, .012, .008, 0, 0, 0, 0, 0];
+  for (let repeat = 0; repeat < 8; repeat++) for (const level of dialogue) {
+    await listener.frame(new Float32Array(1600).fill(level));
+  }
+  assert.equal(transcriptions, 0); assert.deepEqual(holds, []); assert.equal(listener.active, true);
+  await utterance(listener); assert.deepEqual(commands, ["What comes next?"]); assert.equal(holds.length, 1);
+  listener.setResponding(false); listener.setPlayback(false);
+  listener.configure({ sensitivity: "quiet", interruptWithWake: false });
+  assert.equal(listener.active, true); assert.equal(listener.engaged, true);
+  // Allow the adaptive room floor to settle, then a soft voice can be heard.
+  for (let i = 0; i < 60; i++) listener.frame(new Float32Array(1600));
+  for (let i = 0; i < 4; i++) listener.frame(new Float32Array(1600).fill(.009));
+  for (let i = 0; i < 5; i++) await listener.frame(new Float32Array(1600));
+  assert.equal(commands.length, 2);
+});
+
+test("Wake-guarded interruptions ignore loud dialogue even when recognition outlasts playback, but allow the name and follow-ups", async t => {
+  const pending = [], calls = [], events = [];
+  const listener = listening({ interruptWithWake: true, transcribe: () => new Promise(r => pending.push(r)),
+    onCommand: text => calls.push(text), onInterrupt: () => events.push("hold"),
+    onEnd: () => { events.push("stop"); listener.setResponding(false); listener.setPlayback(false); } });
+  t.after(() => listener.stop()); listener.engage(); listener.setResponding(true); listener.setPlayback(true);
+  const movie = utterance(listener);
+  assert.deepEqual(events, [], "Movie dialogue never speculatively pauses playback in guarded mode");
+  listener.setResponding(false); listener.setPlayback(false);
+  pending.shift()({ text: "Get out of the car right now." }); await movie;
+  assert.deepEqual(calls, [], "Eligibility is based on capture time, not delayed recognition time");
+  listener.setResponding(true); listener.setPlayback(true);
+  const change = utterance(listener); pending.shift()({ text: "Hey KAI, change the subject." }); await change;
+  assert.deepEqual(calls, ["change the subject."]);
+  const name = utterance(listener); pending.shift()({ text: "Hey Kai" }); await name;
+  assert.deepEqual(events, ["stop"], "The name alone stops the reply and leaves conversation open");
+  const followup = utterance(listener); pending.shift()({ text: "What about tomorrow?" }); await followup;
+  assert.deepEqual(calls, ["change the subject.", "What about tomorrow?"]);
+  listener.setResponding(true); listener.setPlayback(true);
+  listener.configure({ sensitivity: "tv", interruptWithWake: false });
+  const open = utterance(listener); assert.equal(events.at(-1), "hold");
+  pending.shift()({ text: "Actually, wait." }); await open;
+  assert.equal(calls.at(-1), "Actually, wait.");
+});
+
+test("The first natural clause is emitted early without losing words or splitting a link", () => {
+  const text = "I can help you plan that trip, starting with the places you want to visit and the time you have available. Then we can choose a route.";
+  const p = new SpeechPhrases(), phrases = [];
+  for (let i = 1; i <= text.length; i++) phrases.push(...p.push(text.slice(0, i)));
+  phrases.push(...p.push(text, true));
+  assert.equal(phrases[0], "I can help you plan that trip,");
+  assert.equal(phrases.join(" "), text);
+  const link = new SpeechPhrases();
+  const linked = "You can find everything in [a useful guide, with examples](https://example.com/help). Next";
+  assert.deepEqual(link.push(linked), ["You can find everything in a useful guide, with examples."]);
+  assert.ok(new SpeechPhrases().push("word ".repeat(30))[0].length <= 76);
 });

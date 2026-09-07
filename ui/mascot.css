@@ -171,7 +171,10 @@ body.wake-on #status-pill>span:first-child{background:#8af0ba}
 .voice-options-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:14px;color:#ecfffa}
 .voice-options-heading strong{font-size:16px;font-weight:550;letter-spacing:-.4px}
 #voice-options-panel label{display:block;color:#9eb8c7;font-size:11px;margin-bottom:7px}
-#voice-choice{width:100%;color:#e5f5fa;background:#0d1c2a;border:1px solid #8ccbdd35;border-radius:10px;padding:10px;font-size:12px}
+#voice-choice,#mic-sensitivity{width:100%;color:#e5f5fa;background:#0d1c2a;border:1px solid #8ccbdd35;border-radius:10px;padding:10px;font-size:12px}
+.mic-meter{display:flex;align-items:center;gap:10px;margin:10px 0;color:#b5cbd5;font-size:10px}
+#mic-level{flex:1;min-width:70px;height:12px}
+#voice-options-panel .listening-check{display:flex;align-items:center;gap:8px;margin-top:14px;color:#e5f5fa;font-size:12px}
 .voice-option-actions{display:flex;gap:8px;margin:12px 0}
 .voice-option-actions button{padding:8px 12px;background:#87e8d91c;color:#b2f5e6;border:1px solid #86d9cd28;border-radius:9px;font-size:11px}
 #voice-options-panel p{font-size:11px;line-height:1.6;color:#b5cbd5;margin:8px 0}

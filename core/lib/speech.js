@@ -84,7 +84,27 @@ class SpeechManager {
     if (typeof text !== "string" || !text.trim() || text.length > 240) throw new Error("Speak one short phrase at a time (up to 240 characters).");
     if (!VOICES.some(v => v.id === voice)) throw new Error("Unknown KAI voice.");
     if (!this.available()) throw new Error("Natural voice is not set up.");
+    if (this.warming) {
+      if (signal?.aborted) throw new Error("Speech cancelled.");
+      let abort;
+      try {
+        await Promise.race([this.warming, new Promise((resolve, reject) => {
+          abort = () => reject(new Error("Speech cancelled."));
+          signal?.addEventListener("abort", abort, { once: true });
+        })]);
+      } finally { signal?.removeEventListener("abort", abort); }
+    }
     return this._request({ text, voice }, signal);
+  }
+  warm() {
+    if (this.closed) return Promise.reject(new Error("KAI is shutting down."));
+    if (!this.available()) return Promise.reject(new Error("Natural voice is not set up."));
+    if (this.warming) return this.warming;
+    // A running synthesis already warms the engine. Never download or speak
+    // from this path, and keep the normal two-minute idle release.
+    if (this.worker || this.pending) return Promise.resolve();
+    this.warming = this._request({}).finally(() => { this.warming = null; });
+    return this.warming;
   }
   _request(value, signal) {
     if (this.closed) return Promise.reject(new Error("KAI is shutting down."));

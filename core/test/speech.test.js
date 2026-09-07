@@ -100,10 +100,11 @@ test("Natural voice rejects invalid requests, limits inference concurrency, and 
 });
 
 test("Natural speech API returns WAV and disconnecting playback cancels pending inference", async () => {
-  let cancelled = false, setup = 0;
+  let cancelled = false, setup = 0, warms = 0;
   const speech = {
     status: () => ({ available: true, voices: [{ id: "af_heart" }] }),
     ensure: async () => { setup++; },
+    warm: async () => { warms++; },
     generate: async ({ text, voice, signal }) => {
       if (text === "slow") return new Promise((resolve, reject) => {
         signal.addEventListener("abort", () => { cancelled = true; reject(new Error("cancelled")); }, { once: true });
@@ -115,6 +116,8 @@ test("Natural speech API returns WAV and disconnecting playback cancels pending 
   const port = await gateway.listen(), origin = "http://127.0.0.1:" + port;
   try {
     assert.equal((await (await fetch(origin + "/core/speech")).json()).available, true);
+    assert.equal((await fetch(origin + "/core/speech/warm", { method: "POST", body: "{}" })).status, 200);
+    assert.equal(warms, 1); assert.equal(setup, 0, "Warm-up cannot trigger setup/download");
     await fetch(origin + "/core/speech/setup", { method: "POST", body: "{}" }); assert.equal(setup, 1);
     const response = await fetch(origin + "/core/speech", { method: "POST", body: JSON.stringify({ text: "Hello", voice: "af_heart" }) });
     assert.equal(response.headers.get("content-type"), "audio/wav"); assert.equal(await response.text(), "RIFFtest");
@@ -125,4 +128,30 @@ test("Natural speech API returns WAV and disconnecting playback cancels pending 
     for (let i = 0; i < 20 && !cancelled; i++) await tick();
     assert.equal(cancelled, true);
   } finally { await gateway.close(); }
+});
+
+test("Voice warm-up reuses installed files, shares one worker, and cancelled waiting speech never starts", async t => {
+  const workers = [], requests = []; let downloads = 0;
+  class FakeWorker extends EventEmitter {
+    constructor() { super(); workers.push(this); }
+    postMessage(value) { requests.push(value); }
+    terminate() { return Promise.resolve(); }
+  }
+  const manager = new SpeechManager({ speechDir: os.tmpdir(), WorkerClass: FakeWorker, download: async () => { downloads++; } });
+  t.after(() => manager.close()); manager.available = () => false;
+  await assert.rejects(manager.warm(), /not set up/); assert.equal(downloads, 0); assert.equal(workers.length, 0);
+  manager.available = () => true;
+  const warming = manager.warm(); assert.equal(manager.warm(), warming);
+  const abort = new AbortController();
+  const cancelled = manager.generate({ text: "Do not say this", signal: abort.signal });
+  const stopped = assert.rejects(cancelled, /cancelled/); abort.abort(); await stopped;
+  const next = manager.generate({ text: "Hello after warm-up" });
+  assert.equal(requests.length, 1); assert.equal(requests[0].text, undefined);
+  workers[0].emit("message", { id: requests[0].id }); await warming; await tick();
+  assert.equal(requests.length, 2); assert.equal(requests[1].text, "Hello after warm-up");
+  workers[0].emit("message", { id: requests[1].id, wav: Buffer.from("speech") }); await next;
+  await manager.warm(); assert.equal(requests.length, 2); assert.equal(workers.length, 1); assert.equal(downloads, 0);
+  manager.reset();
+  const closing = manager.warm(), rejected = assert.rejects(closing, /shutting down/);
+  manager.close(); await rejected;
 });

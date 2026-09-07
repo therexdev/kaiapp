@@ -21,10 +21,12 @@ async function startMascotServer(dataDir) {
       return output({ ok: true, text });
     }
     if (url.pathname === "/core/speech/setup") { state.naturalReady = !state.naturalError; return output({ ok: true }); }
+    if (url.pathname === "/core/speech/warm") { state.warms = (state.warms || 0) + 1; return output({ ok: true }); }
     if (url.pathname === "/core/speech" && req.method === "GET") return output({ ok: true, available: !!state.naturalReady, installable: true, modelPresent: !!state.naturalError || !!state.naturalReady,
       voices: [{ id: "af_heart", name: "Heart · warm & friendly" }, { id: "am_puck", name: "Puck · easygoing" }], setup: state.naturalError ? { state: "error", error: state.naturalError } : { state: state.naturalReady ? "done" : "idle" } });
     if (url.pathname === "/core/speech" && req.method === "POST") {
       state.speech.push(JSON.parse(raw));
+      if (state.speechDelay) await new Promise(resolve => setTimeout(resolve, state.speechDelay));
       const { encodeWav16kMono } = require("../../../ui/audio-wav");
       const tone = Float32Array.from({ length: Math.round(16000 * (state.speechSeconds || .2)) }, (_, i) => Math.sin(i * .05) * .1);
       res.writeHead(200, { "content-type": "audio/wav" }); return res.end(Buffer.from(encodeWav16kMono(tone, 16000)));

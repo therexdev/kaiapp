@@ -749,6 +749,10 @@ class Gateway {
       this.speech.ensure().catch(() => {});
       return this._json(res, 200, { ok: true, ...this.speech.status() });
     }
+    if (this.speech && path === "/core/speech/warm" && req.method === "POST") {
+      try { await this.speech.warm(); return this._json(res, 200, { ok: true }); }
+      catch (e) { return this._json(res, 503, { ok: false, error: String(e.message) }); }
+    }
     if (this.speech && path === "/core/speech" && req.method === "POST") {
       const abort = new AbortController();
       const cancel = () => { if (!res.writableEnded) abort.abort(); };

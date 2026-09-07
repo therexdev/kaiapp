@@ -5,6 +5,11 @@
 })(typeof window !== "undefined" ? window : globalThis, function () {
   "use strict";
   const FOLLOW_UP_MS = 60000;
+  const SENSITIVITY = Object.freeze({
+    quiet: { level: .004, ratio: 1.8, voiceMs: 180 },
+    balanced: { level: .012, ratio: 2.2, voiceMs: 240 },
+    tv: { level: .018, ratio: 2.5, voiceMs: 300 },
+  });
   const words = text => (text.toLowerCase().match(/[a-z0-9']+/g) || []).join(" ");
   // AEC is the first line of defence. Reject recognizable residual speaker
   // echo too, without treating a short user acknowledgement as an echo.
@@ -16,11 +21,13 @@
     return a.length >= 5 && a.filter(w => b.has(w)).length / a.length > .88;
   }
   class Activity {
-    constructor(rate, { calibrationMs = 600 } = {}) {
+    constructor(rate, { calibrationMs = 600, sensitivity = "quiet" } = {}) {
       this.rate = rate; this.noise = .001; this.calibrationLeft = calibrationMs;
+      this.profile = Object.hasOwn(SENSITIVITY, sensitivity) ? SENSITIVITY[sensitivity] : SENSITIVITY.tv;
       this.levels = []; this.levelMs = 0; this.reset();
     }
     get calibrating() { return this.calibrationLeft > 0; }
+    get threshold() { return Math.max(this.profile.level, this.noise * this.profile.ratio); }
     measure(rms, ms) {
       this.levels.push({ rms, ms }); this.levelMs += ms;
       while (this.levels.length > 1 && this.levelMs - this.levels[0].ms >= 1500) this.levelMs -= this.levels.shift().ms;
@@ -28,7 +35,7 @@
     reset() { this.pre = []; this.frames = []; this.length = 0; this.voiced = 0; this.silence = 0; }
     finish() {
       let audio = null;
-      if (this.voiced >= 180) {
+      if (this.voiced >= this.profile.voiceMs) {
         audio = new Float32Array(this.length);
         let i = 0; for (const f of this.frames) { audio.set(f, i); i += f.length; }
       }
@@ -37,6 +44,7 @@
     push(frame, { adapt = true } = {}) {
       if (!frame.length) return null;
       const rms = Math.sqrt(frame.reduce((s, v) => s + v * v, 0) / frame.length);
+      this.rms = rms;
       const ms = frame.length / this.rate * 1000;
       this.measure(rms, ms);
       if (this.calibrating) {
@@ -57,7 +65,7 @@
           if (adapt) this.noise = low; this.reset(); return null;
         }
       }
-      const speech = rms > Math.max(this.frames.length ? .003 : .004, this.noise * (this.frames.length ? 1.35 : 1.8));
+      const speech = rms > (this.frames.length ? Math.max(this.profile.level * .75, this.noise * 1.35) : this.threshold);
       if (!speech && !this.frames.length && adapt) this.noise = this.noise * .96 + rms * .04;
       if (!this.frames.length && !speech) {
         this.pre.push(frame);
@@ -75,8 +83,8 @@
     }
   }
   class Listener {
-    constructor({ transcribe, wakeRequest, onCommand, onState, onError, onInterrupt = () => {}, onResume = () => {}, onEnd = () => {}, followUpMs = FOLLOW_UP_MS, interruptMs = 8000, transcribeMs = 30000 }) {
-      Object.assign(this, { transcribe, wakeRequest, onCommand, onState, onError, onInterrupt, onResume, onEnd, followUpMs, interruptMs, transcribeMs });
+    constructor({ transcribe, wakeRequest, onCommand, onState, onError, onInterrupt = () => {}, onResume = () => {}, onEnd = () => {}, onLevel = () => {}, sensitivity = "tv", interruptWithWake = false, followUpMs = FOLLOW_UP_MS, interruptMs = 8000, transcribeMs = 30000 }) {
+      Object.assign(this, { transcribe, wakeRequest, onCommand, onState, onError, onInterrupt, onResume, onEnd, onLevel, sensitivity, interruptWithWake, followUpMs, interruptMs, transcribeMs });
       this.epoch = 0; this.active = false; this.paused = false; this.engaged = false;
       this.queue = []; this.output = []; this.responding = false; this.serial = 0; this.wakeSerial = null; this.playback = false; this.failures = 0; this.rejectedInterruptions = 0;
     }
@@ -98,7 +106,7 @@
         const context = this.context = new AudioContext();
         await context.audioWorklet.addModule("mascot-audio-worklet.js");
         if (epoch !== this.epoch) return;
-        this.activity = new Activity(context.sampleRate);
+        this.activity = new Activity(context.sampleRate, { sensitivity: this.sensitivity });
         this.source = context.createMediaStreamSource(stream);
         this.capture = new AudioWorkletNode(context, "kai-capture");
         this.source.connect(this.capture); this.capture.connect(context.destination);
@@ -139,10 +147,23 @@
         this.interruptBlocked = false; this.rejectedInterruptions = 0; this.releaseInterruption();
       }
     }
-    setPlayback(value) { this.playback = !!value; }
+    setPlayback(value) {
+      if (this.playback && !value) this.echoUntil = Date.now() + 1200;
+      this.playback = !!value;
+    }
+    configure({ sensitivity, interruptWithWake }) {
+      this.sensitivity = Object.hasOwn(SENSITIVITY, sensitivity) ? sensitivity : "tv";
+      this.interruptWithWake = !!interruptWithWake;
+      // Discard candidates captured under the old setting, without reopening
+      // the device or losing the active conversation.
+      const wasPaused = this.paused;
+      this.pause(true);
+      if (this.activity) this.activity.profile = SENSITIVITY[this.sensitivity];
+      this.pause(wasPaused);
+    }
     echoText() { return this.output.filter(o => Date.now() - o.at < 30000).map(o => o.text).join(" "); }
     interrupt(segment) {
-      if (this.holdSerial != null || this.interruptBlocked || !this.playback) return;
+      if (segment.guarded || this.holdSerial != null || this.interruptBlocked || !this.playback) return;
       this.holdSerial = segment.serial; this.onInterrupt();
       this.holdTimer = setTimeout(() => {
         // No unconfirmed sound may lock the speaker indefinitely. Recognition
@@ -171,12 +192,16 @@
     frame(data, epoch = this.epoch) {
       if (!this.active || this.paused || epoch !== this.epoch) return;
       if (!this.activity.frames.length) this.segment = { serial: ++this.serial, armed: this.engaged,
+        guarded: this.responding && this.interruptWithWake,
         echo: this.playback || Date.now() < (this.echoUntil || 0) ? this.echoText() : "", started: false };
       // Output can start after capture began; retain that overlap for echo
       // rejection instead of treating KAI's first audible sentence as a user.
       if (this.playback) this.segment.echo = this.echoText();
       const audio = this.activity.push(data, { adapt: !this.playback });
-      if (this.activity.voiced >= 180 && !this.segment.started) {
+      if (Date.now() - (this.levelAt || 0) >= 100) {
+        this.levelAt = Date.now(); this.onLevel(this.activity.rms, this.activity.threshold);
+      }
+      if (this.activity.voiced >= this.activity.profile.voiceMs && !this.segment.started) {
         this.segment.started = true;
         if (this.segment.armed) this.interrupt(this.segment);
         this.state();
@@ -231,8 +256,15 @@
             this.releaseInterruption(item.serial, true); continue;
           }
           const wake = this.wakeRequest(text);
+          // In a noisy room, spoken dialogue is not proof the user is
+          // interrupting. Require the name for audio captured during a reply,
+          // even if recognition finishes after that reply has ended.
+          if (item.guarded && !wake) { this.releaseInterruption(item.serial, true); continue; }
           const command = wake ? wake.text : item.armed || (this.engaged && this.wakeSerial !== null && item.serial > this.wakeSerial) ? text : "";
-          if (wake) { this.wakeSerial = item.serial; this.engage(); }
+          if (wake) {
+            this.wakeSerial = item.serial; this.engage();
+            if (item.guarded && !command) this.onEnd(false);
+          }
           if (!command) { this.releaseInterruption(item.serial, true); continue; }
           this.engage();
           if (/^(?:stop(?: talking)?|wait(?: a second)?|hold on)[.!?]*$/i.test(command)) {
@@ -271,6 +303,7 @@
       this.stream?.getTracks().forEach(t => t.stop()); this.stream = null;
       const context = this.context; this.context = null;
       this.releaseInterruption(); this.state();
+      this.onLevel(0, 0);
       await context?.close().catch(() => {});
     }
   }

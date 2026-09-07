@@ -29,7 +29,14 @@
         <p id="natural-status">Heart is KAI’s natural voice. Download it once, then it speaks on your computer.</p>
         <div class="voice-divider"></div>
         <strong>Just say “Hey KAI”</strong>
-        <p>Tap the mic and talk, or turn on Hey KAI and say your question. Pause to send. Keep talking after KAI answers—you have a minute for follow-ups. You can interrupt, too.</p>
+        <p>Tap the mic and talk, or turn on Hey KAI and say your question. Pause to send. Keep talking after KAI answers—you have a minute for follow-ups.</p>
+        <label for="mic-sensitivity">Microphone sensitivity</label>
+        <select id="mic-sensitivity"><option value="tv">TV nearby · less sensitive</option><option value="balanced">Everyday room · balanced</option><option value="quiet">Quiet room · more sensitive</option></select>
+        <div class="mic-meter"><meter id="mic-level" min="0" max="1" value="0" aria-label="Microphone level"></meter><span id="mic-level-label">Microphone off</span></div>
+        <p>With the mic on, background sound should stay below the listening level and your voice should rise above it. Move closer or choose a more sensitive setting if KAI misses you.</p>
+        <label class="listening-check"><input id="interrupt-wake" type="checkbox" checked> Say “Hey KAI” to interrupt a reply</label>
+        <p>Recommended with a TV or movie playing. KAI keeps speaking until it recognizes the name. Follow-ups after the reply still need no name. Turn this off to pause KAI as soon as you start speaking.</p>
+        <p class="muted">KAI does not identify your voice yet. Loud background dialogue can still sound like a question. The mic button always lets you stop a reply and ask directly.</p>
         <p class="muted">The chat can stay closed. Say “That’s all” to end the conversation, or “Stop listening” to turn the mic off. Audio stays on this computer; accepted questions go to your selected chat model. Hiding KAI turns the mic off.</p>
       </section>
       <div id="transcript" role="log" aria-label="Conversation">

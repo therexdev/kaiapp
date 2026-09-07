@@ -84,7 +84,7 @@
   // Consume the cumulative stream exactly once, withholding unfinished code,
   // links and reasoning. A complete short sentence can speak immediately.
   class SpeechPhrases {
-    constructor() { this.offset = 0; this.code = false; this.thinking = false; this.pending = ""; }
+    constructor() { this.offset = 0; this.code = false; this.thinking = false; this.pending = ""; this.emitted = 0; }
     push(text, final = false) {
       let i = this.offset;
       while (i < text.length) {
@@ -113,7 +113,10 @@
             if (c === "." && /(?:\b(?:Mr|Mrs|Ms|Dr|Prof|etc|vs)|\b[A-Z])\.$/.test(prefix)) continue;
             end = n + 1; break;
           }
-          if (n >= 200 && /\s/.test(c)) { end = n + 1; break; }
+          // A short first clause reduces both the wait for streamed tokens
+          // and the first local inference. Keep later chunks longer for flow.
+          if (!this.emitted && n >= 24 && /[,;:]/.test(c) && /\s/.test(this.pending[n + 1] || "")) { end = n + 1; break; }
+          if (n >= (this.emitted ? 140 : 72) && /\s/.test(c)) { end = n + 1; break; }
         }
         if (!end && final) end = this.pending.length;
         if (!end) break;
@@ -123,7 +126,7 @@
         while (clean.length) {
           let n = Math.min(240, clean.length);
           if (n < clean.length) { const space = clean.lastIndexOf(" ", n); if (space > 80) n = space; }
-          result.push(clean.slice(0, n).trim()); clean = clean.slice(n).trimStart();
+          result.push(clean.slice(0, n).trim()); this.emitted++; clean = clean.slice(n).trimStart();
         }
       }
       return result.filter(Boolean);

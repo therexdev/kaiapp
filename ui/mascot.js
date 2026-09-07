@@ -6,7 +6,7 @@
   let expanded = false, suspended = false, busy = false, history = [], chatId = read("kai-mascot-chat-id", "");
   let aliases = [], requestedModel = null, chatAbort = null, activeTask = Promise.resolve();
   let voicePending = false, setupTimer = null, voiceStartEpoch = 0, voiceCommandEpoch = 0, currentRequest = null;
-  let speechEpoch = 0, speaking = false, waveTimer = null, idleTimer = null;
+  let speechEpoch = 0, speaking = false, audible = false, waveTimer = null, idleTimer = null;
   let voiceReplies = read("kai-mascot-voice", "0") === "1";
   let motion = read("kai-mascot-motion", "1") !== "0";
   let booted = false, savedFailure = false;
@@ -33,6 +33,9 @@
     speaking: "KAI is speaking", voicing: "Finding my voice…", error: "Let's try that again", dragging: "Coming with you!",
   };
   function mood(value) {
+    if (["idle", "thinking", "voicing", "speaking"].includes(value)) {
+      value = audible ? "speaking" : speaking ? (speech.held ? "listening" : "voicing") : busy ? "thinking" : "idle";
+    }
     const engaged = wakeListener?.engaged;
     if (wakePhase === "capturing" && engaged && ((!busy && !speaking) || speech.held)) value = "listening";
     else if (wakePhase === "transcribing" && engaged && !busy && !speaking) value = "transcribing";
@@ -174,6 +177,18 @@
     write("kai-mascot-voice-choice", voiceChoice); write("kai-mascot-natural-default-v3", "1");
   }
   let wakeEnabled = false, wakeStarting = false, wakePhase = "off";
+  function playbackState(value) {
+    audible = value;
+    wakeListener.setPlayback(value);
+    mood("idle");
+  }
+  let warmRequest = null;
+  function warmSpeech() {
+    if (warmRequest || suspended || !voiceReplies || !voiceChoice.startsWith("natural:") || !speechStatus?.available) return;
+    // Only load already installed files, while the user speaks or the model
+    // thinks. This endpoint cannot download a model or produce audio.
+    warmRequest = post("/core/speech/warm", {}).catch(() => {}).finally(() => { warmRequest = null; });
+  }
   const speech = new KaiSpeech.Queue({
     prepare: async (text, signal) => {
       if (!voiceChoice.startsWith("natural:")) return { text, voice: voiceChoice };
@@ -183,26 +198,34 @@
       return { blob: await response.blob(), text };
     },
     play: value => new Promise((resolve, reject) => {
-      let audio, url, done = false;
-      wakeListener.hearOutput(value.text);
+      let audio, utterance, url, done = false, started = false;
+      const playing = () => {
+        if (done || speech.held) return;
+        if (!started) { started = true; wakeListener.hearOutput(value.text); }
+        playbackState(true);
+      };
+      const silent = () => { if (!done) playbackState(false); };
       const finish = error => {
         if (done) return;
         done = true;
-        if (audio) { audio.onended = null; audio.onerror = null; audio.pause(); audio.removeAttribute("src"); audio.load(); }
+        if (audio) { audio.onplaying = audio.onpause = audio.onwaiting = audio.onended = audio.onerror = null; audio.pause(); audio.removeAttribute("src"); audio.load(); }
+        if (utterance) utterance.onstart = utterance.onresume = utterance.onpause = utterance.onend = utterance.onerror = null;
         if (url) URL.revokeObjectURL(url);
         if (cancelPlayback === cancel) { cancelPlayback = null; holdPlayback = null; }
+        playbackState(false);
         error ? reject(error) : resolve();
       };
       const cancel = () => finish();
       cancelPlayback = cancel;
       if (value.blob) {
         url = URL.createObjectURL(value.blob); audio = new Audio(url);
+        audio.onplaying = playing; audio.onpause = silent; audio.onwaiting = silent;
         audio.onended = () => finish(); audio.onerror = () => finish(new Error("KAI could not play the natural voice. Try again."));
-        holdPlayback = held => { if (held) audio.pause(); else if (!done) audio.play().catch(finish); };
+        holdPlayback = held => { if (held) { audio.pause(); silent(); } else if (!done) audio.play().catch(finish); };
         if (!speech.held) audio.play().catch(finish);
       } else {
         if (!("speechSynthesis" in window)) return finish(new Error("Choose a natural voice to hear KAI on this computer."));
-        const utterance = new SpeechSynthesisUtterance(value.text);
+        utterance = new SpeechSynthesisUtterance(value.text);
         const voices = speechSynthesis.getVoices().filter(v => v.localService);
         const selected = voices.find(v => "system:" + v.voiceURI === value.voice) ||
           voices.find(v => /^en[-_]US/i.test(v.lang) && /natural|premium|enhanced|jenny|aria/i.test(v.name)) ||
@@ -211,9 +234,10 @@
         // Avoid silently choosing an online OS voice.
         else if (speechSynthesis.getVoices().some(v => !v.localService)) return finish(new Error("No local computer voice is available. Get natural voices to hear KAI."));
         utterance.rate = 1; utterance.pitch = 1;
+        utterance.onstart = playing; utterance.onresume = playing; utterance.onpause = silent;
         utterance.onend = () => finish();
         utterance.onerror = event => finish(["interrupted", "canceled"].includes(event.error) ? null : new Error("Computer voice playback failed. Try a natural voice."));
-        holdPlayback = held => held ? speechSynthesis.pause() : speechSynthesis.resume();
+        holdPlayback = held => { if (held) { speechSynthesis.pause(); silent(); } else speechSynthesis.resume(); };
         speechSynthesis.speak(utterance);
         if (speech.held) speechSynthesis.pause();
       }
@@ -311,6 +335,13 @@
   }
   const wakeListener = new KaiWake.Listener({
     wakeRequest: api.wakeRequest,
+    sensitivity: read("kai-mascot-sensitivity", "tv"),
+    interruptWithWake: read("kai-mascot-interrupt-wake", "1") === "1",
+    onLevel: (rms, threshold) => {
+      $("mic-level").max = threshold ? threshold * 3 : 1;
+      $("mic-level").value = rms || 0;
+      $("mic-level-label").textContent = !threshold ? "Microphone off" : rms >= threshold ? "Above listening level" : "Below listening level";
+    },
     transcribe: (samples, rate, signal) => json("/core/transcribe", { method: "POST", signal,
       headers: { "content-type": "audio/wav" }, body: KaiWav.encodeWav16kMono(samples, rate) }),
     onState: phase => {
@@ -319,8 +350,8 @@
       mood(busy ? "thinking" : speaking ? "speaking" : "idle");
       wakeUI();
     },
-    // Pause playback on speech onset; only discard the reply after local ASR
-    // confirms a user utterance. Noise/echo resumes the same audio position.
+    // Open interruption pauses on eligible speech onset. The optional name
+    // guard leaves playback running until a wake phrase is recognized.
     onInterrupt: () => speech.hold(true),
     onResume: () => speech.hold(false),
     onCommand: async text => {
@@ -341,6 +372,15 @@
       wakeUI(); notice(error.message);
     },
   });
+  $("mic-sensitivity").value = ["tv", "balanced", "quiet"].includes(wakeListener.sensitivity) ? wakeListener.sensitivity : "tv";
+  $("interrupt-wake").checked = wakeListener.interruptWithWake;
+  function listeningOptions() {
+    const sensitivity = $("mic-sensitivity").value, interruptWithWake = $("interrupt-wake").checked;
+    write("kai-mascot-sensitivity", sensitivity); write("kai-mascot-interrupt-wake", interruptWithWake ? "1" : "0");
+    wakeListener.configure({ sensitivity, interruptWithWake });
+  }
+  $("mic-sensitivity").addEventListener("change", listeningOptions);
+  $("interrupt-wake").addEventListener("change", listeningOptions);
   function wakeUI() {
     const active = wakeEnabled && wakeListener.active;
     $("wake-toggle").setAttribute("aria-pressed", String(active));
@@ -356,7 +396,7 @@
   }
   function pauseWake() {
     wakeListener.pause(suspended);
-    wakeListener.setPlayback(speech.playing);
+    wakeListener.setPlayback(audible);
     wakeListener.setResponding(busy || speaking);
   }
   async function startListening(direct = false) {
@@ -371,7 +411,7 @@
       if (!(await ensureVoice()) || epoch !== voiceStartEpoch || suspended) { if (epoch === voiceStartEpoch) stopWake(); return; }
       await wakeListener.start({ engaged: direct });
       if (epoch !== voiceStartEpoch || suspended) return;
-      voiceReplies = true; write("kai-mascot-voice", "1"); voiceReplyUI(); pauseWake(); ensureNatural();
+      voiceReplies = true; write("kai-mascot-voice", "1"); voiceReplyUI(); pauseWake(); ensureNatural(); warmSpeech();
     } catch (error) {
       if (epoch !== voiceStartEpoch) return;
       stopWake(); notice(error.name === "NotAllowedError" ? "Microphone access is blocked. Allow Koinos AI in your system settings, then tap the mic." : error.message);
@@ -380,8 +420,16 @@
   function toggleWake() { return wakeEnabled || wakeStarting ? stopWake() : startListening(false); }
   async function mic() {
     notice("");
-    if (wakePhase === "capturing") return wakeListener.flush();
+    if (wakePhase === "capturing" && !busy && !speaking) return wakeListener.flush();
     interruptResponse();
+    // A manual interruption must not submit the movie candidate that happened
+    // to be in flight when the user tapped the mic.
+    if (wakeListener.active) {
+      const epoch = voiceStartEpoch;
+      wakeListener.pause(true); await activeTask;
+      if (epoch !== voiceStartEpoch || suspended || !wakeEnabled) return;
+      wakeListener.pause(false);
+    }
     return startListening(true);
   }
   function voiceReplyUI() {
@@ -399,7 +447,7 @@
     }
     stopSpeech(); notice(""); busy = true; mood("thinking");
     const request = currentRequest = { keepUser: source === "voice" };
-    if (voiceReplies) ensureNatural();
+    if (voiceReplies) { ensureNatural(); warmSpeech(); }
     const phrases = new api.SpeechPhrases(), replyEpoch = speechEpoch;
     $("question").value = "";
     history.push({ role: "user", content: text });
