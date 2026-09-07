@@ -136,11 +136,15 @@ test("KAI UI: natural default, compact voice, follow-ups, barge-in context, hist
   assert.equal(await page.evaluate(() => window.__pauses), guardedPauses);
   assert.equal(await page.evaluate(() => window.__streams.length), streamCount, "Recognition reuses one microphone stream");
   const cancelledBefore = fixture.state.cancelled;
+  // The bubble appears before asynchronous tool discovery. Observe the
+  // actual final-answer request rather than racing the HTTP fixture's array.
+  const interruptionRequest = page.waitForRequest(r => r.url().endsWith("/core/chat/completions") &&
+    r.postDataJSON()?.stream === true && r.postDataJSON()?.messages?.at(-1)?.content === "Actually, make it a two day trip.");
   await utterance("KAI, Actually, make it a two day trip.");
   assert.equal(await page.evaluate(() => window.__pauses), guardedPauses, "Sound alone must not pause KAI before name recognition");
   await page.waitForFunction(() => document.querySelectorAll(".message.user").length === 4);
   assert.ok(fixture.state.cancelled > cancelledBefore, "The recognized KAI cue cancels the previous stream");
-  const followup = fixture.state.requests.at(-1).messages;
+  const followup = (await interruptionRequest).postDataJSON().messages;
   assert.equal(followup.at(-1).content, "Actually, make it a two day trip.");
   assert.ok(followup.some(m => m.content.includes("trip to Seattle")));
   assert.ok(followup.some(m => m.role === "assistant" && m.content.includes("Seattle is a lovely choice")), "Partial assistant context survives interruption");
