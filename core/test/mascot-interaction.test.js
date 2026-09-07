@@ -103,8 +103,8 @@ function utterance(listener) {
 }
 
 test("Wake recognition discards ambient speech and keeps a conversation open for follow-ups", async t => {
-  for (const text of ["I was talking about Kai.", "hey kayak bring up pictures", "my friend said hey Kai"]) assert.equal(wakeRequest(text), null);
-  for (const prefix of ["Hey, Kay!", "Hi KAI,", "Hey Kye", "Hey K. A. I."]) {
+  for (const text of ["I was talking about Kai.", "hey kayak bring up pictures", "my friend said hey Kai", "Heikaido is a place", "heykaiju"]) assert.equal(wakeRequest(text), null);
+  for (const prefix of ["Hey, Kay!", "Hi KAI,", "Hey Kye", "Hey K. A. I.", "Heikai.", "HeyKai,"]) {
     assert.deepEqual(wakeRequest(prefix + " Open my Pictures folder."), { text: "Open my Pictures folder." });
   }
   let transcript = "ordinary private conversation", calls = [], states = [];

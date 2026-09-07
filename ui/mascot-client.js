@@ -78,7 +78,7 @@
     return match ? (match[1].toLowerCase() === "photos" ? "pictures" : match[1].toLowerCase()) : null;
   }
   function wakeRequest(text) {
-    const match = String(text).trim().match(/^(?:hey|hi)[,\s]+(?:kai|kay|kye|ky|cai|k[.\s]*a[.\s]*i)(?=$|[\s,.!?:])[,.!?:\s]*(.*)$/i);
+    const match = String(text).trim().match(/^(?:hey|hi|hei)[,\s]*(?:kai|kay|kye|ky|cai|k[.\s]*a[.\s]*i)(?=$|[\s,.!?:])[,.!?:\s]*(.*)$/i);
     return match ? { text: match[1].trim() } : null;
   }
   // Consume the cumulative stream exactly once, withholding unfinished code,
