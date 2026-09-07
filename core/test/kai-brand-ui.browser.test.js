@@ -1,0 +1,130 @@
+"use strict";
+const { test } = require("node:test"), assert = require("node:assert/strict");
+const fs = require("fs"), os = require("os"), path = require("path");
+const CHROMIUM = process.env.KAI_TEST_CHROMIUM || "/opt/pw-browsers/chromium";
+const shot = async (page, name, options = {}) => {
+  if (!process.env.KAI_MASCOT_QA_DIR) return;
+  fs.mkdirSync(process.env.KAI_MASCOT_QA_DIR, { recursive: true });
+  await page.screenshot({ path: path.join(process.env.KAI_MASCOT_QA_DIR, "brand-" + name + ".png"), animations: "disabled", ...options });
+};
+
+// Real Core and real UI, fake local weights/runtime. No owner profile, external
+// providers, live balances or node processes are involved in these screenshots.
+test("KAI workspace: artwork, welcome drafts, all navigation and narrow-window history", { skip: !fs.existsSync(CHROMIUM), timeout: 120000 }, async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-brand-ui-"));
+  fs.mkdirSync(path.join(dir, "models"));
+  fs.writeFileSync(path.join(dir, "models", "smollm2-135m-instruct-q8_0.gguf"), "weights");
+  const { createCore } = require("../server");
+  const core = await createCore({ dataDir: dir, port: 0, llamaBin: path.join(__dirname, "fixtures/fake-llama-server"), onEvent: () => {} });
+  const base = "http://127.0.0.1:" + await core.start();
+  const { chromium } = require("playwright-core");
+  let browser;
+  t.after(async () => { await browser?.close(); await core.stop(); fs.rmSync(dir, { recursive: true, force: true }); });
+  browser = await chromium.launch({ executablePath: CHROMIUM, args: ["--no-sandbox"] });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 940 } });
+  const errors = [], failedArt = [];
+  page.on("pageerror", error => errors.push(error.message));
+  page.on("response", response => { if (/kai-character\.png|kai-robot\.svg|brand-mark\.svg/.test(response.url()) && !response.ok()) failedArt.push(response.url()); });
+  await page.addInitScript(() => {
+    window.__mascotLaunches = [];
+    window.koinosShell = { launchMascot: async options => window.__mascotLaunches.push(options), onMascotOpenView() {},
+      minimize() {}, toggleMaximize() {}, close() {}, onMaximizeChanged() {} };
+  });
+  await page.goto(base);
+  await page.waitForSelector('#view-chat:not([hidden]) [data-kai-mounted="ready"] svg');
+  const texture = await page.evaluate(() => new Promise(resolve => {
+    const image = new Image(); image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
+    image.onerror = () => resolve(null); image.src = "assets/kai-character.png";
+  }));
+  assert.deepEqual(texture, { width: 1024, height: 1536 }, "The real Core serves the bundled texture");
+  await shot(page, "chat-home");
+  await page.click('[data-chat-prompt*="turn an idea"]');
+  assert.match(await page.inputValue("#input"), /turn an idea/);
+  assert.equal(await page.locator(".msg.user").count(), 0, "Welcome cards create editable drafts, not automatic requests");
+  await page.click("#launch-kai");
+  assert.equal((await page.evaluate(() => window.__mascotLaunches)).length, 1);
+  await page.fill("#input", "Hello from the new workspace."); await page.click("#btn-send");
+  await page.waitForFunction(() => document.querySelector(".msg.assistant")?.textContent.includes("Hello from fake llama") && document.getElementById("btn-stop").hidden);
+  await shot(page, "chat-reply");
+  await page.click("#nav-settings");
+  for (const id of ["btn-dev-toggle", "btn-code-toggle"]) {
+    if (await page.getAttribute("#" + id, "aria-checked") !== "true") await page.click("#" + id);
+  }
+  for (const view of ["models", "docs", "compare", "tools", "tasks", "api", "earn", "network", "settings", "code", "devtools"]) {
+    await page.click(`[data-view="${view}"]`);
+    await page.waitForSelector(`#view-${view}:not([hidden])`);
+    await shot(page, view);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `${view} fits the window`);
+  }
+  // Mock only the node service boundary; the embedded renderer/bridge/styles
+  // are real. No route can fall through and start Docker or reach a chain.
+  const info = await core.gateway.koinosNode.call("app:info");
+  const fixture = {
+    "app:info": info, "wallet:status": { exists: false, unlocked: false },
+    "dashboard:summary": { network: info.networks.mainnet, wallet: { exists: false },
+      node: { docker: { ok: true }, isRunning: true, runningCount: 7 },
+      sync: { inSync: true, local: { height: 38297044 }, remote: { height: 38297044 }, progressPct: 100 },
+      balances: { koin: "4308560000", vhp: "228813610000", mana: "3822790000" },
+      stats: { available: true, totals: null, feed: [], windows: { last24h: "3120000", last7d: "21650000", last30d: "93480000", daysTracked: 30 } },
+      returns: { yearlyProfitSats: "1137340000", yearlyReturnPct: .497 } },
+  };
+  await page.route("**/core/koinos/rpc", route => {
+    const { channel } = route.request().postDataJSON();
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(
+      Object.hasOwn(fixture, channel) ? { ok: true, data: fixture[channel] } : { ok: false, error: "Unavailable in visual fixture" }) });
+  });
+  await page.route("**/core/koinos", route => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ enabled: true, chainReadsAllowed: true }) }));
+  await page.click("#nav-settings");
+  await page.waitForSelector("#nav-koinos:not([hidden])"); await page.click("#nav-koinos");
+  const frame = page.frameLocator("#koinos-frame");
+  await frame.locator("#d-status-text").filter({ hasText: "Running" }).waitFor();
+  await shot(page, "node-dashboard");
+  await page.click('[data-knode="koinos-wallet"]');
+  await frame.locator("#view-wallet.active").waitFor(); await shot(page, "wallet");
+  await page.click('[data-view="chat"]'); await page.setViewportSize({ width: 820, height: 700 });
+  await page.click("#history-toggle");
+  assert.equal(await page.locator("#chats-pane").isVisible(), true);
+  await page.click("#btn-new-chat");
+  assert.equal(await page.locator("#chats-pane").isVisible(), false);
+  await page.waitForSelector('#chat-empty [data-kai-mounted="ready"]');
+  await page.click('[data-chat-prompt*="brainstorm"]'); assert.match(await page.inputValue("#input"), /brainstorm/);
+  const bounds = await page.evaluate(() => {
+    const pane = document.querySelector(".chat-pane").getBoundingClientRect(), composer = document.getElementById("composer").getBoundingClientRect();
+    return { fits: composer.left >= pane.left && composer.right <= pane.right && composer.bottom <= innerHeight,
+      unique: document.querySelectorAll("svg [id]").length === new Set([...document.querySelectorAll("svg [id]")].map(e => e.id)).size };
+  });
+  assert.ok(bounds.fits, "Composer stays within the narrow workspace"); assert.ok(bounds.unique, "New chat preserves unique SVG fragment IDs");
+  await shot(page, "chat-narrow");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  assert.equal(await page.locator("#chat-empty .kai3d-head").evaluate(el => getComputedStyle(el).animationName), "none");
+  assert.deepEqual(failedArt, []); assert.deepEqual(errors, []);
+});
+
+test("KAI character: transparent compact layout and expressions follow actual controller states", { skip: !fs.existsSync(CHROMIUM), timeout: 45000 }, async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-brand-mascot-"));
+  const fixture = await require("./fixtures/mascot-server").startMascotServer(dir);
+  const { chromium } = require("playwright-core"); let browser;
+  t.after(async () => { await browser?.close(); await fixture.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  browser = await chromium.launch({ executablePath: CHROMIUM, args: ["--no-sandbox"] });
+  const page = await browser.newPage({ viewport: { width: 248, height: 304 }, deviceScaleFactor: 2 });
+  await page.addInitScript(() => { window.kaiDesktop = { expand: async () => ({}), onEvent: () => () => {}, regions() {}, startDrag() {}, endDrag() {}, cancelAction() {} }; });
+  await page.goto(fixture.origin + "/mascot.html");
+  await page.waitForSelector("#kai-art svg image");
+  if (await page.locator("#later-natural").isVisible()) await page.click("#later-natural");
+  await page.evaluate(() => new Promise((resolve, reject) => { const img = new Image(); img.onload = resolve; img.onerror = reject; img.src = "assets/kai-character.png"; }));
+  assert.equal(await page.locator("#conversation").isVisible(), false);
+  assert.equal(await page.locator("body").evaluate(el => getComputedStyle(el).backgroundColor), "rgba(0, 0, 0, 0)");
+  // These are visual state fixtures. The existing microphone/audio browser
+  // suite proves when the controller enters speaking/listening/voicing.
+  for (const state of ["idle", "listening", "thinking", "voicing", "speaking"]) {
+    await page.evaluate(state => { document.body.dataset.state = state; }, state);
+    assert.equal(await page.locator(".kai3d-mouth").evaluate(el => getComputedStyle(el).opacity), state === "speaking" ? "1" : "0");
+    await shot(page, "mascot-" + state, { omitBackground: true });
+  }
+  await page.evaluate(() => { document.body.dataset.state = "idle"; });
+  await page.setViewportSize({ width: 660, height: 560 }); await page.click("#toggle-chat");
+  await shot(page, "mascot-chat", { omitBackground: true });
+  await page.click("#voice-options"); await shot(page, "mascot-voice", { omitBackground: true });
+  await page.evaluate(() => document.body.classList.add("motion-off"));
+  assert.equal(await page.locator(".kai3d-head").evaluate(el => getComputedStyle(el).animationName), "none");
+});

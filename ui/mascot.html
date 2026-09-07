@@ -6,12 +6,13 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; media-src 'self' blob:; object-src 'none'; base-uri 'none'">
   <title>KAI · Your desktop companion</title>
   <link rel="stylesheet" href="mascot.css">
+  <link rel="stylesheet" href="kai-character.css">
 </head>
 <body data-state="idle">
   <main id="companion" aria-label="KAI desktop companion">
     <section id="conversation" class="interactive" aria-label="Talk with KAI" hidden>
       <header class="chat-header">
-        <div class="kai-monogram" aria-hidden="true">K</div>
+        <div class="kai-monogram" aria-hidden="true"></div>
         <div class="chat-heading"><h1>KAI<span>DESKTOP COMPANION</span></h1><p id="connection">Connecting to your app…</p></div>
         <button class="icon-button" id="new-chat" title="New conversation" aria-label="New conversation"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
         <button class="icon-button" id="collapse" title="Keep KAI on the desktop" aria-label="Collapse conversation"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>

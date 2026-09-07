@@ -475,6 +475,21 @@ function showView(name, { navOnly = false } = {}) {
   // app); the highlight still follows the entry itself. Mapped HERE because
   // every caller — clicks and the boot poll alike — comes through this door.
   const phys = name.startsWith("koinos") ? "koinos" : name;
+  const headings = {
+    chat: ["Chat with KAI", "A little curiosity goes a long way."],
+    docs: ["Documents", "From a first thought to the final draft."],
+    compare: ["Compare models", "One question. A few different perspectives."],
+    models: ["Model library", "Find the right mind for the job."],
+    tasks: ["Tasks", "Put your ideas in motion."], tools: ["Tools", "Give your AI a few more abilities."],
+    api: ["Local API", "Your models, connected to your workflow."],
+    earn: ["Earn KAI", "Let your compute contribute."],
+    settings: ["Settings", "Make this space your own."], network: ["Network", "Connected on your terms."],
+    code: ["Koinos Code", "Build something you want to exist."], devtools: ["Developer tools", "Everything you need to get hands-on."],
+    koinos: ["Koinos Node", "Your wallet. Your node. Your contribution."], onboarding: ["Welcome to Koinos AI", "Let’s get you ready."]
+  };
+  const heading = headings[phys] || ["Koinos AI", "Think. Build. Grow."];
+  $("workspace-title").textContent = heading[0];
+  $("workspace-caption").textContent = heading[1];
   for (const v of document.querySelectorAll(".view")) v.hidden = true;
   $(`view-${phys}`).hidden = false;
   // Every navigable thing carries data-view — the full-width nav rows AND
@@ -2173,7 +2188,8 @@ function rebuildMessages() {
     if (m.role === "user" && m.images) renderMsgImages(el, m.images);
   }
   if (!state.history.length) {
-    box.innerHTML = `<div id="chat-empty" class="chat-empty"><div class="chat-empty-mark" aria-hidden="true"></div><p>Ask anything. It runs on your machine —<br />private, free, even offline.</p></div>`;
+    box.replaceChildren($("chat-welcome-template").content.cloneNode(true));
+    window.kaiBrand?.mountCharacters(box);
   }
 }
 

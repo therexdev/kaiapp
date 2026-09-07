@@ -1,3 +1,13 @@
+### Meet the new KAI
+
+- **A new character, inspired by your reference.** Glossy white armor, a cobalt cape and headset, a K badge, and an expressive cyan face. KAI looks around, blinks, leans in to listen, thinks, nods while speaking and gives a cheerful greeting. The mouth still moves only during audible playback.
+- **A brighter app, from end to end.** Pearl and soft blue surfaces, deep navy text, electric blue controls, a new app icon and clearer navigation groups. Chat, Documents, Compare, Models, Tools, Tasks, Earn, Settings, Code and the embedded wallet/node screens share the new design.
+- **A proper welcome from KAI.** The new chat home has a character greeting and three starting points for questions, building and ideas. Clicking one puts a draft in the composer for you to edit and send. The source/model controls have their own row, with more space for your message.
+- **A lighter desktop companion.** Matching white conversation and voice cards, blue controls and a clear green mic indicator. KAI still launches compact. Chat, listening, interruptions and voice preferences work as before.
+- **Room for smaller windows.** A Conversations button opens chat history in narrow windows. Model controls, forms and cards resize with the workspace. Keyboard focus and reduced-motion preferences are supported.
+
+Install over the existing **Koinos AI Test** app after quitting it from the tray. Your shared profile, chats, wallet, downloaded models, private desktop provider settings and live earning/node data stay in place. This is a visual revision; it adds no new computer permissions or automatic microphone use.
+
 ### Your own OpenAI or Anthropic connection
 
 - **Settings → Desktop AI connections** now accepts your own OpenAI and Anthropic API keys. Save a connection, then **Test & refresh models**, or enter a model ID from your provider account. The connection check lists models; it does not generate a paid test reply.

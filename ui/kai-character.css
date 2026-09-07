@@ -1,0 +1,47 @@
+/* Shared KAI rig. CSS motion only: no canvas loop, remote art or inference. */
+.kai-character{display:block;width:100%;height:100%;overflow:visible}
+.kai3d-body{transform-origin:512px 1350px;animation:kai3d-breathe 4.8s ease-in-out infinite}
+.kai3d-head{transform-origin:512px 665px;animation:kai3d-look 12s ease-in-out infinite}
+.kai3d-gaze{transform:translate(calc(var(--gaze-x,0px) * 3),calc(var(--gaze-y,0px) * 3));transition:transform .3s ease-out}
+.kai3d-eyes{transform-origin:512px 410px;animation:kai3d-blink 6.1s infinite}
+.kai3d-brows{opacity:.8}
+.kai3d-attentive,.kai3d-mouth,.kai3d-thought,.kai3d-listen{opacity:0}
+.kai3d-mouth{transform-origin:512px 534px}
+.kai3d-shadow{transform-origin:512px 1415px;animation:kai3d-ground 4.8s ease-in-out infinite}
+body[data-state=listening] .kai3d-head{animation:kai3d-listening 3s ease-in-out infinite}
+body[data-state=listening] .kai3d-happy,body[data-state=thinking] .kai3d-happy,body[data-state=transcribing] .kai3d-happy{opacity:0}
+body[data-state=listening] .kai3d-attentive,body[data-state=thinking] .kai3d-attentive,body[data-state=transcribing] .kai3d-attentive{opacity:1}
+body[data-state=listening] .kai3d-listen{animation:kai3d-signal 1s ease-in-out infinite}
+body[data-state=thinking] .kai3d-head,body[data-state=transcribing] .kai3d-head,body[data-state=voicing] .kai3d-head{animation:kai3d-ponder 3s ease-in-out infinite}
+body[data-state=thinking] .kai3d-gaze{transform:translate(17px,-12px)}
+body[data-state=thinking] .kai3d-smile,body[data-state=transcribing] .kai3d-smile{opacity:0}
+body[data-state=thinking] .kai3d-thought,body[data-state=transcribing] .kai3d-thought{opacity:1}
+.kai3d-thought circle{animation:kai3d-dot 1.2s ease-in-out infinite}
+.kai3d-thought circle:nth-child(2){animation-delay:.15s}.kai3d-thought circle:nth-child(3){animation-delay:.3s}
+body[data-state=speaking] .kai3d-head{animation:kai3d-talk 1.4s ease-in-out infinite}
+body[data-state=speaking] .kai3d-smile{opacity:0}
+body[data-state=speaking] .kai3d-mouth{opacity:1;animation:kai3d-speech .31s ease-in-out infinite alternate}
+body[data-state=error] .kai3d-head{animation:kai3d-ponder 3s ease-in-out infinite}
+body[data-state=error] .kai3d-brows{transform:rotate(-7deg);transform-origin:512px 280px}
+body.waving .kai3d-head{animation:kai3d-hello 2.4s ease-in-out}
+body.waving .kai3d-body{animation:kai3d-bounce 2.4s ease-in-out}
+body[data-state=dragging] .kai3d-body{animation:none;transform:rotate(-4deg) translateY(-15px)}
+body.asleep .kai3d-eyes{animation:none;transform:scaleY(.12)}
+body.asleep .kai3d-head{animation:none;transform:rotate(5deg)}
+body.asleep .kai3d-body{animation-duration:7s}
+body.motion-off .kai-character *,body.suspended .kai-character *{animation:none!important;transition:none!important}
+body.motion-off .kai3d-gaze,body.suspended .kai3d-gaze{transform:none}
+.kai-avatar .kai-character *{animation:none!important;transform:none!important}
+@keyframes kai3d-breathe{0%,100%{transform:translateY(0)}50%{transform:translateY(-16px)}}
+@keyframes kai3d-ground{0%,100%{opacity:.8;transform:scaleX(1)}50%{opacity:.55;transform:scaleX(.92)}}
+@keyframes kai3d-look{0%,24%,52%,100%{transform:rotate(0)}32%,42%{transform:rotate(-3deg)}72%,83%{transform:rotate(3deg)}}
+@keyframes kai3d-blink{0%,38%,42%,70%,74%,100%{transform:scaleY(1)}40%,72%{transform:scaleY(.08)}}
+@keyframes kai3d-listening{0%,100%{transform:rotate(-5deg)}50%{transform:rotate(-3deg) translateY(-7px)}}
+@keyframes kai3d-signal{0%,100%{opacity:.25}50%{opacity:1}}
+@keyframes kai3d-ponder{0%,100%{transform:rotate(5deg)}50%{transform:rotate(7deg) translateY(-6px)}}
+@keyframes kai3d-dot{0%,100%{opacity:.25}50%{opacity:1}}
+@keyframes kai3d-talk{0%,100%{transform:rotate(-1deg)}50%{transform:rotate(1deg) translateY(5px)}}
+@keyframes kai3d-speech{from{transform:scale(.85,.22)}to{transform:scale(1,1)}}
+@keyframes kai3d-hello{0%,100%{transform:rotate(0)}20%,60%{transform:rotate(-6deg)}40%,80%{transform:rotate(5deg)}}
+@keyframes kai3d-bounce{0%,100%{transform:translateY(0)}25%,65%{transform:translateY(-32px)}45%,85%{transform:translateY(-8px)}}
+@media(prefers-reduced-motion:reduce){.kai-character *{animation:none!important;transition:none!important}.kai3d-gaze{transform:none}}
