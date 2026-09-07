@@ -14,8 +14,14 @@
     } finally { button.disabled = false; }
   });
   window.koinosShell.onMascotOpenView?.(view => {
-    const safeView = ["chat", "models", "settings"].includes(view) ? view : "chat";
-    document.querySelector('[data-view="' + safeView + '"]')?.click();
+    let safeView = window.KaiAppNavigation?.valid(view) ? view : "chat";
+    const baseView = safeView.startsWith("koinos") ? "koinos" : safeView;
+    const nav = document.querySelector('[data-view="' + baseView + '"]');
+    if (nav?.hidden) safeView = "settings";
+    if (typeof activateView === "function") {
+      activateView(safeView.startsWith("koinos") ? "koinos" : safeView);
+      if (safeView.startsWith("koinos")) window.KaiKoinosNode?.select(safeView);
+    } else nav?.click();
     if (typeof refreshChatList === "function") refreshChatList();
   });
   window.addEventListener("focus", () => {

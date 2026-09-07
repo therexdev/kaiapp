@@ -83,6 +83,10 @@ h2>span{color:var(--accent)}
 .send-button:hover{filter:brightness(1.1)}
 .stop-button{background:#edb078;color:#301d0b}
 .chat-footer{display:flex;align-items:center;justify-content:space-between;padding:11px 19px 13px}
+.tool-trace{font-size:10px;color:#9fdccc;margin:0 0 7px;overflow-wrap:anywhere}
+.tool-trace:empty{display:none}
+.tool-sources{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.tool-sources a{font-size:10px;color:#a3eadb;text-decoration:underline;overflow-wrap:anywhere}
 .chat-footer button{display:flex;align-items:center;gap:6px;font-size:9px;color:#7997aa;background:none;padding:0}
 .chat-footer button:hover{color:#b5efe8}
 .chat-footer svg{width:13px;height:13px}

@@ -514,8 +514,11 @@ class Gateway {
     }
     if (this.tools && path === "/core/tools/call" && req.method === "POST") {
       const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+      const abort = new AbortController();
+      const closed = () => { if (!res.writableEnded) abort.abort(); };
+      res.on("close", closed);
       try {
-        const result = await this.tools.call(String(body.name || ""), body.args || {}, { confirmed: Boolean(body.confirmed) });
+        const result = await this.tools.call(String(body.name || ""), body.args || {}, { confirmed: Boolean(body.confirmed), signal: abort.signal });
         return this._json(res, 200, { ok: true, result });
       } catch (e) {
         return this._json(res, e.needsConfirmation ? 428 : 400, {
@@ -523,7 +526,7 @@ class Gateway {
           error: String(e.message),
           ...(e.needsConfirmation ? { needsConfirmation: true } : {}),
         });
-      }
+      } finally { res.off("close", closed); }
     }
 
     // ---- Koinos node tools (§ optional mode behind the Earn toggle) ----

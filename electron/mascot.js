@@ -24,6 +24,8 @@ function trustedFrame(event, window, origin) {
 // node, changes the wallet, or creates another model/runtime process.
 function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, dialog, prefs, origin, getMainWindow, hasTray = () => true }) {
   const actions = app && dialog ? require("./desktop-actions").createFolderActions({ app, dialog, shell }) : null;
+  const approval = dialog ? require("./tool-approval").createToolApproval({ dialog }) : null;
+  const navigation = require("../ui/app-navigation");
   let window = null, loading = null, expanded = false, dragging = null, timer = null;
   let regions = [], ignored = false, disposed = false, shaped = false;
   const handles = [], listeners = [];
@@ -98,7 +100,7 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, di
           if (/^https?:\/\//i.test(url) && new URL(url).origin !== origin) shell.openExternal(url);
         }
       });
-      created.on("hide", () => { actions?.cancel(); dragging = null; send("suspend", true); });
+      created.on("hide", () => { actions?.cancel(); approval?.cancel(); dragging = null; send("suspend", true); });
       created.on("show", () => send("suspend", false));
       created.webContents.on("render-process-gone", () => showMain());
       created.on("closed", () => {
@@ -122,13 +124,14 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, di
     if (main && !main.isDestroyed()) main.hide();
     return { ok: true };
   }
-  function showMain(view = "chat") {
-    if (window && !window.isDestroyed()) { savePosition(); window.hide(); }
+  function showMain(view = "chat", keepCompanion = false) {
+    if (!keepCompanion && window && !window.isDestroyed()) { savePosition(); window.hide(); }
     const main = getMainWindow();
-    if (!main || main.isDestroyed()) return;
+    if (!main || main.isDestroyed()) return { ok: false, error: "The main app window is unavailable." };
     if (main.isMinimized()) main.restore();
     main.show(); main.focus();
-    main.webContents.send("mascot:open-view", ["chat", "models", "settings"].includes(view) ? view : "chat");
+    main.webContents.send("mascot:open-view", navigation.valid(view) ? view : "chat");
+    return { ok: true, view: navigation.valid(view) ? view : "chat", note: "Main window opened. Disabled feature screens show their Settings switch first." };
   }
   function on(channel, fn) {
     const listener = (event, ...args) => {
@@ -149,7 +152,12 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, di
     if (!actions) throw new Error("Desktop actions are unavailable in this window.");
     return actions.open(window, folder);
   });
-  on("mascot:cancel-action", () => actions?.cancel());
+  handle("mascot:confirm-tool", () => window, (name, args) => approval?.confirm(window, name, args) ?? false);
+  handle("mascot:navigate", () => window, view => {
+    if (!navigation.valid(view)) throw new Error("Unknown app screen");
+    return showMain(view, true);
+  });
+  on("mascot:cancel-action", () => { actions?.cancel(); approval?.cancel(); });
   on("mascot:main", showMain);
   on("mascot:regions", value => {
     if (!Array.isArray(value)) return;
@@ -187,7 +195,7 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, di
     hide() { if (window && !window.isDestroyed()) { savePosition(); window.hide(); } },
     dispose() {
       if (disposed) return;
-      disposed = true; actions?.cancel(); clearInterval(timer);
+      disposed = true; actions?.cancel(); approval?.cancel(); clearInterval(timer);
       screen.removeListener("display-removed", onDisplayChange);
       screen.removeListener("display-metrics-changed", onDisplayChange);
       for (const channel of handles) ipcMain.removeHandler(channel);

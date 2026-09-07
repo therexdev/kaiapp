@@ -3,6 +3,8 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("kaiDesktop", {
   expand: open => ipcRenderer.invoke("mascot:expand", !!open),
   openMain: view => ipcRenderer.send("mascot:main", view),
+  navigate: view => ipcRenderer.invoke("mascot:navigate", view),
+  confirmTool: (name, args) => ipcRenderer.invoke("mascot:confirm-tool", name, args),
   hide: () => ipcRenderer.send("mascot:hide"),
   openFolder: folder => ipcRenderer.invoke("mascot:open-folder", folder),
   cancelAction: () => ipcRenderer.send("mascot:cancel-action"),

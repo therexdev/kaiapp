@@ -13,6 +13,13 @@ async function startMascotServer(dataDir) {
     for await (const chunk of req) raw = Buffer.concat([raw, chunk]);
     if (url.pathname === "/core/models" && state.modelsDelay) await new Promise(resolve => setTimeout(resolve, state.modelsDelay));
     if (url.pathname === "/core/models") return output({ aliases: [{ alias: "tiny-live", label: "Koinos Fast", status: "ready", contextSize: 4096 }], runtime: { activeAlias: "tiny-live" } });
+    if (url.pathname === "/core/tools") return output({ ok: true, tools: state.tools || [] });
+    if (url.pathname === "/core/tools/call") {
+      const body = JSON.parse(raw); (state.toolCalls ||= []).push(body);
+      const tool = (state.tools || []).find(t => t.name === body.name);
+      if (tool?.sensitive && !body.confirmed) return output({ ok: false, needsConfirmation: true }, 428);
+      return output({ ok: true, result: JSON.stringify(state.toolResult || { earnings: { kai: "42.75", pendingKai: "1.25" } }) });
+    }
     if (url.pathname === "/core/voice") return output({ ok: true, ...state.voice });
     if (url.pathname === "/core/voice/setup") { state.voice.available = true; return output({ ok: true }); }
     if (url.pathname === "/core/transcribe") {
@@ -38,7 +45,12 @@ async function startMascotServer(dataDir) {
       catch { return output({ error: "Chat not found" }, 404); }
     }
     if (url.pathname === "/core/chat/completions") {
-      state.requests.push(JSON.parse(raw));
+      const request = JSON.parse(raw);
+      if (request.stream === false) {
+        (state.plans ||= []).push(request);
+        return output({ choices: [{ message: { content: JSON.stringify(state.actions?.shift() || { answer: true }) } }] });
+      }
+      state.requests.push(request);
       res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
       const parts = state.reply.match(/.{1,16}|\n/g) || [];
       let index = 0, done = false;
@@ -54,7 +66,7 @@ async function startMascotServer(dataDir) {
     }
     if (url.pathname === "/main-fixture") {
       res.writeHead(200, { "content-type": "text/html" });
-      return res.end('<!doctype html><title>Main app fixture</title><button id="launch-kai" hidden>Launch KAI</button><p id="kai-launch-error" hidden></p><script src="/mascot-launcher.js"></script>');
+      return res.end('<!doctype html><title>Main app fixture</title><button id="launch-kai" hidden>Launch KAI</button><p id="kai-launch-error" hidden></p><script src="/app-navigation.js"></script><script src="/mascot-launcher.js"></script>');
     }
     if (req.method !== "GET") return output({ error: "Not found" }, 404);
     const file = path.join(root, url.pathname === "/" ? "mascot.html" : path.basename(url.pathname));

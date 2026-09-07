@@ -52,6 +52,8 @@ test("KAI UI: natural default, compact voice, follow-ups, barge-in context, hist
       expand: async open => { window.__kaiEvent?.({ type: "expanded", value: open }); return { expanded: open }; },
       regions: value => { window.__regions = value; }, startDrag() {}, endDrag() {},
       openMain: view => { window.__mainRequests.push(view); window.__kaiEvent?.({ type: "suspend", value: true }); },
+      navigate: async view => { window.__mainRequests.push(view); return { ok: true, view }; },
+      confirmTool: async (name, args) => { (window.__toolApprovals ||= []).push({ name, args }); return window.__allowTool === true; },
       hide: () => window.__kaiEvent?.({ type: "suspend", value: true }),
       openFolder: async folder => { window.__folderRequests.push(folder); return { status: window.__denyFolder ? "cancelled" : "opened", folder, label: "Pictures" }; },
       cancelAction() {}, onEvent: callback => { window.__kaiEvent = callback; },
@@ -205,6 +207,36 @@ test("KAI UI: natural default, compact voice, follow-ups, barge-in context, hist
   const countBeforeReload = await page.locator(".message.user").count();
   await page.reload(); await page.waitForSelector(".message.assistant", { state: "attached" }); await compact();
   assert.equal(await page.locator(".message.user").count(), countBeforeReload);
+  // Desktop KAI uses the shared tools without expanding voice chat or
+  // submitting a mutation before the person has reviewed it.
+  fixture.state.tools = [{ name: "app_read", description: "Read app data", params: { subject: "subject" }, sensitive: false },
+    { name: "app_action", description: "App action", params: { action: "action", args: "arguments" }, sensitive: true },
+    { name: "web_search", description: "Search the web", params: { query: "query" }, sensitive: false, egress: true }];
+  fixture.state.reply = "You have 42.75 KAI, with 1.25 KAI pending in this epoch.";
+  await page.click("#toggle-chat");
+  await page.fill("#question", "How much KAI have I earned?"); await page.click("#send"); await idle();
+  assert.equal(fixture.state.toolCalls.at(-1).args.subject, "earnings");
+  assert.ok(fixture.state.requests.at(-1).messages.some(m => m.content.includes('"kai":"42.75"')));
+  assert.match(await page.locator(".tool-trace").last().textContent(), /app_read/);
+  await screenshot("kai-app-earnings");
+  fixture.state.actions = [{ tool: "app_action", args: { action: "stop_earning", args: {} } }];
+  const callsBefore = fixture.state.toolCalls.length;
+  await page.fill("#question", "Stop earning"); await page.click("#send"); await idle();
+  assert.equal(fixture.state.toolCalls.length, callsBefore);
+  assert.match(fixture.state.requests.at(-1).messages.map(m => m.content).join("\n"), /User declined/);
+  await page.evaluate(() => { window.__allowTool = true; });
+  fixture.state.actions = [{ tool: "app_action", args: { action: "stop_earning", args: {} } }];
+  await page.fill("#question", "Stop earning"); await page.click("#send"); await idle();
+  assert.equal(fixture.state.toolCalls.at(-1).confirmed, true);
+  fixture.state.toolResult = "Paris tomorrow: 22 C. https://weather.example/forecast";
+  fixture.state.actions = [{ tool: "web_search", args: { query: "Paris tomorrow weather" } }];
+  fixture.state.reply = "Tomorrow in Paris is expected to reach 22 degrees Celsius.";
+  await page.fill("#question", "What's the weather tomorrow in Paris?"); await page.click("#send"); await idle();
+  assert.equal(await page.locator(".tool-sources a").last().getAttribute("href"), "https://weather.example/forecast");
+  await page.fill("#question", "Can you open up the application?"); await page.click("#send"); await idle();
+  assert.equal((await page.evaluate(() => window.__mainRequests)).at(-1), "chat");
+  assert.equal(await page.locator("body").evaluate(el => el.classList.contains("suspended")), false);
+  fixture.state.tools = []; await page.click("#collapse");
   // Collapse is independent of the microphone; return/hide releases all tracks.
   await page.click("#quick-wake"); await page.waitForFunction(() => document.querySelector("#quick-wake").getAttribute("aria-pressed") === "true");
   await page.click("#toggle-chat"); await page.click("#collapse");

@@ -48,6 +48,16 @@ async function main() {
     assert.deepEqual(folders.opened, [folders.expected]);
     const refused = await mascot.evaluate(async () => { try { await window.kaiDesktop.openFolder("C:\\Windows\\System32\\cmd.exe"); return false; } catch { return true; } });
     assert.equal(refused, true);
+    // Exercise the real sandboxed preload for app navigation and approvals.
+    await mascot.evaluate(() => window.kaiDesktop.navigate("koinos-wallet"));
+    assert.equal(await app.evaluate(() => globalThis.__kaiMain.isVisible()), true);
+    assert.equal(await app.evaluate(() => globalThis.__kaiController.getWindow().isVisible()), true);
+    assert.equal(await mascot.evaluate(async () => { try { await window.kaiDesktop.navigate("file:///C:/Windows"); return false; } catch { return true; } }), true);
+    await app.evaluate(() => { globalThis.__approveFolder = false; });
+    assert.equal(await mascot.evaluate(() => window.kaiDesktop.confirmTool("app_action", { action: "stop_node", args: {} })), false);
+    await app.evaluate(() => { globalThis.__approveFolder = true; });
+    assert.equal(await mascot.evaluate(() => window.kaiDesktop.confirmTool("app_action", { action: "stop_node", args: {} })), true);
+    assert.equal(await app.evaluate(() => globalThis.__folderApprovals.at(-1).defaultId), 0);
     await app.evaluate(async () => { await globalThis.__kaiController.launch(); });
     await mascot.waitForFunction(() => document.querySelector("#conversation").hidden);
     assert.equal(await app.evaluate(() => globalThis.__kaiController.getWindow().getBounds().width), 248, "Relaunch collapses an open chat");

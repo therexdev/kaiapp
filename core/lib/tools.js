@@ -60,7 +60,7 @@ class ToolRegistry {
         ({ name, label: label || name, server: server || null, serverId: serverId || null, description, params, egress, sensitive }));
   }
 
-  async call(name, args = {}, { confirmed = false } = {}) {
+  async call(name, args = {}, { confirmed = false, signal } = {}) {
     const tool = this._tools.get(name);
     if (!tool) throw new Error(`Unknown tool: ${name}`);
     if (tool.egress && this._privacyMode() === "local-only") {
@@ -72,7 +72,8 @@ class ToolRegistry {
       err.needsConfirmation = true;
       throw err;
     }
-    const out = await tool.handler(args);
+    signal?.throwIfAborted();
+    const out = await tool.handler(args, { signal });
     const text = typeof out === "string" ? out : JSON.stringify(out);
     return text.length > MAX_RESULT_CHARS ? text.slice(0, MAX_RESULT_CHARS) + "\n[truncated]" : text;
   }

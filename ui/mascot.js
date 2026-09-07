@@ -9,7 +9,7 @@
   let speechEpoch = 0, speaking = false, audible = false, waveTimer = null, idleTimer = null;
   let voiceReplies = read("kai-mascot-voice", "0") === "1";
   let motion = read("kai-mascot-motion", "1") !== "0";
-  let booted = false, savedFailure = false;
+  let booted = false, savedFailure = false, approvalPending = false;
 
   async function json(url, options) {
     const response = await fetch(url, options);
@@ -89,7 +89,7 @@
     const locked = busy || voicePending;
     $("send").hidden = busy;
     $("stop").hidden = !busy && !speaking;
-    $("send").disabled = locked || (!$("model").value && !api.folderRequest($("question").value)) || !$("question").value.trim();
+    $("send").disabled = locked || (!$("model").value && !api.folderRequest($("question").value) && !KaiAppNavigation.request($("question").value)) || !$("question").value.trim();
     $("new-chat").disabled = locked;
     $("model").disabled = locked;
     for (const id of ["mic", "quick-mic"]) {
@@ -403,7 +403,7 @@
     wakeListener.stop(); wakeUI(); controls();
   }
   function pauseWake() {
-    wakeListener.pause(suspended);
+    wakeListener.pause(suspended || approvalPending);
     wakeListener.setPlayback(audible);
     wakeListener.setResponding(busy || speaking);
   }
@@ -448,9 +448,9 @@
   }
   async function send({ source = "typed" } = {}) {
     const text = $("question").value.trim(), model = $("model").value;
-    const folder = api.folderRequest(text);
+    const folder = api.folderRequest(text), destination = KaiAppNavigation.request(text);
     if (!text || busy || voicePending) return;
-    if (!model && !folder) {
+    if (!model && !folder && !destination) {
       notice("Open the full app to choose a chat model so KAI can answer, then try again."); mood("error"); return;
     }
     stopSpeech(); notice(""); busy = true; mood("thinking");
@@ -463,9 +463,20 @@
     reply.element.classList.add("streaming");
     controls(); scroll();
     chatAbort = new AbortController();
-    let content = "", served = null, lastPaint = 0, completed = false;
+    let content = "", served = null, lastPaint = 0, completed = false, phase = null;
+    const observations = [];
+    const trace = document.createElement("div"); trace.className = "tool-trace"; trace.setAttribute("role", "status"); reply.element.prepend(trace);
+    const open = bridge?.navigate ? view => bridge.navigate(view) : null;
+    const toolJson = async (url, options) => {
+      const r = await fetch(url, options), j = await r.json();
+      if (!r.ok && r.status !== 428) throw new Error(j.error?.message || j.error || "App tool request failed");
+      return j;
+    };
     try {
-      if (folder) {
+      if (destination) {
+        const result = open ? await open(destination) : { ok: false };
+        content = result.ok ? "The main app is open. I'm still here if you need me. If that feature is disabled, you'll see its switch in Settings." : "I couldn't open the main app. This control needs the installed desktop companion.";
+      } else if (folder) {
         reply.content.textContent = "Waiting for your approval…";
         const result = bridge?.openFolder ? await bridge.openFolder(folder) : { status: "unavailable" };
         if (chatAbort.signal.aborted) throw new DOMException("Stopped", "AbortError");
@@ -474,10 +485,30 @@
           result.status === "error" ? "I couldn't open that folder. " + result.error :
           "Opening folders is available in the installed KAI desktop companion.";
       } else {
+        const contextSize = aliases.find(a => a.alias === model)?.contextSize || 4096;
+        phase = await KaiMascotTools.run({ question: text, history, chatId, contextSize, signal: chatAbort.signal, json: toolJson, open,
+          confirm: async (name, args) => {
+            // Pause capture while a human reviews a mutation. Background audio
+            // is never an approval, and Off/Stop/hide invalidate a late click.
+            approvalPending = true; wakeListener.pause(true);
+            try { return bridge?.confirmTool ? await bridge.confirmTool(name, args) : false; }
+            finally { approvalPending = false; if (wakeEnabled && !suspended) wakeListener.pause(false); }
+          },
+          status: value => { trace.textContent = value; if (value) $("mood-label").textContent = value; scroll(); },
+          onObservation: value => { observations.push(value); request.keepUser = true; },
+          askModel: async (messages, signal) => {
+            const response = await fetch("/core/chat/completions", { method: "POST", headers: { "content-type": "application/json" }, signal,
+              body: JSON.stringify({ model, stream: false, max_tokens: 450, messages }) });
+            let output = ""; for await (const delta of api.completion(response)) output += delta.content; return output;
+          },
+        });
+        if (chatAbort.signal.aborted) throw new DOMException("Stopped", "AbortError");
+        trace.textContent = phase.trace.map(t => t.tool + " · " + t.status).join(" → ");
+        mood("thinking");
         const response = await fetch("/core/chat/completions", {
         method: "POST", headers: { "content-type": "application/json" }, signal: chatAbort.signal,
         body: JSON.stringify({ model, stream: true,
-          messages: api.messagesFor(history, aliases.find(a => a.alias === model)?.contextSize || 4096) }),
+          messages: api.messagesFor(history, contextSize, phase.context) }),
       });
       for await (const delta of api.completion(response)) {
         if (delta.content) content += delta.content;
@@ -498,10 +529,16 @@
         if (!suspended) notice(content || request.keepUser ? "Response stopped." : "Stopped. Your message is back in the composer.");
       } else { notice(error.message); mood("error"); }
     } finally {
+      if (!content.trim() && observations.length) content = "I stopped before finishing the reply. App tool results so far:\n" + observations.filter(o => o.tool !== "app_capabilities").map(o => "- " + o.tool + ": " + String(o.result).slice(0, 500)).join("\n");
       reply.element.classList.remove("streaming");
       if (content.trim()) {
         reply.content.innerHTML = mdToHtml(content);
-        history.push({ role: "assistant", content });
+        if (phase?.citations?.length) {
+          const sources = document.createElement("div"); sources.className = "tool-sources";
+          for (const citation of phase.citations) { const link = document.createElement("a"); link.href = citation.url; link.textContent = citation.title; link.target = "_blank"; link.rel = "noopener noreferrer"; sources.append(link); }
+          reply.element.append(sources);
+        }
+        history.push({ role: "assistant", content, ...(phase?.citations?.length ? { citations: phase.citations } : {}) });
         if (served || model.startsWith("koinos-network")) {
           const source = document.createElement("div"); source.className = "source";
           source.textContent = served || "Answered on the Koinos Network"; reply.element.append(source);

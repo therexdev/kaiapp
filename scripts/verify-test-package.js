@@ -26,7 +26,7 @@ for (const archive of archives) {
   }
   for (const required of ["electron/mascot.js", "electron/mascot-preload.js", "ui/mascot.html",
     "ui/mascot.js", "ui/mascot-client.js", "ui/mascot.css", "ui/kai-robot.svg", "ui/mascot-launcher.js",
-    "ui/mascot-speech.js", "ui/mascot-wake.js", "ui/mascot-audio-worklet.js",
+    "ui/mascot-speech.js", "ui/mascot-wake.js", "ui/mascot-audio-worklet.js", "ui/mascot-tools.js", "ui/app-navigation.js", "core/lib/app-tools.js", "electron/tool-approval.js",
     "electron/desktop-actions.js", "core/lib/speech.js", "core/lib/speech-worker.js", "core/lib/speech-wasm.js", "core/lib/speech-wasm-runtime.mjs", "core/runtimes/kokoro.json"]) {
     try {
       // ASAR's directory walker splits on the host separator. Forward slashes

@@ -640,6 +640,9 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     },
   });
 
+  const { registerAppTools, appRequest } = require("./lib/app-tools");
+  registerAppTools(registry, { request: appRequest(gateway), privacyMode: () => network.status().privacyMode });
+
   return {
     settings,
     speech,

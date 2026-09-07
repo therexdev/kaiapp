@@ -1,3 +1,12 @@
+### Your app, a question away
+
+- **KAI can use the app's tools.** Desktop conversations can search the web, read pages and use connected tools, memory, workspace files, email and calendar through the existing permissions. Web access follows Privacy settings; Local-Only stays offline. Include your city for weather, or KAI can ask for it.
+- **Ask about your real app.** Check KAI balance and pending earnings, KOIN/VHP wallet balances, node health and recent KOIN rewards, installed/downloadable models, documents, saved chats, scheduled tasks and connection status. Unavailable or stale data is reported instead of being treated as zero.
+- **Ask KAI to do things.** Model downloads/removal, earning controls, node start/stop, document editing, scheduled prompts and supported settings changes show a native **Allow once** dialog before running. Tool activity appears in the conversation; web sources are clickable.
+- **“Open up the application.”** KAI can bring up the main app or a specific screen while staying available beside it. Financial transactions, wallet passwords/backups, Docker setup and coding sessions use the existing app forms and their approval steps. Disabled sections open Settings first.
+
+Simple balance/model questions go straight to the relevant app data before answering. Other tool requests may take extra model steps. Stop or hiding KAI cancels pending approvals and further steps; an action the app has already accepted may keep running. KAI's voice, follow-ups, shared wallet and live node data remain in place.
+
 ### KAI interruptions, smoother sentences and a deeper robot voice
 
 - **Say “KAI” to interrupt.** Say the name alone to stop the reply, or begin your new question with it. “Hey KAI” still works. Ordinary speech no longer interrupts a reply, including profiles that previously disabled the name requirement.
