@@ -24,6 +24,7 @@ let core = null;
 let win = null;
 let tray = null;
 let mascot = null;
+let providers = null;
 // Set the moment a real quit begins, so the close handler below knows the
 // difference between "the user pressed X" and "the app is going down".
 let quitting = false;
@@ -156,6 +157,13 @@ async function start() {
   mascot = require("./mascot").createMascotController({
     BrowserWindow, screen: require("electron").screen, ipcMain, shell, app, dialog: require("electron").dialog,
     prefs: winState, origin: "http://127.0.0.1:" + port, getMainWindow: () => win, hasTray: () => !!tray,
+  });
+
+  const { DesktopProviders, registerProviderIPC } = require("./providers");
+  providers = registerProviderIPC({ ipcMain, origin: "http://127.0.0.1:" + port,
+    getMainWindow: () => win, getMascotWindow: () => mascot?.getWindow(),
+    service: new DesktopProviders({ dataDir, safeStorage: require("electron").safeStorage,
+      privacyMode: () => core.settings.get("network.privacyMode", "local-only") }),
   });
 
   /*
@@ -501,6 +509,7 @@ async function start() {
 // logging out — passes through here first, which is what lets the close
 // handler above tell a quit apart from a trip to the tray.
 app.on("before-quit", () => { quitting = true; });
+app.on("before-quit", () => providers?.dispose());
 app.on("before-quit", () => mascot?.dispose());
 app.on("before-quit", () => core?.speech?.close());
 

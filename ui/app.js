@@ -91,15 +91,20 @@ async function refresh() {
     setStatus("busy", "Setup needed");
   }
   $("status-model").textContent = entry ? entry.label.split(" (")[0] : "No models in catalog";
-  updateModelPick(models.aliases);
+  await updateModelPick(models.aliases);
+  const desktopReady = KaiProviders.models().some(m => m.alias === composedChatModel());
+  if (desktopReady && !models.download && !models.ensure?.state) {
+    setStatus("ok", "Desktop provider ready");
+    $("status-model").textContent = KaiProviders.label(composedChatModel());
+  }
 
   // Route: onboarding until the model file is on disk — but only until the user
   // goes somewhere themselves. This poll runs every few seconds, and it used to
   // slam the view back to onboarding each time, throwing anyone without a model
   // off whatever screen they were on mid-keystroke. The Koinos node in
   // particular needs no model at all.
-  const route = state.ready || state.routed ? state.view : "onboarding";
-  showView(route, { navOnly: state.ready });
+  const route = state.ready || desktopReady || state.routed ? state.view : "onboarding";
+  showView(route, { navOnly: state.ready || desktopReady });
   if (!state.ready && entry) renderOnboarding(entry);
 
   const busy = models.download || models.ensure?.state === "working";
@@ -166,7 +171,7 @@ document.getElementById("mode-pick")?.addEventListener("change", () => setChatMo
 /** One short non-streaming model call — the workhorse of research/agent
  *  phases. Same endpoint, same routing (local or network) as the chat. */
 async function askModelOnce(messages, model) {
-  const r = await fetch("/core/chat/completions", {
+  const r = await KaiProviders.chatFetch("/core/chat/completions", {
     method: "POST",
     headers: { "content-type": "application/json" },
     signal: state.abort?.signal,
@@ -302,6 +307,7 @@ function renderCitations(bubble, citations) {
 let networkEligible = false;
 let pickable = []; // latest [{v,label}] the chat picker offers — reused by Compare/Tasks
 async function updateModelPick(aliases) {
+  await KaiProviders.refresh().catch(() => {});
   let netBlockedWhy = "";
   try {
     const n = await coreGet("/core/network");
@@ -334,14 +340,19 @@ async function updateModelPick(aliases) {
   state.aliasLabels = Object.fromEntries(aliases.map((al) => [al.alias, al.label.split(" (")[0]]));
   state.visionAliases = new Set(aliases.filter((al) => al.vision).map((al) => al.alias)); // gates image attach
   const src = $("src-pick");
-  const srcSig = `local${networkEligible ? ",network" : `,blocked:${netBlockedWhy}`}`;
+  const srcSig = `local${networkEligible ? ",network" : `,blocked:${netBlockedWhy}`}` + JSON.stringify(KaiProviders.status);
   if (src.dataset.sig !== srcSig) {
-    const prevSrc = src.value;
+    const prevSrc = src.value || (KaiProviders.desktop ? KaiProviders.read("kai-chat-source", "local") : "local");
     src.innerHTML = "";
     for (const [v, label] of [["local", "This machine"], ...(networkEligible ? [["network", "Koinos Network"]] : [])]) {
       const o = document.createElement("option");
       o.value = v; o.textContent = label;
       src.appendChild(o);
+    }
+    if (KaiProviders.desktop) for (const p of KaiProviders.status.providers) {
+      const o = document.createElement("option"); o.value = p.id;
+      const why = !KaiProviders.status.available || KaiProviders.status.locked ? "unlock secure storage" : !p.configured ? "connect in Settings" : KaiProviders.status.blocked ? "blocked by Local-Only" : !p.models.length ? "refresh models in Settings" : "";
+      o.textContent = p.label + " · Desktop" + (why ? " — " + why : ""); o.disabled = !!why; src.appendChild(o);
     }
     if (!networkEligible && netBlockedWhy) {
       // Visible but not selectable — the network exists; here's how to get it.
@@ -359,6 +370,18 @@ async function updateModelPick(aliases) {
     ...(networkEligible ? [{ v: "koinos-network", label: "Koinos Network · Auto" }] : []),
   ];
   pickable = want;
+  if (["openai", "anthropic"].includes(src.value)) {
+    const providerModels = KaiProviders.models().filter(m => m.alias.startsWith("desktop:" + src.value + ":"));
+    const sig = JSON.stringify(providerModels);
+    if (pick.dataset.sig !== sig) {
+      const prev = pick.value.startsWith("desktop:" + src.value + ":") ? pick.value : KaiProviders.read("kai-chat-model-" + src.value);
+      pick.replaceChildren(...providerModels.map(m => { const o = document.createElement("option"); o.value = m.alias; o.textContent = m.label; return o; }));
+      if (providerModels.some(m => m.alias === prev)) pick.value = prev;
+      pick.dataset.sig = sig;
+    }
+    updateProviderNote();
+    return;
+  }
   if (src.value === "network") {
     await fillNetworkModelPick();
     return;
@@ -411,13 +434,28 @@ async function fillNetworkModelPick() {
   }
 }
 
+function updateProviderNote() {
+  const source = $("src-pick").value, note = $("privacy-note");
+  if (["openai", "anthropic"].includes(source)) {
+    note.dataset.mode = "desktop:" + source;
+    note.textContent = KaiProviders.status.blocked ? "Local-Only blocks this online connection." : `Chat goes directly to ${source === "openai" ? "OpenAI" : "Anthropic"}. Your API account pays for usage.`;
+  }
+}
+window.addEventListener("kai-providers-changed", () => { $("model-pick").dataset.sig = ""; refresh(); });
+window.addEventListener("kai-provider-use", async event => {
+  await updateModelPick((await coreGet("/core/models")).aliases);
+  $("src-pick").value = event.detail; $("src-pick").dispatchEvent(new Event("change")); activateView("chat");
+});
+$("model-pick").addEventListener("change", () => { if (["openai", "anthropic"].includes($("src-pick").value)) KaiProviders.write("kai-chat-model-" + $("src-pick").value, $("model-pick").value); });
 $("src-pick").addEventListener("change", () => {
+  KaiProviders.write("kai-chat-source", $("src-pick").value);
   $("model-pick").dataset.sig = ""; // force refill for the new source
   coreGet("/core/models").then((m) => updateModelPick(m.aliases)).catch(() => {});
 });
 
 /** What send() should request, composed from the two boxes. */
 function composedChatModel() {
+  if (["openai", "anthropic"].includes($("src-pick").value)) return $("model-pick").value.startsWith("desktop:" + $("src-pick").value + ":") ? $("model-pick").value : "";
   if ($("src-pick").value === "network") {
     const m = $("model-pick").value;
     return m === "auto" || !m ? "koinos-network" : `koinos-network:${m}`;
@@ -524,6 +562,7 @@ $("btn-update-check")?.addEventListener("click", async (e) => {
 });
 
 function renderSettings() {
+  KaiProviders.renderSettings();
   renderUpdateStatus();
   renderAccount?.();
   renderDev();
@@ -757,15 +796,19 @@ $("messages").addEventListener("click", async (e) => {
 
 async function send(replayText) {
   const text = replayText ?? $("input").value.trim();
-  if (!text || state.chatting || !state.alias) return;
+  if (!text || state.chatting) return;
   const chatModel = composedChatModel();
+  if (!chatModel) { addMsg("error", "Choose an available model. For OpenAI or Anthropic, connect and refresh models in Settings; Local-Only blocks online connections."); return; }
+  if (KaiProviders.isModel(chatModel) && getChatMode().startsWith("team:")) {
+    addMsg("error", "Desktop providers work in Chat, Research and Agent. Choose one of those modes, or use a local/network model for Teams."); return;
+  }
   if (!replayText) $("input").value = "";
   // An attached IMAGE rides on the question turn itself (vision input) —
   // gated to models that can actually see (the gateway enforces this too;
   // client-side is just the instant, friendlier refusal).
   let pendingImages = null;
   if (!replayText && state.attachment?.kind === "image") {
-    if (chatModel.startsWith("koinos-network") || !state.visionAliases?.has(chatModel)) {
+    if (chatModel.startsWith("koinos-network") || (!KaiProviders.isModel(chatModel) && !state.visionAliases?.has(chatModel))) {
       addMsg("error", "That model can't see images — pick a vision-capable model (👁 in the picker), then send again.");
       $("input").value = text;
       return;
@@ -925,7 +968,7 @@ async function send(replayText) {
 
   const t0 = performance.now();
   try {
-    const resp = await fetch("/core/chat/completions", {
+    const resp = await KaiProviders.chatFetch("/core/chat/completions", {
       method: "POST",
       headers: { "content-type": "application/json" },
       signal: state.abort.signal,
@@ -986,6 +1029,10 @@ async function send(replayText) {
           ? `served by the network's ${cls}`
           : "";
       if (tag.textContent) bubble.appendChild(tag);
+    }
+    if (KaiProviders.isModel(chatModel)) {
+      const tag = document.createElement("div"); tag.className = "route-tag";
+      tag.textContent = "Answered by " + KaiProviders.label(chatModel) + " · private desktop connection"; bubble.appendChild(tag);
     }
     if (webCitations) renderCitations(bubble, webCitations);
     // Speed transparency (field request): show how long the wait actually

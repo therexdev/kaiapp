@@ -69,7 +69,7 @@ async function startMascotServer(dataDir) {
       return res.end('<!doctype html><title>Main app fixture</title><button id="launch-kai" hidden>Launch KAI</button><p id="kai-launch-error" hidden></p><script src="/app-navigation.js"></script><script src="/mascot-launcher.js"></script>');
     }
     if (req.method !== "GET") return output({ error: "Not found" }, 404);
-    const file = path.join(root, url.pathname === "/" ? "mascot.html" : path.basename(url.pathname));
+    const file = path.join(root, url.pathname === "/" ? (state.mainAtRoot ? "index.html" : "mascot.html") : path.basename(url.pathname));
     if (!fs.existsSync(file) || !fs.statSync(file).isFile()) return output({ error: "Not found" }, 404);
     res.writeHead(200, { "content-type": ({ ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml" })[path.extname(file)] || "application/octet-stream" });
     fs.createReadStream(file).pipe(res);

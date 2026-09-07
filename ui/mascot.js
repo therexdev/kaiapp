@@ -144,11 +144,18 @@
   async function loadModels(hint) {
     try {
       const data = await json("/core/models");
-      aliases = data.aliases || [];
-      const choice = api.chooseModel(aliases, data.runtime?.activeAlias, hint || requestedModel, $("model").value || read("kai-mascot-model", ""));
+      await KaiProviders.refresh().catch(() => {});
+      aliases = [...(data.aliases || []), ...KaiProviders.models()];
+      const wanted = hint || requestedModel || $("model").value || read("kai-mascot-model", "");
+      const unavailableProvider = KaiProviders.isModel(wanted) && !aliases.some(a => a.alias === wanted);
+      const choice = KaiProviders.isModel(wanted) ? wanted : api.chooseModel(data.aliases || [], data.runtime?.activeAlias, hint || requestedModel, $("model").value || read("kai-mascot-model", ""));
       $("model").replaceChildren();
       for (const a of aliases.filter(a => a.status === "ready")) {
         const option = document.createElement("option"); option.value = a.alias; option.textContent = a.label || a.alias; $("model").append(option);
+      }
+      if (unavailableProvider) {
+        const option = document.createElement("option"); option.value = wanted; option.textContent = KaiProviders.label(wanted) + " — check Settings / Privacy";
+        $("model").append(option);
       }
       if (choice.startsWith("koinos-network")) {
         const option = document.createElement("option"); option.value = choice;
@@ -157,10 +164,11 @@
       }
       if (!choice) {
         const option = document.createElement("option"); option.value = ""; option.textContent = "Choose a model in the full app"; $("model").append(option);
-        $("connection").textContent = "Your companion is ready. Add a model to chat.";
+        $("model").value = "";
+        $("connection").textContent = KaiProviders.models().length ? "Choose a brain above to start chatting." : "Your companion is ready. Add a model to chat.";
       } else {
         $("model").value = choice;
-        $("connection").textContent = choice.startsWith("koinos-network") ? "Using your Koinos Network selection" : "Connected to your running app";
+        $("connection").textContent = KaiProviders.isModel(choice) ? (unavailableProvider ? "Provider unavailable — check Settings and Privacy" : "Private desktop connection · " + KaiProviders.label(choice)) : choice.startsWith("koinos-network") ? "Using your Koinos Network selection" : "Connected to your running app";
       }
       controls();
     } catch {
@@ -497,7 +505,7 @@
           status: value => { trace.textContent = value; if (value) $("mood-label").textContent = value; scroll(); },
           onObservation: value => { observations.push(value); request.keepUser = true; },
           askModel: async (messages, signal) => {
-            const response = await fetch("/core/chat/completions", { method: "POST", headers: { "content-type": "application/json" }, signal,
+            const response = await KaiProviders.chatFetch("/core/chat/completions", { method: "POST", headers: { "content-type": "application/json" }, signal,
               body: JSON.stringify({ model, stream: false, max_tokens: 450, messages }) });
             let output = ""; for await (const delta of api.completion(response)) output += delta.content; return output;
           },
@@ -505,7 +513,7 @@
         if (chatAbort.signal.aborted) throw new DOMException("Stopped", "AbortError");
         trace.textContent = phase.trace.map(t => t.tool + " · " + t.status).join(" → ");
         mood("thinking");
-        const response = await fetch("/core/chat/completions", {
+        const response = await KaiProviders.chatFetch("/core/chat/completions", {
         method: "POST", headers: { "content-type": "application/json" }, signal: chatAbort.signal,
         body: JSON.stringify({ model, stream: true,
           messages: api.messagesFor(history, contextSize, phase.context) }),
@@ -626,7 +634,8 @@
   $("collapse").onclick = () => expand(false);
   $("toggle-chat").onclick = () => expand(!expanded);
   $("main-app").onclick = () => main("chat"); $("menu-open-app").onclick = () => main("chat");
-  $("open-models").onclick = () => main("models");
+  window.addEventListener("kai-providers-changed", () => { if (!busy) loadModels(); });
+  $("open-models").onclick = () => main(KaiProviders.isModel($("model").value) ? "settings" : "models");
   $("new-chat").onclick = async () => {
     if (busy || voicePending) return;
     if (savedFailure) { await saveChat(); if (savedFailure) return; }

@@ -1067,3 +1067,13 @@ button.small:disabled { opacity: 0.5; cursor: default; }
 .kai-launch b{color:#82e8d7;font-weight:400;font-size:15px}
 .kai-launch small{display:block;color:#92b5c1;font-size:9px;margin-top:4px;white-space:nowrap}
 #kai-launch-error{margin:0 15px 8px;color:#e8b67f;font-size:11px}
+
+/* Private desktop AI settings follow the existing settings surface. */
+.provider-card { border: 1px solid var(--border, #25333d); border-radius: 14px; padding: 20px; margin: 16px 0; }
+.provider-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.provider-heading h3 { margin: 0 0 16px; }
+.provider-card label { display: block; margin: 12px 0 6px; }
+.provider-card input { width: 100%; box-sizing: border-box; }
+.provider-buttons { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 16px; }
+.provider-buttons a { font-size: 12px; margin-left: auto; }
+.provider-card [data-provider-result]:empty { display: none; }

@@ -68,6 +68,28 @@ async function main() {
     assert.equal(await app.evaluate(() => globalThis.__kaiController.getWindow().isVisible()), false);
     await main.click("#launch-kai");
     assert.equal(await app.evaluate(() => globalThis.__kaiController.getWindow().isVisible()), true);
+    // Real Windows safeStorage and sandboxed provider IPC; no paid APIs.
+    assert.equal(await main.evaluate(async () => { try { await window.kaiProviderBridge.status(); return false; } catch { return true; } }), true, "Other Core documents have no provider capability");
+    await app.evaluate(async () => {
+      globalThis.__providerFixture.state.mainAtRoot = true;
+      await globalThis.__kaiMain.loadURL(globalThis.__providerFixture.origin + "/");
+    });
+    const privateStatus = await main.evaluate(async () => {
+      await window.kaiProviderBridge.save("openai", { key: "synthetic-native-provider-key", model: "gpt-fixture" });
+      await window.kaiProviderBridge.save("anthropic", { key: "synthetic-native-provider-key", model: "claude-fixture" });
+      return window.kaiProviderBridge.refresh("openai");
+    });
+    assert.equal(privateStatus.ok, true); assert.equal(JSON.stringify(privateStatus).includes("synthetic-native-provider-key"), false);
+    assert.equal(await app.evaluate(() => require("fs").readFileSync(globalThis.__providerService.file, "utf8").includes("synthetic-native-provider-key")), false);
+    for (const [page, provider, model] of [[main, "openai", "gpt-fixture"], [mascot, "anthropic", "claude-fixture"]]) {
+      const reply = await page.evaluate(async ({ provider, model }) => {
+        const response = await window.KaiProviders.chatFetch("/core/chat/completions", { body: JSON.stringify({ model: `desktop:${provider}:${model}`, stream: false, messages: [{ role: "user", content: "Native fixture check" }] }) });
+        return (await response.json()).choices[0].message.content;
+      }, { provider, model });
+      assert.equal(reply, "Native private reply.");
+    }
+    assert.equal(await mascot.evaluate(async () => { try { await window.kaiProviderBridge.remove("openai"); return false; } catch { return true; } }), true, "KAI cannot change provider credentials");
+    console.log("PASS: native provider DPAPI encryption, private main/companion IPC, both streaming protocols and settings restrictions.");
     console.log("PASS: native KAI launch, transparent always-on-top window, sandbox, chat, resizing, single-window reuse, tray handoff and return to the main app.");
   } finally {
     await app?.close();

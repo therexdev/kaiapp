@@ -1,3 +1,12 @@
+### Your own OpenAI or Anthropic connection
+
+- **Settings → Desktop AI connections** now accepts your own OpenAI and Anthropic API keys. Save a connection, then **Test & refresh models**, or enter a model ID from your provider account. The connection check lists models; it does not generate a paid test reply.
+- **Choose your source in Chat**, then choose a model. **Use in chat** opens that picker from Settings. The desktop KAI **Brain** picker also includes connected models. Chat, Research, Agent and KAI's app tools use your chosen provider, with streamed answers and Stop support.
+- **Private to your desktop.** Keys use encrypted OS storage and are never returned to chat pages, included in network model lists, or used for earning jobs. These connections are unavailable through the local/public API, remote access, Teams or scheduled tasks. Provider failures stop the request without switching to another source.
+- **Your provider account pays for usage.** Questions, conversation context, attachments and relevant app tool results go directly to the selected provider. Local-Only blocks these online requests; choose **Local API → Privacy → Local-First** to allow them. This does not require a network wallet for provider chat. Your earning node retains its existing models and data.
+
+Your API key is separate from your ChatGPT or Claude app login. Models and access depend on your provider account. Choosing a provider does not change KAI's locally generated voice or local microphone transcription.
+
 ### Your app, a question away
 
 - **KAI can use the app's tools.** Desktop conversations can search the web, read pages and use connected tools, memory, workspace files, email and calendar through the existing permissions. Web access follows Privacy settings; Local-Only stays offline. Include your city for weather, or KAI can ask for it.

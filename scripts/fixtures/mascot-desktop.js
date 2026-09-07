@@ -19,8 +19,20 @@ app.whenReady().then(async () => {
     shell: { ...shell, openPath: async target => { globalThis.__openedFolders.push(target); return ""; } },
     dialog: { showMessageBox: async (_win, options) => { globalThis.__folderApprovals.push(options); return { response: globalThis.__approveFolder ? 1 : 0 }; } },
     prefs: new JsonStore(path.join(dir, "window.json"), {}), origin: fixture.origin, getMainWindow: () => main });
+  const { DesktopProviders, registerProviderIPC } = require("../../electron/providers");
+  const providerService = new DesktopProviders({ dataDir: dir, safeStorage: require("electron").safeStorage,
+    privacyMode: () => "local-first", fetchImpl: async (url, options) => {
+      if (url.includes("/models")) return Response.json({ data: [{ id: url.includes("openai") ? "gpt-fixture" : "claude-fixture" }] });
+      const openai = url.includes("openai"), delta = openai ? { type: "response.output_text.delta", delta: "Native private reply." } :
+        { type: "content_block_delta", delta: { type: "text_delta", text: "Native private reply." } };
+      return new Response("data: " + JSON.stringify(delta) + "\n\ndata: " + JSON.stringify({ type: openai ? "response.completed" : "message_stop" }) + "\n\n");
+    } });
+  const providerIPC = registerProviderIPC({ ipcMain, service: providerService, origin: fixture.origin,
+    getMainWindow: () => main, getMascotWindow: () => controller.getWindow() });
+  globalThis.__providerService = providerService;
+  globalThis.__providerFixture = fixture;
   globalThis.__kaiMain = main; globalThis.__kaiController = controller;
   await main.loadURL(fixture.origin + "/main-fixture");
-  app.on("before-quit", () => { controller.dispose(); fixture.server.close(); fixture.server.closeAllConnections(); });
+  app.on("before-quit", () => { providerIPC.dispose(); controller.dispose(); fixture.server.close(); fixture.server.closeAllConnections(); });
 });
 app.on("window-all-closed", () => app.quit());

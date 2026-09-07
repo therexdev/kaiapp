@@ -33,3 +33,23 @@ contextBridge.exposeInMainWorld("koinosShell", {
     return () => ipcRenderer.removeListener("mascot:open-view", listener);
   },
 });
+
+// Private provider capability: no keys are returned to either renderer.
+contextBridge.exposeInMainWorld("kaiProviderBridge", {
+  status: () => ipcRenderer.invoke("providers:status"),
+  save: (id, options) => ipcRenderer.invoke("providers:save", id, options),
+  remove: id => ipcRenderer.invoke("providers:remove", id),
+  refresh: id => ipcRenderer.invoke("providers:refresh", id),
+  chat: (id, body) => ipcRenderer.invoke("providers:chat", id, body),
+  cancel: id => ipcRenderer.invoke("providers:cancel", id),
+  onDelta: callback => {
+    const listener = (_event, value) => callback(value);
+    ipcRenderer.on("providers:delta", listener);
+    return () => ipcRenderer.removeListener("providers:delta", listener);
+  },
+  onChanged: callback => {
+    const listener = () => callback();
+    ipcRenderer.on("providers:changed", listener);
+    return () => ipcRenderer.removeListener("providers:changed", listener);
+  },
+});

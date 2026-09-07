@@ -133,7 +133,7 @@
             <option value="team:analyst">👥 Analyst team (code)</option>
             <option value="team:review">👥 Write &amp; review team</option>
           </select>
-          <select id="src-pick" title="Run on this machine, or on the network"></select>
+          <select id="src-pick" title="Choose this machine, Koinos Network, or a private desktop provider"></select>
           <select id="model-pick" title="Which model answers"></select>
           <select id="persona-pick" title="How the AI should answer">
             <option value="">Default style</option>
@@ -481,6 +481,47 @@
         <div class="api-card">
           <h1>Settings</h1>
           <p class="lede">Your account, and the parts of the app that are off until you turn them on.</p>
+
+
+          <section id="desktop-providers" hidden>
+            <h2>Desktop AI connections</h2>
+            <p class="hint">Use your own OpenAI or Anthropic API account in chat and desktop KAI.
+              Chats, attachments and relevant app tool results go directly to your chosen provider.
+              API usage is billed by that provider. Keys are encrypted on this computer and are never offered to the Koinos Network.</p>
+            <p id="provider-privacy" class="hint" role="status"></p>
+            <div id="provider-openai" class="provider-card" data-provider="openai">
+              <div class="provider-heading"><h3>OpenAI</h3><span class="hint" data-provider-state>Not connected</span></div>
+              <label for="provider-openai-key">API key</label>
+              <input id="provider-openai-key" type="password" autocomplete="off" spellcheck="false" maxlength="4096" placeholder="Paste your API key" />
+              <label for="provider-openai-model">Model ID <span class="hint">(optional — or refresh models after saving)</span></label>
+              <input id="provider-openai-model" data-provider-model autocomplete="off" spellcheck="false" maxlength="180" placeholder="A model ID from your provider account" />
+              <div class="provider-buttons">
+                <button class="primary small" data-provider-action="save">Save connection</button>
+                <button class="small" data-provider-action="refresh">Test &amp; refresh models</button>
+                <button class="small" data-provider-action="use">Use in chat</button>
+                <button class="small" data-provider-action="remove">Remove</button>
+                <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">Get an API key ↗</a>
+              </div>
+              <p class="hint" data-provider-result role="status" aria-live="polite"></p>
+            </div>
+            <div id="provider-anthropic" class="provider-card" data-provider="anthropic">
+              <div class="provider-heading"><h3>Anthropic</h3><span class="hint" data-provider-state>Not connected</span></div>
+              <label for="provider-anthropic-key">API key</label>
+              <input id="provider-anthropic-key" type="password" autocomplete="off" spellcheck="false" maxlength="4096" placeholder="Paste your API key" />
+              <label for="provider-anthropic-model">Model ID <span class="hint">(optional — or refresh models after saving)</span></label>
+              <input id="provider-anthropic-model" data-provider-model autocomplete="off" spellcheck="false" maxlength="180" placeholder="A model ID from your provider account" />
+              <div class="provider-buttons">
+                <button class="primary small" data-provider-action="save">Save connection</button>
+                <button class="small" data-provider-action="refresh">Test &amp; refresh models</button>
+                <button class="small" data-provider-action="use">Use in chat</button>
+                <button class="small" data-provider-action="remove">Remove</button>
+                <a href="https://platform.claude.com/settings/keys" target="_blank" rel="noopener noreferrer">Get an API key ↗</a>
+              </div>
+              <p class="hint" data-provider-result role="status" aria-live="polite"></p>
+            </div>
+            <p class="hint">Available in desktop chat, Research, Agent and KAI. Teams, scheduled tasks,
+              the local API and network earning continue using their existing models. Stop cancels an active provider reply.</p>
+          </section>
 
           <h2>Version</h2>
           <div class="hw-summary" id="update-status">Checking…</div>
@@ -945,6 +986,7 @@
   <script src="markdown.js"></script>
   <script src="audio-wav.js"></script>
   <script src="agents.js"></script>
+  <script src="desktop-providers.js"></script>
   <script src="app.js"></script>
   <script src="app-navigation.js"></script>
   <script src="mascot-launcher.js"></script>

@@ -1614,6 +1614,11 @@ class Gateway {
       return this._json(res, 400, { error: { message: "Body must be JSON", type: "invalid_request_error" } });
     }
     const alias = String(body.model || "");
+    // Desktop provider keys never enter Core. Reject before grounding, runtime
+    // loading or overflow so even a headless caller cannot route these models.
+    if (alias.startsWith("desktop:")) return this._json(res, 403, { error: {
+      message: "Private provider models are available only in desktop chat and KAI.", type: "desktop_only",
+    } });
 
     /*
      * API grounding (optional `koinos.ground`). Parsed FIRST so a malformed
