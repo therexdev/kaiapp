@@ -80,7 +80,8 @@ async function main() {
       return window.kaiProviderBridge.refresh("openai");
     });
     assert.equal(privateStatus.ok, true); assert.equal(JSON.stringify(privateStatus).includes("synthetic-native-provider-key"), false);
-    assert.equal(await app.evaluate(() => require("fs").readFileSync(globalThis.__providerService.file, "utf8").includes("synthetic-native-provider-key")), false);
+    const providerFile = await app.evaluate(() => globalThis.__providerService.file);
+    assert.equal(fs.readFileSync(providerFile, "utf8").includes("synthetic-native-provider-key"), false);
     for (const [page, provider, model] of [[main, "openai", "gpt-fixture"], [mascot, "anthropic", "claude-fixture"]]) {
       const reply = await page.evaluate(async ({ provider, model }) => {
         const response = await window.KaiProviders.chatFetch("/core/chat/completions", { body: JSON.stringify({ model: `desktop:${provider}:${model}`, stream: false, messages: [{ role: "user", content: "Native fixture check" }] }) });
