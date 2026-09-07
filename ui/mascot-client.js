@@ -77,14 +77,16 @@
     const match = String(text).trim().match(/^(?:(?:hey[ ,]+kai)[ ,.!]*\s*)?(?:(?:please|can you|could you|would you)\s+)?(?:open|show|bring up|take me to)\s+(?:(?:my|the)\s+)?(pictures|photos|documents|downloads|desktop|music|videos|home)(?:\s+folder)?(?:\s+(?:for me|please))?[.!?]*$/i);
     return match ? (match[1].toLowerCase() === "photos" ? "pictures" : match[1].toLowerCase()) : null;
   }
-  function wakeRequest(text) {
-    const match = String(text).trim().match(/^(?:hey|hi|hei)[,\s]*(?:kai|kay|kye|ky|cai|k[.\s]*a[.\s]*i)(?=$|[\s,.!?:])[,.!?:\s]*(.*)$/i);
+  function wakeRequest(text, { interrupt = false } = {}) {
+    const value = String(text).trim();
+    const match = value.match(/^(?:hey|hi|hei)[,\s]*(?:kai|kay|kye|ky|cai|k[.\s]*a[.\s]*i)(?=$|[\s,.!?:])[,.!?:\s]*(.*)$/i) ||
+      (interrupt && value.match(/^(?:kai|kay|kye|ky|cai|k[.\s]*a[.\s]*i)(?=$|[\s,.!?:])[,.!?:\s]*(.*)$/i));
     return match ? { text: match[1].trim() } : null;
   }
   // Consume the cumulative stream exactly once, withholding unfinished code,
   // links and reasoning. A complete short sentence can speak immediately.
   class SpeechPhrases {
-    constructor() { this.offset = 0; this.code = false; this.thinking = false; this.pending = ""; this.emitted = 0; }
+    constructor() { this.offset = 0; this.code = false; this.thinking = false; this.pending = ""; }
     push(text, final = false) {
       let i = this.offset;
       while (i < text.length) {
@@ -113,20 +115,19 @@
             if (c === "." && /(?:\b(?:Mr|Mrs|Ms|Dr|Prof|etc|vs)|\b[A-Z])\.$/.test(prefix)) continue;
             end = n + 1; break;
           }
-          // A short first clause reduces both the wait for streamed tokens
-          // and the first local inference. Keep later chunks longer for flow.
-          if (!this.emitted && n >= 24 && /[,;:]/.test(c) && /\s/.test(this.pending[n + 1] || "")) { end = n + 1; break; }
-          if (n >= (this.emitted ? 140 : 72) && /\s/.test(c)) { end = n + 1; break; }
+          // Preserve a full sentence as one playback unit. Bound pathological
+          // punctuation-free output; inference chunking happens separately.
+          if (n >= 1200 && /\s/.test(c)) { end = n + 1; break; }
         }
         if (!end && final) end = this.pending.length;
         if (!end) break;
         let clean = speechText(this.pending.slice(0, end));
         this.pending = this.pending.slice(end);
-        // Even a pathological no-space response must respect the TTS limit.
+        // The renderer assembles all inference chunks before this unit plays.
         while (clean.length) {
-          let n = Math.min(240, clean.length);
+          let n = Math.min(1200, clean.length);
           if (n < clean.length) { const space = clean.lastIndexOf(" ", n); if (space > 80) n = space; }
-          result.push(clean.slice(0, n).trim()); this.emitted++; clean = clean.slice(n).trimStart();
+          result.push(clean.slice(0, n).trim()); clean = clean.slice(n).trimStart();
         }
       }
       return result.filter(Boolean);

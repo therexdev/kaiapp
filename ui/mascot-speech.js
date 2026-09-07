@@ -4,14 +4,96 @@
   else root.KaiSpeech = api;
 })(typeof window !== "undefined" ? window : globalThis, function () {
   "use strict";
-  // One inference and one playback at most; prepare the next phrase while the
-  // current one plays. Epochs make Stop and new requests discard all late work.
+  function splitSentence(text) {
+    let rest = text.trim(); const chunks = [];
+    while (rest.length) {
+      let end = Math.min(240, rest.length);
+      if (end < rest.length) {
+        const clause = [...rest.slice(0, end).matchAll(/[,;:]\s/g)].at(-1);
+        const space = rest.lastIndexOf(" ", end);
+        if (clause && clause.index >= 100) end = clause.index + 1;
+        else if (space > 0) end = space;
+      }
+      chunks.push(rest.slice(0, end)); rest = rest.slice(end).trimStart();
+    }
+    return chunks;
+  }
+  function pcm(buffer) {
+    const view = new DataView(buffer);
+    const tag = (at, value) => [...value].every((c, i) => view.getUint8(at + i) === c.charCodeAt(0));
+    if (buffer.byteLength <= 44 || !tag(0, "RIFF") || !tag(8, "WAVE") || !tag(12, "fmt ") || !tag(36, "data") ||
+      view.getUint32(16, true) !== 16 || view.getUint16(20, true) !== 1 || view.getUint16(22, true) !== 1 ||
+      view.getUint16(34, true) !== 16 || view.getUint32(40, true) !== buffer.byteLength - 44 || buffer.byteLength % 2) {
+      throw new Error("KAI received unreadable voice audio. Please try again.");
+    }
+    const rate = view.getUint32(24, true);
+    if (rate < 8000 || rate > 48000) throw new Error("KAI received an unsupported voice sample rate.");
+    return { view, rate, count: (buffer.byteLength - 44) / 2 };
+  }
+  function joinWavs(buffers) {
+    if (!buffers.length) throw new Error("KAI's voice returned no audio.");
+    const parts = buffers.map(pcm), rate = parts[0].rate;
+    if (parts.some(p => p.rate !== rate)) throw new Error("KAI's voice changed sample rate within a sentence.");
+    // Keep natural opening/closing silence. Remove excess internal chunk
+    // padding so the inference limit cannot create a long mid-sentence pause.
+    const ranges = parts.map((part, index) => {
+      let start = 0, end = part.count;
+      if (index) {
+        while (start < end && Math.abs(part.view.getInt16(44 + start * 2, true)) < 32) start++;
+        start = Math.max(0, start - Math.round(rate * .02));
+      }
+      if (index < parts.length - 1) {
+        while (end > start && Math.abs(part.view.getInt16(44 + (end - 1) * 2, true)) < 32) end--;
+        end = Math.min(part.count, end + Math.round(rate * .06));
+      }
+      return { start, end };
+    });
+    const count = ranges.reduce((n, r) => n + r.end - r.start, 0);
+    const result = new ArrayBuffer(44 + count * 2), bytes = new Uint8Array(result), view = new DataView(result);
+    bytes.set(new Uint8Array(buffers[0], 0, 44)); let at = 44;
+    ranges.forEach((range, i) => {
+      const data = new Uint8Array(buffers[i], 44 + range.start * 2, (range.end - range.start) * 2);
+      bytes.set(data, at); at += data.length;
+    });
+    view.setUint32(4, result.byteLength - 8, true); view.setUint32(40, result.byteLength - 44, true);
+    return result;
+  }
+  function robotTone(buffer) {
+    const { view, rate, count } = pcm(buffer), ratio = .9;
+    // About 1.8 semitones deeper, with a light 55 Hz electronic texture.
+    // Resampling slows speech by 11%; no extra model or inference is needed.
+    const length = Math.ceil(count / ratio), result = new ArrayBuffer(44 + length * 2), out = new DataView(result);
+    new Uint8Array(result, 0, 44).set(new Uint8Array(buffer, 0, 44));
+    out.setUint32(4, result.byteLength - 8, true); out.setUint32(40, result.byteLength - 44, true);
+    for (let i = 0; i < length; i++) {
+      const pos = Math.min(count - 1, i * ratio), lo = Math.floor(pos), hi = Math.min(count - 1, lo + 1);
+      const a = view.getInt16(44 + lo * 2, true), b = view.getInt16(44 + hi * 2, true);
+      const texture = .9 + .1 * Math.cos(2 * Math.PI * 55 * i / rate);
+      const fade = Math.min(1, i / (rate * .005), (length - 1 - i) / (rate * .005));
+      out.setInt16(44 + i * 2, Math.round((a + (b - a) * (pos - lo)) * texture * fade), true);
+    }
+    return result;
+  }
+  async function prepareSentence(text, { synthesize, signal, tone = "kai" }) {
+    if (!text.trim() || text.length > 1200) throw new Error("Speak one sentence at a time.");
+    const buffers = [];
+    for (const chunk of splitSentence(text)) {
+      signal?.throwIfAborted();
+      buffers.push(await synthesize(chunk, signal));
+      signal?.throwIfAborted();
+    }
+    const joined = joinWavs(buffers);
+    return tone === "kai" ? robotTone(joined) : joined;
+  }
+  // One inference and one playback at most; prepare up to two complete
+  // sentences ahead. Epochs make Stop discard every late result.
   class Queue {
-    constructor({ prepare, play, cancel, holdPlayback = () => {}, onState, onError }) {
-      Object.assign(this, { prepare, play, cancel, holdPlayback, onState, onError });
+    constructor({ prepare, play, cancel, holdPlayback = () => {}, onState, onError, buffer = 1, bufferWaitMs = 1800 }) {
+      Object.assign(this, { prepare, play, cancel, holdPlayback, onState, onError, buffer, bufferWaitMs });
       this.epoch = 0; this.tasks = []; this.ready = []; this.preparing = false; this.playing = false;
     }
     enqueue(phrases) { this.tasks.push(...phrases.filter(Boolean)); this.pump(); }
+    end() { this.ended = true; this.pump(); }
     state() { this.onState(this.playing ? "speaking" : this.preparing || this.tasks.length || this.ready.length ? "preparing" : "idle"); }
     hold(value) {
       this.held = value; this.holdPlayback(value); this.pump();
@@ -19,7 +101,7 @@
     pump() {
       this.state();
       const epoch = this.epoch;
-      if (!this.preparing && this.tasks.length && !this.ready.length) {
+      if (!this.preparing && this.tasks.length && this.ready.length < 2) {
         this.preparing = true;
         const abort = this.abort = new AbortController(), text = this.tasks.shift();
         Promise.resolve().then(() => epoch === this.epoch ? this.prepare(text, abort.signal) : null).then(value => {
@@ -27,20 +109,31 @@
         }).catch(error => { if (epoch === this.epoch) { this.stop(); this.onError(error); } })
           .finally(() => { if (epoch === this.epoch) { this.preparing = false; this.abort = null; this.pump(); } });
       }
-      if (!this.held && !this.playing && this.ready.length) {
-        this.playing = true;
+      const target = typeof this.buffer === "function" ? this.buffer() : this.buffer;
+      const drained = !this.preparing && !this.tasks.length;
+      if (!this.started && this.ready.length && drained && !this.ended && !this.bufferTimer && !this.bufferExpired && target > 1) {
+        this.bufferTimer = setTimeout(() => {
+          if (epoch !== this.epoch) return;
+          this.bufferTimer = null; this.bufferExpired = true; this.pump();
+        }, this.bufferWaitMs);
+      }
+      const buffered = this.started || this.ready.length >= target || (drained && (this.ended || this.bufferExpired));
+      if (!this.held && !this.playing && this.ready.length && buffered) {
+        clearTimeout(this.bufferTimer); this.bufferTimer = null;
+        this.started = true; this.playing = true;
         const value = this.ready.shift();
         Promise.resolve().then(() => epoch === this.epoch ? this.play(value) : null).catch(error => {
           if (epoch === this.epoch) { this.stop(); this.onError(error); }
         }).finally(() => { if (epoch === this.epoch) { this.playing = false; this.pump(); } });
-        this.pump(); // Start one phrase of look-ahead.
+        this.pump(); // Fill the bounded look-ahead buffer.
       }
       this.state();
     }
     stop() {
       this.epoch++; this.tasks = []; this.ready = []; this.preparing = false; this.playing = false;
+      clearTimeout(this.bufferTimer); this.bufferTimer = null; this.bufferExpired = false; this.started = false; this.ended = false;
       this.abort?.abort(); this.abort = null; this.held = false; this.cancel(); this.state();
     }
   }
-  return { Queue };
+  return { Queue, splitSentence, joinWavs, robotTone, prepareSentence };
 });

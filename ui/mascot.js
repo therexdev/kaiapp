@@ -30,7 +30,7 @@
   const labels = {
     idle: "Here when you need me", greeting: "Hey! I'm KAI.", thinking: "Thinking it through…",
     listening: "Listening…", transcribing: "Got it · one moment…",
-    speaking: "KAI is speaking", voicing: "Finding my voice…", error: "Let's try that again", dragging: "Coming with you!",
+    speaking: "KAI is speaking", voicing: "Getting my reply ready…", error: "Let's try that again", dragging: "Coming with you!",
   };
   function mood(value) {
     if (["idle", "thinking", "voicing", "speaking"].includes(value)) {
@@ -170,6 +170,7 @@
   }
   let speechStatus = null, speechSetupTimer = null, cancelPlayback = null, holdPlayback = null;
   let voiceChoice = read("kai-mascot-voice-choice", "natural:af_heart");
+  let voiceTone = read("kai-mascot-voice-tone", "kai") === "natural" ? "natural" : "kai";
   // This voice revision upgrades legacy computer-voice selections once.
   // Choices made after the upgrade remain the user's own preference.
   if (read("kai-mascot-natural-default-v3", "0") !== "1") {
@@ -190,12 +191,17 @@
     warmRequest = post("/core/speech/warm", {}).catch(() => {}).finally(() => { warmRequest = null; });
   }
   const speech = new KaiSpeech.Queue({
+    buffer: () => voiceChoice.startsWith("natural:") ? 2 : 1,
     prepare: async (text, signal) => {
-      if (!voiceChoice.startsWith("natural:")) return { text, voice: voiceChoice };
-      const response = await fetch("/core/speech", { method: "POST", signal,
-        headers: { "content-type": "application/json" }, body: JSON.stringify({ text, voice: voiceChoice.slice(8) }) });
-      if (!response.ok) { const error = await response.json().catch(() => ({})); throw new Error(error.error || "Natural voice is unavailable. Choose a computer voice or retry setup."); }
-      return { blob: await response.blob(), text };
+      const voice = voiceChoice, tone = voiceTone;
+      if (!voice.startsWith("natural:")) return { text, voice, tone };
+      const wav = await KaiSpeech.prepareSentence(text, { signal, tone, synthesize: async (chunk, signal) => {
+        const response = await fetch("/core/speech", { method: "POST", signal,
+          headers: { "content-type": "application/json" }, body: JSON.stringify({ text: chunk, voice: voice.slice(8) }) });
+        if (!response.ok) { const error = await response.json().catch(() => ({})); throw new Error(error.error || "Natural voice is unavailable. Choose a computer voice or retry setup."); }
+        return response.arrayBuffer();
+      } });
+      return { blob: new Blob([wav], { type: "audio/wav" }), text };
     },
     play: value => new Promise((resolve, reject) => {
       let audio, utterance, url, done = false, started = false;
@@ -233,7 +239,7 @@
         if (selected) utterance.voice = selected;
         // Avoid silently choosing an online OS voice.
         else if (speechSynthesis.getVoices().some(v => !v.localService)) return finish(new Error("No local computer voice is available. Get natural voices to hear KAI."));
-        utterance.rate = 1; utterance.pitch = 1;
+        utterance.rate = value.tone === "kai" ? .96 : 1; utterance.pitch = value.tone === "kai" ? .88 : 1;
         utterance.onstart = playing; utterance.onresume = playing; utterance.onpause = silent;
         utterance.onend = () => finish();
         utterance.onerror = event => finish(["interrupted", "canceled"].includes(event.error) ? null : new Error("Computer voice playback failed. Try a natural voice."));
@@ -255,7 +261,7 @@
   function stopSpeech() { speechEpoch++; speech.stop(); }
   function speak(text) {
     stopSpeech();
-    if (voiceReplies && !suspended && ensureNatural()) speech.enqueue(new api.SpeechPhrases().push(text, true));
+    if (voiceReplies && !suspended && ensureNatural()) { speech.enqueue(new api.SpeechPhrases().push(text, true)); speech.end(); }
   }
   function enqueueSpeech(phrases, epoch) {
     if (voiceReplies && !suspended && epoch === speechEpoch && (!voiceChoice.startsWith("natural:") || speechStatus?.available)) speech.enqueue(phrases);
@@ -336,7 +342,7 @@
   const wakeListener = new KaiWake.Listener({
     wakeRequest: api.wakeRequest,
     sensitivity: read("kai-mascot-sensitivity", "tv"),
-    interruptWithWake: read("kai-mascot-interrupt-wake", "1") === "1",
+    interruptWithWake: true,
     onLevel: (rms, threshold) => {
       $("mic-level").max = threshold ? threshold * 3 : 1;
       $("mic-level").value = rms || 0;
@@ -350,8 +356,8 @@
       mood(busy ? "thinking" : speaking ? "speaking" : "idle");
       wakeUI();
     },
-    // Open interruption pauses on eligible speech onset. The optional name
-    // guard leaves playback running until a wake phrase is recognized.
+    // Reply interruptions require the spoken name. Ordinary follow-ups after
+    // the reply remain armed, without acquiring another microphone stream.
     onInterrupt: () => speech.hold(true),
     onResume: () => speech.hold(false),
     onCommand: async text => {
@@ -366,21 +372,23 @@
       }
       $("question").value = text; controls(); ask({ source: "voice" });
     },
-    onEnd: off => { interruptResponse(); if (off) stopWake(); },
+    onEnd: async off => { interruptResponse(); if (off) stopWake(); await activeTask; },
     onError: (error, options) => {
       if (!options?.recoverable) { wakeEnabled = false; wakeStarting = false; voiceCommandEpoch++; }
       wakeUI(); notice(error.message);
     },
   });
   $("mic-sensitivity").value = ["tv", "balanced", "quiet"].includes(wakeListener.sensitivity) ? wakeListener.sensitivity : "tv";
-  $("interrupt-wake").checked = wakeListener.interruptWithWake;
   function listeningOptions() {
-    const sensitivity = $("mic-sensitivity").value, interruptWithWake = $("interrupt-wake").checked;
-    write("kai-mascot-sensitivity", sensitivity); write("kai-mascot-interrupt-wake", interruptWithWake ? "1" : "0");
-    wakeListener.configure({ sensitivity, interruptWithWake });
+    const sensitivity = $("mic-sensitivity").value;
+    write("kai-mascot-sensitivity", sensitivity);
+    wakeListener.configure({ sensitivity, interruptWithWake: true });
   }
   $("mic-sensitivity").addEventListener("change", listeningOptions);
-  $("interrupt-wake").addEventListener("change", listeningOptions);
+  $("voice-tone").value = voiceTone;
+  $("voice-tone").addEventListener("change", () => {
+    stopSpeech(); voiceTone = $("voice-tone").value; write("kai-mascot-voice-tone", voiceTone);
+  });
   function wakeUI() {
     const active = wakeEnabled && wakeListener.active;
     $("wake-toggle").setAttribute("aria-pressed", String(active));
@@ -483,6 +491,7 @@
       if (!content.trim()) throw new Error("The model returned an empty reply. Try another model or rephrase your question.");
       completed = true;
       enqueueSpeech(phrases.push(content, true), replyEpoch);
+      speech.end();
     } catch (error) {
       stopSpeech();
       if (error.name === "AbortError") {

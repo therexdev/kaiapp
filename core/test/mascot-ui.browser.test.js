@@ -61,10 +61,10 @@ test("KAI UI: natural default, compact voice, follow-ups, barge-in context, hist
   page.on("pageerror", error => errors.push(error.message));
   const compact = async () => assert.equal(await page.locator("#conversation").evaluate(el => el.hidden), true);
   const idle = () => page.waitForFunction(() => document.querySelector("#stop").hidden && !document.querySelector("#send").hidden);
-  const utterance = async text => {
+  const utterance = async (text, duration = 400) => {
     fixture.state.transcript = text;
     await page.evaluate(() => { window.__gain.gain.value = .06; });
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(duration);
     await page.evaluate(() => { window.__gain.gain.value = window.__roomNoise; });
   };
   const screenshot = async name => {
@@ -95,7 +95,7 @@ test("KAI UI: natural default, compact voice, follow-ups, barge-in context, hist
   assert.equal(fixture.state.transcriptions.length, 0, "Steady room noise must not start a transcription loop");
   const streamCount = await page.evaluate(() => window.__streams.length);
   assert.equal(await page.inputValue("#mic-sensitivity"), "tv");
-  assert.equal(await page.isChecked("#interrupt-wake"), true);
+  assert.equal(await page.inputValue("#voice-tone"), "kai");
   fixture.state.speechDelay = 900; fixture.state.speechSeconds = .6;
   await page.evaluate(() => { window.__playDelay = 350; });
   const firstSpeech = page.waitForRequest(r => r.url().endsWith("/core/speech") && r.method() === "POST");
@@ -120,8 +120,8 @@ test("KAI UI: natural default, compact voice, follow-ups, barge-in context, hist
   assert.ok(fixture.state.requests[1].messages.some(m => m.content.includes("trip to Seattle")), "Follow-up retains the earlier question without a wake phrase");
   await compact(); await screenshot("kai-compact-conversation");
 
-  // A long real WAV plays while SSE is still streaming. Speech onset must
-  // pause it before ASR finishes, then cancel the old stream and retain context.
+  // Buffered complete sentences play while SSE is still streaming. Only
+  // recognized KAI interruptions cancel the old stream and retain context.
   fixture.state.delay = 350; fixture.state.speechSeconds = 6;
   fixture.state.reply = "Seattle is a lovely choice. I would start with a few layers for the weather and comfortable shoes for walking. There are several neighborhoods to explore, and I can help you make a plan for each day of your trip. We can spend the first day exploring the waterfront and the market before heading up the hill. There are also museums to visit when the weather turns rainy, with many interesting things to see. Tell me which places interest you most and we will build a comfortable schedule together.";
   await utterance("Tell me more about the neighborhoods.");
@@ -132,39 +132,29 @@ test("KAI UI: natural default, compact voice, follow-ups, barge-in context, hist
   await page.waitForTimeout(700);
   assert.equal(fixture.state.requests.length, 3, "Loud movie dialogue cannot become an interruption with the name guard on");
   assert.equal(await page.evaluate(() => window.__pauses), guardedPauses);
-  await page.click("#toggle-chat"); await page.click("#voice-options");
-  await page.uncheck("#interrupt-wake"); await page.click("#close-voice-options"); await page.click("#collapse");
-  // A rejected sound must release playback even with a second candidate
-  // arriving while the first transcription is still pending.
-  fixture.state.transcribeDelay = 1000;
-  const rejectedSound = page.waitForRequest(r => r.url().endsWith("/core/transcribe"));
-  await utterance(""); await rejectedSound;
-  await page.evaluate(() => { window.__gain.gain.value = .04; });
-  await page.waitForTimeout(250);
-  assert.ok(await page.evaluate(() => window.__audio.some(a => a.paused && !a.ended && a.currentTime > 0)));
-  assert.notEqual(await page.getAttribute("body", "data-state"), "speaking", "Holding audio closes the mouth");
-  await page.waitForFunction(() => window.__audio.some(a => !a.paused && !a.ended));
-  await page.evaluate(() => { window.__gain.gain.value = window.__roomNoise; });
-  fixture.state.transcribeDelay = 0;
-  await page.waitForTimeout(650);
-  assert.equal(await page.evaluate(() => window.__streams.length), streamCount, "Listening and transcription reuse one microphone stream");
-  assert.equal(await page.getAttribute("#quick-mic", "aria-pressed"), "true");
-  const pausedBefore = await page.evaluate(() => window.__pauses), cancelledBefore = fixture.state.cancelled;
-  await utterance("Actually, make it a two day trip.");
-  assert.ok(await page.evaluate(() => window.__pauses) > pausedBefore, "Audio paused at voice onset before the silence endpoint");
+  assert.equal(await page.evaluate(() => window.__streams.length), streamCount, "Recognition reuses one microphone stream");
+  const cancelledBefore = fixture.state.cancelled;
+  await utterance("KAI, Actually, make it a two day trip.");
+  assert.equal(await page.evaluate(() => window.__pauses), guardedPauses, "Sound alone must not pause KAI before name recognition");
   await page.waitForFunction(() => document.querySelectorAll(".message.user").length === 4);
-  assert.ok(fixture.state.cancelled > cancelledBefore, "Confirmed interruption cancels the previous stream");
+  assert.ok(fixture.state.cancelled > cancelledBefore, "The recognized KAI cue cancels the previous stream");
   const followup = fixture.state.requests.at(-1).messages;
   assert.equal(followup.at(-1).content, "Actually, make it a two day trip.");
   assert.ok(followup.some(m => m.content.includes("trip to Seattle")));
   assert.ok(followup.some(m => m.role === "assistant" && m.content.includes("Seattle is a lovely choice")), "Partial assistant context survives interruption");
   await compact();
-  await page.click("#quick-stop"); await idle();
+  await page.waitForFunction(() => window.__audio.some(a => !a.paused && !a.ended));
+  await utterance("KAI.", 180); await idle();
+  assert.equal(await page.getAttribute("#quick-mic", "aria-pressed"), "true", "KAI alone stops speaking but keeps the mic on");
+  assert.equal(await page.locator(".message.user").count(), 4, "The name alone is not saved as a question");
   await page.evaluate(() => window.__audio.forEach(a => a.dispatchEvent(new Event("playing"))));
   assert.notEqual(await page.getAttribute("body", "data-state"), "speaking", "Late playback events cannot revive stopped animation");
   fixture.state.delay = 10; fixture.state.speechSeconds = .2;
   fixture.state.reply = "Absolutely. What are you working on today?";
 
+  await utterance("What should we eat on the trip?");
+  await page.waitForFunction(() => document.querySelectorAll(".message.user").length === 5); await idle();
+  assert.equal(fixture.state.requests.at(-1).messages.at(-1).content, "What should we eat on the trip?");
   await utterance("That's all.");
   await page.waitForFunction(() => document.querySelector("#mood-label").textContent.includes("Hey KAI"));
   const ambientBefore = fixture.state.requests.length, transcribedBefore = fixture.state.transcriptions.length;
@@ -200,6 +190,8 @@ test("KAI UI: natural default, compact voice, follow-ups, barge-in context, hist
   }));
   await page.click("#preview-voice"); await page.waitForFunction(() => !document.querySelector("#stop").hidden); await idle();
   await screenshot("kai-voice-options");
+  await page.selectOption("#voice-tone", "natural");
+  assert.equal(await page.evaluate(() => localStorage.getItem("kai-mascot-voice-tone")), "natural");
   // Named OS voices remain an explicit choice; sentence streaming stays exact.
   await page.selectOption("#voice-choice", "system:test"); await page.click("#close-voice-options");
   fixture.state.delay = 130;

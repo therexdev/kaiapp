@@ -3,6 +3,8 @@ const fs = require("fs"), os = require("os"), path = require("path"), assert = r
 const dir = process.env.KAI_SPEECH_CHECK_DIR || path.join(os.tmpdir(), "kai-neural-voice-check");
 async function check(modulePath = "../core/lib/speech") {
   const { SpeechManager, VOICES } = require(modulePath);
+  const { robotTone, prepareSentence } = require(path.join(path.dirname(require.resolve(modulePath)), "../../ui/mascot-speech"));
+  const arrayBuffer = buffer => buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
   const manager = new SpeechManager({ speechDir: dir });
   try {
     await manager.ensure();
@@ -20,12 +22,26 @@ async function check(modulePath = "../core/lib/speech") {
       assert.ok(peak > 1000, "Voice is not silent: " + voice.id);
       assert.ok(wav.length > 48000, "Voice has a complete spoken sample");
       metrics.push({ voice: voice.id, durationSeconds: (wav.length - 44) / 48000, elapsedMs: Date.now() - start, peak });
+      const robot = Buffer.from(robotTone(arrayBuffer(wav)));
+      assert.equal(robot.readUInt32LE(24), 24000);
+      assert.ok(Math.abs((robot.length - 44) / (wav.length - 44) - 1 / .9) < .001);
       if (process.env.KAI_MASCOT_QA_DIR) {
         fs.mkdirSync(process.env.KAI_MASCOT_QA_DIR, { recursive: true });
         fs.writeFileSync(path.join(process.env.KAI_MASCOT_QA_DIR, "kai-" + manager.status().runtime + "-" + voice.id + ".wav"), wav);
+        fs.writeFileSync(path.join(process.env.KAI_MASCOT_QA_DIR, "kai-robot-" + voice.id + ".wav"), robot);
       }
     }
     assert.equal(manager.status().runtime, process.env.KAI_EXPECT_SPEECH_RUNTIME || "native");
+    const sentence = "That sounds like a good plan, and we can take it one step at a time so it stays manageable while leaving room to explore a few new ideas together, with enough time to answer your questions and make adjustments whenever something unexpected comes up along the way.";
+    let chunks = 0;
+    const joined = await prepareSentence(sentence, { synthesize: async text => {
+      assert.ok(text.length <= 240); chunks++;
+      return arrayBuffer(await manager.generate({ text, voice: "af_heart" }));
+    } });
+    assert.ok(chunks > 1, "Exercise the inference limit inside one sentence");
+    assert.ok(joined.byteLength > 48000 * 8, "Return the whole spoken sentence in one playable WAV");
+    if (process.env.KAI_MASCOT_QA_DIR) fs.writeFileSync(path.join(process.env.KAI_MASCOT_QA_DIR, "kai-buffered-sentence.wav"), Buffer.from(joined));
+    console.log("PASS: complete sentence assembled before playback; deeper robot treatment uses the same local voice.");
     console.log("PASS: four local natural voices, pinned model, isolated " + manager.status().runtime + " worker, valid non-silent WAV.", JSON.stringify(metrics));
   } finally { manager.close(); }
 }

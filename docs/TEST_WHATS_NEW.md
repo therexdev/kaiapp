@@ -1,3 +1,10 @@
+### KAI interruptions, smoother sentences and a deeper robot voice
+
+- **Say “KAI” to interrupt.** Say the name alone to stop the reply, or begin your new question with it. “Hey KAI” still works. Ordinary speech no longer interrupts a reply, including profiles that previously disabled the name requirement.
+- **Keep talking after a reply.** Follow-ups still need no wake phrase for a minute after KAI finishes. A question spoken immediately after a separate “KAI” cue is retained while the cue is being recognized.
+- **Complete sentences before playback.** KAI no longer speaks a short opening fragment while the rest of that sentence is still being synthesized. Longer sentences are assembled into one audio clip, and the next sentences are prepared ahead. This favors smoother speech and can increase the initial wait; slower computers can still pause between sentences.
+- **The same voice, a little more KAI.** Heart stays the default voice. The new **KAI** voice character sounds slightly deeper with a light electronic texture. Choose **Natural · original sound** under **Voice & listening → Voice character** to compare. No additional voice download is needed.
+
 ### Calmer listening with a TV nearby
 
 - **TV nearby** is the new default microphone setting. It requires stronger, longer speech and rejects more quiet background dialogue. **Voice & listening** also offers balanced and quiet-room settings, with a live microphone level indicator.

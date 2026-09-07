@@ -32,16 +32,16 @@
       this.levels.push({ rms, ms }); this.levelMs += ms;
       while (this.levels.length > 1 && this.levelMs - this.levels[0].ms >= 1500) this.levelMs -= this.levels.shift().ms;
     }
-    reset() { this.pre = []; this.frames = []; this.length = 0; this.voiced = 0; this.silence = 0; }
+    reset() { this.pre = []; this.frames = []; this.length = 0; this.voiced = 0; this.silence = 0; this.voiceMs = this.profile.voiceMs; }
     finish() {
       let audio = null;
-      if (this.voiced >= this.profile.voiceMs) {
+      if (this.voiced >= this.voiceMs) {
         audio = new Float32Array(this.length);
         let i = 0; for (const f of this.frames) { audio.set(f, i); i += f.length; }
       }
       this.reset(); return audio;
     }
-    push(frame, { adapt = true } = {}) {
+    push(frame, { adapt = true, voiceMs = this.profile.voiceMs } = {}) {
       if (!frame.length) return null;
       const rms = Math.sqrt(frame.reduce((s, v) => s + v * v, 0) / frame.length);
       this.rms = rms;
@@ -73,6 +73,7 @@
         return null;
       }
       if (!this.frames.length) {
+        this.voiceMs = voiceMs;
         this.frames = this.pre; this.pre = [];
         this.length = this.frames.reduce((n, f) => n + f.length, 0);
       }
@@ -142,6 +143,7 @@
     setResponding(value) {
       if (this.responding === value) return;
       this.responding = value;
+      if (value) { this.replySerial = (this.replySerial || 0) + 1; this.interruptedReply = null; }
       if (!value) {
         this.echoUntil = Date.now() + 1200; this.armTimer();
         this.interruptBlocked = false; this.rejectedInterruptions = 0; this.releaseInterruption();
@@ -192,16 +194,18 @@
     frame(data, epoch = this.epoch) {
       if (!this.active || this.paused || epoch !== this.epoch) return;
       if (!this.activity.frames.length) this.segment = { serial: ++this.serial, armed: this.engaged,
-        guarded: this.responding && this.interruptWithWake,
+        guarded: this.responding && this.interruptWithWake, replySerial: this.replySerial,
         echo: this.playback || Date.now() < (this.echoUntil || 0) ? this.echoText() : "", started: false };
       // Output can start after capture began; retain that overlap for echo
       // rejection instead of treating KAI's first audible sentence as a user.
       if (this.playback) this.segment.echo = this.echoText();
-      const audio = this.activity.push(data, { adapt: !this.playback });
+      // A single spoken "KAI" may be shorter than normal conversational speech.
+      // It still has to pass the room's loudness threshold and name recognition.
+      const audio = this.activity.push(data, { adapt: !this.playback, voiceMs: this.segment.guarded ? 120 : this.activity.profile.voiceMs });
       if (Date.now() - (this.levelAt || 0) >= 100) {
         this.levelAt = Date.now(); this.onLevel(this.activity.rms, this.activity.threshold);
       }
-      if (this.activity.voiced >= this.activity.profile.voiceMs && !this.segment.started) {
+      if (this.activity.voiced >= this.activity.voiceMs && !this.segment.started) {
         this.segment.started = true;
         if (this.segment.armed) this.interrupt(this.segment);
         this.state();
@@ -255,15 +259,17 @@
           if (!text || /^\s*[\[(].*[\])]\s*$/.test(text) || isEcho(text, item.echo)) {
             this.releaseInterruption(item.serial, true); continue;
           }
-          const wake = this.wakeRequest(text);
+          const wake = this.wakeRequest(text, { interrupt: item.guarded });
           // In a noisy room, spoken dialogue is not proof the user is
           // interrupting. Require the name for audio captured during a reply,
           // even if recognition finishes after that reply has ended.
-          if (item.guarded && !wake) { this.releaseInterruption(item.serial, true); continue; }
+          const afterCue = item.guarded && item.replySerial === this.interruptedReply && item.serial > this.wakeSerial;
+          if (item.guarded && !wake && !afterCue) { this.releaseInterruption(item.serial, true); continue; }
           const command = wake ? wake.text : item.armed || (this.engaged && this.wakeSerial !== null && item.serial > this.wakeSerial) ? text : "";
           if (wake) {
             this.wakeSerial = item.serial; this.engage();
-            if (item.guarded && !command) this.onEnd(false);
+            if (item.guarded) this.interruptedReply = item.replySerial;
+            if (item.guarded && !command) await this.onEnd(false);
           }
           if (!command) { this.releaseInterruption(item.serial, true); continue; }
           this.engage();

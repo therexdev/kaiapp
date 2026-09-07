@@ -316,15 +316,45 @@ test("Wake-guarded interruptions ignore loud dialogue even when recognition outl
   assert.equal(calls.at(-1), "Actually, wait.");
 });
 
-test("The first natural clause is emitted early without losing words or splitting a link", () => {
+test("Complete sentences stay together across streamed clauses, long text and links", () => {
   const text = "I can help you plan that trip, starting with the places you want to visit and the time you have available. Then we can choose a route.";
   const p = new SpeechPhrases(), phrases = [];
   for (let i = 1; i <= text.length; i++) phrases.push(...p.push(text.slice(0, i)));
   phrases.push(...p.push(text, true));
-  assert.equal(phrases[0], "I can help you plan that trip,");
+  assert.equal(phrases[0], text.slice(0, text.indexOf(". ") + 1));
   assert.equal(phrases.join(" "), text);
   const link = new SpeechPhrases();
   const linked = "You can find everything in [a useful guide, with examples](https://example.com/help). Next";
   assert.deepEqual(link.push(linked), ["You can find everything in a useful guide, with examples."]);
-  assert.ok(new SpeechPhrases().push("word ".repeat(30))[0].length <= 76);
+  assert.deepEqual(new SpeechPhrases().push("word ".repeat(60)), []);
+  const long = "word ".repeat(70).trim() + ".";
+  assert.deepEqual(new SpeechPhrases().push(long, true), [long]);
+});
+
+test("A short KAI cue keeps the immediately following question, including audio captured during its recognition", async t => {
+  for (const text of ["KAI", "Kai, change the subject", "Kay!", "Kye, wait", "K. A. I."]) {
+    assert.ok(wakeRequest(text, { interrupt: true }), text);
+    assert.equal(wakeRequest(text), null, "Bare names do not wake an idle conversation");
+  }
+  for (const text of ["Okay", "I know Kai", "kayak", "Kaiju", "sky", "My friend said Kai"]) {
+    assert.equal(wakeRequest(text, { interrupt: true }), null, text);
+  }
+  const pending = [], calls = []; let ended = 0;
+  const listener = listening({ interruptWithWake: true, transcribe: () => new Promise(r => pending.push(r)),
+    onCommand: text => calls.push(text), onEnd: () => { ended++; listener.setPlayback(false); listener.setResponding(false); } });
+  t.after(() => listener.stop()); listener.engage(); listener.setResponding(true); listener.setPlayback(true);
+  let job;
+  // Just 150 ms of speech: enough for one name, less than TV mode's normal
+  // 300 ms conversational threshold. Loudness filtering remains unchanged.
+  for (let i = 0; i < 3; i++) listener.frame(new Float32Array(800).fill(.03));
+  for (let i = 0; i < 10; i++) job = listener.frame(new Float32Array(800)) || job;
+  assert.equal(pending.length, 1, "A brief name is not discarded by conversational VAD");
+  utterance(listener); assert.equal(listener.queue.length, 1);
+  pending.shift()({ text: "Kai." }); await tick();
+  assert.equal(ended, 1); assert.equal(listener.engaged, true);
+  pending.shift()({ text: "What about tomorrow?" }); await job;
+  assert.deepEqual(calls, ["What about tomorrow?"]);
+  listener.setResponding(true); listener.setPlayback(true);
+  const movie = utterance(listener); pending.shift()({ text: "Get out of the car." }); await movie;
+  assert.equal(calls.length, 1, "An old cue cannot authorize dialogue over a new reply");
 });

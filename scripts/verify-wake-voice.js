@@ -18,8 +18,9 @@ async function main() {
   let listener;
   try {
     await speech.ensure(); await voice.ensure();
-    const results = [], commands = [];
+    const results = [], commands = []; let interruptions = 0;
     listener = new Listener({ wakeRequest, onState() {}, onError: error => { throw error; }, onCommand: text => commands.push(text),
+      onEnd: () => { interruptions++; listener.setResponding(false); listener.setPlayback(false); },
       transcribe: async (samples, rate) => {
         const result = await voice.transcribe(Buffer.from(encodeWav16kMono(samples, rate)));
         results.push({ text: result.text, ms: result.ms }); console.log("Whisper:", JSON.stringify(result)); return result;
@@ -63,9 +64,19 @@ async function main() {
     await say("Get out of the car right now.", "am_puck");
     assert.ok(results.length > beforeDialogue, "Loud dialogue reached the real recognizer");
     assert.equal(commands.length, 0, "Recognized loud background dialogue cannot interrupt a guarded reply");
-    await say("Hey Kai, open my pictures folder.", "af_heart");
+    await say("Kai, open my pictures folder.", "af_heart");
     assert.ok(commands.some(text => folderRequest(text) === "pictures"), "A real wake phrase still interrupts a guarded reply");
-    console.log("PASS: real Windows Whisper recognizes two voices, quiet-room wake speech and follow-ups; TV mode rejects quieter dialogue and requires the name for a guarded interruption.");
+    for (const id of ["af_heart", "am_puck"]) {
+      listener.setResponding(false); listener.setResponding(true); listener.setPlayback(true);
+      const before = interruptions;
+      await say("Kai.", id);
+      assert.equal(interruptions, before + 1, "A single spoken KAI must stop the reply: " + id + " " + JSON.stringify(results));
+      assert.equal(listener.engaged, true);
+    }
+    commands.length = 0;
+    await say("What should I pack for that trip?", "af_heart");
+    assert.ok(commands.some(text => /pack/i.test(text)), "The question after a KAI interruption needs no name");
+    console.log("PASS: real Windows Whisper recognizes KAI-only interruptions from two voices, ongoing follow-ups, and rejects background dialogue.");
   } finally {
     await listener?.stop(); speech.close(); fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   }
