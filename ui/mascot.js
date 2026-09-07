@@ -448,7 +448,7 @@
   }
   async function send({ source = "typed" } = {}) {
     const text = $("question").value.trim(), model = $("model").value;
-    const folder = api.folderRequest(text), destination = KaiAppNavigation.request(text);
+    const folder = api.folderRequest(text), destination = folder ? null : KaiAppNavigation.request(text);
     if (!text || busy || voicePending) return;
     if (!model && !folder && !destination) {
       notice("Open the full app to choose a chat model so KAI can answer, then try again."); mood("error"); return;

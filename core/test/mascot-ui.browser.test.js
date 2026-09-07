@@ -236,6 +236,10 @@ test("KAI UI: natural default, compact voice, follow-ups, barge-in context, hist
   await page.fill("#question", "Can you open up the application?"); await page.click("#send"); await idle();
   assert.equal((await page.evaluate(() => window.__mainRequests)).at(-1), "chat");
   assert.equal(await page.locator("body").evaluate(el => el.classList.contains("suspended")), false);
+  await page.fill("#question", "Open my Documents"); await page.click("#send"); await idle();
+  assert.equal((await page.evaluate(() => window.__folderRequests)).at(-1), "documents");
+  await page.fill("#question", "Open the Documents tab"); await page.click("#send"); await idle();
+  assert.equal((await page.evaluate(() => window.__mainRequests)).at(-1), "docs");
   fixture.state.tools = []; await page.click("#collapse");
   // Collapse is independent of the microphone; return/hide releases all tracks.
   await page.click("#quick-wake"); await page.waitForFunction(() => document.querySelector("#quick-wake").getAttribute("aria-pressed") === "true");
