@@ -1,6 +1,7 @@
 "use strict";
 const fs = require("fs"), path = require("path");
 const { Worker } = require("worker_threads");
+const { EventEmitter } = require("events");
 const { downloadFile } = require("./download");
 const catalog = require("../runtimes/kokoro.json");
 const VOICES = Object.freeze([
@@ -9,8 +10,26 @@ const VOICES = Object.freeze([
   { id: "am_puck", name: "Puck · easygoing" },
   { id: "bf_emma", name: "Emma · soft British" },
 ]);
+// In Electron, keep native speech inference in its own process. A native
+// engine crash must not take down Core or the earning app. Utility processes
+// also understand packaged ASAR paths, unlike ordinary Node worker loaders.
+class DesktopSpeechWorker extends EventEmitter {
+  constructor(file, { workerData }) {
+    super();
+    this.child = require("electron").utilityProcess.fork(file, [], {
+      serviceName: "KAI local voice",
+      env: { ...process.env, KAI_SPEECH_MODEL_DIR: workerData.modelDir },
+    });
+    this.child.on("message", value => this.emit("message", value));
+    this.child.on("exit", code => this.emit("exit", code));
+    this.child.on("error", () => this.emit("error", new Error("KAI's voice process stopped unexpectedly.")));
+  }
+  postMessage(value) { this.child.postMessage(value); }
+  terminate() { this.child.kill(); return Promise.resolve(); }
+}
+const DefaultWorker = process.versions.electron && process.type === "browser" ? DesktopSpeechWorker : Worker;
 class SpeechManager {
-  constructor({ speechDir, download = downloadFile, WorkerClass = Worker }) {
+  constructor({ speechDir, download = downloadFile, WorkerClass = DefaultWorker }) {
     this.dir = path.join(speechDir, catalog.revision);
     this.download = download; this.Worker = WorkerClass;
     this.worker = null; this.pending = null; this.serial = 0; this.idle = null;
@@ -75,7 +94,8 @@ class SpeechManager {
       const worker = this.worker = new this.Worker(path.join(__dirname, "speech-worker.js"), { workerData: { modelDir: this.dir } });
       worker.on("message", result => {
         if (this.worker !== worker || result.id !== this.pending?.id) return;
-        result.error ? this.pending.reject(new Error(result.error)) : this.pending.resolve(result.wav ? Buffer.from(result.wav) : null);
+        if (result.error) { this.pending.reject(new Error(result.error)); this.reset(); }
+        else this.pending.resolve(result.wav ? Buffer.from(result.wav) : null);
       });
       worker.on("error", error => { if (this.worker === worker) { this.pending?.reject(error); this.reset(); } });
       worker.on("exit", () => { if (this.worker === worker) { this.pending?.reject(new Error("KAI's voice engine stopped.")); this.reset(); } });

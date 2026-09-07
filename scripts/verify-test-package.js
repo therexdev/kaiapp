@@ -25,7 +25,9 @@ for (const archive of archives) {
     "ui/mascot-speech.js", "ui/mascot-wake.js", "ui/mascot-audio-worklet.js",
     "electron/desktop-actions.js", "core/lib/speech.js", "core/lib/speech-worker.js", "core/runtimes/kokoro.json"]) {
     try {
-      assert.ok(asar.extractFile(file, required).length > 0, "Missing companion asset: " + required);
+      // ASAR's directory walker splits on the host separator. Forward slashes
+      // happen to work at one level on Windows, but fail for core/lib/*.js.
+      assert.ok(asar.extractFile(file, path.normalize(required)).length > 0, "Missing companion asset: " + required);
     } catch (error) {
       console.error("Package diagnostic:", JSON.stringify({ archive: file, required, sourceExists: fs.existsSync(required),
         related: asar.listPackage(file).filter(p => p.includes("core/lib") || /speech|kokoro/.test(p)).slice(0, 100) }, null, 2));

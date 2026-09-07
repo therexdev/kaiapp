@@ -1,27 +1,35 @@
 "use strict";
 const { parentPort, workerData } = require("worker_threads");
+const port = parentPort || process.parentPort;
+const modelDir = workerData?.modelDir || process.env.KAI_SPEECH_MODEL_DIR;
 let ready;
 async function engine() {
   if (!ready) ready = (async () => {
+    if (process.platform === "win32") {
+      const path = require("path");
+      const runtime = path.join(path.dirname(require.resolve("onnxruntime-node")), "../bin/napi-v3/win32", process.arch, "onnxruntime_binding.node");
+      require("./runtimes/llamacpp").ensureCrtBeside(runtime.replace(/app\.asar([/\\])/, "app.asar.unpacked$1"));
+    }
     const { KokoroTTS } = await import("kokoro-js");
     const { StyleTextToSpeech2Model, AutoTokenizer, env } = await import("@huggingface/transformers");
     env.allowRemoteModels = false;
     env.useBrowserCache = false;
     const [model, tokenizer] = await Promise.all([
-      StyleTextToSpeech2Model.from_pretrained(workerData.modelDir, {
+      StyleTextToSpeech2Model.from_pretrained(modelDir, {
         dtype: "q8", device: "cpu", local_files_only: true,
         session_options: { intraOpNumThreads: 2, interOpNumThreads: 1 },
       }),
-      AutoTokenizer.from_pretrained(workerData.modelDir, { local_files_only: true }),
+      AutoTokenizer.from_pretrained(modelDir, { local_files_only: true }),
     ]);
     return new KokoroTTS(model, tokenizer);
   })();
   return ready;
 }
-parentPort.on("message", async ({ id, text, voice }) => {
+port.on("message", async event => {
+  const { id, text, voice } = parentPort ? event : event.data;
   try {
     const tts = await engine();
-    if (!text) return parentPort.postMessage({ id, ready: true });
+    if (!text) return port.postMessage({ id, ready: true });
     const audio = await tts.generate(text, { voice, speed: 1.03 });
     const samples = audio.audio;
     const wav = Buffer.alloc(44 + samples.length * 2);
@@ -34,6 +42,6 @@ parentPort.on("message", async ({ id, text, voice }) => {
       const sample = Math.max(-1, Math.min(1, samples[i]));
       wav.writeInt16LE(Math.round(sample * (sample < 0 ? 32768 : 32767)), 44 + i * 2);
     }
-    parentPort.postMessage({ id, wav });
-  } catch (error) { parentPort.postMessage({ id, error: String(error.message || error) }); }
+    port.postMessage({ id, wav });
+  } catch (error) { port.postMessage({ id, error: String(error.message || error) }); }
 });
