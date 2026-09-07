@@ -24,7 +24,13 @@ for (const archive of archives) {
     "ui/mascot.js", "ui/mascot-client.js", "ui/mascot.css", "ui/kai-robot.svg", "ui/mascot-launcher.js",
     "ui/mascot-speech.js", "ui/mascot-wake.js", "ui/mascot-audio-worklet.js",
     "electron/desktop-actions.js", "core/lib/speech.js", "core/lib/speech-worker.js", "core/runtimes/kokoro.json"]) {
-    assert.ok(asar.extractFile(file, required).length > 0, "Missing companion asset: " + required);
+    try {
+      assert.ok(asar.extractFile(file, required).length > 0, "Missing companion asset: " + required);
+    } catch (error) {
+      console.error("Package diagnostic:", JSON.stringify({ archive: file, required, sourceExists: fs.existsSync(required),
+        related: asar.listPackage(file).filter(p => p.includes("core/lib") || /speech|kokoro/.test(p)).slice(0, 100) }, null, 2));
+      throw error;
+    }
   }
   console.log(`Verified ${file}: ${pkg.version}`);
 }

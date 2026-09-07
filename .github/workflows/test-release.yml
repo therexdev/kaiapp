@@ -60,6 +60,11 @@ jobs:
         run: node scripts/verify-shared-profile.js
       - name: Verify native KAI companion
         run: node scripts/verify-mascot-window.js
+      - name: Preflight Windows package contents and natural voices
+        run: |
+          npm run dist -- --win --dir --publish never
+          node scripts/verify-test-package.js
+          node scripts/verify-neural-voice.js --packaged
       - name: Enable code signing (when configured)
         shell: bash
         env:
