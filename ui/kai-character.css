@@ -45,3 +45,5 @@ body.motion-off .kai3d-gaze,body.suspended .kai3d-gaze{transform:none}
 @keyframes kai3d-hello{0%,100%{transform:rotate(0)}20%,60%{transform:rotate(-6deg)}40%,80%{transform:rotate(5deg)}}
 @keyframes kai3d-bounce{0%,100%{transform:translateY(0)}25%,65%{transform:translateY(-32px)}45%,85%{transform:translateY(-8px)}}
 @media(prefers-reduced-motion:reduce){.kai-character *{animation:none!important;transition:none!important}.kai3d-gaze{transform:none}}
+
+.kai-avatar .kai-character{overflow:hidden}

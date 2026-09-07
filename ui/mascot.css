@@ -148,28 +148,28 @@ body.expanded #compact-notice{display:none}
 #conversation{background:linear-gradient(145deg,#f2f8ff 0,#fff 36%,#fff 100%);border:1px solid #d2e3fb;box-shadow:0 10px 22px #16315c26;border-radius:24px}
 .chat-header{background:#ffffffbd;border-bottom-color:#e2ebf8;padding-top:16px;padding-bottom:15px}
 .kai-monogram{width:35px;height:38px;border:0;border-radius:0;background:url('brand-mark.svg') center/contain no-repeat;box-shadow:none}
-h1{color:#17365f;letter-spacing:1.5px}h1 span{color:#7b94b7}.chat-heading p{color:#5276a3}
+h1{color:#17365f;letter-spacing:1.5px}h1 span{color:#5e789b}.chat-heading p{color:#5276a3}
 .icon-button{color:#6482a8}.icon-button:hover{background:#e8f1ff;color:#155eef}
-.model-row{background:#eff5fd;border-bottom-color:#dde8f6;color:#6e88ad}.model-row select{background:#e8f0fc;color:#2d5c96;border-radius:6px}
+.model-row{background:#eff5fd;border-bottom-color:#dde8f6;color:#5e789b}.model-row select{background:#e8f0fc;color:#2d5c96;border-radius:6px}
 .text-button,.text-button:hover{color:#155eef}.status-light{background:#155eef;box-shadow:none}
-.companion-tools{background:#f8fbff;border-color:#e5edf8}.companion-tools button{color:#6c84a6}.wake-light{background:#a1b4ce}
+.companion-tools{background:#f8fbff;border-color:#e5edf8}.companion-tools button{color:#5e789b}.wake-light{background:#a1b4ce}
 #wake-toggle[aria-pressed=true]{color:#16795c}#wake-toggle[aria-pressed=true] .wake-light{background:#168469;box-shadow:0 0 0 3px #16846918}
 #quick-wake[aria-pressed=true]{color:#126b52;background:#d6f4e8}
-#transcript{scrollbar-color:#c1d2e9 transparent}.eyebrow{color:#3980d3;letter-spacing:1.5px}#welcome h2{font-size:28px;font-weight:650;letter-spacing:-1px;color:#17385f}#welcome>p{color:#7187a5}
+#transcript{scrollbar-color:#c1d2e9 transparent}.eyebrow{color:#3980d3;letter-spacing:1.5px}#welcome h2{font-size:28px;font-weight:650;letter-spacing:-1px;color:#17385f}#welcome>p{color:#5e789b}
 .suggestions button{background:#fff;border-color:#dce7f7;border-radius:12px;color:#325b8b;padding:10px 12px;box-shadow:0 3px 8px #1f478309}
 .suggestions button:hover{background:#edf5ff;border-color:#a9cafa}.suggestions button span{color:#5592d9}.suggestions button b{color:#155eef}
 .message .role{color:#6281a7}.message .content{color:#29456b}.message.user .content{background:#edf4ff;border-color:#dce9fc;color:#285689}
 .message.assistant .content{color:#29456b}.message .content pre{background:#112747;color:#dcecff;border:1px solid #2b486a}.message .content code{background:#ecf3ff;color:#285689}.message .content pre code{background:none;color:#dcecff}
 .message .content a,.tool-sources a{color:#155eef}.message .content blockquote{color:#6a84a5;border-color:#a5c3ee}.message .content td,.message .content th{border-color:#d8e4f5}
-.message.streaming .content:empty:after,.message .source{color:#8096b3}.tool-trace{color:#56866f}
+.message.streaming .content:empty:after,.message .source{color:#5e789b}.tool-trace{color:#56866f}
 #composer{background:#fff;border-color:#d1e2f8;border-radius:16px;box-shadow:0 4px 14px #1d477708;padding:12px 12px 9px}#composer:focus-within{border-color:#8eb8f7}
-#question{color:#25446c;font-size:12px}#question::placeholder{color:#8298b7}#composer-hint{color:#8c9fbb}
+#question{color:#25446c;font-size:12px}#question::placeholder{color:#5e789b}#composer-hint{color:#5e789b}
 .send-button{background:linear-gradient(135deg,#148aff,#095adc);color:#fff;border-radius:10px;box-shadow:0 3px 8px #155eef24}.stop-button{background:#fff0df;color:#9b5a18}
 .chat-footer button{color:#6a85a9}.chat-footer button:hover,#read-aloud[aria-pressed=true]{color:#155eef}
 #notice{background:#fff8e9;border-color:#f0ddb7;color:#956623;border-radius:12px}
 #voice-options-panel{background:linear-gradient(150deg,#f5f9ff,#fff);border-color:#dce7f7}.voice-options-heading{color:#173a65}
 #voice-options-panel label{color:#5e7da5}#voice-choice,#voice-tone,#mic-sensitivity{color:#29517f;background:#fff;border-color:#ccdef6;border-radius:10px}
-#voice-options-panel p,.mic-meter{color:#6b84a6}#voice-options-panel p.muted{color:#8297b3}.voice-option-actions button{background:#eaf3ff;color:#185fbd;border-color:#c6defb}
+#voice-options-panel p,.mic-meter{color:#5e789b}#voice-options-panel p.muted{color:#5e789b}.voice-option-actions button{background:#eaf3ff;color:#185fbd;border-color:#c6defb}
 #status-pill{background:#f8fbfff5;border:1px solid #cde0fb;color:#345b8d;box-shadow:0 3px 10px #1b47861b}
 #status-pill>span:first-child,.dock-dot{background:#1677ee;box-shadow:none}body.wake-on #status-pill>span:first-child{background:#168469}
 body[data-state=listening] #status-pill>span:first-child{background:#168469}body[data-state=thinking] #status-pill>span:first-child,body[data-state=transcribing] #status-pill>span:first-child{background:#4b7de0}body[data-state=error] #status-pill>span:first-child{background:#b9761b}
@@ -182,4 +182,10 @@ body[data-state=listening] #status-pill>span:first-child{background:#168469}body
 body[data-state=listening] #mic,body[data-state=listening] #quick-mic{color:#126b52;background:#d6f4e8;box-shadow:0 0 0 3px #16846914}
 #robot{bottom:39px;height:242px}#robot:hover{filter:drop-shadow(0 0 8px #2789f62b)}
 
-.message .author{color:#527bab}.message.user .author{color:#7b8fa9}
+.message .author{color:#527bab}.message.user .author{color:#5e789b}
+
+/* Keep all three welcome actions above the composer at 660 × 560. */
+.chat-header{padding-top:13px;padding-bottom:12px}
+#welcome h2{font-size:27px;margin-top:7px;margin-bottom:6px}
+.suggestions button{padding-top:8px;padding-bottom:8px}
+#welcome>p{font-size:11px;line-height:1.55;margin-bottom:9px}
