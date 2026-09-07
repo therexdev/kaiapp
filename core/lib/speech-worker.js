@@ -3,7 +3,7 @@ const { parentPort, workerData } = require("worker_threads");
 const port = parentPort || process.parentPort;
 const modelDir = workerData?.modelDir || process.env.KAI_SPEECH_MODEL_DIR;
 const runtime = workerData?.runtime || process.env.KAI_SPEECH_RUNTIME || "native";
-let ready;
+let ready, primed = false;
 async function engine() {
   if (!ready) ready = (async () => {
     if (runtime === "wasm") require("./speech-wasm").installWasmRuntime();
@@ -31,8 +31,16 @@ port.on("message", async event => {
   const { id, text, voice } = parentPort ? event : event.data;
   try {
     const tts = await engine();
-    if (!text) return port.postMessage({ id, ready: true });
+    if (!text) {
+      // Loading weights alone leaves the phonemizer and first-run kernels cold.
+      // Prime them on explicit setup/warm-up, never add work before real speech.
+      // This audio is discarded, never played.
+      if (!primed) await tts.generate("Hello, I'm Kai.", { voice: "af_bella", speed: 1.0 });
+      primed = true;
+      return port.postMessage({ id, ready: true });
+    }
     const audio = await tts.generate(text, { voice, speed: 1.0 });
+    primed = true;
     const samples = audio.audio;
     const wav = Buffer.alloc(44 + samples.length * 2);
     wav.write("RIFF", 0); wav.writeUInt32LE(wav.length - 8, 4); wav.write("WAVEfmt ", 8);

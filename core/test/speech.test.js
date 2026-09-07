@@ -155,3 +155,21 @@ test("Voice warm-up reuses installed files, shares one worker, and cancelled wai
   const closing = manager.warm(), rejected = assert.rejects(closing, /shutting down/);
   manager.close(); await rejected;
 });
+
+test("Visible voice lease keeps the ready process warm without inference, then releases it after renewal stops", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let worker, requests = 0, terminations = 0;
+  class FakeWorker extends EventEmitter {
+    constructor() { super(); worker = this; }
+    postMessage(value) { requests++; this.request = value; }
+    terminate() { terminations++; return Promise.resolve(); }
+  }
+  const manager = new SpeechManager({ speechDir: os.tmpdir(), WorkerClass: FakeWorker });
+  t.after(() => manager.close()); manager.available = () => true;
+  const ready = manager.warm(); worker.emit("message", { id: worker.request.id }); await ready;
+  for (let i = 0; i < 6; i++) { t.mock.timers.tick(45000); await manager.warm(); }
+  assert.equal(requests, 1, "Renewal cannot synthesize, download or start another worker");
+  assert.equal(terminations, 0, "A voice-enabled companion survives the old idle timeout");
+  t.mock.timers.tick(119999); assert.equal(terminations, 0);
+  t.mock.timers.tick(1); assert.equal(terminations, 1, "Release memory two minutes after hide/off stops renewing");
+});

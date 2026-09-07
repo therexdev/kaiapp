@@ -23,13 +23,16 @@
         <button id="voice-options" aria-expanded="false">Voice &amp; listening <span>⌄</span></button>
       </div>
       <section id="voice-options-panel" aria-label="Voice and listening settings" hidden>
-        <div class="voice-options-heading"><strong>Warm voice. Real conversation.</strong><button id="close-voice-options" class="icon-button" aria-label="Close voice settings">×</button></div>
+        <div class="voice-options-heading"><strong>A little voice. A lot of personality.</strong><button id="close-voice-options" class="icon-button" aria-label="Close voice settings">×</button></div>
         <label for="voice-choice">KAI's voice</label>
         <select id="voice-choice"><option value="system">Computer voice</option></select>
         <label for="voice-tone" class="tone-label">Voice character</label>
-        <select id="voice-tone"><option value="kai">KAI · deeper, softly robotic</option><option value="natural">Natural · original sound</option></select>
+        <select id="voice-tone"><option value="cute">Cute KAI · bright &amp; squeaky</option><option value="kai">Classic KAI · deeper, softly robotic</option><option value="natural">Natural · original sound</option></select>
+        <div id="voice-squeak-control"><label for="voice-squeak" class="tone-label">Squeak <output id="voice-squeak-label" for="voice-squeak">Playful</output></label><input id="voice-squeak" type="range" min="5" max="12" step="1" value="9" aria-label="Voice squeak"><div class="squeak-scale"><span>Gentle</span><span>Extra squeaky</span></div></div>
+        <label for="speech-start" class="tone-label">Reply timing</label>
+        <select id="speech-start"><option value="quick">Quick start · speak the first sentence</option><option value="smooth">Extra buffering · fewer pauses on slower PCs</option></select>
         <div class="voice-option-actions"><button id="preview-voice">Hear a hello</button><button id="setup-natural">Get natural voices</button></div>
-        <p id="natural-status">Heart is KAI’s natural voice. Download it once, then it speaks on your computer.</p>
+        <p id="natural-status">Try Cute KAI with Bella. Hear a hello instantly, then download the local voice once for conversations.</p>
         <div class="voice-divider"></div>
         <strong>Just say “Hey KAI”</strong>
         <p>Tap the mic and talk, or turn on Hey KAI and say your question. Pause to send. Keep talking after KAI answers—you have a minute for follow-ups.</p>

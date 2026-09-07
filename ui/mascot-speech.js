@@ -74,7 +74,52 @@
     }
     return result;
   }
-  async function prepareSentence(text, { synthesize, signal, tone = "kai" }) {
+  function cuteTone(buffer, semitones = 9) {
+    const { view, rate, count } = pcm(buffer);
+    if (!Number.isFinite(semitones)) semitones = 9;
+    const ratio = 2 ** (Math.max(5, Math.min(12, semitones)) / 12), tempo = 1.08;
+    const input = Float32Array.from({ length: count }, (_, i) => view.getInt16(44 + i * 2, true));
+    // Waveform-similarity overlap/add lengthens the audio before resampling.
+    // Raising pitch alone would rush every word by 68%. This keeps the
+    // character bright and small while speech is only 8% more lively.
+    // No second model, network call, or native audio dependency is involved.
+    const stretch = ratio / tempo, hop = Math.round(rate * .02), frame = hop * 2;
+    const stretchedCount = Math.ceil(count * stretch), samples = new Float32Array(stretchedCount + frame);
+    samples.set(input.subarray(0, Math.min(frame, count)));
+    const search = Math.round(rate * .008), stride = 4;
+    for (let outAt = hop; outAt < stretchedCount; outAt += hop) {
+      const expected = Math.round(outAt / stretch);
+      const from = Math.max(0, expected - search), to = Math.min(count - frame, expected + search);
+      let best = Math.min(count - 1, expected), score = -Infinity;
+      for (let candidate = from; candidate <= to; candidate += stride) {
+        let dot = 0, energy = 0;
+        for (let j = 0; j < hop; j += stride) {
+          const value = input[candidate + j]; dot += samples[outAt + j] * value; energy += value * value;
+        }
+        const similarity = dot / Math.sqrt(energy + 1);
+        if (similarity > score) { score = similarity; best = candidate; }
+      }
+      for (let j = 0; j < frame; j++) {
+        const value = input[best + j] || 0;
+        const blend = j < hop ? .5 - .5 * Math.cos(Math.PI * j / hop) : 1;
+        samples[outAt + j] = samples[outAt + j] * (1 - blend) + value * blend;
+      }
+    }
+    const length = Math.ceil(count / tempo), result = new ArrayBuffer(44 + length * 2), out = new DataView(result);
+    new Uint8Array(result, 0, 44).set(new Uint8Array(buffer, 0, 44));
+    out.setUint32(4, result.byteLength - 8, true); out.setUint32(40, result.byteLength - 44, true);
+    for (let i = 0; i < length; i++) {
+      const pos = Math.min(stretchedCount - 1, i * ratio), lo = Math.floor(pos), hi = Math.min(stretchedCount - 1, lo + 1);
+      const sample = samples[lo] + (samples[hi] - samples[lo]) * (pos - lo);
+      const fade = Math.min(1, i / (rate * .005), (length - 1 - i) / (rate * .005));
+      out.setInt16(44 + i * 2, Math.round(Math.max(-32768, Math.min(32767, sample * fade))), true);
+    }
+    return result;
+  }
+  function characterTone(buffer, tone, pitch) {
+    return tone === "cute" ? cuteTone(buffer, pitch) : tone === "kai" ? robotTone(buffer) : buffer;
+  }
+  async function prepareSentence(text, { synthesize, signal, tone = "kai", pitch = 9 }) {
     if (!text.trim() || text.length > 1200) throw new Error("Speak one sentence at a time.");
     const buffers = [];
     for (const chunk of splitSentence(text)) {
@@ -83,7 +128,7 @@
       signal?.throwIfAborted();
     }
     const joined = joinWavs(buffers);
-    return tone === "kai" ? robotTone(joined) : joined;
+    return characterTone(joined, tone, pitch);
   }
   // One inference and one playback at most; prepare up to two complete
   // sentences ahead. Epochs make Stop discard every late result.
@@ -135,5 +180,5 @@
       this.abort?.abort(); this.abort = null; this.held = false; this.cancel(); this.state();
     }
   }
-  return { Queue, splitSentence, joinWavs, robotTone, prepareSentence };
+  return { Queue, splitSentence, joinWavs, robotTone, cuteTone, characterTone, prepareSentence };
 });

@@ -1,3 +1,12 @@
+### KAI finds a cute little voice
+
+- **Cute KAI is the new character voice.** Bella with a brighter, higher, lightly squeaky character treatment. The **Squeak** slider in **Voice & listening** goes from Gentle to Extra squeaky. Pitch and pacing are handled separately, so a higher voice does not race through every word. Classic deeper KAI and the unprocessed voices remain available.
+- **Hear it immediately.** With Bella selected, **Hear a hello** uses a tiny bundled recording and applies your current character settings. No model startup or download is needed for that preview. Conversations reuse the same local voice files you already installed; first-time setup still requires a click.
+- **Start with the first sentence.** **Quick start** is now the default. KAI speaks the first complete sentence as soon as its audio is ready while preparing the next. It no longer waits for two sentences. **Extra buffering** remains an option for slower computers; pauses can still occur when local synthesis cannot keep up.
+- **Stay ready to talk.** While KAI is visible with voice replies enabled, the installed voice engine stays loaded. Setup prepares the first-use speech components too. Hiding KAI or turning off voice replies stops the keep-warm requests; idle voice memory is released after two minutes. No background microphone use is added.
+
+This update selects Cute KAI with Bella once. Your choices after that persist. Open **Voice & listening → Hear a hello** to try it. The reference guided the character's pitch and energy; this is an original local character treatment, not a clone or ElevenLabs connection. Voice generation and processing stay on your computer, with no new account, API key or subscription.
+
 ### Meet the new KAI
 
 - **A new character, inspired by your reference.** Glossy white armor, a cobalt cape and headset, a K badge, and an expressive cyan face. KAI looks around, blinks, leans in to listen, thinks, nods while speaking and gives a cheerful greeting. The mouth still moves only during audible playback.

@@ -189,3 +189,9 @@ body[data-state=listening] #mic,body[data-state=listening] #quick-mic{color:#126
 #welcome h2{font-size:27px;margin-top:7px;margin-bottom:6px}
 .suggestions button{padding-top:8px;padding-bottom:8px}
 #welcome>p{font-size:11px;line-height:1.55;margin-bottom:9px}
+
+/* Local character voice tuning. */
+#speech-start{width:100%;padding:8px 10px;color:#29517f;background:#fff;border:1px solid #ccdef6;border-radius:10px;font:inherit;font-size:11px}
+#voice-squeak{width:100%;accent-color:#1678fa;cursor:pointer}
+#voice-squeak-label{float:right;color:#176de0;font-weight:600}
+.squeak-scale{display:flex;justify-content:space-between;font-size:10px;color:#5e789b;margin-top:3px}

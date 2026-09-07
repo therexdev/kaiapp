@@ -3,7 +3,7 @@ const fs = require("fs"), os = require("os"), path = require("path"), assert = r
 const dir = process.env.KAI_SPEECH_CHECK_DIR || path.join(os.tmpdir(), "kai-neural-voice-check");
 async function check(modulePath = "../core/lib/speech") {
   const { SpeechManager, VOICES } = require(modulePath);
-  const { robotTone, prepareSentence } = require(path.join(path.dirname(require.resolve(modulePath)), "../../ui/mascot-speech"));
+  const { robotTone, cuteTone, prepareSentence } = require(path.join(path.dirname(require.resolve(modulePath)), "../../ui/mascot-speech"));
   const arrayBuffer = buffer => buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
   const manager = new SpeechManager({ speechDir: dir });
   try {
@@ -25,10 +25,19 @@ async function check(modulePath = "../core/lib/speech") {
       const robot = Buffer.from(robotTone(arrayBuffer(wav)));
       assert.equal(robot.readUInt32LE(24), 24000);
       assert.ok(Math.abs((robot.length - 44) / (wav.length - 44) - 1 / .9) < .001);
+      const startCute = performance.now(), cute = Buffer.from(cuteTone(arrayBuffer(wav)));
+      metrics.at(-1).cuteProcessingMs = Math.round(performance.now() - startCute);
+      assert.equal(cute.readUInt32LE(24), 24000);
+      assert.equal(cute.readUInt32LE(40), cute.length - 44);
+      assert.ok(Math.abs((cute.length - 44) / (wav.length - 44) - 1 / 1.08) < .001, "Cute voice preserves an easy-to-follow tempo");
+      let cutePeak = 0;
+      for (let i = 44; i < cute.length; i += 2) cutePeak = Math.max(cutePeak, Math.abs(cute.readInt16LE(i)));
+      assert.ok(cutePeak > 1000 && cutePeak <= peak + 1, "Character treatment stays audible without clipping");
       if (process.env.KAI_MASCOT_QA_DIR) {
         fs.mkdirSync(process.env.KAI_MASCOT_QA_DIR, { recursive: true });
         fs.writeFileSync(path.join(process.env.KAI_MASCOT_QA_DIR, "kai-" + manager.status().runtime + "-" + voice.id + ".wav"), wav);
         fs.writeFileSync(path.join(process.env.KAI_MASCOT_QA_DIR, "kai-robot-" + voice.id + ".wav"), robot);
+        fs.writeFileSync(path.join(process.env.KAI_MASCOT_QA_DIR, "kai-cute-" + voice.id + ".wav"), cute);
       }
     }
     assert.equal(manager.status().runtime, process.env.KAI_EXPECT_SPEECH_RUNTIME || "native");

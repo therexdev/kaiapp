@@ -4,6 +4,57 @@ const fs = require("fs"), os = require("os"), path = require("path");
 const { startMascotServer } = require("./fixtures/mascot-server");
 const CHROMIUM = process.env.KAI_TEST_CHROMIUM || "/opt/pw-browsers/chromium";
 
+test("Cute KAI: instant local preview before setup, persistent tuning and visible-only voice warmth", { skip: !fs.existsSync(CHROMIUM), timeout: 45000 }, async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-cute-ui-")), fixture = await startMascotServer(dir);
+  const { chromium } = require("playwright-core");
+  const browser = await chromium.launch({ executablePath: CHROMIUM, args: ["--no-sandbox"] });
+  t.after(async () => { await browser.close(); await fixture.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  const page = await browser.newPage({ viewport: { width: 660, height: 560 } }), errors = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await page.addInitScript(() => {
+    const interval = window.setInterval;
+    window.setInterval = (fn, ms, ...args) => {
+      if (ms === 45000) window.__renewVoice = fn;
+      return interval(fn, ms, ...args);
+    };
+    window.kaiDesktop = { regions() {}, startDrag() {}, endDrag() {},
+      expand: async value => { window.__kaiEvent?.({ type: "expanded", value }); return { expanded: value }; },
+      onEvent: callback => { window.__kaiEvent = callback; } };
+  });
+  await page.goto(fixture.origin + "/mascot.html");
+  await page.waitForFunction(() => document.querySelector("#model").value === "tiny-live");
+  await page.click("#toggle-chat"); await page.click("#voice-options");
+  assert.equal(await page.inputValue("#voice-choice"), "natural:af_bella");
+  assert.equal(await page.inputValue("#voice-tone"), "cute");
+  const asset = page.waitForResponse(r => r.url().endsWith("assets/kai-voice-hello.wav"));
+  await page.click("#preview-voice"); assert.equal((await asset).headers()["content-type"], "audio/wav");
+  await page.waitForFunction(() => document.body.dataset.state === "speaking");
+  assert.equal(fixture.state.naturalReady, undefined, "Preview never installs a voice model");
+  assert.equal(fixture.state.speech.length, 0, "Preview never calls neural synthesis");
+  assert.equal(fixture.state.transcriptions.length, 0, "Preview never enables a microphone");
+  await page.click("#preview-voice");
+  await page.locator("#voice-squeak").evaluate(el => { el.value = "12"; el.dispatchEvent(new Event("input", { bubbles: true })); });
+  assert.equal(await page.textContent("#voice-squeak-label"), "Extra squeaky");
+  await page.selectOption("#speech-start", "smooth");
+  fixture.state.naturalReady = true;
+  await page.reload(); await page.waitForFunction(() => document.querySelector("#model").value === "tiny-live");
+  assert.equal(await page.inputValue("#voice-squeak"), "12");
+  assert.equal(await page.inputValue("#speech-start"), "smooth");
+  const before = fixture.state.warms || 0;
+  await page.evaluate(() => window.__renewVoice());
+  await page.waitForTimeout(100); assert.ok(fixture.state.warms > before, "Visible voice replies renew warmth");
+  await page.evaluate(() => window.__kaiEvent({ type: "suspend", value: true }));
+  const hiddenWarms = fixture.state.warms;
+  await page.evaluate(() => window.__renewVoice()); await page.waitForTimeout(100);
+  assert.equal(fixture.state.warms, hiddenWarms, "A hidden companion does not renew the voice lease");
+  await page.evaluate(() => window.__kaiEvent({ type: "suspend", value: false }));
+  await page.click("#toggle-chat"); await page.click("#read-aloud");
+  await page.waitForTimeout(100); const offWarms = fixture.state.warms;
+  await page.evaluate(() => window.__renewVoice()); await page.waitForTimeout(100);
+  assert.equal(fixture.state.warms, offWarms, "Voice replies off stops renewal");
+  assert.deepEqual(errors, []);
+});
+
 test("KAI UI: natural default, compact voice, follow-ups, barge-in context, history and microphone cleanup", { skip: !fs.existsSync(CHROMIUM), timeout: 90000 }, async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-mascot-ui-"));
   const fixture = await startMascotServer(dir);
@@ -13,7 +64,7 @@ test("KAI UI: natural default, compact voice, follow-ups, barge-in context, hist
   browser = await chromium.launch({ executablePath: CHROMIUM, args: ["--no-sandbox", "--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] });
   const context = await browser.newContext({ viewport: { width: 660, height: 560 }, permissions: ["microphone"], deviceScaleFactor: 2 });
   await context.addInitScript(() => {
-    if (!localStorage.getItem("kai-mascot-natural-default-v3")) localStorage.setItem("kai-mascot-voice-choice", "system:test");
+    if (!localStorage.getItem("kai-mascot-cute-default-v1")) localStorage.setItem("kai-mascot-voice-choice", "system:test");
     window.__spoken = []; window.__streams = []; window.__mainRequests = []; window.__folderRequests = [];
     window.__audio = []; window.__pauses = 0; window.__toneMedia = true; window.__roomNoise = .008;
     const NativeAudio = window.Audio;
@@ -77,7 +128,7 @@ test("KAI UI: natural default, compact voice, follow-ups, barge-in context, hist
   await page.goto(fixture.origin + "/mascot.html");
   await page.waitForFunction(() => document.querySelector("#model").value === "tiny-live" && document.querySelector("#kai-art svg"));
   await compact(); assert.equal(await page.evaluate(() => window.__streams.length), 0);
-  assert.equal(await page.inputValue("#voice-choice"), "natural:af_heart");
+  assert.equal(await page.inputValue("#voice-choice"), "natural:af_bella");
   await page.click("#quick-mic");
   await page.waitForSelector("#natural-card:not([hidden])");
   await compact(); assert.equal(await page.evaluate(() => window.__spoken.length), 0, "No silent fallback to legacy computer speech");
@@ -97,7 +148,8 @@ test("KAI UI: natural default, compact voice, follow-ups, barge-in context, hist
   assert.equal(fixture.state.transcriptions.length, 0, "Steady room noise must not start a transcription loop");
   const streamCount = await page.evaluate(() => window.__streams.length);
   assert.equal(await page.inputValue("#mic-sensitivity"), "tv");
-  assert.equal(await page.inputValue("#voice-tone"), "kai");
+  assert.equal(await page.inputValue("#voice-tone"), "cute");
+  assert.equal(await page.inputValue("#speech-start"), "quick");
   fixture.state.speechDelay = 900; fixture.state.speechSeconds = .6;
   await page.evaluate(() => { window.__playDelay = 350; });
   const firstSpeech = page.waitForRequest(r => r.url().endsWith("/core/speech") && r.method() === "POST");
@@ -112,7 +164,7 @@ test("KAI UI: natural default, compact voice, follow-ups, barge-in context, hist
   await page.evaluate(() => { window.__playDelay = 0; });
   await page.waitForFunction(() => document.querySelector("#messages").textContent.includes("What are you working on today"));
   await idle(); await compact();
-  assert.equal(fixture.state.requests.length, 1); assert.ok(fixture.state.speech.some(s => s.voice === "af_heart"));
+  assert.equal(fixture.state.requests.length, 1); assert.ok(fixture.state.speech.some(s => s.voice === "af_bella"));
   assert.ok(fixture.state.warms > 0, "Warm the installed voice while the model thinks");
   fixture.state.speechSeconds = .2;
   assert.equal(fixture.state.transcriptions[0].toString("ascii", 0, 4), "RIFF");

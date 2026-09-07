@@ -177,14 +177,22 @@
     }
   }
   let speechStatus = null, speechSetupTimer = null, cancelPlayback = null, holdPlayback = null;
-  let voiceChoice = read("kai-mascot-voice-choice", "natural:af_heart");
-  let voiceTone = read("kai-mascot-voice-tone", "kai") === "natural" ? "natural" : "kai";
-  // This voice revision upgrades legacy computer-voice selections once.
-  // Choices made after the upgrade remain the user's own preference.
-  if (read("kai-mascot-natural-default-v3", "0") !== "1") {
-    if (voiceChoice.startsWith("system")) voiceChoice = "natural:af_heart";
-    write("kai-mascot-voice-choice", voiceChoice); write("kai-mascot-natural-default-v3", "1");
+  let voiceChoice = read("kai-mascot-voice-choice", "natural:af_bella");
+  let voiceTone = read("kai-mascot-voice-tone", "cute");
+  if (!["cute", "kai", "natural"].includes(voiceTone)) voiceTone = "cute";
+  let voicePitch = Number(read("kai-mascot-voice-squeak", "9"));
+  if (!Number.isFinite(voicePitch)) voicePitch = 9;
+  voicePitch = Math.max(5, Math.min(12, voicePitch));
+  let speechStart = read("kai-mascot-speech-start", "quick") === "smooth" ? "smooth" : "quick";
+  // The owner requested replacing the old default with a cute character.
+  // Apply once; every later voice/tone choice, including OS voices, persists.
+  if (read("kai-mascot-cute-default-v1", "0") !== "1") {
+    voiceChoice = "natural:af_bella"; voiceTone = "cute";
+    write("kai-mascot-voice-choice", voiceChoice); write("kai-mascot-voice-tone", voiceTone);
+    write("kai-mascot-cute-default-v1", "1");
   }
+  const previewHello = "Hey, I'm KAI. Your little robot friend, ready to help.";
+  let helloAudio = null;
   let wakeEnabled = false, wakeStarting = false, wakePhase = "off";
   function playbackState(value) {
     audible = value;
@@ -199,11 +207,23 @@
     warmRequest = post("/core/speech/warm", {}).catch(() => {}).finally(() => { warmRequest = null; });
   }
   const speech = new KaiSpeech.Queue({
-    buffer: () => voiceChoice.startsWith("natural:") ? 2 : 1,
+    buffer: () => speechStart === "smooth" && voiceChoice.startsWith("natural:") ? 2 : 1,
     prepare: async (text, signal) => {
-      const voice = voiceChoice, tone = voiceTone;
-      if (!voice.startsWith("natural:")) return { text, voice, tone };
-      const wav = await KaiSpeech.prepareSentence(text, { signal, tone, synthesize: async (chunk, signal) => {
+      const preview = typeof text === "object" && text.preview;
+      if (preview) text = previewHello;
+      const voice = voiceChoice, tone = voiceTone, pitch = voicePitch;
+      if (!voice.startsWith("natural:")) return { text, voice, tone, pitch };
+      if (preview && voice === "natural:af_bella") {
+        if (!helloAudio) {
+          const response = await fetch("assets/kai-voice-hello.wav", { signal });
+          if (!response.ok) throw new Error("KAI's voice preview could not load. Please try again.");
+          helloAudio = await response.arrayBuffer();
+        }
+        signal.throwIfAborted();
+        const wav = KaiSpeech.characterTone(helloAudio, tone, pitch);
+        return { blob: new Blob([wav], { type: "audio/wav" }), text };
+      }
+      const wav = await KaiSpeech.prepareSentence(text, { signal, tone, pitch, synthesize: async (chunk, signal) => {
         const response = await fetch("/core/speech", { method: "POST", signal,
           headers: { "content-type": "application/json" }, body: JSON.stringify({ text: chunk, voice: voice.slice(8) }) });
         if (!response.ok) { const error = await response.json().catch(() => ({})); throw new Error(error.error || "Natural voice is unavailable. Choose a computer voice or retry setup."); }
@@ -247,7 +267,8 @@
         if (selected) utterance.voice = selected;
         // Avoid silently choosing an online OS voice.
         else if (speechSynthesis.getVoices().some(v => !v.localService)) return finish(new Error("No local computer voice is available. Get natural voices to hear KAI."));
-        utterance.rate = value.tone === "kai" ? .96 : 1; utterance.pitch = value.tone === "kai" ? .88 : 1;
+        utterance.rate = value.tone === "cute" ? 1.08 : value.tone === "kai" ? .96 : 1;
+        utterance.pitch = value.tone === "cute" ? 2 ** (value.pitch / 12) : value.tone === "kai" ? .88 : 1;
         utterance.onstart = playing; utterance.onresume = playing; utterance.onpause = silent;
         utterance.onend = () => finish();
         utterance.onerror = event => finish(["interrupted", "canceled"].includes(event.error) ? null : new Error("Computer voice playback failed. Try a natural voice."));
@@ -280,7 +301,7 @@
     for (const v of speechStatus?.voices || []) add("natural:" + v.id, v.name + " · natural");
     add("system", "Computer voice · automatic");
     for (const v of window.speechSynthesis?.getVoices() || []) if (v.localService) add("system:" + v.voiceURI, v.name + " · " + v.lang);
-    if (![...select.options].some(o => o.value === voiceChoice)) add(voiceChoice, "Heart · natural");
+    if (![...select.options].some(o => o.value === voiceChoice)) add(voiceChoice, "Bella · bright & playful");
     select.value = voiceChoice;
     voiceReplyUI();
   }
@@ -290,7 +311,7 @@
     voiceChoices();
     $("setup-natural").disabled = !speechStatus.installable;
     $("setup-natural").textContent = speechStatus.available ? "Repair voices" : speechStatus.modelPresent ? "Retry natural voice" : "Get natural voices";
-    $("natural-status").textContent = speechStatus.setup?.state === "error" ? speechStatus.setup.error : speechStatus.available ? "Natural voices are ready. Speech stays on your computer." :
+    $("natural-status").textContent = speechStatus.setup?.state === "error" ? speechStatus.setup.error : speechStatus.available ? "Local voices are ready. Cute KAI works best with Bella. Speech stays on your computer." :
       speechStatus.modelPresent ? "Your voices are downloaded. Retry setup to start KAI’s voice." : "Download natural voices once (" + Math.ceil((speechStatus.downloadBytes || 93000000) / 1000000) + " MB). No account or subscription needed.";
   }
   function ensureNatural() {
@@ -300,7 +321,7 @@
     $("compact-natural").textContent = speechStatus?.modelPresent ? "Retry natural voice" : "Get natural voice";
     $("natural-card-copy").textContent = speechStatus?.setup?.state === "error" ? speechStatus.setup.error : speechStatus?.modelPresent ?
       "Your voices are downloaded. Retry setup to start KAI’s voice." : speechStatus?.installable ?
-      "Give KAI a warm, natural voice. One download, about 93 MB. No account needed." :
+      "Give KAI a cute little voice. One download, about 93 MB. No account needed." :
       "KAI's natural voice is unavailable. Open Voice & listening to retry or choose another voice.";
     regions(); return false;
   }
@@ -327,9 +348,8 @@
           const status = speechStatus = await json("/core/speech");
           if (status.setup?.state === "error") throw new Error(status.setup.error || "Natural voice setup failed.");
           if (status.setup?.state === "done") {
-            voiceChoice = "natural:af_heart"; write("kai-mascot-voice-choice", voiceChoice);
             await loadSpeech(); $("natural-card").hidden = true;
-            notice("Heart's natural voice is ready.");
+            notice("KAI's local voices are ready."); warmSpeech();
             if (!suspended && !busy && !wakeListener.engaged) {
               voiceReplies = true; voiceReplyUI(); speak("Hey, I'm Kai. It's good to hear you. What shall we do today?");
             }
@@ -394,8 +414,23 @@
   }
   $("mic-sensitivity").addEventListener("change", listeningOptions);
   $("voice-tone").value = voiceTone;
+  const squeakUI = () => {
+    $("voice-squeak-control").hidden = voiceTone !== "cute";
+    $("voice-squeak").value = voicePitch;
+    const label = voicePitch <= 6 ? "Gentle" : voicePitch >= 11 ? "Extra squeaky" : "Playful";
+    $("voice-squeak-label").textContent = label; $("voice-squeak").setAttribute("aria-valuetext", label);
+  };
+  squeakUI();
   $("voice-tone").addEventListener("change", () => {
     stopSpeech(); voiceTone = $("voice-tone").value; write("kai-mascot-voice-tone", voiceTone);
+    squeakUI(); regions();
+  });
+  $("voice-squeak").addEventListener("input", () => {
+    stopSpeech(); voicePitch = Number($("voice-squeak").value); write("kai-mascot-voice-squeak", String(voicePitch)); squeakUI();
+  });
+  $("speech-start").value = speechStart;
+  $("speech-start").addEventListener("change", () => {
+    speechStart = $("speech-start").value; write("kai-mascot-speech-start", speechStart); speech.pump();
   });
   function wakeUI() {
     const active = wakeEnabled && wakeListener.active;
@@ -599,7 +634,7 @@
   function suspend(value) {
     suspended = !!value; document.body.classList.toggle("suspended", suspended);
     if (suspended) { chatAbort?.abort(); bridge?.cancelAction?.(); stopWake(); stopSpeech(); }
-    else wake();
+    else { wake(); warmSpeech(); }
   }
   function main(view) {
     suspend(true);
@@ -617,7 +652,7 @@
   $("voice-options").onclick = () => voiceOptions($("voice-options-panel").hidden);
   $("close-voice-options").onclick = () => voiceOptions(false);
   $("menu-voice").onclick = async () => { await expand(true); voiceOptions(true); };
-  $("voice-choice").onchange = () => { stopSpeech(); voiceChoice = $("voice-choice").value; write("kai-mascot-voice-choice", voiceChoice); voiceReplyUI(); ensureNatural(); };
+  $("voice-choice").onchange = () => { stopSpeech(); voiceChoice = $("voice-choice").value; write("kai-mascot-voice-choice", voiceChoice); voiceReplyUI(); ensureNatural(); warmSpeech(); };
   $("setup-natural").onclick = $("compact-natural").onclick = installNatural;
   $("later-natural").onclick = () => { $("natural-card").hidden = true; regions(); };
   $("dismiss-compact-notice").onclick = () => notice("");
@@ -625,7 +660,9 @@
     if (speaking) { stopSpeech(); return; }
     if (busy || voicePending) return;
     voiceReplies = true; write("kai-mascot-voice", "1"); voiceReplyUI(); notice("");
-    speak("Hey, I'm KAI. A little robot with a lot of curiosity. What shall we do today?");
+    stopSpeech();
+    if (voiceChoice === "natural:af_bella" || ensureNatural()) { speech.enqueue([{ preview: true }]); speech.end(); }
+    warmSpeech();
   };
   window.speechSynthesis?.addEventListener?.("voiceschanged", voiceChoices);
   $("mic").onclick = mic; $("quick-mic").onclick = mic;
@@ -646,7 +683,7 @@
   $("read-aloud").onclick = () => {
     voiceReplies = !voiceReplies; write("kai-mascot-voice", voiceReplies ? "1" : "0"); voiceReplyUI();
     if (!voiceReplies) { stopSpeech(); if (!busy) mood("idle"); }
-    else ensureNatural();
+    else { ensureNatural(); warmSpeech(); }
   };
   $("wave").onclick = () => { wave(); $("mascot-menu").hidden = true; regions(); };
   $("motion").onclick = () => {
@@ -715,6 +752,7 @@
     $("motion").setAttribute("aria-pressed", String(motion));
     voiceReplyUI();
     await loadSpeech();
+    warmSpeech();
     await loadModels(); await loadChat(); booted = true;
     regions(); wave(); wake();
   })();
@@ -731,4 +769,5 @@
     }
   });
   setInterval(() => { if (booted && !suspended && !busy && !voicePending) loadModels(); }, 15000);
+  setInterval(() => { if (booted) warmSpeech(); }, 45000);
 })();

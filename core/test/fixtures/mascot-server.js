@@ -30,7 +30,7 @@ async function startMascotServer(dataDir) {
     if (url.pathname === "/core/speech/setup") { state.naturalReady = !state.naturalError; return output({ ok: true }); }
     if (url.pathname === "/core/speech/warm") { state.warms = (state.warms || 0) + 1; return output({ ok: true }); }
     if (url.pathname === "/core/speech" && req.method === "GET") return output({ ok: true, available: !!state.naturalReady, installable: true, modelPresent: !!state.naturalError || !!state.naturalReady,
-      voices: [{ id: "af_heart", name: "Heart · warm & friendly" }, { id: "am_puck", name: "Puck · easygoing" }], setup: state.naturalError ? { state: "error", error: state.naturalError } : { state: state.naturalReady ? "done" : "idle" } });
+      voices: [{ id: "af_heart", name: "Heart · warm & friendly" }, { id: "af_bella", name: "Bella · bright & playful" }, { id: "am_puck", name: "Puck · easygoing" }], setup: state.naturalError ? { state: "error", error: state.naturalError } : { state: state.naturalReady ? "done" : "idle" } });
     if (url.pathname === "/core/speech" && req.method === "POST") {
       state.speech.push(JSON.parse(raw));
       if (state.speechDelay) await new Promise(resolve => setTimeout(resolve, state.speechDelay));
@@ -73,7 +73,7 @@ async function startMascotServer(dataDir) {
     const file = path.resolve(root, relative);
     if (!file.startsWith(root + path.sep)) return output({ error: "Not found" }, 404);
     if (!fs.existsSync(file) || !fs.statSync(file).isFile()) return output({ error: "Not found" }, 404);
-    res.writeHead(200, { "content-type": ({ ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png" })[path.extname(file)] || "application/octet-stream" });
+    res.writeHead(200, { "content-type": ({ ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png", ".wav": "audio/wav" })[path.extname(file)] || "application/octet-stream" });
     fs.createReadStream(file).pipe(res);
   });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));

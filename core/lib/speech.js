@@ -99,10 +99,15 @@ class SpeechManager {
   warm() {
     if (this.closed) return Promise.reject(new Error("KAI is shutting down."));
     if (!this.available()) return Promise.reject(new Error("Natural voice is not set up."));
+    if (this.engineError) return Promise.reject(new Error(this.engineError));
     if (this.warming) return this.warming;
-    // A running synthesis already warms the engine. Never download or speak
-    // from this path, and keep the normal two-minute idle release.
-    if (this.worker || this.pending) return Promise.resolve();
+    // A visible companion renews this two-minute lease while voice replies
+    // are enabled. Refresh it without running inference or downloading files.
+    // Hide/off/quit stops renewal, so the idle process still releases memory.
+    if (this.worker || this.pending) {
+      if (!this.pending) this._idle();
+      return Promise.resolve();
+    }
     this.warming = this._request({}).finally(() => { this.warming = null; });
     return this.warming;
   }
@@ -118,7 +123,7 @@ class SpeechManager {
       const finish = callback => result => {
         if (!active()) return;
         clearTimeout(timer); signal?.removeEventListener("abort", abort); this.pending = null;
-        this.idle = setTimeout(() => this.reset(), 120000); this.idle.unref?.(); callback(result);
+        this._idle(); callback(result);
       };
       request.resolve = finish(resolve); request.reject = finish(reject);
       const abort = () => { request.reject(new Error("Speech cancelled.")); this.reset(); };
@@ -165,6 +170,7 @@ class SpeechManager {
     });
   }
 
+  _idle() { clearTimeout(this.idle); this.idle = setTimeout(() => this.reset(), 120000); this.idle.unref?.(); }
   reset() { clearTimeout(this.idle); const worker = this.worker; this.worker = null; worker?.terminate().catch(() => {}); }
   close() { this.closed = true; this.downloadAbort?.abort(); this.pending?.reject(new Error("KAI is shutting down.")); this.reset(); }
 }
