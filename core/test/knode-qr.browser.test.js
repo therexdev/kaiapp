@@ -110,6 +110,11 @@ const closeModal = (page) => page.evaluate(() => {
 async function openUi(page, base) {
   await page.goto(`${base}/knode/index.html`);
   await page.waitForFunction(() => !!window.KQR, { timeout: UI_WAIT });
+  // KQR loads before the renderer's initial async wallet/fund refresh. Wait
+  // for that paint to finish before supplying the mock address rows, or its
+  // late fund response can erase the fixture halfway through the QR checks.
+  await page.waitForFunction(() => document.getElementById("set-save") &&
+    document.getElementById("fund-addr-wrap")?.dataset.addr !== undefined, { timeout: UI_WAIT });
   await paintAnchors(page, KOIN_ADDR, ETH_ADDR);
   await page.waitForFunction(() => !!document.getElementById("kai-qr-fund"), { timeout: UI_WAIT });
 }
