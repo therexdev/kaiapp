@@ -35,6 +35,18 @@ async function main() {
     await mascot.fill("#question", "Hello KAI");
     await mascot.press("#question", "Enter");
     await mascot.waitForFunction(() => document.querySelector("#messages").textContent.includes("What are you working on today") && document.querySelector("#stop").hidden);
+    await mascot.fill("#question", "Bring up my Pictures folder.");
+    await mascot.press("#question", "Enter");
+    await mascot.waitForFunction(() => document.querySelector("#messages").textContent.includes("left the folder closed") && document.querySelector("#stop").hidden);
+    assert.equal(await app.evaluate(() => globalThis.__openedFolders.length), 0);
+    await app.evaluate(() => { globalThis.__approveFolder = true; });
+    await mascot.fill("#question", "Open my Pictures folder.");
+    await mascot.press("#question", "Enter");
+    await mascot.waitForFunction(() => document.querySelector("#messages").textContent.includes("Your Pictures folder is open") && document.querySelector("#stop").hidden);
+    const folders = await app.evaluate(({ app }) => ({ opened: globalThis.__openedFolders, expected: app.getPath("pictures") }));
+    assert.deepEqual(folders.opened, [folders.expected]);
+    const refused = await mascot.evaluate(async () => { try { await window.kaiDesktop.openFolder("C:\\Windows\\System32\\cmd.exe"); return false; } catch { return true; } });
+    assert.equal(refused, true);
     await mascot.click("#collapse");
     await mascot.waitForFunction(() => document.querySelector("#conversation").hidden);
     await app.evaluate(async () => { await globalThis.__kaiController.launch(); });

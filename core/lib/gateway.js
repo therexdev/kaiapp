@@ -97,7 +97,7 @@ function hasImageParts(messages) {
 }
 
 class Gateway {
-  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, earn, network, feedback, chats, docs, voice, tools, memory, mcp, nodeRuntime, email, calendar, koinos, koinosNode, teams, account, dev, bench, agents, code, onEvent }) {
+  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, earn, network, feedback, chats, docs, voice, speech, tools, memory, mcp, nodeRuntime, email, calendar, koinos, koinosNode, teams, account, dev, bench, agents, code, onEvent }) {
     this.tools = tools || null; // unified tool registry (agents/MCP/memory/…)
     this.memory = memory || null; // cross-chat memory store
     this.mcp = mcp || null; // MCP server manager
@@ -113,6 +113,7 @@ class Gateway {
     this.agents = agents || null; // multi-agent group chats (task #64) — runner + saved defs
     this.code = code || null; // Koinos Code in the app (task #60 v3) — approval-carded coding agent
     this.voice = voice || null; // local speech-to-text (whisper)
+    this.speech = speech || null;
     this.feedback = feedback || null; // relay to the project's feedback inbox
     this.chats = chats || null; // local chat history store
     this.docs = docs || null; // local documents store
@@ -741,6 +742,27 @@ class Gateway {
       }
     }
 
+    if (this.speech && path === "/core/speech" && req.method === "GET") {
+      return this._json(res, 200, { ok: true, ...this.speech.status() });
+    }
+    if (this.speech && path === "/core/speech/setup" && req.method === "POST") {
+      this.speech.ensure().catch(() => {});
+      return this._json(res, 200, { ok: true, ...this.speech.status() });
+    }
+    if (this.speech && path === "/core/speech" && req.method === "POST") {
+      const abort = new AbortController();
+      const cancel = () => { if (!res.writableEnded) abort.abort(); };
+      res.on("close", cancel);
+      try {
+        const body = JSON.parse((await this._readBody(req)).toString("utf8"));
+        const wav = await this.speech.generate({ text: body.text, voice: body.voice, signal: abort.signal });
+        if (!res.destroyed) { res.writeHead(200, { "content-type": "audio/wav", "cache-control": "no-store" }); res.end(wav); }
+      } catch (e) {
+        if (!res.destroyed) this._json(res, /not set up|busy/.test(e.message) ? 503 : 400, { ok: false, error: String(e.message) });
+      } finally { res.removeListener("close", cancel); }
+      return;
+    }
+
     // Voice input (LOCAL always — audio never leaves this machine, so no §7
     // gate: it works identically in Local-Only mode). The UI records, encodes
     // 16 kHz WAV, POSTs it here; whisper runs one-shot and hands back text.
@@ -753,13 +775,18 @@ class Gateway {
       return this._json(res, 200, { ok: true, ...this.voice.status() });
     }
     if (this.voice && path === "/core/transcribe" && req.method === "POST") {
+      const abort = new AbortController();
+      const cancel = () => { if (!res.writableEnded) abort.abort(); };
+      res.on("close", cancel);
       try {
         const wav = await this._readBody(req);
-        return this._json(res, 200, { ok: true, ...(await this.voice.transcribe(wav)) });
+        const result = await this.voice.transcribe(wav, { signal: abort.signal });
+        if (!res.destroyed) return this._json(res, 200, { ok: true, ...result });
       } catch (e) {
         const msg = String(e.message);
-        return this._json(res, /not set up/.test(msg) ? 503 : 400, { ok: false, error: msg });
-      }
+        if (!res.destroyed) return this._json(res, /not set up|busy/.test(msg) ? 503 : 400, { ok: false, error: msg });
+      } finally { res.removeListener("close", cancel); }
+      return;
     }
 
     // Custom model import (bring your own GGUF, hashed + referenced in place).

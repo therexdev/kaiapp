@@ -17,6 +17,21 @@
         <button class="icon-button" id="collapse" title="Keep KAI on the desktop" aria-label="Collapse conversation"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
       </header>
       <div class="model-row"><span class="status-light"></span><label for="model">Brain</label><select id="model" aria-label="Choose KAI's model"></select><button id="open-models" class="text-button">Manage</button></div>
+      <div class="companion-tools">
+        <button id="wake-toggle" aria-pressed="false" title="Enable local listening for Hey KAI"><span class="wake-light"></span><span id="wake-label">Hey KAI off</span></button>
+        <button id="voice-options" aria-expanded="false">Voice &amp; listening <span>⌄</span></button>
+      </div>
+      <section id="voice-options-panel" aria-label="Voice and listening settings" hidden>
+        <div class="voice-options-heading"><strong>A voice with a little heart.</strong><button id="close-voice-options" class="icon-button" aria-label="Close voice settings">×</button></div>
+        <label for="voice-choice">KAI's voice</label>
+        <select id="voice-choice"><option value="system">Computer voice</option></select>
+        <div class="voice-option-actions"><button id="preview-voice">Hear a hello</button><button id="setup-natural">Get natural voices</button></div>
+        <p id="natural-status">Natural voices speak locally after a one-time 93 MB download.</p>
+        <div class="voice-divider"></div>
+        <strong>Just say “Hey KAI”</strong>
+        <p>Turn on the switch above, then say “Hey KAI, bring up my Pictures folder.” Or say “Hey KAI,” wait for “I'm listening,” and ask your question.</p>
+        <p class="muted">Microphone audio is processed on this computer. Only your question after the wake phrase goes to the selected chat model. Listening pauses during replies and turns off when you hide KAI or open the full app.</p>
+      </section>
       <div id="transcript" role="log" aria-label="Conversation">
         <div id="welcome">
           <span class="eyebrow">A LITTLE ROBOT. A LOT OF HELP.</span>
@@ -25,7 +40,7 @@
           <div class="suggestions">
             <button data-prompt="Help me plan my day. Start by asking what I need to get done."><span>01</span> Help me plan my day <b>↗</b></button>
             <button data-prompt="Explain something fascinating about how AI works in a simple way."><span>02</span> Teach me something <b>↗</b></button>
-            <button data-prompt="Let's brainstorm. Ask me what I'm working on, then help me find a fresh approach."><span>03</span> Let's brainstorm <b>↗</b></button>
+            <button data-prompt="Bring up my Pictures folder."><span>03</span> Open my Pictures folder <b>↗</b></button>
           </div>
         </div>
         <div id="messages"></div>
@@ -53,10 +68,12 @@
       <div id="mascot-dock" class="interactive">
         <button id="toggle-chat" title="Chat with KAI"><span class="dock-dot"></span><strong>KAI</strong><svg viewBox="0 0 24 24"><path d="M5 5h14v11H9l-4 4Z"/></svg></button>
         <button id="quick-mic" class="icon-button" title="Talk to KAI" aria-label="Talk to KAI"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M6 10v2a6 6 0 0 0 12 0v-2M12 18v3"/></svg></button>
+        <button id="quick-wake" class="icon-button" title="Hey KAI listening off" aria-label="Toggle Hey KAI listening" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M4 10v4M8 6v12M12 3v18M16 6v12M20 10v4"/></svg></button>
         <button id="mascot-menu-button" class="icon-button" title="KAI options" aria-label="KAI options" aria-expanded="false"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
       </div>
       <div id="mascot-menu" class="interactive" hidden>
         <button id="wave">Say hello 👋</button>
+        <button id="menu-voice">Voice &amp; listening</button>
         <button id="motion" aria-pressed="true">Animation on</button>
         <button id="menu-open-app">Open full app ↗</button>
         <button id="hide-mascot">Hide KAI to tray</button>
@@ -66,6 +83,8 @@
   <script src="markdown.js"></script>
   <script src="audio-wav.js"></script>
   <script src="mascot-client.js"></script>
+  <script src="mascot-speech.js"></script>
+  <script src="mascot-wake.js"></script>
   <script src="mascot.js"></script>
 </body>
 </html>

@@ -4,6 +4,8 @@ contextBridge.exposeInMainWorld("kaiDesktop", {
   expand: open => ipcRenderer.invoke("mascot:expand", !!open),
   openMain: view => ipcRenderer.send("mascot:main", view),
   hide: () => ipcRenderer.send("mascot:hide"),
+  openFolder: folder => ipcRenderer.invoke("mascot:open-folder", folder),
+  cancelAction: () => ipcRenderer.send("mascot:cancel-action"),
   regions: regions => ipcRenderer.send("mascot:regions", regions),
   startDrag: () => ipcRenderer.send("mascot:drag-start"),
   endDrag: () => ipcRenderer.send("mascot:drag-end"),

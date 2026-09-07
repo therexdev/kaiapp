@@ -22,7 +22,8 @@ function trustedFrame(event, window, origin) {
 
 // A second view of the same running Core. Hiding either window never stops the
 // node, changes the wallet, or creates another model/runtime process.
-function createMascotController({ BrowserWindow, screen, ipcMain, shell, prefs, origin, getMainWindow, hasTray = () => true }) {
+function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, dialog, prefs, origin, getMainWindow, hasTray = () => true }) {
+  const actions = app && dialog ? require("./desktop-actions").createFolderActions({ app, dialog, shell }) : null;
   let window = null, loading = null, expanded = false, dragging = null, timer = null;
   let regions = [], ignored = false, disposed = false, shaped = false;
   const handles = [], listeners = [];
@@ -97,7 +98,7 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, prefs, 
           if (/^https?:\/\//i.test(url) && new URL(url).origin !== origin) shell.openExternal(url);
         }
       });
-      created.on("hide", () => { dragging = null; send("suspend", true); });
+      created.on("hide", () => { actions?.cancel(); dragging = null; send("suspend", true); });
       created.on("show", () => send("suspend", false));
       created.webContents.on("render-process-gone", () => showMain());
       created.on("closed", () => {
@@ -143,6 +144,11 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, prefs, 
   }
   handle("mascot:launch", getMainWindow, options => launch(options || {}));
   handle("mascot:expand", () => window, open => { resize(open); return { expanded }; });
+  handle("mascot:open-folder", () => window, folder => {
+    if (!actions) throw new Error("Desktop actions are unavailable in this window.");
+    return actions.open(window, folder);
+  });
+  on("mascot:cancel-action", () => actions?.cancel());
   on("mascot:main", showMain);
   on("mascot:regions", value => {
     if (!Array.isArray(value)) return;
@@ -180,7 +186,7 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, prefs, 
     hide() { if (window && !window.isDestroyed()) { savePosition(); window.hide(); } },
     dispose() {
       if (disposed) return;
-      disposed = true; clearInterval(timer);
+      disposed = true; actions?.cancel(); clearInterval(timer);
       screen.removeListener("display-removed", onDisplayChange);
       screen.removeListener("display-metrics-changed", onDisplayChange);
       for (const channel of handles) ipcMain.removeHandler(channel);

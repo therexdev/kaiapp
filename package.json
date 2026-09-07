@@ -3,7 +3,7 @@
   "productName": "Koinos AI",
   "version": "0.54.1",
   "private": true,
-  "description": "Koinos AI Core — local-first AI with a self-hosted OpenAI-compatible API",
+  "description": "Koinos AI Core \u2014 local-first AI with a self-hosted OpenAI-compatible API",
   "license": "MIT",
   "author": "therexdev",
   "repository": {
@@ -57,7 +57,10 @@
       "ui/agents.js",
       "core/lib/jail.js",
       "build/icon.ico",
-      "build/icon.png"
+      "build/icon.png",
+      "node_modules/onnxruntime-node/**",
+      "node_modules/kokoro-js/**",
+      "node_modules/phonemizer/**"
     ],
     "win": {
       "target": [
@@ -91,7 +94,7 @@
       "entitlementsInherit": "build/entitlements.mac.inherit.plist",
       "artifactName": "${name}-${version}-${arch}.${ext}",
       "extendInfo": {
-        "NSMicrophoneUsageDescription": "Koinos AI uses the microphone only when you start voice input."
+        "NSMicrophoneUsageDescription": "Koinos AI uses the microphone when you start voice input or enable Hey KAI listening."
       }
     },
     "linux": {
@@ -111,12 +114,14 @@
     ]
   },
   "dependencies": {
+    "@huggingface/transformers": "3.5.1",
     "@noble/hashes": "^1.8.0",
     "@noble/secp256k1": "^1.7.2",
     "electron-updater": "^6.8.9",
     "ethers": "^6.17.0",
     "imapflow": "^1.7.1",
     "koilib": "^9.3.0",
+    "kokoro-js": "1.2.1",
     "mailparser": "^3.9.17",
     "nodemailer": "^9.0.5"
   },

@@ -29,23 +29,26 @@ const TRANSCRIBE_TIMEOUT_MS = 120000;
 const MAX_WAV_BYTES = 10 * 1024 * 1024; // ~5 min of 16k mono 16-bit
 
 /** Run whisper-cli once over a WAV file; resolve with the plain text. */
-function transcribeWav({ binPath, modelPath, wavPath, timeoutMs = TRANSCRIBE_TIMEOUT_MS }) {
+function transcribeWav({ binPath, modelPath, wavPath, timeoutMs = TRANSCRIBE_TIMEOUT_MS, signal }) {
   return new Promise((resolve, reject) => {
     // --no-timestamps: stdout is the transcription lines and nothing else;
     // banner/perf chatter goes to stderr on every build we ship.
     ensureCrtBeside(binPath); // MSVC runtime beside the exe (win32 no-op elsewhere)
-    const child = spawn(binPath, ["-m", modelPath, "-f", wavPath, "--no-timestamps"], {
+    const child = spawn(binPath, ["-m", modelPath, "-f", wavPath, "--no-timestamps", "-t", "2"], {
       windowsHide: true,
       cwd: path.dirname(binPath), // whisper.cpp zips keep DLLs beside the exe
       env: engineEnv(binPath), // KMP guards + LD_LIBRARY_PATH (llama field lessons)
       timeout: timeoutMs,
+      signal,
     });
     let out = "";
     let err = "";
     child.stdout.on("data", (c) => (out += c));
     child.stderr.on("data", (c) => (err = (err + c).slice(-2000)));
-    child.on("error", (e) => reject(new Error(`voice engine failed to start: ${e.message}`)));
-    child.on("exit", (code) => {
+    let failure;
+    child.on("error", e => { failure = e; });
+    child.on("close", (code) => {
+      if (failure) return reject(failure);
       if (code !== 0) return reject(new Error(`voice engine exited ${code}: ${err.slice(-300)}`));
       const text = out
         .replace(/\r/g, "")
@@ -185,7 +188,8 @@ class VoiceManager {
   }
 
   /** Transcribe a WAV buffer; resolves to the text. */
-  async transcribe(wavBuffer) {
+  async transcribe(wavBuffer, { signal } = {}) {
+    if (this.transcribing) throw new Error("Voice input is busy. Try again in a moment.");
     if (!wavBuffer?.length) throw new Error("empty audio");
     if (wavBuffer.length > MAX_WAV_BYTES) throw new Error("recording too long — keep it under ~5 minutes");
     const binPath = this._binPath();
@@ -193,12 +197,13 @@ class VoiceManager {
     if (!binPath || !modelPath) throw new Error("voice input is not set up");
     const wavPath = path.join(os.tmpdir(), `kai-voice-${process.pid}-${Date.now()}.wav`);
     fs.writeFileSync(wavPath, wavBuffer);
+    this.transcribing = true;
     try {
       const t0 = Date.now();
-      const text = await transcribeWav({ binPath, modelPath, wavPath });
+      const text = await transcribeWav({ binPath, modelPath, wavPath, signal });
       return { text, ms: Date.now() - t0 };
     } finally {
-      fs.rmSync(wavPath, { force: true });
+      try { fs.rmSync(wavPath, { force: true }); } finally { this.transcribing = false; }
     }
   }
 }

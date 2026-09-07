@@ -32,12 +32,16 @@ jobs:
       - run: npm test
         env:
           KAI_MASCOT_QA_DIR: mascot-qa
+      - name: Verify natural voice inference
+        run: node scripts/verify-neural-voice.js
+        env:
+          KAI_MASCOT_QA_DIR: mascot-qa
       - name: Save KAI visual checks
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: mascot-visual-checks
-          path: mascot-qa/*.png
+          path: mascot-qa/*
           if-no-files-found: ignore
 
   windows:
@@ -87,6 +91,8 @@ jobs:
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
       - run: node scripts/verify-test-package.js
+      - name: Verify packaged Windows natural voices
+        run: node scripts/verify-neural-voice.js --packaged
       - uses: actions/upload-artifact@v4
         with:
           name: kai-test-windows

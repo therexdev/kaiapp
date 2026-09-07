@@ -576,6 +576,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     voiceDir: path.join(dataDir, "voice"),
     onEvent: events,
   });
+  const speech = new (require("./lib/speech").SpeechManager)({ speechDir: path.join(dataDir, "voice", "kokoro") });
   const gateway = new Gateway({
     port: port ?? Number(process.env.KAI_CORE_PORT || release.port),
     runtime,
@@ -586,6 +587,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     earn,
     network,
     voice,
+    speech,
     tools: registry,
     memory,
     mcp,
@@ -640,6 +642,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
 
   return {
     settings,
+    speech,
     state,
     hardware: hw,
     keys,
@@ -719,6 +722,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
       return p;
     },
     async stop() {
+      speech.close();
       if (this._policyTimer) clearInterval(this._policyTimer);
       producerReporter.stop();
       this.tasks?.stop();

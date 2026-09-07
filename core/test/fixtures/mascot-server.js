@@ -4,7 +4,7 @@ const { ChatStore } = require("../../lib/chats");
 
 async function startMascotServer(dataDir) {
   const chats = new ChatStore(path.join(dataDir, "chats"));
-  const state = { requests: [], transcriptions: [], delay: 10, cancelled: 0, voice: { available: true, installable: true }, reply: "Absolutely. Let's make something great together.\n\nWhat are you working on today?" };
+  const state = { requests: [], transcriptions: [], speech: [], transcript: "Hello from the microphone.", delay: 10, cancelled: 0, finished: 0, voice: { available: true, installable: true }, reply: "Absolutely. Let's make something great together.\n\nWhat are you working on today?" };
   const root = path.join(__dirname, "../../../ui");
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
@@ -14,7 +14,16 @@ async function startMascotServer(dataDir) {
     if (url.pathname === "/core/models") return output({ aliases: [{ alias: "tiny-live", label: "Koinos Fast", status: "ready", contextSize: 4096 }], runtime: { activeAlias: "tiny-live" } });
     if (url.pathname === "/core/voice") return output({ ok: true, ...state.voice });
     if (url.pathname === "/core/voice/setup") { state.voice.available = true; return output({ ok: true }); }
-    if (url.pathname === "/core/transcribe") { state.transcriptions.push(raw); return output({ ok: true, text: "Hello from the microphone." }); }
+    if (url.pathname === "/core/transcribe") { state.transcriptions.push(raw); return output({ ok: true, text: state.transcript }); }
+    if (url.pathname === "/core/speech/setup") { state.naturalReady = true; return output({ ok: true }); }
+    if (url.pathname === "/core/speech" && req.method === "GET") return output({ ok: true, available: !!state.naturalReady, installable: true,
+      voices: [{ id: "af_heart", name: "Heart · warm & friendly" }, { id: "am_puck", name: "Puck · easygoing" }], setup: { state: state.naturalReady ? "done" : "idle" } });
+    if (url.pathname === "/core/speech" && req.method === "POST") {
+      state.speech.push(JSON.parse(raw));
+      const { encodeWav16kMono } = require("../../../ui/audio-wav");
+      const tone = Float32Array.from({ length: 3200 }, (_, i) => Math.sin(i * .05) * .1);
+      res.writeHead(200, { "content-type": "audio/wav" }); return res.end(Buffer.from(encodeWav16kMono(tone, 16000)));
+    }
     if (url.pathname === "/core/chats" && req.method === "POST") return output({ ok: true, ...chats.save(JSON.parse(raw)) });
     if (url.pathname === "/core/chats") return output({ ok: true, chats: chats.list() });
     if (url.pathname.startsWith("/core/chats/")) {
@@ -29,7 +38,7 @@ async function startMascotServer(dataDir) {
       const timer = setInterval(() => {
         if (index < parts.length) res.write("data: " + JSON.stringify({ model: "tiny-live", choices: [{ delta: { content: parts[index++] } }] }) + "\n\n");
         else {
-          done = true; clearInterval(timer);
+          done = true; state.finished++; clearInterval(timer);
           res.end('data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n');
         }
       }, state.delay);

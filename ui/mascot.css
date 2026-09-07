@@ -157,3 +157,43 @@ body.motion-off .kai-gaze{transform:none}
 @keyframes panel-in{from{opacity:0;transform:translate(8px,5px) scale(.98)}to{opacity:1;transform:none}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
 @media(max-width:600px){body.expanded #mascot-stage{width:188px;transform:scale(.78);transform-origin:right bottom}body.expanded #conversation{right:192px}.chat-header{padding:12px 10px;gap:6px}h1 span{letter-spacing:.5px;font-size:7px}.model-row{padding:8px 11px}#transcript{padding:13px}h2{font-size:25px}}
+
+/* Voice controls stay one click away in compact and chat modes. */
+.companion-tools{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 16px;border-bottom:1px solid var(--border);flex-shrink:0}
+.companion-tools button{display:flex;align-items:center;gap:6px;padding:0;background:none;font-size:10px;color:#9db6c7}
+.wake-light{width:5px;height:5px;border-radius:50%;background:#607587}
+#wake-toggle[aria-pressed=true]{color:#a6fbe0}
+#wake-toggle[aria-pressed=true] .wake-light{background:#85efc5;box-shadow:0 0 8px #85efc588}
+#quick-wake[aria-pressed=true]{color:#a5ffda;background:#64d99b25}
+body.wake-on #status-pill>span:first-child{background:#8af0ba}
+#mascot-dock{right:8px}
+#voice-options-panel{position:absolute;z-index:5;inset:124px 0 0;padding:16px 20px 22px;overflow-y:auto;background:linear-gradient(160deg,#1b3042,#101d2b);border-top:1px solid #9bc8db24}
+.voice-options-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:14px;color:#ecfffa}
+.voice-options-heading strong{font-size:16px;font-weight:550;letter-spacing:-.4px}
+#voice-options-panel label{display:block;color:#9eb8c7;font-size:11px;margin-bottom:7px}
+#voice-choice{width:100%;color:#e5f5fa;background:#0d1c2a;border:1px solid #8ccbdd35;border-radius:10px;padding:10px;font-size:12px}
+.voice-option-actions{display:flex;gap:8px;margin:12px 0}
+.voice-option-actions button{padding:8px 12px;background:#87e8d91c;color:#b2f5e6;border:1px solid #86d9cd28;border-radius:9px;font-size:11px}
+#voice-options-panel p{font-size:11px;line-height:1.6;color:#b5cbd5;margin:8px 0}
+#voice-options-panel p.muted{font-size:10px;color:#849ead}
+.voice-divider{height:1px;background:var(--border);margin:16px 0}
+#voice-options-panel strong{font-weight:550}
+#natural-status{min-height:32px}
+#welcome h2{font-size:27px;margin-top:8px}
+#welcome>p{margin-bottom:10px}
+.suggestions button{padding-top:7px;padding-bottom:7px}
+/* Softer face: a delighted squint, rosy cheeks and a small speaking mouth. */
+.kai-happy-eyes,.kai-mouth-open{opacity:0}
+.kai-mouth-open{transform-origin:160px 149px}
+.kai-blush{opacity:.8;transition:opacity .3s}
+body.waving .kai-eyes{opacity:0}
+body.waving .kai-happy-eyes{opacity:1}
+body.waving .kai-blush{opacity:1}
+body.waving .kai-heart{animation:kai-heartbeat .8s ease-in-out 3;transform-origin:160px 227px}
+body[data-state=speaking] .kai-mouth-open{opacity:1;animation:kai-mouth-talk .27s ease-in-out infinite alternate}
+body[data-state=listening] .kai-brows{transform:translateY(-2px)}
+body[data-state=thinking] .kai-brows{transform:rotate(-5deg);transform-origin:160px 92px}
+@keyframes kai-mouth-talk{from{transform:scale(.8,.4)}to{transform:scale(1,1)}}
+@keyframes kai-heartbeat{0%,100%{transform:scale(1)}45%{transform:scale(1.2)}}
+body.motion-off .kai-mouth-open,body.motion-off .kai-heart,body.suspended .kai-mouth-open,body.suspended .kai-heart{animation:none!important}
+@media(prefers-reduced-motion:reduce){.kai-mouth-open,.kai-heart{animation:none!important}}

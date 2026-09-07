@@ -1,0 +1,99 @@
+"use strict";
+const fs = require("fs"), path = require("path");
+const { Worker } = require("worker_threads");
+const { downloadFile } = require("./download");
+const catalog = require("../runtimes/kokoro.json");
+const VOICES = Object.freeze([
+  { id: "af_heart", name: "Heart · warm & friendly" },
+  { id: "af_bella", name: "Bella · bright & playful" },
+  { id: "am_puck", name: "Puck · easygoing" },
+  { id: "bf_emma", name: "Emma · soft British" },
+]);
+class SpeechManager {
+  constructor({ speechDir, download = downloadFile, WorkerClass = Worker }) {
+    this.dir = path.join(speechDir, catalog.revision);
+    this.download = download; this.Worker = WorkerClass;
+    this.worker = null; this.pending = null; this.serial = 0; this.idle = null;
+    this.setup = { state: "idle" }; this.installing = null; this.closed = false;
+  }
+  available() {
+    return catalog.files.every(f => {
+      try { return fs.statSync(path.join(this.dir, f.path)).size === f.sizeBytes; } catch { return false; }
+    });
+  }
+  status() {
+    return { available: this.available(), installable: ["win32", "darwin", "linux"].includes(process.platform) && ["x64", "arm64"].includes(process.arch),
+      downloadBytes: catalog.files.reduce((n, f) => n + f.sizeBytes, 0), voices: VOICES, setup: this.setup };
+  }
+  ensure() {
+    if (this.closed) return Promise.reject(new Error("KAI is shutting down."));
+    if (this.installing) return this.installing;
+    this.installing = this._ensure().finally(() => { this.installing = null; });
+    return this.installing;
+  }
+  async _ensure() {
+    this.setup = { state: "downloading", pct: 0 };
+    this.downloadAbort = new AbortController();
+    try {
+      let done = 0;
+      const total = this.status().downloadBytes;
+      for (const file of catalog.files) {
+        const dest = path.join(this.dir, file.path);
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        let exists = false;
+        try {
+          if (fs.statSync(dest).size === file.sizeBytes) {
+            const hash = require("crypto").createHash("sha256");
+            for await (const chunk of fs.createReadStream(dest)) hash.update(chunk);
+            exists = hash.digest("hex") === file.sha256;
+          }
+        } catch { /* new install */ }
+        if (!exists) await this.download(file.url, dest, { sha256: file.sha256, sizeBytes: file.sizeBytes,
+          signal: this.downloadAbort.signal,
+          onProgress: p => { this.setup = { state: "downloading", pct: Math.min(100, Math.floor((done + p.done) / total * 100)) }; },
+        });
+        done += file.sizeBytes;
+      }
+      this.setup = { state: "loading" };
+      await this._request({});
+      this.setup = { state: "done" };
+    } catch (error) { this.setup = { state: "error", error: String(error.message || error) }; throw error; }
+    finally { this.downloadAbort = null; }
+  }
+  async generate({ text, voice = "af_heart", signal } = {}) {
+    if (typeof text !== "string" || !text.trim() || text.length > 240) throw new Error("Speak one short phrase at a time (up to 240 characters).");
+    if (!VOICES.some(v => v.id === voice)) throw new Error("Unknown KAI voice.");
+    if (!this.available()) throw new Error("Natural voice is not set up.");
+    return this._request({ text, voice }, signal);
+  }
+  _request(value, signal) {
+    if (this.closed) return Promise.reject(new Error("KAI is shutting down."));
+    if (signal?.aborted) return Promise.reject(new Error("Speech cancelled."));
+    if (this.pending) return Promise.reject(new Error("KAI's voice is busy. Try again in a moment."));
+    clearTimeout(this.idle);
+    if (!this.worker) {
+      const worker = this.worker = new this.Worker(path.join(__dirname, "speech-worker.js"), { workerData: { modelDir: this.dir } });
+      worker.on("message", result => {
+        if (this.worker !== worker || result.id !== this.pending?.id) return;
+        result.error ? this.pending.reject(new Error(result.error)) : this.pending.resolve(result.wav ? Buffer.from(result.wav) : null);
+      });
+      worker.on("error", error => { if (this.worker === worker) { this.pending?.reject(error); this.reset(); } });
+      worker.on("exit", () => { if (this.worker === worker) { this.pending?.reject(new Error("KAI's voice engine stopped.")); this.reset(); } });
+    }
+    return new Promise((resolve, reject) => {
+      const id = ++this.serial;
+      const abort = () => { this.pending?.reject(new Error("Speech cancelled.")); this.reset(); };
+      const timer = setTimeout(() => { this.pending?.reject(new Error("Natural voice took too long. Try a computer voice.")); this.reset(); }, 90000);
+      const finish = callback => result => {
+        clearTimeout(timer); signal?.removeEventListener("abort", abort); this.pending = null;
+        this.idle = setTimeout(() => this.reset(), 120000); this.idle.unref?.(); callback(result);
+      };
+      this.pending = { id, resolve: finish(resolve), reject: finish(reject) };
+      signal?.addEventListener("abort", abort, { once: true });
+      this.worker.postMessage({ id, ...value });
+    });
+  }
+  reset() { clearTimeout(this.idle); const worker = this.worker; this.worker = null; worker?.terminate().catch(() => {}); }
+  close() { this.closed = true; this.downloadAbort?.abort(); this.pending?.reject(new Error("KAI is shutting down.")); this.reset(); }
+}
+module.exports = { SpeechManager, VOICES };

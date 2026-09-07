@@ -154,7 +154,7 @@ async function start() {
   }
 
   mascot = require("./mascot").createMascotController({
-    BrowserWindow, screen: require("electron").screen, ipcMain, shell,
+    BrowserWindow, screen: require("electron").screen, ipcMain, shell, app, dialog: require("electron").dialog,
     prefs: winState, origin: "http://127.0.0.1:" + port, getMainWindow: () => win, hasTray: () => !!tray,
   });
 
@@ -502,6 +502,7 @@ async function start() {
 // handler above tell a quit apart from a trip to the tray.
 app.on("before-quit", () => { quitting = true; });
 app.on("before-quit", () => mascot?.dispose());
+app.on("before-quit", () => core?.speech?.close());
 
 app.on("window-all-closed", () => app.quit());
 

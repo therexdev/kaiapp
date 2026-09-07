@@ -14,7 +14,10 @@ app.whenReady().then(async () => {
   const main = new BrowserWindow({ width: 800, height: 650, webPreferences: {
     preload: path.join(__dirname, "../../electron/preload.js"), contextIsolation: true, nodeIntegration: false, sandbox: true,
   } });
-  const controller = createMascotController({ BrowserWindow, screen, ipcMain, shell,
+  globalThis.__folderApprovals = []; globalThis.__openedFolders = []; globalThis.__approveFolder = false;
+  const controller = createMascotController({ BrowserWindow, screen, ipcMain, app,
+    shell: { ...shell, openPath: async target => { globalThis.__openedFolders.push(target); return ""; } },
+    dialog: { showMessageBox: async (_win, options) => { globalThis.__folderApprovals.push(options); return { response: globalThis.__approveFolder ? 1 : 0 }; } },
     prefs: new JsonStore(path.join(dir, "window.json"), {}), origin: fixture.origin, getMainWindow: () => main });
   globalThis.__kaiMain = main; globalThis.__kaiController = controller;
   await main.loadURL(fixture.origin + "/main-fixture");
