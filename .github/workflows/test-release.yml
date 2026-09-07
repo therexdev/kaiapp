@@ -66,6 +66,8 @@ jobs:
         run: node scripts/verify-test-package.js
       - name: Verify Windows preflight natural voices
         run: node scripts/verify-neural-voice.js --packaged
+      - name: Verify real Windows wake recognition
+        run: node scripts/verify-wake-voice.js
       - name: Enable code signing (when configured)
         shell: bash
         env:

@@ -161,6 +161,9 @@
           if (wake) { this.wakeSerial = item.serial; this.engage(); }
           if (!command) continue;
           this.engage();
+          if (/^(?:stop(?: talking)?|wait(?: a second)?|hold on)[.!?]*$/i.test(command)) {
+            this.onEnd(false); continue;
+          }
           if (/^(?:stop listening|turn (?:the )?microphone off)[.!?]*$/i.test(command)) {
             await this.stop(); this.onEnd(true); return;
           }

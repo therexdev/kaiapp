@@ -216,7 +216,7 @@
         if (speech.held) speechSynthesis.pause();
       }
     }),
-    cancel: () => { window.speechSynthesis?.cancel(); cancelPlayback?.(); },
+    cancel: () => { window.speechSynthesis?.cancel(); window.speechSynthesis?.resume(); cancelPlayback?.(); },
     holdPlayback: held => holdPlayback?.(held),
     onState: state => {
       speaking = state !== "idle";
@@ -320,7 +320,7 @@
         $("question").value += " " + text;
         notice("Added your voice to the draft. Open chat to review and send it."); controls(); return;
       }
-      $("question").value = text; controls(); ask();
+      $("question").value = text; controls(); ask({ source: "voice" });
     },
     onEnd: off => { interruptResponse(); if (off) stopWake(); },
     onError: (error, options) => {
@@ -376,12 +376,12 @@
       (speechStatus?.voices?.find(v => "natural:" + v.id === voiceChoice)?.name.split(" · ")[0] || "Natural") : "Computer";
     $("read-aloud").querySelector("span").textContent = voiceReplies ? name + " voice on" : "Voice replies off";
   }
-  async function send() {
+  async function send({ source = "typed" } = {}) {
     const text = $("question").value.trim(), model = $("model").value;
     const folder = api.folderRequest(text);
     if (!text || (!model && !folder) || busy || voicePending) return;
     stopSpeech(); notice(""); busy = true; mood("thinking");
-    const request = currentRequest = { keepUser: false };
+    const request = currentRequest = { keepUser: source === "voice" };
     if (voiceReplies) ensureNatural();
     const phrases = new api.SpeechPhrases(), replyEpoch = speechEpoch;
     $("question").value = "";
@@ -421,7 +421,7 @@
     } catch (error) {
       stopSpeech();
       if (error.name === "AbortError") {
-        if (!suspended) notice(content ? "Response stopped." : "Stopped. Your message is back in the composer.");
+        if (!suspended) notice(content || request.keepUser ? "Response stopped." : "Stopped. Your message is back in the composer.");
       } else { notice(error.message); mood("error"); }
     } finally {
       reply.element.classList.remove("streaming");
@@ -444,7 +444,7 @@
       else if (document.body.dataset.state !== "error") mood("idle");
     }
   }
-  function ask() { activeTask = send(); return activeTask; }
+  function ask(options) { activeTask = send(options); return activeTask; }
   async function ensureVoice() {
     const status = await json("/core/voice");
     if (status.available) return true;
