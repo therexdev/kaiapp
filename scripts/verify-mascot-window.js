@@ -14,6 +14,7 @@ async function main() {
     const nextWindow = app.waitForEvent("window");
     await main.click("#launch-kai");
     const mascot = await nextWindow;
+    mascot.on("pageerror", error => console.error("Mascot renderer:", error.message));
     await mascot.waitForSelector("#kai-art svg");
     await mascot.waitForFunction(() => document.querySelector("#model").value === "tiny-live");
     let native = await app.evaluate(({ BrowserWindow }) => {

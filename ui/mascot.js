@@ -596,18 +596,18 @@
     voiceReplyUI();
     await loadSpeech();
     await loadModels(); await loadChat(); booted = true;
-    setExpanded(false);
     regions(); wave(); wake();
   })();
   bridge?.onEvent(async ({ type, value }) => {
     if (type === "expanded") setExpanded(value);
     if (type === "suspend") suspend(value);
     if (type === "launch") {
+      setExpanded(false); // Reset before any asynchronous loading, never after a user click.
       requestedModel = value?.model || null;
       await ready; await activeTask;
       suspend(false); notice(""); await loadModels(requestedModel);
       if (!savedFailure) await loadChat();
-      setExpanded(false); wave(); regions();
+      wave(); regions();
     }
   });
   setInterval(() => { if (booted && !suspended && !busy && !voicePending) loadModels(); }, 15000);

@@ -130,7 +130,14 @@ test("KAI UI: natural default, compact voice, follow-ups, barge-in context, hist
   assert.equal(await page.getAttribute("#quick-wake", "aria-pressed"), "false");
   await compact();
 
+  // A user's click during asynchronous launch/model loading wins over the
+  // compact launch default; late history loading must not close the panel.
+  fixture.state.modelsDelay = 700;
+  await page.evaluate(() => { window.__launchTask = window.__kaiEvent({ type: "launch", value: {} }); });
   await page.click("#toggle-chat");
+  await page.evaluate(() => window.__launchTask);
+  assert.equal(await page.locator("#conversation").evaluate(el => el.hidden), false);
+  fixture.state.modelsDelay = 0;
   const layout = await page.evaluate(() => ({ composer: document.querySelector("#composer").getBoundingClientRect().toJSON(),
     panel: document.querySelector("#conversation").getBoundingClientRect().toJSON(), regions: window.__regions }));
   assert.ok(layout.composer.bottom < layout.panel.bottom); assert.ok(layout.regions.some(r => r.width < 250 && r.height < 300));
