@@ -110,6 +110,10 @@ test("KAI desktop UI: chat, persisted history, cancellation, voice, microphone c
   assert.ok(await page.evaluate(() => window.__streams.every(s => s.getTracks().every(t => t.readyState === "ended"))));
 
   await page.click("#voice-options");
+  assert.ok(await page.locator("#wake-toggle").evaluate(el => {
+    const r = el.getBoundingClientRect();
+    return el.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
+  }), "Wake switch stays reachable while voice settings are open");
   await page.click("#setup-natural");
   await page.waitForFunction(() => document.querySelector("#voice-choice").value === "natural:af_heart");
   await page.click("#preview-voice");

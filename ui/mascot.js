@@ -87,6 +87,8 @@
     $("mic").setAttribute("aria-label", recording ? "Finish speaking and send to KAI" : "Start voice input");
     $("composer-hint").textContent = recording ? "Tap the mic to ask KAI" : voicePending ? "Preparing your voice…" : busy ? "KAI is thinking · Stop to interrupt" : "Enter to send";
     $("welcome").hidden = history.length > 0 || $("messages").childElementCount > 0;
+    $("preview-voice").textContent = speaking ? "Stop voice" : "Hear a hello";
+    $("preview-voice").disabled = (busy && !speaking) || !!recording || voicePending;
     pauseWake();
   }
   function message(role, text = "") {
@@ -496,6 +498,7 @@
   $("voice-choice").onchange = () => { stopSpeech(); voiceChoice = $("voice-choice").value; write("kai-mascot-voice-choice", voiceChoice); };
   $("setup-natural").onclick = installNatural;
   $("preview-voice").onclick = () => {
+    if (speaking) { stopSpeech(); return; }
     if (busy || recording || voicePending) return;
     voiceReplies = true; write("kai-mascot-voice", "1"); voiceReplyUI(); notice("");
     speak("Hey, I'm KAI. A little robot with a lot of curiosity. What shall we do today?");

@@ -167,7 +167,7 @@ body.motion-off .kai-gaze{transform:none}
 #quick-wake[aria-pressed=true]{color:#a5ffda;background:#64d99b25}
 body.wake-on #status-pill>span:first-child{background:#8af0ba}
 #mascot-dock{right:8px}
-#voice-options-panel{position:absolute;z-index:5;inset:124px 0 0;padding:16px 20px 22px;overflow-y:auto;background:linear-gradient(160deg,#1b3042,#101d2b);border-top:1px solid #9bc8db24}
+#voice-options-panel{position:absolute;z-index:5;inset:146px 0 0;padding:16px 20px 22px;overflow-y:auto;background:linear-gradient(160deg,#1b3042,#101d2b);border-top:1px solid #9bc8db24}
 .voice-options-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:14px;color:#ecfffa}
 .voice-options-heading strong{font-size:16px;font-weight:550;letter-spacing:-.4px}
 #voice-options-panel label{display:block;color:#9eb8c7;font-size:11px;margin-bottom:7px}
