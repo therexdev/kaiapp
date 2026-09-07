@@ -116,6 +116,7 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, di
     if (disposed || !window || window.isDestroyed()) return { ok: false };
     ignore(false);
     window.show();
+    resize(false); // Every launch starts with just KAI; chat is opened explicitly.
     send("launch", { model: typeof options.model === "string" ? options.model.slice(0, 160) : null, expanded });
     const main = getMainWindow();
     if (main && !main.isDestroyed()) main.hide();

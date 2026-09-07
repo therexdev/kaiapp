@@ -7,12 +7,15 @@
   // One inference and one playback at most; prepare the next phrase while the
   // current one plays. Epochs make Stop and new requests discard all late work.
   class Queue {
-    constructor({ prepare, play, cancel, onState, onError }) {
-      Object.assign(this, { prepare, play, cancel, onState, onError });
+    constructor({ prepare, play, cancel, holdPlayback = () => {}, onState, onError }) {
+      Object.assign(this, { prepare, play, cancel, holdPlayback, onState, onError });
       this.epoch = 0; this.tasks = []; this.ready = []; this.preparing = false; this.playing = false;
     }
     enqueue(phrases) { this.tasks.push(...phrases.filter(Boolean)); this.pump(); }
     state() { this.onState(this.playing ? "speaking" : this.preparing || this.tasks.length || this.ready.length ? "preparing" : "idle"); }
+    hold(value) {
+      this.held = value; this.holdPlayback(value); this.pump();
+    }
     pump() {
       this.state();
       const epoch = this.epoch;
@@ -24,7 +27,7 @@
         }).catch(error => { if (epoch === this.epoch) { this.stop(); this.onError(error); } })
           .finally(() => { if (epoch === this.epoch) { this.preparing = false; this.abort = null; this.pump(); } });
       }
-      if (!this.playing && this.ready.length) {
+      if (!this.held && !this.playing && this.ready.length) {
         this.playing = true;
         const value = this.ready.shift();
         Promise.resolve().then(() => epoch === this.epoch ? this.play(value) : null).catch(error => {
@@ -36,7 +39,7 @@
     }
     stop() {
       this.epoch++; this.tasks = []; this.ready = []; this.preparing = false; this.playing = false;
-      this.abort?.abort(); this.abort = null; this.cancel(); this.state();
+      this.abort?.abort(); this.abort = null; this.held = false; this.cancel(); this.state();
     }
   }
   return { Queue };

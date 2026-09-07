@@ -47,9 +47,9 @@ async function main() {
     assert.deepEqual(folders.opened, [folders.expected]);
     const refused = await mascot.evaluate(async () => { try { await window.kaiDesktop.openFolder("C:\\Windows\\System32\\cmd.exe"); return false; } catch { return true; } });
     assert.equal(refused, true);
-    await mascot.click("#collapse");
-    await mascot.waitForFunction(() => document.querySelector("#conversation").hidden);
     await app.evaluate(async () => { await globalThis.__kaiController.launch(); });
+    await mascot.waitForFunction(() => document.querySelector("#conversation").hidden);
+    assert.equal(await app.evaluate(() => globalThis.__kaiController.getWindow().getBounds().width), 248, "Relaunch collapses an open chat");
     assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 2, "Relaunch reuses the same mascot");
     await mascot.click("#mascot-menu-button");
     await mascot.click("#menu-open-app");

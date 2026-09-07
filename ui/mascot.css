@@ -197,3 +197,18 @@ body[data-state=thinking] .kai-brows{transform:rotate(-5deg);transform-origin:16
 @keyframes kai-heartbeat{0%,100%{transform:scale(1)}45%{transform:scale(1.2)}}
 body.motion-off .kai-mouth-open,body.motion-off .kai-heart,body.suspended .kai-mouth-open,body.suspended .kai-heart{animation:none!important}
 @media(prefers-reduced-motion:reduce){.kai-mouth-open,.kai-heart{animation:none!important}}
+
+/* Voice controls and setup remain available in the 248 × 304 compact window. */
+#status-pill{pointer-events:auto;gap:5px;padding:7px 8px;right:8px;max-width:232px}
+#status-pill #mood-label{overflow:hidden;text-overflow:ellipsis}
+#quick-stop{padding:0 3px;background:none;color:#ffd6c3;font-size:11px}
+.voice-card{position:absolute;z-index:11;left:8px;right:8px;top:38px;max-height:210px;overflow:auto;padding:15px;border:1px solid #8bdcd144;border-radius:16px;background:#112332;box-shadow:0 8px 28px #0005;font-size:12px;line-height:1.5}
+.voice-card strong{display:block;color:#d5fff4;font-size:13px}
+.voice-card p{margin:9px 0 12px;color:#bdd6df}
+.voice-card button{padding:8px 10px;border-radius:8px;background:#a4f1dc;color:#153038;font-size:11px;font-weight:650}
+.voice-card button.text-button{background:none;color:#bdd6df;padding:8px}
+#voice-setup{margin:0;padding:15px;background:#112332;font-size:12px}
+#compact-notice{position:absolute;z-index:8;left:8px;right:8px;top:38px;max-height:160px;overflow:auto;padding:12px 25px 12px 12px;border:1px solid #94cbdf44;border-radius:13px;background:#122437f5;color:#d1e6eb;font-size:11px;line-height:1.5;box-shadow:0 8px 20px #0003}
+#dismiss-compact-notice{position:absolute;right:5px;top:4px;background:none;color:#d1e6eb;font-size:18px}
+body.expanded #compact-notice{display:none}
+#quick-mic[aria-pressed=true],#mic[aria-pressed=true]{color:#a8ffda;background:#71ecc220}

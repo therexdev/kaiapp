@@ -30,7 +30,7 @@ port.on("message", async event => {
   try {
     const tts = await engine();
     if (!text) return port.postMessage({ id, ready: true });
-    const audio = await tts.generate(text, { voice, speed: 1.03 });
+    const audio = await tts.generate(text, { voice, speed: 1.0 });
     const samples = audio.audio;
     const wav = Buffer.alloc(44 + samples.length * 2);
     wav.write("RIFF", 0); wav.writeUInt32LE(wav.length - 8, 4); wav.write("WAVEfmt ", 8);

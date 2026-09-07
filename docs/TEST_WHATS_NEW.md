@@ -1,11 +1,12 @@
-### KAI has a little more heart
+### A more natural conversation with KAI
 
-- A cuter robot with big sparkling eyes, rosy cheeks, happy squints and a tiny glowing heart.
-- **Natural voices:** open **Voice & listening → Get natural voices** for a one-time 93 MB download. Try Heart, Bella, Puck or Emma with **Hear a hello**. Speech runs locally; no account or subscription is needed.
-- **Talk while thinking:** KAI starts speaking complete sentences while the answer is still streaming. Stop interrupts both the answer and its voice.
-- **Hey KAI:** turn on the listening switch, then say “Hey KAI, bring up my Pictures folder.” Or say “Hey KAI,” wait for “I'm listening,” and ask. This first local wake mode listens for speech, then checks the phrase, so a short pause is normal.
-- **Approved desktop actions:** ask KAI to open Pictures, Documents, Downloads, Desktop, Music, Videos or Home. Each request asks for your approval. KAI can open these folders; it cannot read, change or delete their contents.
+- **Heart is now the default voice.** KAI offers a one-time 93 MB natural-voice download right beside the robot. No account or subscription is needed. The old automatic computer voice no longer takes over silently. You can preview Heart, Bella, Puck and Emma in **Voice & listening**.
+- **Tap the mic and talk.** You do not need a wake phrase or a second tap to send. Pause briefly and KAI answers. The waveform button enables “Hey KAI” when you want to start hands-free.
+- **Keep the conversation going.** After waking KAI, ask follow-up questions without repeating its name. KAI stays in conversation for a minute after each reply. Say “That’s all” to return to wake-only listening, or “Stop listening” to switch the microphone off.
+- **Interrupt naturally.** Start speaking during a reply and KAI pauses its voice. Once your words are recognized, it stops the old response and answers with the earlier conversation and your new request in context. Echo cancellation and a local echo check help prevent KAI from answering itself.
+- **Just the robot by default.** Voice questions do not open the chat panel. Click the chat bubble to open it and the minus button to minimize it again. A Stop button is available beside the robot during replies.
+- **More responsive listening.** Quieter speech is detected, pauses are shorter, and capture continues while earlier audio is being transcribed.
 
-Hey KAI stays active with the chat collapsed, pauses during replies, and turns off when you hide KAI or open the full app. The green microphone indicator and dock switch show when it is on. Microphone audio stays on this computer; only the question after the wake phrase reaches your selected chat model under the app's existing routing policy. Local listening requires the Windows speech-input setup already offered by KAI.
+Listening remains opt-in, with a green microphone indicator. Hiding KAI, returning to the full app or quitting turns it off. Microphone audio stays on this computer; accepted questions go to your selected chat model. Local transcription and voice generation still take some processing time, and speaker/microphone hardware affects interruption performance.
 
 Test continues using your existing profile, wallet, models and earning node.

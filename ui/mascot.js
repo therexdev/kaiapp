@@ -5,8 +5,8 @@
   const write = (key, value) => { try { localStorage.setItem(key, value); } catch { /* optional preferences */ } };
   let expanded = false, suspended = false, busy = false, history = [], chatId = read("kai-mascot-chat-id", "");
   let aliases = [], requestedModel = null, chatAbort = null, activeTask = Promise.resolve();
-  let recording = null, voicePending = false, voiceEpoch = 0, transcribeAbort = null, setupTimer = null;
-  let speechEpoch = 0, speaking = false, spokenReply = "", waveTimer = null, idleTimer = null;
+  let voicePending = false, setupTimer = null, voiceStartEpoch = 0, voiceCommandEpoch = 0, currentRequest = null;
+  let speechEpoch = 0, speaking = false, waveTimer = null, idleTimer = null;
   let voiceReplies = read("kai-mascot-voice", "0") === "1";
   let motion = read("kai-mascot-motion", "1") !== "0";
   let booted = false, savedFailure = false;
@@ -23,24 +23,29 @@
   function notice(message) {
     $("notice").textContent = message || "";
     $("notice").hidden = !message;
+    $("compact-notice-copy").textContent = message || "";
+    $("compact-notice").hidden = !message;
     regions();
   }
   const labels = {
     idle: "Here when you need me", greeting: "Hey! I'm KAI.", thinking: "Thinking it through…",
-    listening: "Listening · tap mic to finish", transcribing: "Turning speech into words…",
+    listening: "Listening…", transcribing: "Got it · one moment…",
     speaking: "KAI is speaking", voicing: "Finding my voice…", error: "Let's try that again", dragging: "Coming with you!",
   };
   function mood(value) {
+    if (wakePhase === "capturing") value = "listening";
+    else if (wakePhase === "transcribing") value = "transcribing";
     document.body.dataset.state = value;
     $("mood-label").textContent = value === "idle" && wakePhase === "waiting" ? "Say “Hey KAI” · mic on" :
-      value === "idle" && wakePhase === "listening" ? "Yes? I'm listening…" : labels[value] || labels.idle;
+      value === "idle" && wakePhase === "listening" ? "Your turn · mic on" :
+      wakePhase === "capturing" ? "Listening…" : wakePhase === "transcribing" ? "Got it · one moment…" : labels[value] || labels.idle;
     wake();
   }
   function wake() {
     document.body.classList.remove("asleep");
     clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
-      if (!busy && !recording && !voicePending && !speaking && !expanded && !wakeEnabled && motion) {
+      if (!busy && !voicePending && !speaking && !expanded && !wakeEnabled && motion) {
         document.body.classList.add("asleep");
         $("mood-label").textContent = "Resting my circuits…";
       }
@@ -66,7 +71,8 @@
     $("conversation").hidden = !expanded;
     $("mascot-menu").hidden = true;
     $("mascot-menu-button").setAttribute("aria-expanded", "false");
-    if (!expanded) cancelVoice();
+    $("toggle-chat").setAttribute("aria-expanded", String(expanded));
+    $("toggle-chat").title = expanded ? "Minimize chat" : "Open chat";
     regions();
     if (expanded) { wake(); setTimeout(() => $("question").focus(), 50); }
   }
@@ -75,20 +81,23 @@
     setExpanded(open);
   }
   function controls() {
-    const locked = busy || voicePending || !!recording;
+    const locked = busy || voicePending;
     $("send").hidden = busy;
     $("stop").hidden = !busy && !speaking;
     $("send").disabled = locked || (!$("model").value && !api.folderRequest($("question").value)) || !$("question").value.trim();
     $("new-chat").disabled = locked;
     $("model").disabled = locked;
-    $("mic").disabled = busy || voicePending;
-    $("quick-mic").disabled = busy || voicePending;
-    $("mic").setAttribute("aria-pressed", String(!!recording));
-    $("mic").setAttribute("aria-label", recording ? "Finish speaking and send to KAI" : "Start voice input");
-    $("composer-hint").textContent = recording ? "Tap the mic to ask KAI" : voicePending ? "Preparing your voice…" : busy ? "KAI is thinking · Stop to interrupt" : "Enter to send";
+    for (const id of ["mic", "quick-mic"]) {
+      $(id).disabled = voicePending;
+      $(id).setAttribute("aria-pressed", String(wakeEnabled && wakeListener.engaged));
+      $(id).setAttribute("aria-label", busy || speaking ? "Interrupt KAI and talk" : "Talk to KAI");
+      $(id).title = busy || speaking ? "Interrupt and talk" : "Talk now · no wake phrase needed";
+    }
+    $("quick-stop").hidden = !busy && !speaking;
+    $("composer-hint").textContent = voicePending ? "Preparing your voice…" : wakeEnabled ? "Pause to send · keep talking after replies" : "Enter to send";
     $("welcome").hidden = history.length > 0 || $("messages").childElementCount > 0;
     $("preview-voice").textContent = speaking ? "Stop voice" : "Hear a hello";
-    $("preview-voice").disabled = (busy && !speaking) || !!recording || voicePending;
+    $("preview-voice").disabled = (busy && !speaking) || voicePending;
     pauseWake();
   }
   function message(role, text = "") {
@@ -154,8 +163,14 @@
       notice("KAI cannot reach the app right now. Open the full app to check its status.");
     }
   }
-  let speechStatus = null, speechSetupTimer = null, cancelPlayback = null;
-  let voiceChoice = read("kai-mascot-voice-choice", "system");
+  let speechStatus = null, speechSetupTimer = null, cancelPlayback = null, holdPlayback = null;
+  let voiceChoice = read("kai-mascot-voice-choice", "natural:af_heart");
+  // The old automatic default selected legacy OS speech. Migrate that default
+  // once; preserve explicitly selected named voices and later user choices.
+  if (read("kai-mascot-natural-default-v2", "0") !== "1") {
+    if (voiceChoice === "system") voiceChoice = "natural:af_heart";
+    write("kai-mascot-voice-choice", voiceChoice); write("kai-mascot-natural-default-v2", "1");
+  }
   let wakeEnabled = false, wakeStarting = false, wakePhase = "off";
   const speech = new KaiSpeech.Queue({
     prepare: async (text, signal) => {
@@ -163,16 +178,17 @@
       const response = await fetch("/core/speech", { method: "POST", signal,
         headers: { "content-type": "application/json" }, body: JSON.stringify({ text, voice: voiceChoice.slice(8) }) });
       if (!response.ok) { const error = await response.json().catch(() => ({})); throw new Error(error.error || "Natural voice is unavailable. Choose a computer voice or retry setup."); }
-      return { blob: await response.blob() };
+      return { blob: await response.blob(), text };
     },
     play: value => new Promise((resolve, reject) => {
       let audio, url, done = false;
+      wakeListener.hearOutput(value.text);
       const finish = error => {
         if (done) return;
         done = true;
         if (audio) { audio.onended = null; audio.onerror = null; audio.pause(); audio.removeAttribute("src"); audio.load(); }
         if (url) URL.revokeObjectURL(url);
-        if (cancelPlayback === cancel) cancelPlayback = null;
+        if (cancelPlayback === cancel) { cancelPlayback = null; holdPlayback = null; }
         error ? reject(error) : resolve();
       };
       const cancel = () => finish();
@@ -180,7 +196,8 @@
       if (value.blob) {
         url = URL.createObjectURL(value.blob); audio = new Audio(url);
         audio.onended = () => finish(); audio.onerror = () => finish(new Error("KAI could not play the natural voice. Try again."));
-        audio.play().catch(finish);
+        holdPlayback = held => { if (held) audio.pause(); else if (!done) audio.play().catch(finish); };
+        if (!speech.held) audio.play().catch(finish);
       } else {
         if (!("speechSynthesis" in window)) return finish(new Error("Choose a natural voice to hear KAI on this computer."));
         const utterance = new SpeechSynthesisUtterance(value.text);
@@ -191,18 +208,20 @@
         if (selected) utterance.voice = selected;
         // Avoid silently choosing an online OS voice.
         else if (speechSynthesis.getVoices().some(v => !v.localService)) return finish(new Error("No local computer voice is available. Get natural voices to hear KAI."));
-        utterance.rate = 1.03; utterance.pitch = 1.08;
+        utterance.rate = 1; utterance.pitch = 1;
         utterance.onend = () => finish();
         utterance.onerror = event => finish(["interrupted", "canceled"].includes(event.error) ? null : new Error("Computer voice playback failed. Try a natural voice."));
-        spokenReply = utterance;
+        holdPlayback = held => held ? speechSynthesis.pause() : speechSynthesis.resume();
         speechSynthesis.speak(utterance);
+        if (speech.held) speechSynthesis.pause();
       }
     }),
     cancel: () => { window.speechSynthesis?.cancel(); cancelPlayback?.(); },
+    holdPlayback: held => holdPlayback?.(held),
     onState: state => {
       speaking = state !== "idle";
       if (speaking) mood(state === "speaking" ? "speaking" : "voicing");
-      else if (!recording && !voicePending) mood(busy ? "thinking" : "idle");
+      else if (!voicePending) mood(busy ? "thinking" : "idle");
       controls();
     },
     onError: error => notice(error.message + " The reply is still in your chat."),
@@ -210,19 +229,20 @@
   function stopSpeech() { speechEpoch++; speech.stop(); }
   function speak(text) {
     stopSpeech();
-    if (voiceReplies && !suspended) speech.enqueue(new api.SpeechPhrases().push(text, true));
+    if (voiceReplies && !suspended && ensureNatural()) speech.enqueue(new api.SpeechPhrases().push(text, true));
   }
   function enqueueSpeech(phrases, epoch) {
-    if (voiceReplies && !suspended && epoch === speechEpoch) speech.enqueue(phrases);
+    if (voiceReplies && !suspended && epoch === speechEpoch && (!voiceChoice.startsWith("natural:") || speechStatus?.available)) speech.enqueue(phrases);
   }
   function voiceChoices() {
     const select = $("voice-choice"); select.replaceChildren();
     const add = (value, label, disabled = false) => { const o = document.createElement("option"); o.value = value; o.textContent = label; o.disabled = disabled; select.append(o); };
-    for (const v of speechStatus?.voices || []) add("natural:" + v.id, v.name, !speechStatus.available);
+    for (const v of speechStatus?.voices || []) add("natural:" + v.id, v.name + " · natural");
     add("system", "Computer voice · automatic");
     for (const v of window.speechSynthesis?.getVoices() || []) if (v.localService) add("system:" + v.voiceURI, v.name + " · " + v.lang);
-    if (![...select.options].some(o => o.value === voiceChoice && !o.disabled)) voiceChoice = "system";
+    if (![...select.options].some(o => o.value === voiceChoice)) add(voiceChoice, "Heart · natural");
     select.value = voiceChoice;
+    voiceReplyUI();
   }
   async function loadSpeech() {
     try { speechStatus = await json("/core/speech"); }
@@ -233,11 +253,20 @@
     $("natural-status").textContent = speechStatus.available ? "Natural voices are ready. Speech stays on your computer." :
       "Download natural voices once (" + Math.ceil((speechStatus.downloadBytes || 93000000) / 1000000) + " MB). No account or subscription needed.";
   }
+  function ensureNatural() {
+    if (!voiceChoice.startsWith("natural:") || speechStatus?.available) return true;
+    $("natural-card").hidden = false;
+    $("compact-natural").disabled = !speechStatus?.installable;
+    $("natural-card-copy").textContent = speechStatus?.installable ?
+      "Give KAI a warm, natural voice. One download, about 93 MB. No account needed." :
+      "KAI's natural voice is unavailable. Open Voice & listening to retry or choose another voice.";
+    regions(); return false;
+  }
   function voiceOptions(open) {
     $("voice-options-panel").hidden = !open; $("voice-options").setAttribute("aria-expanded", String(open)); regions();
   }
   async function installNatural() {
-    stopSpeech(); $("setup-natural").disabled = true;
+    stopSpeech(); $("setup-natural").disabled = true; $("compact-natural").disabled = true;
     const deadline = Date.now() + 15 * 60000;
     try {
       await post("/core/speech/setup", {});
@@ -247,15 +276,25 @@
           if (status.setup?.state === "error") throw new Error(status.setup.error || "Natural voice setup failed.");
           if (status.setup?.state === "done") {
             voiceChoice = "natural:af_heart"; write("kai-mascot-voice-choice", voiceChoice);
-            await loadSpeech(); notice("KAI's natural voices are ready. Try Hear a hello."); return;
+            await loadSpeech(); $("natural-card").hidden = true;
+            notice("Heart's natural voice is ready.");
+            if (!suspended && !busy && !wakeListener.engaged) {
+              voiceReplies = true; voiceReplyUI(); speak("Hey, I'm Kai. It's good to hear you. What shall we do today?");
+            }
+            return;
           }
           if (Date.now() > deadline) throw new Error("Setup is taking longer than expected. Check your connection and try again.");
           $("natural-status").textContent = status.setup?.state === "loading" ? "Warming up KAI's new voice…" : "Downloading natural voices · " + (status.setup?.pct || 0) + "%";
+          $("natural-card-copy").textContent = $("natural-status").textContent;
           speechSetupTimer = setTimeout(poll, 1200);
-        } catch (error) { $("setup-natural").disabled = false; notice(error.message); }
+        } catch (error) { $("setup-natural").disabled = false; $("compact-natural").disabled = false; notice(error.message); }
       };
       await poll();
-    } catch (error) { $("setup-natural").disabled = false; notice(error.message); }
+    } catch (error) { $("setup-natural").disabled = false; $("compact-natural").disabled = false; notice(error.message); }
+  }
+  function interruptResponse(keepContext = true) {
+    if (keepContext && currentRequest) currentRequest.keepUser = true;
+    chatAbort?.abort(); bridge?.cancelAction?.(); stopSpeech();
   }
   const wakeListener = new KaiWake.Listener({
     wakeRequest: api.wakeRequest,
@@ -263,52 +302,87 @@
       headers: { "content-type": "audio/wav" }, body: KaiWav.encodeWav16kMono(samples, rate) }),
     onState: phase => {
       wakePhase = phase;
-      $("wake-label").textContent = phase === "listening" ? "I'm listening…" : phase === "paused" ? "Hey KAI paused" : phase === "waiting" ? "Hey KAI on" : "Hey KAI off";
-      if (!busy && !speaking && !recording && !voicePending) mood("idle");
+      $("wake-label").textContent = phase === "off" ? "Hey KAI off" : phase === "waiting" ? "Hey KAI on" : "Conversation on";
+      mood(busy ? "thinking" : speaking ? "speaking" : "idle");
       wakeUI();
     },
+    // Pause playback on speech onset; only discard the reply after local ASR
+    // confirms a user utterance. Noise/echo resumes the same audio position.
+    onInterrupt: () => speech.hold(true),
+    onResume: () => speech.hold(false),
     onCommand: async text => {
-      if (!wakeEnabled || suspended || busy || speaking || recording || voicePending) return;
-      await expand(true);
+      const epoch = ++voiceCommandEpoch;
       if (!wakeEnabled || suspended) return;
-      if ($("question").value.trim()) { $("question").value += " " + text; notice("Added your voice to the draft. Press Send when you're ready."); controls(); return; }
-      $("question").value = text; controls(); await ask();
+      interruptResponse();
+      await activeTask; // Commit the interrupted turn before the next prompt.
+      if (epoch !== voiceCommandEpoch || !wakeEnabled || suspended) return;
+      if ($("question").value.trim()) {
+        $("question").value += " " + text;
+        notice("Added your voice to the draft. Open chat to review and send it."); controls(); return;
+      }
+      $("question").value = text; controls(); ask();
     },
-    onError: error => { wakeEnabled = false; wakeStarting = false; wakeUI(); notice(error.message); },
+    onEnd: off => { interruptResponse(); if (off) stopWake(); },
+    onError: (error, options) => {
+      if (!options?.recoverable) { wakeEnabled = false; wakeStarting = false; voiceCommandEpoch++; }
+      wakeUI(); notice(error.message);
+    },
   });
   function wakeUI() {
     const active = wakeEnabled && wakeListener.active;
     $("wake-toggle").setAttribute("aria-pressed", String(active));
     $("quick-wake").setAttribute("aria-pressed", String(active));
-    $("quick-wake").title = active ? "Turn off Hey KAI listening" : "Turn on Hey KAI listening";
+    $("quick-wake").title = active ? "Microphone on · click to turn off" : "Listen for Hey KAI";
     document.body.classList.toggle("wake-on", active);
     $("wake-toggle").disabled = wakeStarting; $("quick-wake").disabled = wakeStarting;
+    for (const id of ["mic", "quick-mic"]) $(id).setAttribute("aria-pressed", String(active && wakeListener.engaged));
   }
   function stopWake() {
-    wakeEnabled = false; wakeStarting = false; wakeListener.stop(); wakeUI();
+    voiceStartEpoch++; voiceCommandEpoch++; wakeEnabled = false; wakeStarting = false; voicePending = false;
+    wakeListener.stop(); wakeUI(); controls();
   }
-  function pauseWake() { wakeListener.pause(busy || speaking || !!recording || voicePending || suspended); }
-  async function toggleWake() {
-    if (wakeEnabled || wakeStarting) return stopWake();
-    wakeEnabled = true; wakeStarting = true; wakeUI(); notice("");
+  function pauseWake() {
+    wakeListener.pause(suspended);
+    wakeListener.setResponding(busy || speaking);
+  }
+  async function startListening(direct = false) {
+    if (wakeStarting || suspended) return;
+    if (wakeListener.active) {
+      if (direct) { interruptResponse(); wakeListener.engage(); }
+      return;
+    }
+    const epoch = ++voiceStartEpoch;
+    wakeEnabled = true; wakeStarting = true; voicePending = true; wakeUI(); controls(); notice("");
     try {
-      if (!(await ensureVoice()) || !wakeEnabled || suspended) { stopWake(); if (!expanded) await expand(true); return; }
-      await wakeListener.start();
-      if (!wakeEnabled || suspended) { stopWake(); return; }
-      voiceReplies = true; write("kai-mascot-voice", "1"); voiceReplyUI(); pauseWake();
-      notice("Say ‘Hey KAI’ with your question, then pause. Listening stays on while KAI is visible.");
-    } catch (error) { stopWake(); notice(error.name === "NotAllowedError" ? "Microphone access is blocked. Allow Koinos AI in your system settings to use Hey KAI." : error.message); }
-    finally { wakeStarting = false; wakeUI(); }
+      if (!(await ensureVoice()) || epoch !== voiceStartEpoch || suspended) { if (epoch === voiceStartEpoch) stopWake(); return; }
+      await wakeListener.start({ engaged: direct });
+      if (epoch !== voiceStartEpoch || suspended) return;
+      voiceReplies = true; write("kai-mascot-voice", "1"); voiceReplyUI(); pauseWake(); ensureNatural();
+    } catch (error) {
+      if (epoch !== voiceStartEpoch) return;
+      stopWake(); notice(error.name === "NotAllowedError" ? "Microphone access is blocked. Allow Koinos AI in your system settings, then tap the mic." : error.message);
+    } finally { if (epoch === voiceStartEpoch) { wakeStarting = false; voicePending = false; wakeUI(); controls(); } }
+  }
+  function toggleWake() { return wakeEnabled || wakeStarting ? stopWake() : startListening(false); }
+  async function mic() {
+    notice("");
+    if (wakePhase === "capturing") return wakeListener.flush();
+    interruptResponse();
+    return startListening(true);
   }
   function voiceReplyUI() {
     $("read-aloud").setAttribute("aria-pressed", String(voiceReplies));
-    $("read-aloud").querySelector("span").textContent = voiceReplies ? "Voice replies on" : "Voice replies off";
+    const name = voiceChoice.startsWith("natural:") ?
+      (speechStatus?.voices?.find(v => "natural:" + v.id === voiceChoice)?.name.split(" · ")[0] || "Natural") : "Computer";
+    $("read-aloud").querySelector("span").textContent = voiceReplies ? name + " voice on" : "Voice replies off";
   }
   async function send() {
     const text = $("question").value.trim(), model = $("model").value;
     const folder = api.folderRequest(text);
-    if (!text || (!model && !folder) || busy || recording || voicePending) return;
+    if (!text || (!model && !folder) || busy || voicePending) return;
     stopSpeech(); notice(""); busy = true; mood("thinking");
+    const request = currentRequest = { keepUser: false };
+    if (voiceReplies) ensureNatural();
     const phrases = new api.SpeechPhrases(), replyEpoch = speechEpoch;
     $("question").value = "";
     history.push({ role: "user", content: text });
@@ -359,27 +433,18 @@
           source.textContent = served || "Answered on the Koinos Network"; reply.element.append(source);
         }
         await saveChat();
+      } else if (request.keepUser) {
+        reply.element.remove(); await saveChat();
       } else {
         reply.element.remove(); userBubble.element.remove(); history.pop();
         if (!$("question").value) $("question").value = text;
       }
-      busy = false; chatAbort = null; controls(); scroll();
+      busy = false; chatAbort = null; currentRequest = null; controls(); scroll();
       if (completed) { if (!speaking) mood("idle"); }
       else if (document.body.dataset.state !== "error") mood("idle");
     }
   }
   function ask() { activeTask = send(); return activeTask; }
-  function cancelVoice() {
-    voiceEpoch++; transcribeAbort?.abort(); transcribeAbort = null;
-    const rec = recording; recording = null;
-    if (rec) {
-      clearTimeout(rec.timer); rec.stream.getTracks().forEach(track => track.stop());
-      if (rec.recorder.state !== "inactive") rec.recorder.stop();
-    }
-    voicePending = false;
-    if (!busy && !speaking) mood("idle");
-    controls();
-  }
   async function ensureVoice() {
     const status = await json("/core/voice");
     if (status.available) return true;
@@ -390,68 +455,6 @@
       Math.round((status.downloadBytes || 156000000) / 1000000) + " MB). Your microphone audio stays on this computer.";
     $("voice-setup").hidden = false; regions();
     return false;
-  }
-  async function startRecording() {
-    if (busy || voicePending || recording) return;
-    // Manual recording owns the device until the user enables wake mode again.
-    if (wakeEnabled || wakeStarting) stopWake();
-    stopSpeech(); notice(""); voicePending = true; controls();
-    const epoch = ++voiceEpoch;
-    try {
-      if (!(await ensureVoice()) || epoch !== voiceEpoch || suspended) return;
-      if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") throw new Error("This computer does not expose a microphone to KAI.");
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: false });
-      if (epoch !== voiceEpoch || suspended) { stream.getTracks().forEach(t => t.stop()); return; }
-      let recorder;
-      try { recorder = new MediaRecorder(stream); } catch (error) { stream.getTracks().forEach(t => t.stop()); throw error; }
-      const chunks = [];
-      recorder.ondataavailable = event => { if (event.data.size) chunks.push(event.data); };
-      recorder.onerror = () => { cancelVoice(); notice("The microphone stopped working. Check its connection and try again."); };
-      recording = { recorder, stream, chunks, epoch, draft: $("question").value, timer: setTimeout(finishRecording, 90000) };
-      recorder.start(250); mood("listening");
-      voiceReplies = true; write("kai-mascot-voice", "1"); voiceReplyUI();
-    } catch (error) {
-      if (epoch !== voiceEpoch) return;
-      mood("error");
-      notice(error.name === "NotAllowedError" ? "Microphone access is blocked. Allow Koinos AI in your system's microphone settings, then try again." : error.message);
-    } finally { if (epoch === voiceEpoch) { voicePending = false; controls(); } }
-  }
-  async function finishRecording() {
-    if (!recording) return;
-    const rec = recording; recording = null; clearTimeout(rec.timer);
-    voicePending = true; mood("transcribing"); controls();
-    transcribeAbort = new AbortController();
-    try {
-      await new Promise((resolve, reject) => {
-        rec.recorder.onstop = resolve;
-        rec.recorder.onerror = () => reject(new Error("The recording could not be completed."));
-        rec.recorder.stop();
-      });
-      rec.stream.getTracks().forEach(t => t.stop());
-      if (rec.epoch !== voiceEpoch || suspended) return;
-      const raw = await new Blob(rec.chunks, { type: rec.recorder.mimeType || "audio/webm" }).arrayBuffer();
-      const context = new OfflineAudioContext(1, 1, 16000);
-      const decoded = await context.decodeAudioData(raw);
-      const wav = KaiWav.encodeWav16kMono(decoded.getChannelData(0), decoded.sampleRate);
-      const result = await json("/core/transcribe", { method: "POST", headers: { "content-type": "audio/wav" }, body: wav, signal: transcribeAbort.signal });
-      if (rec.epoch !== voiceEpoch || suspended) return;
-      const text = result.text?.trim();
-      if (!text) throw new Error("I didn't catch that. Try speaking a little closer to the microphone.");
-      $("question").value = rec.draft.trim() ? rec.draft.trimEnd() + " " + text : text;
-      voicePending = false; mood("idle"); controls();
-      if (!rec.draft.trim()) await ask();
-      else { notice("Added your voice to the draft. Press Send when you're ready."); $("question").focus(); }
-    } catch (error) {
-      if (rec.epoch === voiceEpoch && error.name !== "AbortError") { mood("error"); notice(error.message); }
-    } finally {
-      rec.stream.getTracks().forEach(t => t.stop());
-      if (rec.epoch === voiceEpoch) { voicePending = false; transcribeAbort = null; controls(); }
-    }
-  }
-  async function mic() {
-    if (recording) return finishRecording();
-    if (!expanded) await expand(true);
-    return startRecording();
   }
   async function installVoice() {
     $("install-voice").disabled = true; notice("");
@@ -464,7 +467,7 @@
           const status = await json("/core/voice");
           if (status.available) {
             $("voice-setup").hidden = true; $("install-voice").disabled = false;
-            notice("Voice is ready. Tap the microphone, speak, then tap again to ask KAI."); regions(); return;
+            notice("Listening is ready. Tap the mic and talk, or turn on Hey KAI."); regions(); return;
           }
           if (status.setup?.state === "error") throw new Error(status.setup.error || "Voice setup failed.");
           if (Date.now() > deadline) throw new Error("Voice setup is taking longer than expected. Check your connection and try again.");
@@ -476,7 +479,7 @@
   }
   function suspend(value) {
     suspended = !!value; document.body.classList.toggle("suspended", suspended);
-    if (suspended) { chatAbort?.abort(); bridge?.cancelAction?.(); stopWake(); cancelVoice(); stopSpeech(); }
+    if (suspended) { chatAbort?.abort(); bridge?.cancelAction?.(); stopWake(); stopSpeech(); }
     else wake();
   }
   function main(view) {
@@ -490,16 +493,18 @@
   $("question").addEventListener("keydown", event => {
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); ask(); }
   });
-  $("stop").onclick = () => { chatAbort?.abort(); bridge?.cancelAction?.(); stopSpeech(); if (!busy) mood("idle"); };
+  $("stop").onclick = $("quick-stop").onclick = () => { interruptResponse(false); if (!busy) mood("idle"); };
   $("wake-toggle").onclick = toggleWake; $("quick-wake").onclick = toggleWake;
   $("voice-options").onclick = () => voiceOptions($("voice-options-panel").hidden);
   $("close-voice-options").onclick = () => voiceOptions(false);
   $("menu-voice").onclick = async () => { await expand(true); voiceOptions(true); };
-  $("voice-choice").onchange = () => { stopSpeech(); voiceChoice = $("voice-choice").value; write("kai-mascot-voice-choice", voiceChoice); };
-  $("setup-natural").onclick = installNatural;
+  $("voice-choice").onchange = () => { stopSpeech(); voiceChoice = $("voice-choice").value; write("kai-mascot-voice-choice", voiceChoice); voiceReplyUI(); ensureNatural(); };
+  $("setup-natural").onclick = $("compact-natural").onclick = installNatural;
+  $("later-natural").onclick = () => { $("natural-card").hidden = true; regions(); };
+  $("dismiss-compact-notice").onclick = () => notice("");
   $("preview-voice").onclick = () => {
     if (speaking) { stopSpeech(); return; }
-    if (busy || recording || voicePending) return;
+    if (busy || voicePending) return;
     voiceReplies = true; write("kai-mascot-voice", "1"); voiceReplyUI(); notice("");
     speak("Hey, I'm KAI. A little robot with a lot of curiosity. What shall we do today?");
   };
@@ -512,7 +517,7 @@
   $("main-app").onclick = () => main("chat"); $("menu-open-app").onclick = () => main("chat");
   $("open-models").onclick = () => main("models");
   $("new-chat").onclick = async () => {
-    if (busy || recording || voicePending) return;
+    if (busy || voicePending) return;
     if (savedFailure) { await saveChat(); if (savedFailure) return; }
     stopSpeech(); history = []; chatId = ""; write("kai-mascot-chat-id", "");
     $("messages").replaceChildren(); $("question").value = ""; notice(""); controls(); mood("idle"); $("question").focus(); wave();
@@ -521,6 +526,7 @@
   $("read-aloud").onclick = () => {
     voiceReplies = !voiceReplies; write("kai-mascot-voice", voiceReplies ? "1" : "0"); voiceReplyUI();
     if (!voiceReplies) { stopSpeech(); if (!busy) mood("idle"); }
+    else ensureNatural();
   };
   $("wave").onclick = () => { wave(); $("mascot-menu").hidden = true; regions(); };
   $("motion").onclick = () => {
@@ -537,7 +543,7 @@
   document.querySelectorAll("[data-prompt]").forEach(button => button.onclick = () => { $("question").value = button.dataset.prompt; controls(); ask(); });
   document.addEventListener("keydown", event => {
     if (event.key === "Escape") {
-      if (recording || voicePending) cancelVoice();
+      if (voicePending || wakePhase === "capturing") stopWake();
       else if (busy || speaking) { chatAbort?.abort(); bridge?.cancelAction?.(); stopSpeech(); }
       else if (!$("voice-options-panel").hidden) voiceOptions(false);
       else if (!$("mascot-menu").hidden) { $("mascot-menu").hidden = true; regions(); }
@@ -564,7 +570,7 @@
     if (!pointer) return;
     const prior = pointer; pointer = null; bridge?.endDrag();
     if ($("robot").hasPointerCapture(event.pointerId)) $("robot").releasePointerCapture(event.pointerId);
-    if (prior.moved) mood(busy ? "thinking" : recording ? "listening" : voicePending ? "transcribing" : speaking ? "speaking" : "idle");
+    if (prior.moved) mood(busy ? "thinking" : voicePending ? "transcribing" : speaking ? "speaking" : "idle");
     else if (event.type === "pointerup") { wave(); expand(!expanded); }
   }
   $("robot").addEventListener("pointerup", endDrag);
@@ -590,7 +596,7 @@
     voiceReplyUI();
     await loadSpeech();
     await loadModels(); await loadChat(); booted = true;
-    if (!bridge) setExpanded(true);
+    setExpanded(false);
     regions(); wave(); wake();
   })();
   bridge?.onEvent(async ({ type, value }) => {
@@ -601,8 +607,8 @@
       await ready; await activeTask;
       suspend(false); notice(""); await loadModels(requestedModel);
       if (!savedFailure) await loadChat();
-      setExpanded(value?.expanded || false); wave(); regions();
+      setExpanded(false); wave(); regions();
     }
   });
-  setInterval(() => { if (booted && !suspended && !busy && !recording && !voicePending) loadModels(); }, 15000);
+  setInterval(() => { if (booted && !suspended && !busy && !voicePending) loadModels(); }, 15000);
 })();

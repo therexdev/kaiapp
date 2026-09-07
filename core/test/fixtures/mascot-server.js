@@ -21,7 +21,7 @@ async function startMascotServer(dataDir) {
     if (url.pathname === "/core/speech" && req.method === "POST") {
       state.speech.push(JSON.parse(raw));
       const { encodeWav16kMono } = require("../../../ui/audio-wav");
-      const tone = Float32Array.from({ length: 3200 }, (_, i) => Math.sin(i * .05) * .1);
+      const tone = Float32Array.from({ length: Math.round(16000 * (state.speechSeconds || .2)) }, (_, i) => Math.sin(i * .05) * .1);
       res.writeHead(200, { "content-type": "audio/wav" }); return res.end(Buffer.from(encodeWav16kMono(tone, 16000)));
     }
     if (url.pathname === "/core/chats" && req.method === "POST") return output({ ok: true, ...chats.save(JSON.parse(raw)) });

@@ -22,15 +22,15 @@
         <button id="voice-options" aria-expanded="false">Voice &amp; listening <span>⌄</span></button>
       </div>
       <section id="voice-options-panel" aria-label="Voice and listening settings" hidden>
-        <div class="voice-options-heading"><strong>A voice with a little heart.</strong><button id="close-voice-options" class="icon-button" aria-label="Close voice settings">×</button></div>
+        <div class="voice-options-heading"><strong>Warm voice. Real conversation.</strong><button id="close-voice-options" class="icon-button" aria-label="Close voice settings">×</button></div>
         <label for="voice-choice">KAI's voice</label>
         <select id="voice-choice"><option value="system">Computer voice</option></select>
         <div class="voice-option-actions"><button id="preview-voice">Hear a hello</button><button id="setup-natural">Get natural voices</button></div>
-        <p id="natural-status">Natural voices speak locally after a one-time 93 MB download.</p>
+        <p id="natural-status">Heart is KAI’s natural voice. Download it once, then it speaks on your computer.</p>
         <div class="voice-divider"></div>
         <strong>Just say “Hey KAI”</strong>
-        <p>Turn on the switch above, then say “Hey KAI, bring up my Pictures folder.” Or say “Hey KAI,” wait for “I'm listening,” and ask your question.</p>
-        <p class="muted">Microphone audio is processed on this computer. Only your question after the wake phrase goes to the selected chat model. Listening pauses during replies and turns off when you hide KAI or open the full app.</p>
+        <p>Tap the mic and talk, or turn on Hey KAI and say your question. Pause to send. Keep talking after KAI answers—you have a minute for follow-ups. You can interrupt, too.</p>
+        <p class="muted">The chat can stay closed. Say “That’s all” to end the conversation, or “Stop listening” to turn the mic off. Audio stays on this computer; accepted questions go to your selected chat model. Hiding KAI turns the mic off.</p>
       </section>
       <div id="transcript" role="log" aria-label="Conversation">
         <div id="welcome">
@@ -46,7 +46,6 @@
         <div id="messages"></div>
       </div>
       <div id="notice" role="status" hidden></div>
-      <div id="voice-setup" hidden><p id="voice-setup-copy"></p><button id="install-voice">Set up voice</button><button id="cancel-voice-setup" class="text-button">Later</button></div>
       <form id="composer">
         <label class="sr-only" for="question">Your message to KAI</label>
         <textarea id="question" rows="2" maxlength="12000" placeholder="Ask KAI anything…" autocomplete="off"></textarea>
@@ -63,10 +62,16 @@
       </footer>
     </section>
     <div id="mascot-stage">
-      <div id="status-pill" class="interactive"><span></span><span id="mood-label">Here when you need me</span></div>
+      <aside id="natural-card" class="voice-card interactive" aria-label="Set up KAI's natural voice" hidden>
+        <strong>Meet KAI’s natural voice</strong><p id="natural-card-copy"></p>
+        <button id="compact-natural">Get natural voice</button><button id="later-natural" class="text-button">Later</button>
+      </aside>
+      <div id="voice-setup" class="voice-card interactive" hidden><strong>Let KAI hear you</strong><p id="voice-setup-copy"></p><button id="install-voice">Set up listening</button><button id="cancel-voice-setup" class="text-button">Later</button></div>
+      <aside id="compact-notice" class="interactive" role="status" hidden><button id="dismiss-compact-notice" aria-label="Dismiss message">×</button><span id="compact-notice-copy"></span></aside>
+      <div id="status-pill" class="interactive"><span></span><span id="mood-label">Here when you need me</span><button id="quick-stop" title="Stop response" aria-label="Stop response" hidden>■</button></div>
       <button id="robot" class="interactive" aria-label="KAI. Click to chat, or drag to move." title="Click to chat · Drag to move"><span id="kai-art" aria-hidden="true"></span></button>
       <div id="mascot-dock" class="interactive">
-        <button id="toggle-chat" title="Chat with KAI"><span class="dock-dot"></span><strong>KAI</strong><svg viewBox="0 0 24 24"><path d="M5 5h14v11H9l-4 4Z"/></svg></button>
+        <button id="toggle-chat" title="Open chat" aria-label="Open or minimize chat" aria-expanded="false"><span class="dock-dot"></span><strong>KAI</strong><svg viewBox="0 0 24 24"><path d="M5 5h14v11H9l-4 4Z"/></svg></button>
         <button id="quick-mic" class="icon-button" title="Talk to KAI" aria-label="Talk to KAI"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M6 10v2a6 6 0 0 0 12 0v-2M12 18v3"/></svg></button>
         <button id="quick-wake" class="icon-button" title="Hey KAI listening off" aria-label="Toggle Hey KAI listening" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M4 10v4M8 6v12M12 3v18M16 6v12M20 10v4"/></svg></button>
         <button id="mascot-menu-button" class="icon-button" title="KAI options" aria-label="KAI options" aria-expanded="false"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
