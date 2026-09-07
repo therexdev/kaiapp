@@ -1073,7 +1073,9 @@ button.small:disabled { opacity: 0.5; cursor: default; }
 .provider-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .provider-heading h3 { margin: 0 0 16px; }
 .provider-card label { display: block; margin: 12px 0 6px; }
-.provider-card input { width: 100%; box-sizing: border-box; }
+.provider-card input { width: 100%; box-sizing: border-box; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font: inherit; }
+.provider-card input::placeholder { color: var(--text-dim); }
+.provider-card input:focus { outline: 1px solid var(--violet); box-shadow: 0 0 0 3px #8b5cf61a; }
 .provider-buttons { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 16px; }
-.provider-buttons a { font-size: 12px; margin-left: auto; }
+.provider-buttons a { font-size: 12px; margin-left: auto; color: var(--sky); text-underline-offset: 3px; }
 .provider-card [data-provider-result]:empty { display: none; }

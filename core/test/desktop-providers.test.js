@@ -80,6 +80,10 @@ test("provider errors, truncated streams and quota failures cannot retry, leak k
   await assert.rejects(service.chat(turn("desktop:openai:unknown"), () => {}), /no longer configured/); assert.equal(calls, 3);
 });
 test("Local-Only prevents egress; Stop, removing a connection and changing privacy abort in-flight requests", async t => {
+  // A real pending HTTPS request keeps Node alive. This synthetic fetch has
+  // no socket; keep the fixture alive while the unref'd privacy guard fires.
+  const pendingSocket = setInterval(() => {}, 1000);
+  t.after(() => clearInterval(pendingSocket));
   let mode = "local-only", calls = 0, started;
   const { service } = fixture(t, { privacyMode: () => mode, fetchImpl: (_url, { signal }) => {
     calls++; started?.(); return new Promise((_resolve, reject) => { signal.addEventListener("abort", () => reject(signal.reason), { once: true }); });
