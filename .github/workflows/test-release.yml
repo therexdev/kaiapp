@@ -60,14 +60,14 @@ jobs:
         run: node scripts/verify-shared-profile.js
       - name: Verify native KAI companion
         run: node scripts/verify-mascot-window.js
+      - name: Verify real Windows wake recognition
+        run: node scripts/verify-wake-voice.js
       - name: Build Windows preflight package
         run: npm run dist -- --win --dir --publish never
       - name: Verify Windows preflight contents
-        run: node scripts/verify-test-package.js
+        run: node scripts/verify-test-package.js --preflight
       - name: Verify Windows preflight natural voices
         run: node scripts/verify-neural-voice.js --packaged
-      - name: Verify real Windows wake recognition
-        run: node scripts/verify-wake-voice.js
       - name: Enable code signing (when configured)
         shell: bash
         env:

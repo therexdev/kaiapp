@@ -165,11 +165,11 @@
   }
   let speechStatus = null, speechSetupTimer = null, cancelPlayback = null, holdPlayback = null;
   let voiceChoice = read("kai-mascot-voice-choice", "natural:af_heart");
-  // The old automatic default selected legacy OS speech. Migrate that default
-  // once; preserve explicitly selected named voices and later user choices.
-  if (read("kai-mascot-natural-default-v2", "0") !== "1") {
-    if (voiceChoice === "system") voiceChoice = "natural:af_heart";
-    write("kai-mascot-voice-choice", voiceChoice); write("kai-mascot-natural-default-v2", "1");
+  // This voice revision upgrades legacy computer-voice selections once.
+  // Choices made after the upgrade remain the user's own preference.
+  if (read("kai-mascot-natural-default-v3", "0") !== "1") {
+    if (voiceChoice.startsWith("system")) voiceChoice = "natural:af_heart";
+    write("kai-mascot-voice-choice", voiceChoice); write("kai-mascot-natural-default-v3", "1");
   }
   let wakeEnabled = false, wakeStarting = false, wakePhase = "off";
   const speech = new KaiSpeech.Queue({

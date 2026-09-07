@@ -16,10 +16,14 @@ for (const archive of archives) {
   assert.equal(pkg.kaiChannel, "test");
   assert.equal(pkg.version, core.version);
   assert.match(pkg.version, /-test\./);
-  const config = yaml.load(fs.readFileSync(path.join(path.dirname(file), "app-update.yml"), "utf8"));
-  assert.equal(config.provider, "generic");
-  assert.equal(config.url, TEST_FEED);
-  assert.equal(config.channel, "test");
+  // electron-builder creates app-update.yml with an installer target, not
+  // --dir. The final installer check (without --preflight) always requires it.
+  if (!process.argv.includes("--preflight")) {
+    const config = yaml.load(fs.readFileSync(path.join(path.dirname(file), "app-update.yml"), "utf8"));
+    assert.equal(config.provider, "generic");
+    assert.equal(config.url, TEST_FEED);
+    assert.equal(config.channel, "test");
+  }
   for (const required of ["electron/mascot.js", "electron/mascot-preload.js", "ui/mascot.html",
     "ui/mascot.js", "ui/mascot-client.js", "ui/mascot.css", "ui/kai-robot.svg", "ui/mascot-launcher.js",
     "ui/mascot-speech.js", "ui/mascot-wake.js", "ui/mascot-audio-worklet.js",

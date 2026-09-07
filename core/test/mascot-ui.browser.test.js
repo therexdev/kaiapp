@@ -13,6 +13,7 @@ test("KAI UI: natural default, compact voice, follow-ups, barge-in context, hist
   browser = await chromium.launch({ executablePath: CHROMIUM, args: ["--no-sandbox", "--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] });
   const context = await browser.newContext({ viewport: { width: 660, height: 560 }, permissions: ["microphone"], deviceScaleFactor: 2 });
   await context.addInitScript(() => {
+    if (!localStorage.getItem("kai-mascot-natural-default-v3")) localStorage.setItem("kai-mascot-voice-choice", "system:test");
     window.__spoken = []; window.__streams = []; window.__mainRequests = []; window.__folderRequests = [];
     window.__audio = []; window.__pauses = 0; window.__toneMedia = true;
     const NativeAudio = window.Audio;
