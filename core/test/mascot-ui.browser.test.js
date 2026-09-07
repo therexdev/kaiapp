@@ -79,6 +79,14 @@ test("KAI UI: natural default, compact voice, follow-ups, barge-in context, hist
   await page.waitForSelector("#natural-card:not([hidden])");
   await compact(); assert.equal(await page.evaluate(() => window.__spoken.length), 0, "No silent fallback to legacy computer speech");
   await screenshot("kai-compact-voice-setup");
+  fixture.state.naturalError = "KAI's natural voice couldn't start. Try setting it up again. Your downloaded voices will be reused.";
+  await page.click("#compact-natural");
+  await page.waitForFunction(() => document.querySelector("#compact-natural").textContent === "Retry natural voice" && !document.querySelector("#compact-natural").disabled);
+  assert.match(await page.textContent("#natural-card-copy"), /couldn't start/);
+  assert.doesNotMatch(await page.textContent("#natural-card-copy"), /Starting|Warming/);
+  assert.equal(await page.evaluate(() => window.__spoken.length), 0);
+  await compact(); await screenshot("kai-natural-voice-retry");
+  fixture.state.naturalError = null;
   await page.click("#compact-natural");
   await page.waitForSelector("#natural-card", { state: "hidden" });
   assert.equal(await page.getAttribute("#quick-wake", "aria-pressed"), "true");

@@ -2,10 +2,12 @@
 const { parentPort, workerData } = require("worker_threads");
 const port = parentPort || process.parentPort;
 const modelDir = workerData?.modelDir || process.env.KAI_SPEECH_MODEL_DIR;
+const runtime = workerData?.runtime || process.env.KAI_SPEECH_RUNTIME || "native";
 let ready;
 async function engine() {
   if (!ready) ready = (async () => {
-    if (process.platform === "win32") {
+    if (runtime === "wasm") require("./speech-wasm").installWasmRuntime();
+    else if (process.platform === "win32") {
       const path = require("path");
       const runtime = path.join(path.dirname(require.resolve("onnxruntime-node")), "../bin/napi-v3/win32", process.arch, "onnxruntime_binding.node");
       require("./runtimes/llamacpp").ensureCrtBeside(runtime.replace(/app\.asar([/\\])/, "app.asar.unpacked$1"));

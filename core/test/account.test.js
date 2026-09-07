@@ -150,8 +150,10 @@ async function coreWithAccount() {
   const get = (p) => fetch(base + p).then(async (r) => ({ status: r.status, ...(await r.json()) }));
   // Wallet + point the app at the fake network + allow egress.
   await post("/core/earn/wallet", { password: PASSWORD });
-  await post("/core/network/config", { privacyMode: "network" });
+  // Enabling network mode immediately polls scheduler policy. Install the
+  // loopback fixture first so tests never poll the production scheduler.
   await post("/core/earn/config", { schedulerUrl: `${fake.origin}/scheduler` });
+  await post("/core/network/config", { privacyMode: "network" });
   return { core, base, fake, post, get, dir };
 }
 

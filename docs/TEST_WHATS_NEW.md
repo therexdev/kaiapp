@@ -1,3 +1,9 @@
+### Natural voice startup repair
+
+- KAI now automatically recovers when Windows cannot load its native voice DLL. The compatible engine uses the same local Heart, Bella, Puck and Emma voices and your existing voice download.
+- The setup card shows a clear error and **Retry natural voice** if setup fails, instead of staying on “Warming up.” Retrying verifies and reuses downloaded files.
+- Compatibility mode can take longer to generate speech. Replies still start playing as phrases become ready, and Stop and interruptions cancel pending audio.
+
 ### A more natural conversation with KAI
 
 - **Heart is now the default voice.** KAI offers a one-time 93 MB natural-voice download right beside the robot. No account or subscription is needed. The old automatic computer voice no longer takes over silently. You can preview Heart, Bella, Puck and Emma in **Voice & listening**.

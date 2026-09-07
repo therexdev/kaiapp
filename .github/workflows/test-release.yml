@@ -32,6 +32,11 @@ jobs:
       - run: npm test
         env:
           KAI_MASCOT_QA_DIR: mascot-qa
+          # Tests provide their own loopback services. Never use production
+          # defaults for background polls from temporary test profiles.
+          KAI_SCHEDULER_URL: http://127.0.0.1:9/scheduler
+          KAI_RELAY_URL: http://127.0.0.1:9
+          KAI_FEEDBACK_URL: http://127.0.0.1:9/feedback
       - name: Verify natural voice inference
         run: node scripts/verify-neural-voice.js
         env:
@@ -66,8 +71,8 @@ jobs:
         run: npm run dist -- --win --dir --publish never
       - name: Verify Windows preflight contents
         run: node scripts/verify-test-package.js --preflight
-      - name: Verify Windows preflight natural voices
-        run: node scripts/verify-neural-voice.js --packaged
+      - name: Verify packaged voice recovery with native DLL unavailable
+        run: node scripts/verify-neural-voice.js --packaged --without-native
       - name: Enable code signing (when configured)
         shell: bash
         env:

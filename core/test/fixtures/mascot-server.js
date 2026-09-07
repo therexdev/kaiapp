@@ -16,9 +16,9 @@ async function startMascotServer(dataDir) {
     if (url.pathname === "/core/voice") return output({ ok: true, ...state.voice });
     if (url.pathname === "/core/voice/setup") { state.voice.available = true; return output({ ok: true }); }
     if (url.pathname === "/core/transcribe") { state.transcriptions.push(raw); return output({ ok: true, text: state.transcript }); }
-    if (url.pathname === "/core/speech/setup") { state.naturalReady = true; return output({ ok: true }); }
-    if (url.pathname === "/core/speech" && req.method === "GET") return output({ ok: true, available: !!state.naturalReady, installable: true,
-      voices: [{ id: "af_heart", name: "Heart · warm & friendly" }, { id: "am_puck", name: "Puck · easygoing" }], setup: { state: state.naturalReady ? "done" : "idle" } });
+    if (url.pathname === "/core/speech/setup") { state.naturalReady = !state.naturalError; return output({ ok: true }); }
+    if (url.pathname === "/core/speech" && req.method === "GET") return output({ ok: true, available: !!state.naturalReady, installable: true, modelPresent: !!state.naturalError || !!state.naturalReady,
+      voices: [{ id: "af_heart", name: "Heart · warm & friendly" }, { id: "am_puck", name: "Puck · easygoing" }], setup: state.naturalError ? { state: "error", error: state.naturalError } : { state: state.naturalReady ? "done" : "idle" } });
     if (url.pathname === "/core/speech" && req.method === "POST") {
       state.speech.push(JSON.parse(raw));
       const { encodeWav16kMono } = require("../../../ui/audio-wav");

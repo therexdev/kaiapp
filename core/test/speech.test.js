@@ -4,6 +4,76 @@ const { SpeechManager } = require("../lib/speech");
 const { Gateway } = require("../lib/gateway");
 const os = require("os"), path = require("path");
 const tick = () => new Promise(resolve => setImmediate(resolve));
+for (const failure of ["message", "error", "exit", "constructor"]) test("Natural voice recovers from native " + failure + " without changing the request", async () => {
+  const workers = [], runtimes = [];
+  class FakeWorker extends EventEmitter {
+    constructor(file, { workerData }) {
+      super(); runtimes.push(workerData.runtime);
+      if (failure === "constructor" && workerData.runtime === "native") throw new Error("DLL initialization failed");
+      workers.push(this);
+    }
+    postMessage(value) { this.request = value; }
+    terminate() { this.terminated = true; return Promise.resolve(); }
+  }
+  const manager = new SpeechManager({ speechDir: os.tmpdir(), WorkerClass: FakeWorker });
+  manager.available = () => true;
+  try {
+    const pending = manager.generate({ text: "Hello friend", voice: "am_puck" });
+    const first = workers[0];
+    if (failure === "message") first.emit("message", { id: first.request.id, error: "DLL initialization failed" });
+    if (failure === "error") first.emit("error", new Error("DLL initialization failed"));
+    if (failure === "exit") first.emit("exit", 1);
+    assert.deepEqual(runtimes, ["native", "wasm"]);
+    const compatible = workers.at(-1);
+    assert.equal(compatible.request.text, "Hello friend"); assert.equal(compatible.request.voice, "am_puck");
+    await assert.rejects(manager.generate({ text: "Overlap" }), /busy/);
+    if (first !== compatible) {
+      assert.equal(first.terminated, true);
+      first.emit("message", { id: first.request.id, wav: Buffer.from("obsolete") });
+      first.emit("exit", 1);
+    }
+    compatible.emit("message", { id: compatible.request.id, wav: Buffer.from("recovered") });
+    assert.equal((await pending).toString(), "recovered");
+    manager.reset();
+    const again = manager.generate({ text: "Still here" });
+    workers.at(-1).emit("message", { id: workers.at(-1).request.id, wav: Buffer.from("again") });
+    await again;
+    assert.deepEqual(runtimes, ["native", "wasm", "wasm"], "Remember recovery after idle unload");
+  } finally { manager.close(); }
+});
+
+test("Compatibility recovery stays cancellable and a second failure exposes a retryable error", async () => {
+  const workers = [];
+  class FakeWorker extends EventEmitter {
+    constructor() { super(); workers.push(this); }
+    postMessage(value) { this.request = value; }
+    terminate() { return Promise.resolve(); }
+  }
+  const manager = new SpeechManager({ speechDir: os.tmpdir(), WorkerClass: FakeWorker });
+  manager.available = () => true;
+  try {
+    const abort = new AbortController();
+    const first = manager.generate({ text: "Hello", signal: abort.signal });
+    workers[0].emit("exit", 1);
+    const stopped = assert.rejects(first, /cancelled/);
+    abort.abort(); await stopped;
+    workers[1].emit("error", new Error("late failure"));
+    assert.equal(workers.length, 2); assert.equal(manager.worker, null);
+    const second = manager.generate({ text: "Try again" });
+    const rejected = assert.rejects(second, /downloaded voices will be reused/);
+    workers[2].emit("message", { id: workers[2].request.id, error: "C:\\private\\broken.node" });
+    await rejected;
+    assert.equal(workers.length, 3, "No repeated recovery loop");
+    assert.equal(manager.status().available, false); assert.equal(manager.status().modelPresent, true);
+    const third = manager.generate({ text: "Retry" });
+    workers[3].emit("message", { id: workers[3].request.id, wav: Buffer.from("repaired") });
+    await third; assert.equal(manager.status().available, true);
+    const last = manager.generate({ text: "Closing" });
+    const closed = assert.rejects(last, /shutting down/); manager.close(); await closed;
+    workers[3].emit("exit", 1); assert.equal(workers.length, 4);
+  } finally { manager.close(); }
+});
+
 test("Natural voice rejects invalid requests, limits inference concurrency, and cancels the worker", async () => {
   let worker, terminated = 0;
   class FakeWorker extends EventEmitter {

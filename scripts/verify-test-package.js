@@ -27,7 +27,7 @@ for (const archive of archives) {
   for (const required of ["electron/mascot.js", "electron/mascot-preload.js", "ui/mascot.html",
     "ui/mascot.js", "ui/mascot-client.js", "ui/mascot.css", "ui/kai-robot.svg", "ui/mascot-launcher.js",
     "ui/mascot-speech.js", "ui/mascot-wake.js", "ui/mascot-audio-worklet.js",
-    "electron/desktop-actions.js", "core/lib/speech.js", "core/lib/speech-worker.js", "core/runtimes/kokoro.json"]) {
+    "electron/desktop-actions.js", "core/lib/speech.js", "core/lib/speech-worker.js", "core/lib/speech-wasm.js", "core/lib/speech-wasm-runtime.mjs", "core/runtimes/kokoro.json"]) {
     try {
       // ASAR's directory walker splits on the host separator. Forward slashes
       // happen to work at one level on Windows, but fail for core/lib/*.js.
@@ -37,6 +37,9 @@ for (const archive of archives) {
         related: asar.listPackage(file).filter(p => p.includes("core/lib") || /speech|kokoro/.test(p)).slice(0, 100) }, null, 2));
       throw error;
     }
+  }
+  for (const asset of ["ort.node.min.js", "ort-wasm-simd-threaded.mjs", "ort-wasm-simd-threaded.wasm"]) {
+    assert.ok(fs.statSync(path.join(file + ".unpacked", "node_modules/onnxruntime-web/dist", asset)).size > 0, "Missing local compatible voice runtime: " + asset);
   }
   console.log(`Verified ${file}: ${pkg.version}`);
 }

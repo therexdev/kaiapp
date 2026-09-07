@@ -6,8 +6,8 @@ async function check(modulePath = "../core/lib/speech") {
   const manager = new SpeechManager({ speechDir: dir });
   try {
     await manager.ensure();
-    // Fail if inference tries to fetch anything after the opt-in install.
-    // The worker also has allowRemoteModels=false and reads bundled voices.
+    assert.equal(manager.status().runtime, process.env.KAI_EXPECT_SPEECH_RUNTIME || "native");
+    // Inference uses allowRemoteModels=false and bundled voice embeddings.
     const metrics = [];
     for (const voice of VOICES) {
       const start = Date.now();
@@ -22,14 +22,25 @@ async function check(modulePath = "../core/lib/speech") {
       metrics.push({ voice: voice.id, durationSeconds: (wav.length - 44) / 48000, elapsedMs: Date.now() - start, peak });
       if (process.env.KAI_MASCOT_QA_DIR) {
         fs.mkdirSync(process.env.KAI_MASCOT_QA_DIR, { recursive: true });
-        fs.writeFileSync(path.join(process.env.KAI_MASCOT_QA_DIR, "kai-" + voice.id + ".wav"), wav);
+        fs.writeFileSync(path.join(process.env.KAI_MASCOT_QA_DIR, "kai-" + manager.status().runtime + "-" + voice.id + ".wav"), wav);
       }
     }
-    console.log("PASS: four local natural voices, pinned model, isolated CPU worker, valid non-silent WAV.", JSON.stringify(metrics));
+    assert.equal(manager.status().runtime, process.env.KAI_EXPECT_SPEECH_RUNTIME || "native");
+    console.log("PASS: four local natural voices, pinned model, isolated " + manager.status().runtime + " worker, valid non-silent WAV.", JSON.stringify(metrics));
   } finally { manager.close(); }
 }
 module.exports = { check };
-if (require.main === module) {
+// Deliberately make ONLY the app's native addon unavailable. This reproduces
+// a loader failure even on Windows CI machines with current developer DLLs.
+// Always restore the build input, including when a child process fails.
+async function withoutNative(root, run) {
+  const native = path.join(root, "node_modules/onnxruntime-node/bin/napi-v3", process.platform, process.arch, "onnxruntime_binding.node");
+  const saved = native + ".kai-check-disabled";
+  assert.ok(fs.existsSync(native), "Expected native addon for failure check: " + native);
+  fs.renameSync(native, saved);
+  try { await run(); } finally { fs.renameSync(saved, native); }
+}
+async function main() {
   if (process.argv.includes("--packaged")) {
     const { spawnSync } = require("child_process");
     const archives = fs.readdirSync("dist", { recursive: true }).filter(p => path.basename(p) === "app.asar");
@@ -37,9 +48,19 @@ if (require.main === module) {
     for (const archive of archives) {
       const env = { ...process.env, KAI_SPEECH_ASAR: path.resolve("dist", archive), KAI_SPEECH_CHECK_DIR: dir };
       delete env.ELECTRON_RUN_AS_NODE;
-      const result = spawnSync(require("electron"), [path.join(__dirname, "fixtures/speech-desktop.js")], { env, stdio: "inherit", timeout: 300000 });
-      if (result.error) throw result.error;
-      assert.equal(result.status, 0, "Packaged voice engine must run inside Electron");
+      const run = () => {
+        const result = spawnSync(require("electron"), [path.join(__dirname, "fixtures/speech-desktop.js")], { env, stdio: "inherit", timeout: 600000 });
+        if (result.error) throw result.error;
+        assert.equal(result.status, 0, "Packaged voice engine must run inside Electron");
+      };
+      if (process.argv.includes("--without-native")) {
+        env.KAI_EXPECT_SPEECH_RUNTIME = "wasm";
+        await withoutNative(env.KAI_SPEECH_ASAR + ".unpacked", run);
+      } else run();
     }
-  } else check().catch(error => { console.error(error); process.exitCode = 1; });
+  } else if (process.argv.includes("--without-native")) {
+    process.env.KAI_EXPECT_SPEECH_RUNTIME = "wasm";
+    await withoutNative(path.join(__dirname, ".."), () => check());
+  } else await check();
 }
+if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1; });

@@ -249,15 +249,17 @@
     catch { speechStatus = { available: false, installable: false, voices: [] }; }
     voiceChoices();
     $("setup-natural").disabled = !speechStatus.installable;
-    $("setup-natural").textContent = speechStatus.available ? "Repair voices" : "Get natural voices";
-    $("natural-status").textContent = speechStatus.available ? "Natural voices are ready. Speech stays on your computer." :
-      "Download natural voices once (" + Math.ceil((speechStatus.downloadBytes || 93000000) / 1000000) + " MB). No account or subscription needed.";
+    $("setup-natural").textContent = speechStatus.available ? "Repair voices" : speechStatus.modelPresent ? "Retry natural voice" : "Get natural voices";
+    $("natural-status").textContent = speechStatus.setup?.state === "error" ? speechStatus.setup.error : speechStatus.available ? "Natural voices are ready. Speech stays on your computer." :
+      speechStatus.modelPresent ? "Your voices are downloaded. Retry setup to start KAI’s voice." : "Download natural voices once (" + Math.ceil((speechStatus.downloadBytes || 93000000) / 1000000) + " MB). No account or subscription needed.";
   }
   function ensureNatural() {
     if (!voiceChoice.startsWith("natural:") || speechStatus?.available) return true;
     $("natural-card").hidden = false;
     $("compact-natural").disabled = !speechStatus?.installable;
-    $("natural-card-copy").textContent = speechStatus?.installable ?
+    $("compact-natural").textContent = speechStatus?.modelPresent ? "Retry natural voice" : "Get natural voice";
+    $("natural-card-copy").textContent = speechStatus?.setup?.state === "error" ? speechStatus.setup.error : speechStatus?.modelPresent ?
+      "Your voices are downloaded. Retry setup to start KAI’s voice." : speechStatus?.installable ?
       "Give KAI a warm, natural voice. One download, about 93 MB. No account needed." :
       "KAI's natural voice is unavailable. Open Voice & listening to retry or choose another voice.";
     regions(); return false;
@@ -266,13 +268,23 @@
     $("voice-options-panel").hidden = !open; $("voice-options").setAttribute("aria-expanded", String(open)); regions();
   }
   async function installNatural() {
-    stopSpeech(); $("setup-natural").disabled = true; $("compact-natural").disabled = true;
+    stopSpeech(); clearTimeout(speechSetupTimer);
+    $("setup-natural").disabled = true; $("compact-natural").disabled = true;
+    const showProgress = text => { $("natural-status").textContent = text; $("natural-card-copy").textContent = text; regions(); };
+    const failed = error => {
+      clearTimeout(speechSetupTimer);
+      speechStatus = { ...speechStatus, available: false, setup: { state: "error", error: error.message } };
+      $("setup-natural").disabled = false; $("compact-natural").disabled = false;
+      $("setup-natural").textContent = "Retry natural voice"; $("compact-natural").textContent = "Retry natural voice";
+      showProgress(error.message); notice(error.message);
+    };
+    showProgress("Starting KAI’s natural voice…");
     const deadline = Date.now() + 15 * 60000;
     try {
       await post("/core/speech/setup", {});
       const poll = async () => {
         try {
-          const status = await json("/core/speech");
+          const status = speechStatus = await json("/core/speech");
           if (status.setup?.state === "error") throw new Error(status.setup.error || "Natural voice setup failed.");
           if (status.setup?.state === "done") {
             voiceChoice = "natural:af_heart"; write("kai-mascot-voice-choice", voiceChoice);
@@ -284,13 +296,12 @@
             return;
           }
           if (Date.now() > deadline) throw new Error("Setup is taking longer than expected. Check your connection and try again.");
-          $("natural-status").textContent = status.setup?.state === "loading" ? "Warming up KAI's new voice…" : "Downloading natural voices · " + (status.setup?.pct || 0) + "%";
-          $("natural-card-copy").textContent = $("natural-status").textContent;
+          showProgress(status.setup?.state === "loading" ? "Starting KAI’s natural voice…" : "Downloading natural voices · " + (status.setup?.pct || 0) + "%");
           speechSetupTimer = setTimeout(poll, 1200);
-        } catch (error) { $("setup-natural").disabled = false; $("compact-natural").disabled = false; notice(error.message); }
+        } catch (error) { failed(error); }
       };
       await poll();
-    } catch (error) { $("setup-natural").disabled = false; $("compact-natural").disabled = false; notice(error.message); }
+    } catch (error) { failed(error); }
   }
   function interruptResponse(keepContext = true) {
     if (keepContext && currentRequest) currentRequest.keepUser = true;
