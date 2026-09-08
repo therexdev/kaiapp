@@ -17,6 +17,11 @@ async function main() {
     mascot.on("pageerror", error => console.error("Mascot renderer:", error.message));
     await mascot.waitForSelector("#kai-art svg");
     await mascot.waitForFunction(() => document.querySelector("#model").value === "tiny-live");
+    const voiceStatus = await mascot.evaluate(() => window.kaiDesktop.windowsVoices());
+    assert.ok(voiceStatus.available); assert.ok(voiceStatus.voices.length);
+    const voiceBytes = await mascot.evaluate(async id => Array.from((await window.kaiDesktop.windowsSpeech({ voice: id, text: "Hey, I'm KAI." })).slice(0, 44)), voiceStatus.voices[0].id);
+    assert.equal(Buffer.from(voiceBytes).toString("ascii", 0, 4), "RIFF", "Sandboxed Windows audio reaches the renderer for character processing");
+    console.log("PASS: native fast Windows voice enumeration and PCM speech through the private companion preload.");
     let native = await app.evaluate(({ BrowserWindow }) => {
       const w = globalThis.__kaiController.getWindow();
       return { count: BrowserWindow.getAllWindows().length, mainVisible: globalThis.__kaiMain.isVisible(),

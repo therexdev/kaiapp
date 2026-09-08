@@ -59,6 +59,19 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
+      - name: Build fast Windows voice helper
+        run: node scripts/build-windows-voice.js
+      - name: Verify fast Windows voices and character effects
+        run: node scripts/verify-windows-voice.js
+        env:
+          KAI_MASCOT_QA_DIR: windows-voice-qa
+      - name: Save fast voice checks
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fast-windows-voice-checks
+          path: windows-voice-qa/*
+          if-no-files-found: ignore
       - name: Prepare test installer identity
         run: node scripts/prepare-test-build.js ${{ github.run_number }} ${{ github.run_attempt }}
       - name: Verify live profile handoff and credential reuse
@@ -71,6 +84,8 @@ jobs:
         run: npm run dist -- --win --dir --publish never
       - name: Verify Windows preflight contents
         run: node scripts/verify-test-package.js --preflight
+      - name: Verify packaged fast Windows voices
+        run: node scripts/verify-windows-voice.js --packaged
       - name: Verify packaged voice recovery with native DLL unavailable
         run: node scripts/verify-neural-voice.js --packaged --without-native
       - name: Enable code signing (when configured)

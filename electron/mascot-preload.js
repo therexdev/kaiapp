@@ -9,6 +9,10 @@ contextBridge.exposeInMainWorld("kaiDesktop", {
   openFolder: folder => ipcRenderer.invoke("mascot:open-folder", folder),
   cancelAction: () => ipcRenderer.send("mascot:cancel-action"),
   regions: regions => ipcRenderer.send("mascot:regions", regions),
+  windowsVoices: refresh => ipcRenderer.invoke("mascot:windows-voices", refresh === true),
+  windowsSpeech: request => ipcRenderer.invoke("mascot:windows-speech", request),
+  cancelWindowsSpeech: () => ipcRenderer.send("mascot:windows-speech-cancel"),
+  windowsVoiceSettings: () => ipcRenderer.invoke("mascot:windows-voice-settings"),
   startDrag: () => ipcRenderer.send("mascot:drag-start"),
   endDrag: cancelled => ipcRenderer.send("mascot:drag-end", cancelled === true),
   onEvent: callback => {

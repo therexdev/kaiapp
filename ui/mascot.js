@@ -181,6 +181,7 @@
       notice("KAI cannot reach the app right now. Open the full app to check its status.");
     }
   }
+  let windowsVoices = [], windowsStatus = null;
   let speechStatus = null, speechSetupTimer = null, cancelPlayback = null, holdPlayback = null;
   let voiceChoice = read("kai-mascot-voice-choice", "natural:af_bella");
   let voiceTone = read("kai-mascot-voice-tone", "cute");
@@ -188,7 +189,8 @@
   let voicePitch = Number(read("kai-mascot-voice-squeak", "9"));
   if (!Number.isFinite(voicePitch)) voicePitch = 9;
   voicePitch = Math.max(5, Math.min(12, voicePitch));
-  let speechStart = read("kai-mascot-speech-start", "quick") === "smooth" ? "smooth" : "quick";
+  let speechStart = read("kai-mascot-speech-start", "quick");
+  if (!["quick", "smooth", "complete"].includes(speechStart)) speechStart = "quick";
   // The owner requested replacing the old default with a cute character.
   // Apply once; every later voice/tone choice, including OS voices, persists.
   if (read("kai-mascot-cute-default-v1", "0") !== "1") {
@@ -206,17 +208,32 @@
   }
   let warmRequest = null;
   function warmSpeech() {
+    if (!suspended && voiceReplies && voiceChoice.startsWith("windows:")) { bridge?.windowsVoices?.().catch(() => {}); return; }
     if (warmRequest || suspended || !voiceReplies || !voiceChoice.startsWith("natural:") || !speechStatus?.available) return;
     // Only load already installed files, while the user speaks or the model
     // thinks. This endpoint cannot download a model or produce audio.
     warmRequest = post("/core/speech/warm", {}).catch(() => {}).finally(() => { warmRequest = null; });
   }
   const speech = new KaiSpeech.Queue({
-    buffer: () => speechStart === "smooth" && voiceChoice.startsWith("natural:") ? 2 : 1,
+    buffer: () => speechStart === "complete" ? "complete" : speechStart === "smooth" ? 2 : 1,
+    merge: values => {
+      const text = values.map(v => v.text).join(" ");
+      return values.every(v => v.wav) ? { wav: KaiSpeech.joinWavs(values.map(v => v.wav)), text } : { ...values[0], text };
+    },
     prepare: async (text, signal) => {
       const preview = typeof text === "object" && text.preview;
       if (preview) text = previewHello;
       const voice = voiceChoice, tone = voiceTone, pitch = voicePitch;
+      if (voice.startsWith("windows:")) {
+        if (!bridge?.windowsSpeech) throw new Error("Fast Windows voices need the installed desktop app.");
+        signal.throwIfAborted();
+        const abort = () => bridge.cancelWindowsSpeech(); signal.addEventListener("abort", abort, { once: true });
+        try {
+          const bytes = new Uint8Array(await bridge.windowsSpeech({ text, voice: voice.slice(8) }));
+          signal.throwIfAborted();
+          return { wav: KaiSpeech.characterTone(bytes.buffer, tone, pitch), text };
+        } finally { signal.removeEventListener("abort", abort); }
+      }
       if (!voice.startsWith("natural:")) return { text, voice, tone, pitch };
       if (preview && voice === "natural:af_bella") {
         if (!helloAudio) {
@@ -226,7 +243,7 @@
         }
         signal.throwIfAborted();
         const wav = KaiSpeech.characterTone(helloAudio, tone, pitch);
-        return { blob: new Blob([wav], { type: "audio/wav" }), text };
+        return { wav, text };
       }
       const wav = await KaiSpeech.prepareSentence(text, { signal, tone, pitch, synthesize: async (chunk, signal) => {
         const response = await fetch("/core/speech", { method: "POST", signal,
@@ -234,7 +251,7 @@
         if (!response.ok) { const error = await response.json().catch(() => ({})); throw new Error(error.error || "Natural voice is unavailable. Choose a computer voice or retry setup."); }
         return response.arrayBuffer();
       } });
-      return { blob: new Blob([wav], { type: "audio/wav" }), text };
+      return { wav, text };
     },
     play: value => new Promise((resolve, reject) => {
       let audio, utterance, url, done = false, started = false;
@@ -256,10 +273,10 @@
       };
       const cancel = () => finish();
       cancelPlayback = cancel;
-      if (value.blob) {
-        url = URL.createObjectURL(value.blob); audio = new Audio(url);
+      if (value.wav) {
+        url = URL.createObjectURL(new Blob([value.wav], { type: "audio/wav" })); audio = new Audio(url);
         audio.onplaying = playing; audio.onpause = silent; audio.onwaiting = silent;
-        audio.onended = () => finish(); audio.onerror = () => finish(new Error("KAI could not play the natural voice. Try again."));
+        audio.onended = () => finish(); audio.onerror = () => finish(new Error("KAI could not play the voice. Try again."));
         holdPlayback = held => { if (held) { audio.pause(); silent(); } else if (!done) audio.play().catch(finish); };
         if (!speech.held) audio.play().catch(finish);
       } else {
@@ -303,12 +320,40 @@
   function voiceChoices() {
     const select = $("voice-choice"); select.replaceChildren();
     const add = (value, label, disabled = false) => { const o = document.createElement("option"); o.value = value; o.textContent = label; o.disabled = disabled; select.append(o); };
+    for (const v of windowsVoices) add("windows:" + v.id, v.name + " · fast · " + v.lang);
     for (const v of speechStatus?.voices || []) add("natural:" + v.id, v.name + " · natural");
-    add("system", "Computer voice · automatic");
-    for (const v of window.speechSynthesis?.getVoices() || []) if (v.localService) add("system:" + v.voiceURI, v.name + " · " + v.lang);
-    if (![...select.options].some(o => o.value === voiceChoice)) add(voiceChoice, "Bella · bright & playful");
+    add("system", "Browser computer voice · automatic");
+    for (const v of window.speechSynthesis?.getVoices() || []) if (v.localService) add("system:" + v.voiceURI, v.name + " · browser · " + v.lang);
+    if (![...select.options].some(o => o.value === voiceChoice)) add(voiceChoice, voiceChoice.startsWith("natural:") ? "Selected natural voice" : "Selected computer voice · refresh voices");
     select.value = voiceChoice;
-    voiceReplyUI();
+    voiceReplyUI(); voiceEngineUI();
+  }
+  function voiceEngineUI() {
+    $("voice-engine-help").textContent = voiceChoice.startsWith("windows:") ?
+      "Fast local Windows speech. Cute KAI, Squeak and Classic robot are applied directly to the audio. No voice-model download." :
+      voiceChoice.startsWith("natural:") ? "These four natural voices share one engine. On slower computers, choose Whole reply to avoid synthesis pauses, or try a fast Windows voice." :
+      "Browser computer voices are fast, but some ignore pitch changes. On Windows, choose the matching fast voice above for full character effects.";
+    $("speech-start-help").textContent = speechStart === "complete" ? "Prepares the reply's audio before speaking. Longer initial wait, then continuous playback. Very long replies play in sections." :
+      speechStart === "smooth" ? "Prepares two sentences before starting. Slower voice engines may still pause later." :
+      "Starts with the first complete sentence and prepares the next while talking. Best with fast Windows voices.";
+  }
+  async function loadWindowsVoices(refresh = false) {
+    if (!bridge?.windowsVoices) return;
+    try {
+      windowsStatus = await bridge.windowsVoices(refresh); windowsVoices = windowsStatus.voices || [];
+      $("windows-voice-controls").hidden = !windowsStatus.supported;
+      $("use-fast-voice").disabled = !windowsVoices.length;
+      // Upgrade an explicitly selected Windows computer voice to the same
+      // installed voice with audio effects; never replace a natural selection.
+      const normalized = name => name.toLowerCase().replace(/desktop/g, "").replace(/[^a-z0-9]/g, "");
+      const old = window.speechSynthesis?.getVoices().find(v => "system:" + v.voiceURI === voiceChoice);
+      const matching = old && windowsVoices.find(v => normalized(v.name) === normalized(old.name));
+      if (matching && !speaking && !busy) { voiceChoice = "windows:" + matching.id; write("kai-mascot-voice-choice", voiceChoice); }
+      voiceChoices();
+    } catch {
+      $("voice-engine-help").textContent = "Fast Windows voices could not load. Refresh voices to try again, or keep your selected voice.";
+      $("windows-voice-controls").hidden = false;
+    }
   }
   async function loadSpeech() {
     try { speechStatus = await json("/core/speech"); }
@@ -428,14 +473,14 @@
   squeakUI();
   $("voice-tone").addEventListener("change", () => {
     stopSpeech(); voiceTone = $("voice-tone").value; write("kai-mascot-voice-tone", voiceTone);
-    squeakUI(); regions();
+    squeakUI(); voiceEngineUI(); regions();
   });
   $("voice-squeak").addEventListener("input", () => {
     stopSpeech(); voicePitch = Number($("voice-squeak").value); write("kai-mascot-voice-squeak", String(voicePitch)); squeakUI();
   });
   $("speech-start").value = speechStart;
   $("speech-start").addEventListener("change", () => {
-    speechStart = $("speech-start").value; write("kai-mascot-speech-start", speechStart); speech.pump();
+    speechStart = $("speech-start").value; write("kai-mascot-speech-start", speechStart); voiceEngineUI(); speech.pump();
   });
   function wakeUI() {
     const active = wakeEnabled && wakeListener.active;
@@ -490,7 +535,7 @@
   }
   function voiceReplyUI() {
     $("read-aloud").setAttribute("aria-pressed", String(voiceReplies));
-    const name = voiceChoice.startsWith("natural:") ?
+    const name = voiceChoice.startsWith("windows:") ? "Fast KAI" : voiceChoice.startsWith("natural:") ?
       (speechStatus?.voices?.find(v => "natural:" + v.id === voiceChoice)?.name.split(" · ")[0] || "Natural") : "Computer";
     $("read-aloud").querySelector("span").textContent = voiceReplies ? name + " voice on" : "Voice replies off";
   }
@@ -663,7 +708,18 @@
   $("voice-options").onclick = () => voiceOptions($("voice-options-panel").hidden);
   $("close-voice-options").onclick = () => voiceOptions(false);
   $("menu-voice").onclick = async () => { await expand(true); voiceOptions(true); };
-  $("voice-choice").onchange = () => { stopSpeech(); voiceChoice = $("voice-choice").value; write("kai-mascot-voice-choice", voiceChoice); voiceReplyUI(); ensureNatural(); warmSpeech(); };
+  $("voice-choice").onchange = () => { stopSpeech(); voiceChoice = $("voice-choice").value; write("kai-mascot-voice-choice", voiceChoice); voiceReplyUI(); voiceEngineUI(); ensureNatural(); warmSpeech(); };
+  $("refresh-windows-voices").onclick = () => loadWindowsVoices(true);
+  $("add-windows-voices").onclick = () => bridge?.windowsVoiceSettings?.().catch(error => notice(error.message));
+  $("use-fast-voice").onclick = () => {
+    const selected = windowsVoices.find(v => /^en[-_]US/i.test(v.lang) && /zira/i.test(v.name)) ||
+      windowsVoices.find(v => /^en/i.test(v.lang) && /zira|hazel|susan|mark/i.test(v.name)) || windowsVoices.find(v => /^en/i.test(v.lang)) || windowsVoices[0];
+    if (!selected) return;
+    stopSpeech(); voiceChoice = "windows:" + selected.id; voiceTone = "cute"; speechStart = "quick";
+    write("kai-mascot-voice-choice", voiceChoice); write("kai-mascot-voice-tone", voiceTone); write("kai-mascot-speech-start", speechStart);
+    $("voice-tone").value = voiceTone; $("speech-start").value = speechStart; squeakUI(); voiceChoices();
+    $("natural-card").hidden = true; notice(""); regions();
+  };
   $("setup-natural").onclick = $("compact-natural").onclick = installNatural;
   $("later-natural").onclick = () => { $("natural-card").hidden = true; regions(); };
   $("dismiss-compact-notice").onclick = () => notice("");
@@ -788,6 +844,7 @@
     $("motion").setAttribute("aria-pressed", String(motion));
     voiceReplyUI();
     await loadSpeech();
+    loadWindowsVoices();
     warmSpeech();
     await loadModels(); await loadChat(); booted = true;
     regions(); wave(); wake();

@@ -106,3 +106,34 @@ test("Joining chunks removes excess internal silence and rejects malformed or mi
   const different = piece.slice(0); new DataView(different).setUint32(24, 24000, true);
   assert.throws(() => joinWavs([piece, different]), /sample rate/);
 });
+
+test("Whole reply prepares past two sentences, waits for the stream, then plays one joined clip", async () => {
+  const pending = [], played = [];
+  const q = new Queue({ buffer: "complete", prepare: text => new Promise(resolve => pending.push({ text, resolve })),
+    merge: values => ({ text: values.map(v => v.text).join(" "), wav: joinWavs(values.map(v => v.wav)) }),
+    play: value => played.push(value), cancel() {}, onState() {}, onError: assert.fail });
+  q.enqueue(["One.", "Two.", "Three."]); await tick();
+  for (let i = 0; i < 3; i++) { const p = pending.shift(); p.resolve({ text: p.text, wav: wav(.1) }); await tick(); }
+  assert.equal(played.length, 0, "Complete mode never escapes on the two-sentence timer");
+  q.enqueue(["Four."]); q.end(); await tick();
+  assert.equal(played.length, 0, "Text completion still waits for the last audio");
+  const last = pending.shift(); last.resolve({ text: last.text, wav: wav(.1) }); await tick();
+  assert.equal(played.length, 1); assert.equal(played[0].text, "One. Two. Three. Four.");
+  assert.ok(played[0].wav.byteLength > wav(.3).byteLength); q.stop();
+});
+test("Stopping whole-reply preparation drops all buffered and late audio", async () => {
+  let finish; const played = [];
+  const q = new Queue({ buffer: "complete", prepare: () => new Promise(r => { finish = r; }),
+    merge: values => values, play: value => played.push(value), cancel() {}, onState() {}, onError: assert.fail });
+  q.enqueue(["First.", "Second."]); q.end(); await tick(); q.stop(); finish({ wav: wav() }); await tick();
+  assert.deepEqual(played, []); assert.equal(q.ready.length, 0); assert.equal(q.tasks.length, 0);
+});
+test("Whole-reply buffering has a memory ceiling even before text generation finishes", async () => {
+  let finish; const sections = [];
+  const q = new Queue({ buffer: "complete", prepare: async text => ({ text, wav: { byteLength: 8 * 1024 * 1024 } }),
+    merge: values => values, play: values => { sections.push(values); return new Promise(r => { finish = r; }); },
+    cancel() { finish?.(); }, onState() {}, onError: assert.fail });
+  q.enqueue(["1", "2", "3", "4", "5", "6", "7"]); await tick();
+  assert.equal(sections.length, 1); assert.equal(sections[0].length, 3);
+  assert.equal(q.ready.length, 3); assert.equal(q.tasks.length, 1); q.stop();
+});

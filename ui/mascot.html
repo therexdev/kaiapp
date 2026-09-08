@@ -26,11 +26,14 @@
         <div class="voice-options-heading"><strong>A little voice. A lot of personality.</strong><button id="close-voice-options" class="icon-button" aria-label="Close voice settings">×</button></div>
         <label for="voice-choice">KAI's voice</label>
         <select id="voice-choice"><option value="system">Computer voice</option></select>
+        <p id="voice-engine-help"></p>
+        <div id="windows-voice-controls" hidden><button id="use-fast-voice" type="button">Use fast Cute KAI</button><button id="refresh-windows-voices" type="button">Refresh voices</button><button id="add-windows-voices" type="button">Add Windows voices ↗</button><p>Install speech voices in Windows Settings, then refresh this list. Available voices depend on your Windows installation.</p></div>
         <label for="voice-tone" class="tone-label">Voice character</label>
         <select id="voice-tone"><option value="cute">Cute KAI · bright &amp; squeaky</option><option value="kai">Classic KAI · deeper, softly robotic</option><option value="natural">Natural · original sound</option></select>
         <div id="voice-squeak-control"><label for="voice-squeak" class="tone-label">Squeak <output id="voice-squeak-label" for="voice-squeak">Playful</output></label><input id="voice-squeak" type="range" min="5" max="12" step="1" value="9" aria-label="Voice squeak"><div class="squeak-scale"><span>Gentle</span><span>Extra squeaky</span></div></div>
         <label for="speech-start" class="tone-label">Reply timing</label>
-        <select id="speech-start"><option value="quick">Quick start · speak the first sentence</option><option value="smooth">Extra buffering · fewer pauses on slower PCs</option></select>
+        <select id="speech-start"><option value="quick">Quick start · first sentence</option><option value="smooth">Head start · two sentences</option><option value="complete">Whole reply · continuous playback</option></select>
+        <p id="speech-start-help"></p>
         <div class="voice-option-actions"><button id="preview-voice">Hear a hello</button><button id="setup-natural">Get natural voices</button></div>
         <p id="natural-status">Try Cute KAI with Bella. Hear a hello instantly, then download the local voice once for conversations.</p>
         <div class="voice-divider"></div>

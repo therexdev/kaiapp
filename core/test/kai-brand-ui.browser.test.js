@@ -166,6 +166,25 @@ test("KAI pickup, edge poses and search props coexist with chat and reduced moti
   await capture("free");
   for (const physical of ["free", "perched"]) {
     await pose({ pose: physical });
+    for (const time of [650, 1450]) {
+      await page.evaluate(time => {
+        document.body.classList.add("waving");
+        for (const animation of document.getAnimations()) { animation.pause(); animation.currentTime = time; }
+      }, time);
+      const wave = await page.evaluate(() => {
+        const arm = document.querySelector(".kai3d-arm-left"), forearm = document.querySelector(".kai3d-forearm-left"), palm = document.querySelector(".kai3d-wave-palm");
+        const elbow = new DOMPoint(260, 850).matrixTransform(forearm.getScreenCTM());
+        return { shoulder: new DOMMatrix(getComputedStyle(arm).transform).a, palm: getComputedStyle(document.querySelector(".kai3d-wave-forearm")).opacity,
+          palmAboveElbow: palm.getBoundingClientRect().bottom < elbow.y };
+      });
+      assert.ok(wave.shoulder > .5, "Shoulder stays below 60 degrees instead of flipping backward");
+      assert.equal(wave.palm, "1"); assert.ok(wave.palmAboveElbow, "The forward-facing open palm stays above the bent elbow");
+      await shot(page, "wave-" + physical + "-" + time, { omitBackground: true, animations: "allow" });
+      await page.evaluate(() => { document.body.classList.remove("waving"); for (const a of document.getAnimations()) a.play(); });
+    }
+  }
+  for (const physical of ["free", "perched"]) {
+    await pose({ pose: physical });
     for (const activity of ["idle", "thinking", "searching", "speaking"]) {
       await page.evaluate(state => { document.body.dataset.state = state; }, activity);
       assert.equal(await page.locator(".kai3d-search-props").evaluate(el => getComputedStyle(el).opacity), activity === "searching" ? "1" : "0");

@@ -74,8 +74,6 @@ body[data-state=speaking] .kai3d-arm-right{animation:kai-talk-gesture 2.8s ease-
 body[data-state=speaking] .kai3d-forearm-right{animation:kai-talk-hand 2.8s ease-in-out infinite}
 body[data-state=listening] .kai3d-arm-right{animation:none;transform:rotate(13deg)}
 body[data-state=listening] .kai3d-forearm-right{transform:rotate(32deg)}
-body.waving .kai3d-arm-left{animation:kai-wave-arm 2.4s ease-in-out}
-body.waving .kai3d-forearm-left{animation:kai-wave-hand 2.4s ease-in-out}
 /* The desktop edge is an actual resting pose; the feet are tucked away. */
 body[data-pose=perched] .kai3d-body{animation:none;transform:translateY(430px)}
 body[data-pose=perched] .kai3d-leg,body[data-pose=perched] .kai3d-shadow{opacity:0}
@@ -113,8 +111,8 @@ body.landing .kai3d-shadow{animation:kai-shadow-settle .65s ease-out}
 @keyframes kai-page-float{0%,100%{transform:translateY(12px);opacity:.5}50%{transform:translateY(-25px);opacity:1}}
 @keyframes kai-talk-gesture{0%,100%{transform:rotate(0)}35%,60%{transform:rotate(-22deg)}}
 @keyframes kai-talk-hand{0%,100%{transform:rotate(0)}35%,60%{transform:rotate(50deg)}}
-@keyframes kai-wave-arm{0%,100%{transform:rotate(0)}20%,80%{transform:rotate(142deg)}}
-@keyframes kai-wave-hand{0%,100%{transform:rotate(0)}25%,65%{transform:rotate(-12deg)}45%,80%{transform:rotate(20deg)}}
+@keyframes kai-wave-arm{0%,100%{transform:rotate(0)}22%,78%{transform:rotate(55deg)}}
+@keyframes kai-wave-hand{0%,100%{transform:rotate(0)}22%,52%,78%{transform:rotate(55deg)}37%,67%{transform:rotate(77deg)}}
 @keyframes kai-dangle{0%,100%{transform:rotate(-1.5deg) translateY(8px)}50%{transform:rotate(1.5deg) translateY(15px)}}
 @keyframes kai-dangle-arm{0%,100%{transform:rotate(-24deg)}50%{transform:rotate(-38deg)}}
 @keyframes kai-dangle-arm-right{0%,100%{transform:rotate(38deg)}50%{transform:rotate(24deg)}}
@@ -127,3 +125,12 @@ body.motion-off .kai3d-puppet,body.suspended .kai3d-puppet{transform:none!import
 body.motion-off:is([data-state=thinking],[data-state=transcribing],[data-state=voicing]) .kai3d-arm-left{transform:rotate(-30deg)}
 body.motion-off .kai3d-question-prop{opacity:1}
 @media(prefers-reduced-motion:reduce){.kai3d-puppet{transform:none!important}body:is([data-state=thinking],[data-state=transcribing],[data-state=voicing]) .kai3d-arm-left{transform:rotate(-30deg)}}
+
+/* A forward-facing palm and a bent elbow; the shoulder never flips over. */
+.kai3d-wave-forearm{opacity:0;pointer-events:none}
+body.waving:not([data-pose=carried]) .kai3d-arm-left{animation:kai-wave-arm 2.4s ease-in-out}
+body.waving:not([data-pose=carried]) .kai3d-forearm-left{animation:kai-wave-hand 2.4s ease-in-out}
+body.waving:not([data-pose=carried]) .kai3d-forearm-left>image{animation:kai-wave-original 2.4s linear}
+body.waving:not([data-pose=carried]) .kai3d-wave-forearm{animation:kai-wave-palm 2.4s linear}
+@keyframes kai-wave-palm{0%,14%,90%,100%{opacity:0}20%,84%{opacity:1}}
+@keyframes kai-wave-original{0%,14%,90%,100%{opacity:1}20%,84%{opacity:0}}

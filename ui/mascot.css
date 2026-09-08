@@ -205,3 +205,7 @@ body[data-pose=perched] #mascot-menu{max-height:176px;overflow:auto;bottom:118px
 body[data-state=searching] #status-pill>span:first-child{background:#00a7d9;animation:breathe .9s infinite}
 body.perch-target #mascot-stage:after{content:"";position:absolute;bottom:0;left:38px;right:38px;height:2px;border-radius:2px;background:#36d7ff;box-shadow:0 0 10px #2bafff;pointer-events:none}
 body.motion-off #robot,body.suspended #robot{transition:none!important}
+
+#windows-voice-controls{padding:10px;border:1px solid #c4dcf8;background:#edf6ff;border-radius:10px;margin:8px 0}
+#windows-voice-controls button{padding:7px 9px;margin:3px;border-radius:7px;background:#daeaff;color:#174b8b;font-size:11px}
+#windows-voice-controls #use-fast-voice{background:#1678fa;color:white}

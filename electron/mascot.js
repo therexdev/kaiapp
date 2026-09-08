@@ -15,6 +15,7 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, di
   const actions = app && dialog ? require("./desktop-actions").createFolderActions({ app, dialog, shell }) : null;
   const approval = dialog ? require("./tool-approval").createToolApproval({ dialog }) : null;
   const navigation = require("../ui/app-navigation");
+  const windowsVoice = new (require("./windows-voice").WindowsVoice)();
   let window = null, loading = null, expanded = false, dragging = null, timer = null;
   let regions = [], ignored = false, disposed = false, shaped = false;
   let perched = false;
@@ -112,12 +113,12 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, di
           if (/^https?:\/\//i.test(url) && new URL(url).origin !== origin) shell.openExternal(url);
         }
       });
-      created.on("hide", () => { actions?.cancel(); approval?.cancel(); finishDrag(true); pose(); send("suspend", true); });
+      created.on("hide", () => { actions?.cancel(); approval?.cancel(); windowsVoice.cancel(); finishDrag(true); pose(); send("suspend", true); });
       created.on("blur", () => { if (dragging) finishDrag(true); });
       created.on("show", () => send("suspend", false));
-      created.webContents.on("render-process-gone", () => showMain());
+      created.webContents.on("render-process-gone", () => { windowsVoice.cancel(); showMain(); });
       created.on("closed", () => {
-        clearInterval(timer); timer = null;
+        windowsVoice.cancel(); clearInterval(timer); timer = null;
         window = null; loading = null; dragging = null; regions = []; ignored = false; shaped = false;
       });
       loading = created.loadURL(origin + "/mascot.html").catch(error => {
@@ -170,6 +171,17 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, di
     if (!navigation.valid(view)) throw new Error("Unknown app screen");
     return showMain(view, true);
   });
+  // Local voice audio is a private desktop capability, never a Core/network tool.
+  handle("mascot:windows-voices", () => window, refresh => windowsVoice.status(refresh === true));
+  handle("mascot:windows-speech", () => window, request => {
+    if (!window.isVisible()) throw new Error("KAI is hidden.");
+    return windowsVoice.generate(request);
+  });
+  handle("mascot:windows-voice-settings", () => window, () => {
+    if (process.platform !== "win32" || !window.isVisible()) return false;
+    return shell.openExternal("ms-settings:speech").then(() => true);
+  });
+  on("mascot:windows-speech-cancel", () => windowsVoice.cancel());
   on("mascot:cancel-action", () => { actions?.cancel(); approval?.cancel(); });
   on("mascot:main", showMain);
   on("mascot:regions", value => {
@@ -225,7 +237,7 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, di
     hide() { if (window && !window.isDestroyed()) { savePosition(); window.hide(); } },
     dispose() {
       if (disposed) return;
-      disposed = true; actions?.cancel(); approval?.cancel(); clearInterval(timer);
+      disposed = true; actions?.cancel(); approval?.cancel(); windowsVoice.close(); clearInterval(timer);
       screen.removeListener("display-removed", onDisplayChange);
       screen.removeListener("display-metrics-changed", onDisplayChange);
       for (const channel of handles) ipcMain.removeHandler(channel);

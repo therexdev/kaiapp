@@ -133,8 +133,8 @@
   // One inference and one playback at most; prepare up to two complete
   // sentences ahead. Epochs make Stop discard every late result.
   class Queue {
-    constructor({ prepare, play, cancel, holdPlayback = () => {}, onState, onError, buffer = 1, bufferWaitMs = 1800 }) {
-      Object.assign(this, { prepare, play, cancel, holdPlayback, onState, onError, buffer, bufferWaitMs });
+    constructor({ prepare, play, cancel, holdPlayback = () => {}, onState, onError, buffer = 1, bufferWaitMs = 1800, merge = values => values[0] }) {
+      Object.assign(this, { prepare, play, cancel, holdPlayback, onState, onError, buffer, bufferWaitMs, merge });
       this.epoch = 0; this.tasks = []; this.ready = []; this.preparing = false; this.playing = false;
     }
     enqueue(phrases) { this.tasks.push(...phrases.filter(Boolean)); this.pump(); }
@@ -146,7 +146,12 @@
     pump() {
       this.state();
       const epoch = this.epoch;
-      if (!this.preparing && this.tasks.length && this.ready.length < 2) {
+      const target = typeof this.buffer === "function" ? this.buffer() : this.buffer;
+      const complete = target === "complete";
+      // Whole-reply mode stays bounded for unusually long answers. Audio up
+      // to 24 MiB / 128 sentences is prepared as a continuous section.
+      const full = this.ready.length >= (complete ? 128 : 2) || (complete && this.ready.reduce((n, v) => n + (v.wav?.byteLength || 0), 0) >= 24 * 1024 * 1024);
+      if (!this.preparing && this.tasks.length && !full) {
         this.preparing = true;
         const abort = this.abort = new AbortController(), text = this.tasks.shift();
         Promise.resolve().then(() => epoch === this.epoch ? this.prepare(text, abort.signal) : null).then(value => {
@@ -154,20 +159,19 @@
         }).catch(error => { if (epoch === this.epoch) { this.stop(); this.onError(error); } })
           .finally(() => { if (epoch === this.epoch) { this.preparing = false; this.abort = null; this.pump(); } });
       }
-      const target = typeof this.buffer === "function" ? this.buffer() : this.buffer;
       const drained = !this.preparing && !this.tasks.length;
-      if (!this.started && this.ready.length && drained && !this.ended && !this.bufferTimer && !this.bufferExpired && target > 1) {
+      if (!this.started && this.ready.length && drained && !this.ended && !this.bufferTimer && !this.bufferExpired && !complete && target > 1) {
         this.bufferTimer = setTimeout(() => {
           if (epoch !== this.epoch) return;
           this.bufferTimer = null; this.bufferExpired = true; this.pump();
         }, this.bufferWaitMs);
       }
-      const buffered = this.started || this.ready.length >= target || (drained && (this.ended || this.bufferExpired));
+      const buffered = complete ? (full || (drained && this.ended)) : this.started || this.ready.length >= target || (drained && (this.ended || this.bufferExpired));
       if (!this.held && !this.playing && this.ready.length && buffered) {
         clearTimeout(this.bufferTimer); this.bufferTimer = null;
         this.started = true; this.playing = true;
-        const value = this.ready.shift();
-        Promise.resolve().then(() => epoch === this.epoch ? this.play(value) : null).catch(error => {
+        const values = complete ? this.ready.splice(0) : [this.ready.shift()];
+        Promise.resolve().then(() => epoch === this.epoch ? this.play(complete ? this.merge(values) : values[0]) : null).catch(error => {
           if (epoch === this.epoch) { this.stop(); this.onError(error); }
         }).finally(() => { if (epoch === this.epoch) { this.playing = false; this.pump(); } });
         this.pump(); // Fill the bounded look-ahead buffer.

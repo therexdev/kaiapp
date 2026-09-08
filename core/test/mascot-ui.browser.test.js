@@ -311,3 +311,64 @@ test("KAI UI: natural default, compact voice, follow-ups, barge-in context, hist
   assert.ok(await page.locator("body").evaluate(el => el.classList.contains("motion-off")));
   assert.deepEqual(errors, []);
 });
+
+test("Fast Windows voices apply actual PCM effects, whole replies play once, and Stop cancels preparation", { skip: !fs.existsSync(CHROMIUM), timeout: 45000 }, async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-fast-voice-ui-")), fixture = await startMascotServer(dir);
+  const { chromium } = require("playwright-core"), browser = await chromium.launch({ executablePath: CHROMIUM, args: ["--no-sandbox"] });
+  t.after(async () => { await browser.close(); await fixture.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  const page = await browser.newPage({ viewport: { width: 660, height: 700 } }), errors = [];
+  page.on("pageerror", e => errors.push(e.message));
+  await page.addInitScript(() => {
+    localStorage.setItem("kai-mascot-cute-default-v1", "1");
+    if (!localStorage.getItem("kai-mascot-voice-choice")) localStorage.setItem("kai-mascot-voice-choice", "system:zira");
+    window.__voiceRequests = []; window.__clips = []; window.__cancelledWindows = 0; window.__settingsOpened = 0;
+    const createURL = URL.createObjectURL; URL.createObjectURL = value => { window.__clips.push(value); return createURL(value); };
+    const voices = [{ id: "onecore:zira", name: "Microsoft Zira", lang: "en-US" }, { id: "onecore:mark", name: "Microsoft Mark", lang: "en-US" }];
+    Object.defineProperty(window, "speechSynthesis", { value: { getVoices: () => [{ localService: true, voiceURI: "zira", name: "Microsoft Zira Desktop", lang: "en-US" }], cancel() {}, resume() {}, speak() { throw new Error("Windows effects must not use browser speech playback"); } } });
+    window.kaiDesktop = { expand: async () => ({}), regions() {}, onEvent: fn => { window.__kaiEvent = fn; }, cancelAction() {},
+      windowsVoices: async () => ({ supported: true, available: true, voices }),
+      windowsSpeech: async request => {
+        window.__voiceRequests.push(request);
+        if (window.__delayVoice) await new Promise(resolve => { window.__finishVoice = resolve; });
+        return new Uint8Array(window.KaiWav.encodeWav16kMono(Float32Array.from({ length: 16000 }, (_, i) => .3 * Math.sin(2 * Math.PI * 220 * i / 16000)), 16000));
+      }, cancelWindowsSpeech: () => { window.__cancelledWindows++; }, windowsVoiceSettings: async () => { window.__settingsOpened++; },
+    };
+  });
+  await page.goto(fixture.origin + "/mascot.html");
+  await page.waitForFunction(() => document.getElementById("voice-choice").value === "windows:onecore:zira");
+  await page.click("#toggle-chat"); await page.click("#voice-options");
+  await page.click("#use-fast-voice"); assert.equal(await page.inputValue("#voice-tone"), "cute");
+  assert.equal(await page.inputValue("#speech-start"), "quick");
+  await page.click("#preview-voice"); await page.waitForFunction(() => document.body.dataset.state === "speaking");
+  const cute = await page.evaluate(async () => (await window.__clips.at(-1).arrayBuffer()).byteLength);
+  assert.ok(cute < 32044, "Cute KAI applies its real audio resampling, independent of Windows pitch support");
+  await page.waitForFunction(() => document.body.dataset.state === "idle");
+  await page.selectOption("#voice-tone", "kai"); await page.click("#preview-voice");
+  await page.waitForFunction(() => document.body.dataset.state === "speaking");
+  assert.ok(await page.evaluate(async () => (await window.__clips.at(-1).arrayBuffer()).byteLength) > 32044);
+  await page.waitForFunction(() => document.body.dataset.state === "idle");
+  await page.selectOption("#voice-choice", "windows:onecore:mark");
+  await page.selectOption("#speech-start", "complete");
+  await page.click("#add-windows-voices"); assert.equal(await page.evaluate(() => window.__settingsOpened), 1);
+  if (process.env.KAI_MASCOT_QA_DIR) await page.screenshot({ path: path.join(process.env.KAI_MASCOT_QA_DIR, "fast-windows-voice-settings.png") });
+  await page.click("#close-voice-options");
+  fixture.state.reply = "First sentence. Second sentence. Third sentence. Fourth sentence."; fixture.state.delay = 35;
+  const before = await page.evaluate(() => window.__clips.length);
+  await page.fill("#question", "Give me four sentences."); await page.press("#question", "Enter");
+  await page.waitForFunction(() => document.body.dataset.state === "speaking");
+  assert.equal(fixture.state.finished, 1, "Whole reply waits for text generation to finish");
+  assert.equal(await page.evaluate(() => window.__clips.length), before + 1, "All four sentences use one continuous audio clip");
+  assert.equal((await page.evaluate(() => window.__voiceRequests.slice(-4))).every(v => v.voice === "onecore:mark"), true);
+  await page.waitForFunction(() => document.body.dataset.state === "idle");
+  await page.evaluate(() => { window.__delayVoice = true; });
+  await page.fill("#question", "Another reply, please."); await page.press("#question", "Enter");
+  await page.waitForFunction(() => !!window.__finishVoice);
+  const clipsBeforeStop = await page.evaluate(() => window.__clips.length);
+  await page.click("#stop"); await page.evaluate(() => window.__finishVoice()); await page.waitForTimeout(100);
+  assert.ok(await page.evaluate(() => window.__cancelledWindows > 0));
+  assert.equal(await page.evaluate(() => window.__clips.length), clipsBeforeStop, "Late native audio after Stop cannot play");
+  await page.reload(); await page.waitForFunction(() => document.getElementById("voice-choice").value === "windows:onecore:mark");
+  assert.equal(await page.inputValue("#speech-start"), "complete");
+  assert.equal(fixture.state.speech.length, 0, "Fast Windows voices never use neural synthesis");
+  assert.deepEqual(errors, []);
+});

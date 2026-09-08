@@ -1,3 +1,12 @@
+### A proper wave and faster character voices
+
+- **A natural little wave.** KAI bends his elbow and shows an open palm. His wrist waves gently instead of swinging the entire arm backward. This works on the desktop and while resting along the edge.
+- **Fast Windows voices with real character effects.** Open **Voice & listening → Use fast Cute KAI**. The installed Windows voices now produce local audio that KAI can actually reshape, so Cute KAI, the Squeak slider and Classic deeper KAI work even when the browser voice engine ignores pitch. No neural-model download or new account is needed. The list includes supported installed Windows and desktop voices, which vary by computer.
+- **More installed options.** **Add Windows voices** opens Windows Speech settings. Install an available speech voice there, then **Refresh voices** in KAI. Only voices exposed by Windows' supported speech APIs appear; a Narrator-only voice is not promised to work in other apps.
+- **Choose how replies start.** Quick start plays the first complete sentence and works best with fast voices. Head start prepares two sentences. **Whole reply** prepares and joins the reply audio first, then plays it continuously, avoiding waits for synthesis between sentences. It takes longer to begin; exceptionally long answers are read in bounded sections.
+
+An explicitly selected browser Windows voice is upgraded to its matching installed voice when found. Existing natural voice selections stay selected. The four natural voices share one engine, so switching among them is not a speed upgrade. Stop, KAI-name interruptions, follow-ups, microphone cleanup and the shared wallet/node profile are preserved.
+
 ### Pick KAI up and bring him along
 
 - **A little robot in your hand.** Pick KAI up by dragging him. His arms and legs dangle, his cape sways, and his body leans with your movement. Dropping him on the desktop gives a soft settling bounce.
