@@ -8,6 +8,7 @@ const { RuntimeProvisioner } = require("../core/lib/runtime-provisioner");
 const { Activity, Listener } = require("../ui/mascot-wake");
 const { wakeRequest, folderRequest } = require("../ui/mascot-client");
 const { encodeWav16kMono } = require("../ui/audio-wav");
+const { retryFixtureDownload } = require("./retry-fixture-download");
 async function main() {
   assert.equal(process.platform, "win32", "Run this check on the supported Windows speech-input platform");
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-wake-check-"));
@@ -17,7 +18,7 @@ async function main() {
     provisioner: new RuntimeProvisioner({ catalogPath, runtimesDir: path.join(dir, "runtimes"), hardware: {} }) });
   let listener;
   try {
-    await speech.ensure(); await voice.ensure();
+    await retryFixtureDownload(() => speech.ensure()); await retryFixtureDownload(() => voice.ensure());
     const results = [], commands = []; let interruptions = 0;
     listener = new Listener({ wakeRequest, onState() {}, onError: error => { throw error; }, onCommand: text => commands.push(text),
       onEnd: () => { interruptions++; listener.setResponding(false); listener.setPlayback(false); },

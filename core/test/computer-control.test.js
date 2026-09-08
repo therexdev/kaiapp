@@ -4,6 +4,15 @@ const { ComputerControl } = require("../../electron/computer-control");
 const { NativeComputer } = require("../../electron/native-computer");
 const desktop = require("../../ui/computer-tools"), { run } = require("../../ui/mascot-tools");
 const { Gateway } = require("../lib/gateway");
+test("CI retries transient fixture downloads with backoff, never validation failures", async () => {
+  const { retryFixtureDownload } = require("../../scripts/retry-fixture-download");
+  let attempts = 0; const waits = [];
+  assert.equal(await retryFixtureDownload(async () => { if (++attempts < 3) throw new Error("Download failed: HTTP 429"); return "verified"; }, async ms => waits.push(ms)), "verified");
+  assert.deepEqual(waits, [30000, 60000]);
+  for (const message of ["sha256 mismatch", "Assertion failed", "Download failed: HTTP 403"]) {
+    let count = 0; await assert.rejects(retryFixtureDownload(async () => { count++; throw new Error(message); }, async () => {}), { message }); assert.equal(count, 1);
+  }
+});
 function fixture(t, options = {}) {
   const calls = [], approvals = [], events = [], opened = [], shortcuts = new Map();
   let visible = true, count = 0, allow = true, info = { kind: "local", vision: false };

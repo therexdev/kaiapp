@@ -189,7 +189,12 @@ class KaiComputer {
                 string op = Text(r, "op"); object result;
                 if (op == "look") result = Look(r);
                 else if (op == "act") result = Act(r);
-                else if (op == "focus") { var w = Windows().FirstOrDefault(x => x.ToInt64().ToString() == Text(r,"window")); if (w == IntPtr.Zero) throw new Exception("That window is unavailable."); ShowWindow(w,9); SetForegroundWindow(w); Frame=""; result = new { ok = GetForegroundWindow() == w }; }
+                else if (op == "focus") {
+                    var w = Windows().FirstOrDefault(x => x.ToInt64().ToString() == Text(r,"window")); if (w == IntPtr.Zero) throw new Exception("That window is unavailable.");
+                    if (IsIconic(w)) ShowWindow(w,9); SetForegroundWindow(w);
+                    if (GetForegroundWindow() != w) { try { AutomationElement.FromHandle(w).SetFocus(); } catch {} }
+                    Frame=""; result = new { ok = GetForegroundWindow() == w };
+                }
                 else throw new Exception("Unknown desktop request.");
                 Console.WriteLine(Json.Serialize(new { id, result }));
             } catch (Exception error) { Console.WriteLine(Json.Serialize(new { id, error = Short(error.Message, 350) })); }
