@@ -1,18 +1,7 @@
 "use strict";
 
 const path = require("path");
-const SIZE = { compact: { width: 248, height: 304 }, chat: { width: 660, height: 560 } };
-
-function fitBounds(anchor, expanded, area) {
-  const size = expanded ? SIZE.chat : SIZE.compact;
-  const width = Math.min(size.width, area.width);
-  const height = Math.min(size.height, area.height);
-  return {
-    x: Math.round(Math.max(area.x, Math.min(anchor.x - width, area.x + area.width - width))),
-    y: Math.round(Math.max(area.y, Math.min(anchor.y - height, area.y + area.height - height))),
-    width, height,
-  };
-}
+const { SIZE, fitBounds, dragPlacement } = require("./mascot-layout");
 
 function trustedFrame(event, window, origin) {
   if (!window || window.isDestroyed() || event.sender !== window.webContents ||
@@ -28,6 +17,7 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, di
   const navigation = require("../ui/app-navigation");
   let window = null, loading = null, expanded = false, dragging = null, timer = null;
   let regions = [], ignored = false, disposed = false, shaped = false;
+  let perched = false;
   const handles = [], listeners = [];
   const send = (type, value) => {
     if (window && !window.isDestroyed()) window.webContents.send("mascot:event", { type, value });
@@ -35,7 +25,11 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, di
   function savePosition() {
     if (!window || window.isDestroyed()) return;
     const b = window.getBounds();
-    prefs.set("mascot.position", { x: b.x + b.width, y: b.y + b.height });
+    prefs.set("mascot.position", { x: b.x + b.width, y: b.y + b.height, perched });
+  }
+  const pose = (value = {}) => send("placement", { pose: perched ? "perched" : "free", ...value });
+  function unshape() {
+    if (shaped) { window.setShape([]); shaped = false; }
   }
   function ignore(value) {
     if (!window || window.isDestroyed() || ignored === value) return;
@@ -48,7 +42,21 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, di
     const cursor = screen.getCursorScreenPoint();
     if (dragging) {
       const dx = cursor.x - dragging.cursor.x, dy = cursor.y - dragging.cursor.y;
-      window.setPosition(Math.round(dragging.bounds.x + dx), Math.round(dragging.bounds.y + dy));
+      if (!dragging.moved && Math.hypot(dx, dy) <= 5) return;
+      dragging.moved = true;
+      const area = screen.getDisplayNearestPoint(cursor).workArea;
+      const placement = dragPlacement(dragging, cursor, expanded, area);
+      dragging.lifted = placement.lifted; dragging.placement = placement; dragging.area = area;
+      const now = Date.now(), dt = Math.max(16, now - dragging.time);
+      const target = Math.max(-16, Math.min(16, (cursor.x - dragging.previous.x) / dt * 12));
+      dragging.sway = dragging.sway * .65 + target * .35;
+      dragging.previous = cursor; dragging.time = now;
+      // Use the intended cursor anchor, never an OS-adjusted off-screen
+      // rectangle. Choose the monitor under the hand, not the large chat pane.
+      const previousBounds = window.getBounds();
+      if (["x", "y", "width", "height"].some(k => previousBounds[k] !== placement.bounds[k])) window.setBounds(placement.bounds);
+      pose({ pose: placement.lifted ? "carried" : "perched", moving: true,
+        nearFloor: placement.perched, sway: dragging.sway, offsetY: placement.offsetY });
       ignore(false);
       return;
     }
@@ -62,13 +70,15 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, di
     if (!window || window.isDestroyed()) return;
     const b = window.getBounds();
     const anchor = { x: b.x + b.width, y: b.y + b.height };
-    const area = screen.getDisplayMatching(b).workArea;
+    const area = screen.getDisplayNearestPoint({ x: anchor.x - Math.min(b.width, SIZE.compact.width) / 2, y: anchor.y - 1 }).workArea;
+    if (perched) anchor.y = area.y + area.height;
     expanded = !!open;
     regions = [];
     ignore(false);
-    if (shaped) { window.setShape([]); shaped = false; }
+    unshape();
     window.setBounds(fitBounds(anchor, expanded, area));
     send("expanded", expanded);
+    pose();
     savePosition();
   }
   async function launch(options = {}) {
@@ -79,6 +89,8 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, di
       const point = valid ? { x: saved.x - 1, y: saved.y - 1 } : screen.getCursorScreenPoint();
       const area = screen.getDisplayNearestPoint(point).workArea;
       const anchor = valid ? saved : { x: area.x + area.width - 24, y: area.y + area.height - 16 };
+      perched = valid && saved.perched === true;
+      if (perched) anchor.y = area.y + area.height;
       expanded = false;
       window = new BrowserWindow({
         ...fitBounds(anchor, false, area), title: "KAI · Desktop companion",
@@ -100,7 +112,8 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, di
           if (/^https?:\/\//i.test(url) && new URL(url).origin !== origin) shell.openExternal(url);
         }
       });
-      created.on("hide", () => { actions?.cancel(); approval?.cancel(); dragging = null; send("suspend", true); });
+      created.on("hide", () => { actions?.cancel(); approval?.cancel(); finishDrag(true); pose(); send("suspend", true); });
+      created.on("blur", () => { if (dragging) finishDrag(true); });
       created.on("show", () => send("suspend", false));
       created.webContents.on("render-process-gone", () => showMain());
       created.on("closed", () => {
@@ -111,7 +124,7 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, di
         if (!created.isDestroyed()) created.destroy();
         throw error;
       });
-      timer = setInterval(tick, 50);
+      timer = setInterval(tick, 33);
       timer.unref?.();
     }
     await loading;
@@ -163,6 +176,7 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, di
     if (!Array.isArray(value)) return;
     regions = value.slice(0, 12).filter(r => r && ["x", "y", "width", "height"].every(k => Number.isFinite(r[k])) &&
       r.width > 0 && r.height > 0 && r.width <= 2000 && r.height <= 2000);
+    if (dragging) return; // Keep pointer capture over the entire moving window.
     if (process.platform !== "darwin" && typeof window.setShape === "function" && regions.length) {
       try {
         // Native hit regions avoid a polling delay on the first click and let
@@ -177,16 +191,32 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, di
     tick();
   });
   on("mascot:drag-start", () => {
-    dragging = { bounds: window.getBounds(), cursor: screen.getCursorScreenPoint() };
+    if (dragging || !window.isVisible()) return;
+    const bounds = window.getBounds(), cursor = screen.getCursorScreenPoint();
+    dragging = { anchor: { x: bounds.x + bounds.width, y: bounds.y + bounds.height }, cursor, perched,
+      previous: cursor, time: Date.now(), sway: 0, moved: false, lifted: false };
+    unshape();
+    pose({ pose: perched ? "perched" : "carried", moving: false });
     ignore(false);
   });
-  on("mascot:drag-end", () => {
+  function finishDrag(cancelled = false) {
+    if (!dragging) return;
+    if (!cancelled) tick(); // Include the final cursor movement before release.
+    const drag = dragging;
     dragging = null;
-    resize(expanded); // clamp to the current monitor's usable area
-  });
+    if (drag.moved && drag.placement) {
+      perched = drag.placement.perched;
+      const anchor = { ...drag.placement.anchor };
+      if (perched) anchor.y = drag.area.y + drag.area.height;
+      window.setBounds(fitBounds(anchor, expanded, drag.area));
+    }
+    pose({ landed: drag.moved && !cancelled, cancelled });
+    savePosition();
+  }
+  on("mascot:drag-end", cancelled => finishDrag(cancelled === true));
   on("mascot:hide", () => { if (!hasTray()) return showMain(); savePosition(); window.hide(); });
   const onDisplayChange = () => {
-    if (window && !window.isDestroyed()) resize(expanded);
+    if (window && !window.isDestroyed()) { finishDrag(true); resize(expanded); }
   };
   screen.on("display-removed", onDisplayChange);
   screen.on("display-metrics-changed", onDisplayChange);

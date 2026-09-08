@@ -15,7 +15,13 @@ app.whenReady().then(async () => {
     preload: path.join(__dirname, "../../electron/preload.js"), contextIsolation: true, nodeIntegration: false, sandbox: true,
   } });
   globalThis.__folderApprovals = []; globalThis.__openedFolders = []; globalThis.__approveFolder = false;
-  const controller = createMascotController({ BrowserWindow, screen, ipcMain, app,
+  // Deterministic DIP cursor for the native drag check; all monitor queries
+  // and BrowserWindow operations still use Electron on the real desktop.
+  const fixtureScreen = new Proxy(screen, { get(target, key) {
+    if (key === "getCursorScreenPoint") return () => globalThis.__kaiCursor || screen.getCursorScreenPoint();
+    return typeof target[key] === "function" ? target[key].bind(target) : target[key];
+  } });
+  const controller = createMascotController({ BrowserWindow, screen: fixtureScreen, ipcMain, app,
     shell: { ...shell, openPath: async target => { globalThis.__openedFolders.push(target); return ""; } },
     dialog: { showMessageBox: async (_win, options) => { globalThis.__folderApprovals.push(options); return { response: globalThis.__approveFolder ? 1 : 0 }; } },
     prefs: new JsonStore(path.join(dir, "window.json"), {}), origin: fixture.origin, getMainWindow: () => main });

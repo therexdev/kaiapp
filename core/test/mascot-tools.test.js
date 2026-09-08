@@ -111,11 +111,15 @@ test("Companion grounds earnings automatically, uses fresh tools for follow-ups 
 test("Companion shares web and connected tools, cites real URLs and asks for missing weather location", async () => {
   const f = fixture();
   f.registry.register({ name: "web_search", description: "Search the web", params: { query: "terms" }, egress: true, sensitive: false, handler: () => "Tomorrow in Paris: 22 C. https://weather.example/forecast" });
-  const r = runtime(f, { question: "Weather tomorrow in Paris?", askModel: async messages => {
+  const activities = [];
+  const r = runtime(f, { question: "Weather tomorrow in Paris?", status: (label, detail) => activities.push({ label, detail }), askModel: async messages => {
     assert.match(messages[0].content, /ask for the city/); assert.match(messages[0].content, /Local date:/);
     return JSON.stringify(r.actions.length ? { answer: true } : { tool: "web_search", args: { query: "Paris tomorrow forecast" } });
   } });
   const out = await run(r.config); assert.equal(out.citations[0].url, "https://weather.example/forecast"); assert.match(out.context, /22 C/);
+  assert.ok(activities.some(s => s.detail?.activity === "searching"));
+  assert.equal(activities.at(-1).label, "");
+  assert.equal(activities.at(-1).detail, undefined, "Finished tools clear the activity");
   f.setMode("local-only"); const offline = await run(runtime(f, { question: "Weather tomorrow?" }).config);
   assert.match(offline.context, /Web tools are disabled/); assert.match(offline.context, /never invent a forecast/);
 });

@@ -7,6 +7,8 @@
   let aliases = [], requestedModel = null, chatAbort = null, activeTask = Promise.resolve();
   let voicePending = false, setupTimer = null, voiceStartEpoch = 0, voiceCommandEpoch = 0, currentRequest = null;
   let speechEpoch = 0, speaking = false, audible = false, waveTimer = null, idleTimer = null;
+  let pointer = null, toolActivity = null, landingTimer = null, restingPose = "free";
+  document.body.dataset.pose = "free";
   let voiceReplies = read("kai-mascot-voice", "0") === "1";
   let motion = read("kai-mascot-motion", "1") !== "0";
   let booted = false, savedFailure = false, approvalPending = false;
@@ -28,13 +30,13 @@
     regions();
   }
   const labels = {
-    idle: "Here when you need me", greeting: "Hey! I'm KAI.", thinking: "Thinking it through…",
+    idle: "Here when you need me", greeting: "Hey! I'm KAI.", thinking: "Thinking it through…", searching: "Looking it up…",
     listening: "Listening…", transcribing: "Got it · one moment…",
-    speaking: "KAI is speaking", voicing: "Getting my reply ready…", error: "Let's try that again", dragging: "Coming with you!",
+    speaking: "KAI is speaking", voicing: "Getting my reply ready…", error: "Let's try that again",
   };
   function mood(value) {
-    if (["idle", "thinking", "voicing", "speaking"].includes(value)) {
-      value = audible ? "speaking" : speaking ? (speech.held ? "listening" : "voicing") : busy ? "thinking" : "idle";
+    if (["idle", "thinking", "searching", "voicing", "speaking"].includes(value)) {
+      value = audible ? "speaking" : speaking ? (speech.held ? "listening" : "voicing") : busy ? (toolActivity || "thinking") : "idle";
     }
     const engaged = wakeListener?.engaged;
     if (wakePhase === "capturing" && engaged && ((!busy && !speaking) || speech.held)) value = "listening";
@@ -50,7 +52,7 @@
     document.body.classList.remove("asleep");
     clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
-      if (!busy && !voicePending && !speaking && !expanded && !wakeEnabled && motion) {
+      if (!busy && !voicePending && !speaking && !expanded && !wakeEnabled && motion && !pointer) {
         document.body.classList.add("asleep");
         $("mood-label").textContent = "Resting my circuits…";
       }
@@ -67,7 +69,10 @@
   function regions() {
     if (!bridge) return;
     const boxes = [...document.querySelectorAll(".interactive")].filter(el => el.getClientRects().length && !el.closest("[hidden]"))
-      .map(el => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; });
+      .map(el => {
+        const r = el.getBoundingClientRect(), x = Math.max(0, r.x), y = Math.max(0, r.y);
+        return { x, y, width: Math.min(innerWidth, r.right) - x, height: Math.min(innerHeight, r.bottom) - y };
+      }).filter(r => r.width > 0 && r.height > 0);
     bridge.regions(boxes);
   }
   function setExpanded(open) {
@@ -496,7 +501,7 @@
     if (!model && !folder && !destination) {
       notice("Open the full app to choose a chat model so KAI can answer, then try again."); mood("error"); return;
     }
-    stopSpeech(); notice(""); busy = true; mood("thinking");
+    stopSpeech(); notice(""); toolActivity = null; busy = true; mood("thinking");
     const request = currentRequest = { keepUser: source === "voice" };
     if (voiceReplies) { ensureNatural(); warmSpeech(); }
     const phrases = new api.SpeechPhrases(), replyEpoch = speechEpoch;
@@ -537,7 +542,12 @@
             try { return bridge?.confirmTool ? await bridge.confirmTool(name, args) : false; }
             finally { approvalPending = false; if (wakeEnabled && !suspended) wakeListener.pause(false); }
           },
-          status: value => { trace.textContent = value; if (value) $("mood-label").textContent = value; scroll(); },
+          status: (value, detail) => {
+            toolActivity = detail?.activity === "searching" ? "searching" : null;
+            trace.textContent = value; mood("thinking");
+            if (value && !audible) $("mood-label").textContent = value;
+            scroll();
+          },
           onObservation: value => { observations.push(value); request.keepUser = true; },
           askModel: async (messages, signal) => {
             const response = await KaiProviders.chatFetch("/core/chat/completions", { method: "POST", headers: { "content-type": "application/json" }, signal,
@@ -546,6 +556,7 @@
           },
         });
         if (chatAbort.signal.aborted) throw new DOMException("Stopped", "AbortError");
+        toolActivity = null;
         trace.textContent = phase.trace.map(t => t.tool + " · " + t.status).join(" → ");
         mood("thinking");
         const response = await KaiProviders.chatFetch("/core/chat/completions", {
@@ -567,7 +578,7 @@
       enqueueSpeech(phrases.push(content, true), replyEpoch);
       speech.end();
     } catch (error) {
-      stopSpeech();
+      toolActivity = null; stopSpeech();
       if (error.name === "AbortError") {
         if (!suspended) notice(content || request.keepUser ? "Response stopped." : "Stopped. Your message is back in the composer.");
       } else { notice(error.message); mood("error"); }
@@ -593,7 +604,7 @@
         reply.element.remove(); userBubble.element.remove(); history.pop();
         if (!$("question").value) $("question").value = text;
       }
-      busy = false; chatAbort = null; currentRequest = null; controls(); scroll();
+      toolActivity = null; busy = false; chatAbort = null; currentRequest = null; controls(); scroll();
       if (completed) { if (!speaking) mood("idle"); }
       else if (document.body.dataset.state !== "error") mood("idle");
     }
@@ -633,7 +644,7 @@
   }
   function suspend(value) {
     suspended = !!value; document.body.classList.toggle("suspended", suspended);
-    if (suspended) { chatAbort?.abort(); bridge?.cancelAction?.(); stopWake(); stopSpeech(); }
+    if (suspended) { endDrag({ type: "pointercancel" }); clearTimeout(landingTimer); document.body.classList.remove("landing", "perch-target"); chatAbort?.abort(); bridge?.cancelAction?.(); stopWake(); stopSpeech(); }
     else { wake(); warmSpeech(); }
   }
   function main(view) {
@@ -707,15 +718,36 @@
       else expand(false);
     }
   });
-  let pointer = null;
+  function placement(value) {
+    if (!["free", "perched", "carried"].includes(value?.pose)) return;
+    document.body.dataset.pose = value.pose;
+    if (value.pose !== "carried") restingPose = value.pose;
+    const bounded = (n, min, max) => Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : 0;
+    document.body.style.setProperty("--carry-tilt", bounded(value.sway, -16, 16) + "deg");
+    document.body.style.setProperty("--carry-offset-y", bounded(value.offsetY, 0, 111) + "px");
+    document.body.classList.toggle("perch-target", value.pose === "carried" && value.nearFloor === true);
+    if (pointer && value.moving) pointer.moved = true;
+    if (value.cancelled && pointer) endDrag({ type: "pointercancel" });
+    clearTimeout(landingTimer); document.body.classList.remove("landing");
+    if (value.landed && !suspended) {
+      void $("robot").offsetWidth;
+      document.body.classList.add("landing");
+      landingTimer = setTimeout(() => document.body.classList.remove("landing"), 650);
+    }
+    regions();
+  }
   $("robot").addEventListener("pointerdown", event => {
-    if (event.button !== 0) return;
-    pointer = { x: event.screenX, y: event.screenY, moved: false, state: document.body.dataset.state };
-    $("robot").setPointerCapture(event.pointerId); wake(); bridge?.startDrag();
+    if (event.button !== 0 || pointer) return;
+    pointer = { x: event.screenX, y: event.screenY, moved: false, id: event.pointerId };
+    clearTimeout(waveTimer); document.body.classList.remove("waving");
+    $("robot").setPointerCapture(event.pointerId); wake();
+    placement({ pose: restingPose === "perched" ? "perched" : "carried" });
+    bridge?.startDrag();
   });
   $("robot").addEventListener("pointermove", event => {
     if (pointer && Math.hypot(event.screenX - pointer.x, event.screenY - pointer.y) > 5) {
-      pointer.moved = true; mood("dragging");
+      pointer.moved = true;
+      if (!bridge) placement({ pose: "carried", sway: (event.screenX - pointer.x) / 8 });
     }
     if (motion && !pointer) {
       const r = $("robot").getBoundingClientRect();
@@ -725,13 +757,17 @@
   });
   function endDrag(event) {
     if (!pointer) return;
-    const prior = pointer; pointer = null; bridge?.endDrag();
-    if ($("robot").hasPointerCapture(event.pointerId)) $("robot").releasePointerCapture(event.pointerId);
-    if (prior.moved) mood(busy ? "thinking" : voicePending ? "transcribing" : speaking ? "speaking" : "idle");
-    else if (event.type === "pointerup") { wave(); expand(!expanded); }
+    const prior = pointer; pointer = null;
+    const cancelled = event.type !== "pointerup";
+    bridge?.endDrag(cancelled);
+    if ($("robot").hasPointerCapture(prior.id)) $("robot").releasePointerCapture(prior.id);
+    if (!bridge || cancelled || !prior.moved) placement({ pose: restingPose, landed: prior.moved && !cancelled });
+    if (!prior.moved && !cancelled) { wave(); expand(!expanded); }
   }
   $("robot").addEventListener("pointerup", endDrag);
   $("robot").addEventListener("pointercancel", endDrag);
+  $("robot").addEventListener("lostpointercapture", endDrag);
+  window.addEventListener("blur", () => endDrag({ type: "pointercancel" }));
   $("robot").addEventListener("keydown", event => {
     if (event.key === "Enter" || event.key === " ") { event.preventDefault(); wave(); expand(!expanded); }
   });
@@ -757,6 +793,7 @@
     regions(); wave(); wake();
   })();
   bridge?.onEvent(async ({ type, value }) => {
+    if (type === "placement") placement(value);
     if (type === "expanded") setExpanded(value);
     if (type === "suspend") suspend(value);
     if (type === "launch") {

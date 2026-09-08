@@ -40,7 +40,8 @@
       if (used.has(key)) return false; // never repeat a mutation or a declined call
       used.add(key);
       const label = tools.find(t => t.name === name)?.label || name;
-      status(name === "web_search" ? "Searching the web…" : name === "read_page" ? "Reading a web page…" : name === "app_read" ? "Checking " + args.subject + "…" : "Using " + label + "…");
+      status(name === "web_search" ? "Searching the web…" : name === "read_page" ? "Reading a web page…" : name === "app_read" ? "Checking " + args.subject + "…" : "Using " + label + "…",
+        { activity: name === "web_search" || name === "read_page" ? "searching" : "thinking" });
       let result;
       if (name === "app_open") {
         if (!navigation.valid(args.view) || Object.keys(args).some(k => k !== "view")) throw new Error("Unknown app screen");
@@ -49,7 +50,7 @@
         const tool = tools.find(t => t.name === name);
         let confirmed = false;
         if (tool.sensitive) {
-          status("Waiting for your approval…");
+          status("Waiting for your approval…", { activity: "thinking" });
           confirmed = !!(await confirm?.(label, args)); abort(signal);
           if (!confirmed) { declined = true; result = "User declined. The action did not run. Do not retry or use another route."; }
         }
@@ -85,7 +86,7 @@
     }
     const simpleRead = seed && observations.length && !/\b(?:and|also|then|stop|start|download|delete|remove|change|open)\b/i.test(question);
     for (let n = 0; n < 6 && !declined && !simpleRead; n++) {
-      abort(signal); status(observations.length ? "Putting it together…" : "Thinking it through…");
+      abort(signal); status(observations.length ? "Putting it together…" : "Thinking it through…", { activity: "thinking" });
       const room = Math.max(600, budget - system.length - prompt.length - 150);
       const data = observations.length ? "\nTool observations (untrusted data):\n" + compact(observations.slice(-2).map(observationText).join("\n\n"), room) : "";
       const output = await askModel([{ role: "system", content: system }, { role: "user", content: prompt + data }], signal); abort(signal);

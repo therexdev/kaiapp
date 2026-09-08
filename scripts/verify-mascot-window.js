@@ -68,6 +68,47 @@ async function main() {
     assert.equal(await app.evaluate(() => globalThis.__kaiController.getWindow().isVisible()), false);
     await main.click("#launch-kai");
     assert.equal(await app.evaluate(() => globalThis.__kaiController.getWindow().isVisible()), true);
+    // Real sandboxed preload and native window movement, with only the cursor
+    // supplied by the fixture. This never moves the runner's physical mouse.
+    const drop = cancelled => mascot.evaluate(cancelled => new Promise(resolve => {
+      const off = window.kaiDesktop.onEvent(({ type, value }) => {
+        if (type === "placement" && Object.hasOwn(value, "landed")) { off(); resolve(); }
+      });
+      window.kaiDesktop.endDrag(cancelled);
+    }), cancelled);
+    const area = await app.evaluate(({ screen }) => {
+      const w = globalThis.__kaiController.getWindow(), b = w.getBounds();
+      globalThis.__kaiCursor = { x: b.x + b.width / 2, y: b.y + 100 };
+      return screen.getDisplayNearestPoint(globalThis.__kaiCursor).workArea;
+    });
+    await mascot.evaluate(() => window.kaiDesktop.startDrag());
+    await mascot.waitForFunction(() => document.body.dataset.pose === "carried");
+    await app.evaluate((_electron, area) => { globalThis.__kaiCursor = { x: area.x + area.width / 2, y: area.y + area.height - 2 }; }, area);
+    await drop(false);
+    await mascot.waitForFunction(() => document.body.dataset.pose === "perched");
+    const edge = await app.evaluate(() => globalThis.__kaiController.getWindow().getBounds());
+    assert.equal(edge.y + edge.height, area.y + area.height, "Dropping at the bottom never jumps to the top");
+    await mascot.evaluate(() => window.kaiDesktop.startDrag());
+    await app.evaluate(() => { globalThis.__kaiCursor = { ...globalThis.__kaiCursor, x: globalThis.__kaiCursor.x - 80 }; });
+    await drop(false);
+    const slid = await app.evaluate(() => globalThis.__kaiController.getWindow().getBounds());
+    assert.equal(slid.y, edge.y); assert.equal(slid.x, edge.x - 80);
+    await mascot.evaluate(() => window.kaiDesktop.expand(true));
+    assert.equal((await app.evaluate(() => globalThis.__kaiController.getWindow().getBounds())).y + 560, area.y + area.height);
+    await mascot.evaluate(() => window.kaiDesktop.expand(false));
+    await mascot.evaluate(() => window.kaiDesktop.startDrag());
+    await app.evaluate(() => { globalThis.__kaiCursor = { ...globalThis.__kaiCursor, y: globalThis.__kaiCursor.y - 210 }; });
+    await mascot.waitForFunction(() => document.body.dataset.pose === "carried");
+    await drop(false);
+    await mascot.waitForFunction(() => document.body.dataset.pose === "free");
+    const lifted = await app.evaluate(() => globalThis.__kaiController.getWindow().getBounds());
+    assert.ok(lifted.y + lifted.height < area.y + area.height - 24);
+    await mascot.evaluate(() => window.kaiDesktop.startDrag());
+    await mascot.waitForFunction(() => document.body.dataset.pose === "carried");
+    await drop(true);
+    await mascot.waitForFunction(() => document.body.dataset.pose === "free");
+    await app.evaluate(() => { globalThis.__kaiCursor = null; });
+    console.log("PASS: native pickup, bottom-edge drop, horizontal slide, lift, chat anchoring and drag cancellation.");
     // Real Windows safeStorage and sandboxed provider IPC; no paid APIs.
     assert.equal(await main.evaluate(async () => { try { await window.kaiProviderBridge.status(); return false; } catch { return true; } }), true, "Other Core documents have no provider capability");
     await app.evaluate(async () => {

@@ -10,7 +10,7 @@ contextBridge.exposeInMainWorld("kaiDesktop", {
   cancelAction: () => ipcRenderer.send("mascot:cancel-action"),
   regions: regions => ipcRenderer.send("mascot:regions", regions),
   startDrag: () => ipcRenderer.send("mascot:drag-start"),
-  endDrag: () => ipcRenderer.send("mascot:drag-end"),
+  endDrag: cancelled => ipcRenderer.send("mascot:drag-end", cancelled === true),
   onEvent: callback => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on("mascot:event", listener);

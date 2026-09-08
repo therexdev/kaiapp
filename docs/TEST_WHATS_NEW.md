@@ -1,3 +1,12 @@
+### Pick KAI up and bring him along
+
+- **A little robot in your hand.** Pick KAI up by dragging him. His arms and legs dangle, his cape sways, and his body leans with your movement. Dropping him on the desktop gives a soft settling bounce.
+- **A place on the desktop edge.** Drop KAI near the bottom of the usable screen and he rests with his hands along the edge above the taskbar. Slide him left or right, or pull upward to lift him back onto the desktop. His resting position is remembered.
+- **No more bottom-to-top jump.** Movement follows the monitor under your cursor and keeps the native window inside that monitor's usable area, including when chat is open or displays change.
+- **More expressive activities.** Thinking brings a hand to his chin with a question mark and a little idea bulb. Actual web searches bring a moving magnifying glass and floating pages. Speaking adds hand gestures; the mouth still follows audible playback.
+
+Click KAI to open or minimize chat. **Animation off** and the system's reduced-motion preference stop the movement while retaining the edge pose. Your voice preferences, microphone controls and ongoing conversations continue to work while KAI is moved.
+
 ### KAI finds a cute little voice
 
 - **Cute KAI is the new character voice.** Bella with a brighter, higher, lightly squeaky character treatment. The **Squeak** slider in **Voice & listening** goes from Gentle to Extra squeaky. Pitch and pacing are handled separately, so a higher voice does not race through every word. Classic deeper KAI and the unprocessed voices remain available.

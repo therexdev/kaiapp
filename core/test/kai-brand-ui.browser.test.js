@@ -128,3 +128,82 @@ test("KAI character: transparent compact layout and expressions follow actual co
   await page.evaluate(() => document.body.classList.add("motion-off"));
   assert.equal(await page.locator(".kai3d-head").evaluate(el => getComputedStyle(el).animationName), "none");
 });
+
+test("KAI pickup, edge poses and search props coexist with chat and reduced motion", { skip: !fs.existsSync(CHROMIUM), timeout: 45000 }, async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-interaction-"));
+  const fixture = await require("./fixtures/mascot-server").startMascotServer(dir);
+  const { chromium } = require("playwright-core"); let browser;
+  t.after(async () => { await browser?.close(); await fixture.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  browser = await chromium.launch({ executablePath: CHROMIUM, args: ["--no-sandbox"] });
+  const page = await browser.newPage({ viewport: { width: 248, height: 304 }, deviceScaleFactor: 2 });
+  const errors = []; page.on("pageerror", e => errors.push(e.message));
+  await page.addInitScript(() => {
+    window.__dragEnds = []; window.__regions = [];
+    window.kaiDesktop = { expand: async () => ({}), onEvent: fn => { window.__kaiEvent = fn; }, regions: r => { window.__regions = r; },
+      startDrag() {}, endDrag: cancelled => window.__dragEnds.push(cancelled), cancelAction() {} };
+  });
+  await page.goto(fixture.origin + "/mascot.html");
+  await page.waitForFunction(() => document.querySelector("#model").value === "tiny-live" && document.querySelector("#kai-art svg"));
+  if (await page.locator("#later-natural").isVisible()) await page.click("#later-natural");
+  await page.evaluate(() => new Promise((resolve, reject) => { const i = new Image(); i.onload = resolve; i.onerror = reject; i.src = "assets/kai-character.png"; }));
+  const pose = async value => page.evaluate(value => window.__kaiEvent({ type: "placement", value }), value);
+  const capture = async name => {
+    await page.evaluate(() => { document.body.classList.remove("waving", "landing"); for (const a of document.getAnimations()) { a.pause(); a.currentTime = 1200; } });
+    await shot(page, "interactive-" + name, { omitBackground: true, animations: "allow" });
+    await page.evaluate(() => { for (const a of document.getAnimations()) a.play(); });
+  };
+  await page.mouse.move(123, 100); await page.mouse.down();
+  assert.equal(await page.getAttribute("body", "data-pose"), "carried");
+  await page.mouse.move(160, 130);
+  await pose({ pose: "carried", moving: true, sway: 12 });
+  assert.equal(await page.getAttribute("body", "data-state"), "idle", "Pickup leaves the conversation state intact");
+  assert.equal(await page.locator(".kai3d-mouth").evaluate(el => getComputedStyle(el).opacity), "0");
+  await capture("carried"); await page.mouse.up();
+  await pose({ pose: "free", landed: true });
+  assert.equal(await page.locator("body.landing").count(), 1);
+  assert.equal(await page.locator("#conversation").isVisible(), false, "A drag is never mistaken for a chat click");
+  await page.waitForFunction(() => !document.body.classList.contains("landing"));
+  await capture("free");
+  for (const physical of ["free", "perched"]) {
+    await pose({ pose: physical });
+    for (const activity of ["idle", "thinking", "searching", "speaking"]) {
+      await page.evaluate(state => { document.body.dataset.state = state; }, activity);
+      assert.equal(await page.locator(".kai3d-search-props").evaluate(el => getComputedStyle(el).opacity), activity === "searching" ? "1" : "0");
+      await capture(physical + "-" + activity);
+    }
+    const boxes = await page.evaluate(() => window.__regions);
+    assert.ok(boxes.every(r => r.x >= 0 && r.y >= 0 && r.x + r.width <= 248 && r.y + r.height <= 304));
+  }
+  await page.evaluate(() => { document.body.dataset.state = "idle"; });
+  await page.mouse.move(123, 200); await page.mouse.down();
+  await pose({ pose: "carried", moving: true, offsetY: 70 });
+  assert.equal(await page.locator("#robot").evaluate(el => getComputedStyle(el).transform), "matrix(1, 0, 0, 1, 0, 70)");
+  await pose({ pose: "free", cancelled: true }); await page.mouse.up();
+  assert.equal(await page.getAttribute("body", "data-pose"), "free");
+  assert.equal(await page.evaluate(() => window.__dragEnds.at(-1)), true);
+  // A normal click remains a chat toggle after a cancelled pickup.
+  await page.setViewportSize({ width: 660, height: 560 });
+  await page.click("#robot", { position: { x: 122, y: 100 } });
+  assert.equal(await page.locator("#conversation").isVisible(), true);
+  fixture.state.tools = [{ name: "web_search", description: "Search the web", params: { query: "search words" }, enabled: true }];
+  fixture.state.actions = [{ tool: "web_search", args: { query: "Paris weather tomorrow" } }, { answer: true }];
+  let releaseSearch;
+  await page.route("**/core/tools/call", route => new Promise(resolve => { releaseSearch = async () => {
+    await route.fulfill({ json: { ok: true, result: "Tomorrow in Paris: 22 C. https://weather.example/forecast" } }); resolve();
+  }; }));
+  await page.fill("#question", "What is the weather tomorrow in Paris?"); await page.press("#question", "Enter");
+  await page.waitForFunction(() => document.body.dataset.state === "searching");
+  assert.equal(await page.locator(".kai3d-search-props").evaluate(el => getComputedStyle(el).opacity), "1");
+  await releaseSearch(); await page.waitForFunction(() => document.getElementById("stop").hidden);
+  assert.equal(await page.getAttribute("body", "data-state"), "idle");
+  await pose({ pose: "perched" });
+  await page.evaluate(() => { document.body.dataset.state = "thinking"; });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  assert.equal(await page.locator(".kai3d-arm-left").evaluate(el => getComputedStyle(el).animationName), "none");
+  assert.equal(await page.locator(".kai3d-body").evaluate(el => getComputedStyle(el).transform), "matrix(1, 0, 0, 1, 0, 430)");
+  await capture("reduced-motion");
+  await pose({ pose: "carried" });
+  await page.evaluate(() => window.__kaiEvent({ type: "suspend", value: true }));
+  assert.equal(await page.locator(".kai3d-puppet").evaluate(el => getComputedStyle(el).animationName), "none");
+  assert.deepEqual(errors, []);
+});
