@@ -25,12 +25,18 @@ async function main() {
     const find = name => { const item = out.screen.elements.find(e => e.name === name); assert.ok(item, `Observed ${name}; controls: ${JSON.stringify(out.screen.elements)}`); return item.id; };
     out = await control.call(session.id, "computer_type", { frame: out.screen.frame, element: find("Search movies"), text: "The Test Movie" });
     assert.equal(await page.inputValue("#search"), "The Test Movie", "Real UIA typed into Chromium");
+    assert.equal(approvals.length, 1, "Literal search text uses the approved task");
     out = await control.call(session.id, "computer_key", { frame: out.screen.frame, key: "ENTER" });
     assert.equal(await page.textContent("#search-result"), "Results for The Test Movie", "Native keyboard input submits the search");
+    // Some Chromium UIA providers do not report a focused field's value.
+    // The production policy correctly reviews Enter in that case.
+    const searchApprovals = approvals.length;
+    assert.ok(searchApprovals === 1 || searchApprovals === 2);
+    if (searchApprovals === 2) assert.match(approvals.at(-1).detail, /Key: ENTER/);
     out = await control.call(session.id, "computer_click", { frame: out.screen.frame, element: find("Play") });
     assert.equal(await page.textContent("#output"), "Playing The Test Movie", "Real UIA invoked the browser Play button");
     assert.ok(out.screen.elements.some(e => /Playing The Test Movie/.test(e.name)), "Post-action view verifies the outcome");
-    assert.equal(approvals.length, 1, "Ordinary search and Play use the approved task");
+    assert.equal(approvals.length, searchApprovals, "Play uses the approved task without another confirmation");
     const point = (name, portion = .5) => {
       const b = out.screen.elements.find(e => e.name === name && (name !== "Volume" || e.role === "Slider"))?.bounds; assert.ok(b, "Visible coordinates for " + name);
       return { x: Math.round(b.x + b.width * portion), y: Math.round(b.y + b.height / 2) };
@@ -40,7 +46,7 @@ async function main() {
     const start = point("Volume", .12), end = point("Volume", .8);
     out = await control.call(session.id, "computer_drag", { frame: out.screen.frame, ...start, toX: end.x, toY: end.y, reason: "Raise the visible Volume slider" });
     assert.ok(Number(await page.inputValue("#volume")) > 65, "Native drag adjusts the real browser slider");
-    assert.equal(approvals.length, 3, "Both coordinate operations require separate review");
+    assert.equal(approvals.length, searchApprovals + 2, "Both coordinate operations require separate review");
     approve = false;
     await assert.rejects(control.call(session.id, "computer_click", { frame: out.screen.frame, element: find("Rent for $9.99") }), /declined/);
     assert.equal(await page.textContent("#output"), "Playing The Test Movie", "Declined rental never executes");
