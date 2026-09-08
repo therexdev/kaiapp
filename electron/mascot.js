@@ -23,6 +23,7 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, di
   const send = (type, value) => {
     if (window && !window.isDestroyed()) window.webContents.send("mascot:event", { type, value });
   };
+  const pocketVoice = new (require("./pocket-voice").PocketVoice)({ dir: path.join(app?.getPath?.("userData") || require("os").tmpdir(), "speech", "pocket") });
   const computer = new (require("./computer-control").ComputerControl)({ dialog, shell, globalShortcut,
     getWindow: () => window, describeModel, onEvent: value => send("computer", value),
     highlight: (view, args) => require("./computer-highlight").highlight({ BrowserWindow, screen }, view, args) });
@@ -116,13 +117,13 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, di
           if (/^https?:\/\//i.test(url) && new URL(url).origin !== origin) shell.openExternal(url);
         }
       });
-      created.on("hide", () => { computer.cancel(); actions?.cancel(); approval?.cancel(); windowsVoice.cancel(); finishDrag(true); pose(); send("suspend", true); });
+      created.on("hide", () => { computer.cancel(); actions?.cancel(); approval?.cancel(); windowsVoice.cancel(); pocketVoice.close(); finishDrag(true); pose(); send("suspend", true); });
       created.on("blur", () => { if (dragging) finishDrag(true); });
       created.on("show", () => send("suspend", false));
-      created.webContents.on("render-process-gone", () => { computer.cancel(); windowsVoice.cancel(); showMain(); });
+      created.webContents.on("render-process-gone", () => { computer.cancel(); windowsVoice.cancel(); pocketVoice.close(); showMain(); });
       created.on("closed", () => {
         computer.cancel();
-        windowsVoice.cancel(); clearInterval(timer); timer = null;
+        windowsVoice.cancel(); pocketVoice.close(); clearInterval(timer); timer = null;
         window = null; loading = null; dragging = null; regions = []; ignored = false; shaped = false;
       });
       loading = created.loadURL(origin + "/mascot.html").catch(error => {
@@ -181,6 +182,22 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, di
     if (!navigation.valid(view)) throw new Error("Unknown app screen");
     return showMain(view, true);
   });
+  handle("mascot:pocket-status", () => window, () => pocketVoice.status(), true);
+  handle("mascot:pocket-setup", () => window, () => {
+    if (!window.isVisible()) throw new Error("KAI is hidden.");
+    pocketVoice.ensure().catch(() => {}); return pocketVoice.status();
+  }, true);
+  handle("mascot:pocket-warm", () => window, voice => {
+    if (!window.isVisible()) throw new Error("KAI is hidden.");
+    return pocketVoice.warm(voice);
+  }, true);
+  handle("mascot:pocket-speech", () => window, request => {
+    if (!window.isVisible()) throw new Error("KAI is hidden.");
+    if (!request || typeof request.id !== "string" || !/^[a-zA-Z0-9-]{1,64}$/.test(request.id)) throw new Error("Invalid voice request.");
+    return pocketVoice.generate(request, chunk => send("pocket-audio", { ...chunk, id: request.id }));
+  }, true);
+  handle("mascot:pocket-cancel", () => window, () => pocketVoice.cancel(), true);
+  handle("mascot:pocket-release", () => window, () => pocketVoice.close(), true);
   // Local voice audio is a private desktop capability, never a Core/network tool.
   handle("mascot:windows-voices", () => window, refresh => windowsVoice.status(refresh === true));
   handle("mascot:windows-speech", () => window, request => {
@@ -248,7 +265,7 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, di
     hide() { if (window && !window.isDestroyed()) { savePosition(); window.hide(); } },
     dispose() {
       if (disposed) return;
-      disposed = true; computer.cancel(); actions?.cancel(); approval?.cancel(); windowsVoice.close(); clearInterval(timer);
+      disposed = true; computer.cancel(); actions?.cancel(); approval?.cancel(); windowsVoice.close(); pocketVoice.close(); clearInterval(timer);
       screen.removeListener("display-removed", onDisplayChange);
       screen.removeListener("display-metrics-changed", onDisplayChange);
       for (const channel of handles) ipcMain.removeHandler(channel);

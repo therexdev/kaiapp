@@ -101,3 +101,25 @@ test("Every desktop control IPC requires the exact companion document and main f
     e.senderFrame.url = "http://localhost:7777/mascot.html";
   }
 });
+
+test("Pocket voice IPC requires the exact visible companion and releases native work on hide", async t => {
+  const { PocketVoice } = require("../../electron/pocket-voice"); let calls = 0, releases = 0;
+  t.mock.method(PocketVoice.prototype, "warm", async () => { calls++; });
+  t.mock.method(PocketVoice.prototype, "generate", async () => { calls++; });
+  t.mock.method(PocketVoice.prototype, "ensure", async () => { calls++; });
+  t.mock.method(PocketVoice.prototype, "close", () => { releases++; });
+  const f = nativeFixture(t); await f.controller.launch(); const win = f.controller.getWindow();
+  for (const channel of ["status", "setup", "warm", "speech", "cancel", "release"]) {
+    const invoke = f.ipcMain.handles.get("mascot:pocket-" + channel);
+    assert.throws(() => invoke({ ...f.event(), sender: {} }), /Untrusted/);
+    assert.throws(() => invoke({ ...f.event(), senderFrame: { url: f.event().senderFrame.url } }), /Untrusted/);
+    win.webContents.mainFrame.url = "http://localhost:7777/";
+    assert.throws(() => invoke(f.event()), /denied/);
+    win.webContents.mainFrame.url = "http://localhost:7777/mascot.html";
+  }
+  assert.equal(calls, 0);
+  await f.ipcMain.handles.get("mascot:pocket-warm")(f.event(), "alba"); assert.equal(calls, 1);
+  win.hide(); assert.ok(releases > 0);
+  for (const channel of ["setup", "warm", "speech"]) assert.throws(() => f.ipcMain.handles.get("mascot:pocket-" + channel)(f.event()), /hidden/);
+  assert.equal(calls, 1);
+});

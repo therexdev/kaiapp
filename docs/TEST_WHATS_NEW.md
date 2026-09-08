@@ -1,3 +1,10 @@
+### Try Pocket voices with KAI
+
+- **Four optional English voices.** Download Pocket once in KAI’s **Voice & listening** panel, then choose Alba, Marius, Javert or Azelma. Your existing voice stays selected until you change it. The download is about 201 MB; no account, Python installation or subscription is needed.
+- **Audio starts while the sentence is still generating.** Pocket sends small audio chunks to a continuous player. Cute, Squeak and Classic effects keep their pitch and timing across those chunks. Your usual reply-timing choice returns when you select another engine.
+- **Compare on your computer.** “Hear a hello” uses the real engine, and the panel reports the last sentence’s startup time and buffering pauses. This is a trial, not a promise of faster speech on every computer. The first use after loading is slower.
+- **Local and easy to stop.** Pocket runs in an isolated CPU process. Stop, voice-off and hiding KAI stop its audio; unused voices release their memory. Existing microphone behavior and the spoken “KAI” interruption rule are unchanged. This English bundle does not add Korean speech.
+
 ### Smoother thinking and clearer spoken answers
 
 - **A proper hand at his chin.** KAI now rests a curled hand under his face, with upright knuckles. The same grip holds his magnifying glass while searching.

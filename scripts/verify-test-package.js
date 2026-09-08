@@ -24,7 +24,7 @@ for (const archive of archives) {
     assert.equal(config.url, TEST_FEED);
     assert.equal(config.channel, "test");
   }
-  for (const required of ["electron/computer-highlight.js", "electron/computer-control.js", "electron/native-computer.js", "ui/computer-tools.js", "electron/providers.js", "electron/provider-http.js", "ui/desktop-providers.js", "electron/mascot.js", "electron/mascot-layout.js", "electron/windows-voice.js", "electron/mascot-preload.js", "ui/mascot.html",
+  for (const required of ["electron/pocket-voice.js", "electron/pocket-voice-worker.js", "ui/mascot-pocket.js", "ui/pocket-credits.html", "core/runtimes/pocket.json", "electron/computer-highlight.js", "electron/computer-control.js", "electron/native-computer.js", "ui/computer-tools.js", "electron/providers.js", "electron/provider-http.js", "ui/desktop-providers.js", "electron/mascot.js", "electron/mascot-layout.js", "electron/windows-voice.js", "electron/mascot-preload.js", "ui/mascot.html",
     "ui/brand.js", "ui/brand-mark.svg", "ui/kai-character.css", "ui/assets/kai-character.png", "ui/assets/kai-voice-hello.wav", "ui/node-brand.css",
     "ui/mascot.js", "ui/mascot-client.js", "ui/mascot.css", "ui/kai-robot.svg", "ui/mascot-launcher.js",
     "ui/mascot-speech.js", "ui/mascot-wake.js", "ui/mascot-audio-worklet.js", "ui/mascot-tools.js", "ui/app-navigation.js", "core/lib/app-tools.js", "electron/tool-approval.js",
@@ -43,6 +43,10 @@ for (const archive of archives) {
   if (process.platform === "win32") assert.ok(fs.statSync(path.join(path.dirname(file), "bin/kai-computer.exe")).size > 0, "Missing private desktop control helper");
   for (const asset of ["ort.node.min.js", "ort-wasm-simd-threaded.mjs", "ort-wasm-simd-threaded.wasm"]) {
     assert.ok(fs.statSync(path.join(file + ".unpacked", "node_modules/onnxruntime-web/dist", asset)).size > 0, "Missing local compatible voice runtime: " + asset);
+  }
+  if (process.platform === "win32") {
+    const native = path.join(file + ".unpacked", "node_modules/sherpa-onnx-win-x64");
+    for (const asset of ["sherpa-onnx.node", "onnxruntime.dll", "onnxruntime_providers_shared.dll", "sherpa-onnx-c-api.dll", "sherpa-onnx-cxx-api.dll"]) assert.ok(fs.statSync(path.join(native, asset)).size > 0, "Missing Pocket native runtime: " + asset);
   }
   console.log(`Verified ${file}: ${pkg.version}`);
 }

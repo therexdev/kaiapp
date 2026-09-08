@@ -8,6 +8,12 @@ async function computerInvoke(channel, ...args) {
   }
 }
 contextBridge.exposeInMainWorld("kaiDesktop", {
+  pocketStatus: () => computerInvoke("mascot:pocket-status"),
+  pocketSetup: () => computerInvoke("mascot:pocket-setup"),
+  pocketWarm: voice => computerInvoke("mascot:pocket-warm", voice),
+  pocketSpeech: request => computerInvoke("mascot:pocket-speech", request),
+  cancelPocketSpeech: () => computerInvoke("mascot:pocket-cancel").catch(() => {}),
+  releasePocket: () => computerInvoke("mascot:pocket-release").catch(() => {}),
   computerStatus: () => computerInvoke("mascot:computer-status"),
   computerBegin: request => computerInvoke("mascot:computer-begin", request),
   computerCall: (token, name, args) => computerInvoke("mascot:computer-call", token, name, args),

@@ -188,7 +188,7 @@
       notice("KAI cannot reach the app right now. Open the full app to check its status.");
     }
   }
-  let windowsVoices = [], windowsStatus = null;
+  let windowsVoices = [], windowsStatus = null, pocketStatus = null, pocketTimer = null;
   let speechStatus = null, speechSetupTimer = null, cancelPlayback = null, holdPlayback = null;
   let voiceChoice = read("kai-mascot-voice-choice", "natural:af_bella");
   let voiceTone = read("kai-mascot-voice-tone", "cute");
@@ -215,6 +215,7 @@
   }
   let warmRequest = null;
   function warmSpeech() {
+    if (!suspended && voiceReplies && voiceChoice.startsWith("pocket:")) { if (pocketStatus?.available) bridge.pocketWarm(voiceChoice.slice(7)).catch(() => {}); return; }
     if (!suspended && voiceReplies && voiceChoice.startsWith("windows:")) { bridge?.windowsVoices?.().catch(() => {}); return; }
     if (warmRequest || suspended || !voiceReplies || !voiceChoice.startsWith("natural:") || !speechStatus?.available) return;
     // Only load already installed files, while the user speaks or the model
@@ -222,7 +223,7 @@
     warmRequest = post("/core/speech/warm", {}).catch(() => {}).finally(() => { warmRequest = null; });
   }
   const speech = new KaiSpeech.Queue({
-    buffer: () => speechStart === "complete" ? "complete" : speechStart === "smooth" ? 2 : 1,
+    buffer: () => voiceChoice.startsWith("pocket:") ? 1 : speechStart === "complete" ? "complete" : speechStart === "smooth" ? 2 : 1,
     merge: values => {
       const text = values.map(v => v.text).join(" ");
       return values.every(v => v.wav) ? { wav: KaiSpeech.joinWavs(values.map(v => v.wav)), text } : { ...values[0], text };
@@ -231,6 +232,7 @@
       const preview = typeof text === "object" && text.preview;
       if (preview) text = previewHello;
       const voice = voiceChoice, tone = voiceTone, pitch = voicePitch;
+      if (voice.startsWith("pocket:")) return KaiPocket.prepare(bridge, { text, voice: voice.slice(7), tone, pitch }, signal);
       if (voice.startsWith("windows:")) {
         if (!bridge?.windowsSpeech) throw new Error("Fast Windows voices need the installed desktop app.");
         signal.throwIfAborted();
@@ -260,7 +262,19 @@
       } });
       return { wav, text };
     },
-    play: value => new Promise((resolve, reject) => {
+    play: value => {
+      if (value.pocket) {
+        let heard = false;
+        const player = KaiPocket.play(value, { onAudible: active => {
+          if (active && !heard) { heard = true; wakeListener.hearOutput(value.text); }
+          playbackState(active);
+        }, onMetric: metric => {
+          $("pocket-metric").textContent = "Last sentence started in " + (metric.firstPlaybackMs / 1000).toFixed(1) + " s · " + (metric.pauses ? metric.pauses + " buffering pause(s)" : "no buffering pauses") + ".";
+        } });
+        cancelPlayback = player.cancel; holdPlayback = player.hold;
+        return player.finished.finally(() => { if (cancelPlayback === player.cancel) { cancelPlayback = null; holdPlayback = null; } });
+      }
+      return new Promise((resolve, reject) => {
       let audio, utterance, url, done = false, started = false;
       const playing = () => {
         if (done || speech.held) return;
@@ -305,7 +319,8 @@
         speechSynthesis.speak(utterance);
         if (speech.held) speechSynthesis.pause();
       }
-    }),
+    });
+    },
     cancel: () => { window.speechSynthesis?.cancel(); window.speechSynthesis?.resume(); cancelPlayback?.(); },
     holdPlayback: held => holdPlayback?.(held),
     onState: state => {
@@ -326,12 +341,13 @@
     if (voiceReplies && !suspended && ensureNatural()) { speech.enqueue(new api.SpeechPhrases().push(text, true)); speech.end(); }
   }
   function enqueueSpeech(phrases, epoch) {
-    if (voiceReplies && !suspended && epoch === speechEpoch && (!voiceChoice.startsWith("natural:") || speechStatus?.available)) speech.enqueue(phrases);
+    if (voiceReplies && !suspended && epoch === speechEpoch && (!voiceChoice.startsWith("natural:") || speechStatus?.available) && (!voiceChoice.startsWith("pocket:") || pocketStatus?.available)) speech.enqueue(phrases);
   }
   function voiceChoices() {
     const select = $("voice-choice"); select.replaceChildren();
     const add = (value, label, disabled = false) => { const o = document.createElement("option"); o.value = value; o.textContent = label; o.disabled = disabled; select.append(o); };
     for (const v of windowsVoices) add("windows:" + v.id, v.name + " · fast · " + v.lang);
+    for (const v of pocketStatus?.supported ? pocketStatus.voices : []) add("pocket:" + v.id, v.name + " · Pocket streaming · English" + (pocketStatus.available ? "" : " · download first"));
     for (const v of speechStatus?.voices || []) add("natural:" + v.id, v.name + " · natural");
     add("system", "Browser computer voice · automatic");
     for (const v of window.speechSynthesis?.getVoices() || []) if (v.localService) add("system:" + v.voiceURI, v.name + " · browser · " + v.lang);
@@ -340,11 +356,13 @@
     voiceReplyUI(); voiceEngineUI();
   }
   function voiceEngineUI() {
-    $("voice-engine-help").textContent = voiceChoice.startsWith("windows:") ?
+    if (!voiceChoice.startsWith("natural:")) $("natural-card").hidden = true;
+    $("speech-start").disabled = voiceChoice.startsWith("pocket:");
+    $("voice-engine-help").textContent = voiceChoice.startsWith("pocket:") ? "Pocket streams each sentence as audio is generated, with Cute, Squeak and Classic effects. This trial is English-only. Speed depends on your computer; try Hear a hello and compare the timing below." : voiceChoice.startsWith("windows:") ?
       "Fast local Windows speech with Cute, Squeak and Classic effects. Korean replies use an installed Korean voice; add Korean speech below if needed. Your usual voice stays selected." :
       voiceChoice.startsWith("natural:") ? "These four natural voices share one engine. On slower computers, choose Whole reply to avoid synthesis pauses, or try a fast Windows voice." :
       "Browser computer voices are fast, but some ignore pitch changes. On Windows, choose the matching fast voice above for full character effects.";
-    $("speech-start-help").textContent = speechStart === "complete" ? "Prepares the reply's audio before speaking. Longer initial wait, then continuous playback. Very long replies play in sections." :
+    $("speech-start-help").textContent = voiceChoice.startsWith("pocket:") ? "Pocket uses a short audio buffer and starts before the sentence finishes generating. Your timing choice is kept for other engines." : speechStart === "complete" ? "Prepares the reply's audio before speaking. Longer initial wait, then continuous playback. Very long replies play in sections." :
       speechStart === "smooth" ? "Prepares two sentences before starting. Slower voice engines may still pause later." :
       "Starts with the first complete sentence and prepares the next while talking. Best with fast Windows voices.";
   }
@@ -375,7 +393,23 @@
     $("natural-status").textContent = speechStatus.setup?.state === "error" ? speechStatus.setup.error : speechStatus.available ? "Local voices are ready. Cute KAI works best with Bella. Speech stays on your computer." :
       speechStatus.modelPresent ? "Your voices are downloaded. Retry setup to start KAI’s voice." : "Download natural voices once (" + Math.ceil((speechStatus.downloadBytes || 93000000) / 1000000) + " MB). No account or subscription needed.";
   }
+  async function loadPocket() {
+    if (!bridge?.pocketStatus) return;
+    try { pocketStatus = await bridge.pocketStatus(); } catch { return; }
+    $("pocket-controls").hidden = !pocketStatus.supported;
+    const state = pocketStatus.setup?.state;
+    $("setup-pocket").disabled = state === "downloading";
+    $("setup-pocket").textContent = pocketStatus.available ? "Repair Pocket voices" : "Download Pocket voices";
+    $("pocket-status").textContent = state === "error" ? pocketStatus.setup.error : state === "downloading" ? "Downloading Pocket voices · " + (pocketStatus.setup.pct || 0) + "%" : pocketStatus.available ? "Ready. Choose a Pocket voice above, then Hear a hello." : "Download once to try Alba, Marius, Javert and Azelma.";
+    voiceChoices();
+    if (state === "downloading" && !suspended) { clearTimeout(pocketTimer); pocketTimer = setTimeout(loadPocket, 1200); }
+    else warmSpeech();
+  }
   function ensureNatural() {
+    if (voiceChoice.startsWith("pocket:")) {
+      if (pocketStatus?.available) return true;
+      notice("Download Pocket voices in Voice & listening first. Your reply will still appear in chat."); return false;
+    }
     if (!voiceChoice.startsWith("natural:") || speechStatus?.available) return true;
     $("natural-card").hidden = false;
     $("compact-natural").disabled = !speechStatus?.installable;
@@ -546,7 +580,7 @@
   }
   function voiceReplyUI() {
     $("read-aloud").setAttribute("aria-pressed", String(voiceReplies));
-    const name = voiceChoice.startsWith("windows:") ? "Fast KAI" : voiceChoice.startsWith("natural:") ?
+    const name = voiceChoice.startsWith("pocket:") ? "Pocket KAI" : voiceChoice.startsWith("windows:") ? "Fast KAI" : voiceChoice.startsWith("natural:") ?
       (speechStatus?.voices?.find(v => "natural:" + v.id === voiceChoice)?.name.split(" · ")[0] || "Natural") : "Computer";
     $("read-aloud").querySelector("span").textContent = voiceReplies ? name + " voice on" : "Voice replies off";
   }
@@ -711,8 +745,8 @@
   }
   function suspend(value) {
     suspended = !!value; document.body.classList.toggle("suspended", suspended);
-    if (suspended) { endDrag({ type: "pointercancel" }); clearTimeout(landingTimer); document.body.classList.remove("landing", "perch-target"); chatAbort?.abort(); bridge?.cancelAction?.(); stopWake(); stopSpeech(); }
-    else { wake(); warmSpeech(); }
+    if (suspended) { clearTimeout(pocketTimer); bridge?.releasePocket?.(); endDrag({ type: "pointercancel" }); clearTimeout(landingTimer); document.body.classList.remove("landing", "perch-target"); chatAbort?.abort(); bridge?.cancelAction?.(); stopWake(); stopSpeech(); }
+    else { wake(); loadPocket(); warmSpeech(); }
   }
   function main(view) {
     suspend(true);
@@ -730,7 +764,11 @@
   $("voice-options").onclick = () => voiceOptions($("voice-options-panel").hidden);
   $("close-voice-options").onclick = () => voiceOptions(false);
   $("menu-voice").onclick = async () => { await expand(true); voiceOptions(true); };
-  $("voice-choice").onchange = () => { stopSpeech(); voiceChoice = $("voice-choice").value; write("kai-mascot-voice-choice", voiceChoice); voiceReplyUI(); voiceEngineUI(); ensureNatural(); warmSpeech(); };
+  $("voice-choice").onchange = () => { stopSpeech(); bridge?.releasePocket?.(); voiceChoice = $("voice-choice").value; write("kai-mascot-voice-choice", voiceChoice); voiceReplyUI(); voiceEngineUI(); ensureNatural(); warmSpeech(); };
+  $("setup-pocket").onclick = async () => {
+    stopSpeech(); $("setup-pocket").disabled = true;
+    try { await bridge.pocketSetup(); await loadPocket(); } catch (error) { $("setup-pocket").disabled = false; notice(error.message); }
+  };
   $("refresh-windows-voices").onclick = () => loadWindowsVoices(true);
   $("add-windows-voices").onclick = () => bridge?.windowsVoiceSettings?.().catch(error => notice(error.message));
   $("use-fast-voice").onclick = () => {
@@ -771,7 +809,7 @@
   $("model").onchange = () => { requestedModel = $("model").value; write("kai-mascot-model", requestedModel); controls(); };
   $("read-aloud").onclick = () => {
     voiceReplies = !voiceReplies; write("kai-mascot-voice", voiceReplies ? "1" : "0"); voiceReplyUI();
-    if (!voiceReplies) { stopSpeech(); if (!busy) mood("idle"); }
+    if (!voiceReplies) { bridge?.releasePocket?.(); stopSpeech(); if (!busy) mood("idle"); }
     else { ensureNatural(); warmSpeech(); }
   };
   $("wave").onclick = () => { wave(); $("mascot-menu").hidden = true; regions(); };
@@ -875,6 +913,7 @@
     $("motion").setAttribute("aria-pressed", String(motion));
     voiceReplyUI();
     await loadSpeech();
+    await loadPocket();
     loadWindowsVoices();
     warmSpeech();
     await loadModels(); await loadChat(); booted = true;

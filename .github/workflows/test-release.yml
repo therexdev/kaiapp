@@ -41,6 +41,10 @@ jobs:
         run: node scripts/verify-neural-voice.js
         env:
           KAI_MASCOT_QA_DIR: mascot-qa
+      - name: Verify Pocket streaming voices
+        run: node scripts/verify-pocket-voice.js
+        env:
+          KAI_MASCOT_QA_DIR: mascot-qa
       - name: Save KAI visual checks
         if: always()
         uses: actions/upload-artifact@v4
@@ -88,6 +92,17 @@ jobs:
         run: npm run dist -- --win --dir --publish never
       - name: Verify Windows preflight contents
         run: node scripts/verify-test-package.js --preflight
+      - name: Verify packaged Pocket voices
+        run: node scripts/verify-pocket-voice.js --packaged
+        env:
+          KAI_MASCOT_QA_DIR: pocket-voice-qa
+      - name: Save packaged Pocket checks
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pocket-windows-voice-checks
+          path: pocket-voice-qa/*
+          if-no-files-found: ignore
       - name: Verify packaged fast Windows voices
         run: node scripts/verify-windows-voice.js --packaged
       - name: Verify packaged desktop control

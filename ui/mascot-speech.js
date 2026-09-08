@@ -171,8 +171,11 @@
       if (!this.preparing && this.tasks.length && !full) {
         this.preparing = true;
         const abort = this.abort = new AbortController(), text = this.tasks.shift();
-        Promise.resolve().then(() => epoch === this.epoch ? this.prepare(text, abort.signal) : null).then(value => {
-          if (epoch === this.epoch) this.ready.push(value);
+        Promise.resolve().then(() => epoch === this.epoch ? this.prepare(text, abort.signal) : null).then(async value => {
+          if (epoch === this.epoch) { this.ready.push(value); this.pump(); }
+          // A streaming voice becomes playable before inference finishes. Keep
+          // the single preparation slot until its remaining chunks arrive.
+          await value?.finished;
         }).catch(error => { if (epoch === this.epoch) { this.stop(); this.onError(error); } })
           .finally(() => { if (epoch === this.epoch) { this.preparing = false; this.abort = null; this.pump(); } });
       }

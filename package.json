@@ -62,7 +62,8 @@
       "node_modules/onnxruntime-node/**",
       "node_modules/kokoro-js/**",
       "node_modules/phonemizer/**",
-      "node_modules/onnxruntime-web/**"
+      "node_modules/onnxruntime-web/**",
+      "node_modules/sherpa-onnx*/**"
     ],
     "win": {
       "target": [
@@ -126,7 +127,8 @@
     "kokoro-js": "1.2.1",
     "mailparser": "^3.9.17",
     "nodemailer": "^9.0.5",
-    "onnxruntime-web": "1.22.0-dev.20250409-89f8206ba4"
+    "onnxruntime-web": "1.22.0-dev.20250409-89f8206ba4",
+    "sherpa-onnx-node": "1.13.7"
   },
   "overrides": {
     "protobufjs": "7.4.0"
