@@ -1,3 +1,10 @@
+### Smoother thinking and clearer spoken answers
+
+- **A proper hand at his chin.** KAI now rests a curled hand under his face, with upright knuckles. The same grip holds his magnifying glass while searching.
+- **Steady thinking and searching.** His arm eases into position, his head nods gently, and web searches keep their animation between lookup steps. A greeting ends when KAI starts working, so the poses do not compete.
+- **Answers without spoken web addresses.** Voice replies skip full URLs, numbered citations and source lists. Useful source links remain clickable in the text chat.
+- **Emoji in plain words.** Common emoji get short names such as “smiley face emoji,” “thumbs up emoji” or “robot emoji.” Combined emoji are handled as one symbol. This works with fast Windows, browser and natural voices, including streamed replies.
+
 ### KAI can work in your browser and desktop apps
 
 - **“Open Tubi” just opens Tubi.** Known website commands launch your default browser immediately. You can also give KAI a complete website address.

@@ -96,7 +96,7 @@ test("KAI workspace: artwork, welcome drafts, all navigation and narrow-window h
   assert.ok(bounds.fits, "Composer stays within the narrow workspace"); assert.ok(bounds.unique, "New chat preserves unique SVG fragment IDs");
   await shot(page, "chat-narrow");
   await page.emulateMedia({ reducedMotion: "reduce" });
-  assert.equal(await page.locator("#chat-empty .kai3d-head").evaluate(el => getComputedStyle(el).animationName), "none");
+  assert.equal(await page.locator("#chat-empty .kai3d-head-motion").evaluate(el => getComputedStyle(el).animationName), "none");
   assert.deepEqual(failedArt, []); assert.deepEqual(errors, []);
 });
 
@@ -126,7 +126,7 @@ test("KAI character: transparent compact layout and expressions follow actual co
   await shot(page, "mascot-chat", { omitBackground: true });
   await page.click("#voice-options"); await shot(page, "mascot-voice", { omitBackground: true });
   await page.evaluate(() => document.body.classList.add("motion-off"));
-  assert.equal(await page.locator(".kai3d-head").evaluate(el => getComputedStyle(el).animationName), "none");
+  assert.equal(await page.locator(".kai3d-head-motion").evaluate(el => getComputedStyle(el).animationName), "none");
 });
 
 test("KAI pickup, edge poses and search props coexist with chat and reduced motion", { skip: !fs.existsSync(CHROMIUM), timeout: 45000 }, async t => {

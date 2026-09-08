@@ -41,7 +41,10 @@
     const engaged = wakeListener?.engaged;
     if (wakePhase === "capturing" && engaged && ((!busy && !speaking) || speech.held)) value = "listening";
     else if (wakePhase === "transcribing" && engaged && !busy && !speaking) value = "transcribing";
-    document.body.dataset.state = value;
+    // Status and microphone updates often repeat the same mood. Keep the rig's
+    // animation timeline intact, and end a greeting before a work pose begins.
+    if (value !== "idle") { clearTimeout(waveTimer); document.body.classList.remove("waving"); }
+    if (document.body.dataset.state !== value) document.body.dataset.state = value;
     $("mood-label").textContent = wakePhase === "calibrating" ? "Getting microphone ready…" :
       value === "idle" && wakeEnabled && !engaged ? "Say “Hey KAI” · mic on" :
       value === "idle" && wakeEnabled && engaged ? "Your turn · mic on" : labels[value] || labels.idle;
@@ -60,6 +63,7 @@
   }
   function wave() {
     wake();
+    if (busy || speaking || voicePending) return;
     clearTimeout(waveTimer);
     document.body.classList.remove("waving");
     void $("robot").offsetWidth;
@@ -602,7 +606,10 @@
             finally { approvalPending = false; if (wakeEnabled && !suspended) wakeListener.pause(false); }
           },
           status: (value, detail) => {
-            toolActivity = detail?.activity === "searching" ? "searching" : null;
+            // A web lookup includes the planning between search/read calls.
+            // Keep that pose until the tool phase ends instead of flashing the
+            // thinking pose between every quickly returning web request.
+            toolActivity = detail?.activity === "searching" || (detail?.phase === "planning" && toolActivity === "searching") ? "searching" : null;
             trace.textContent = value; mood("thinking");
             if (value && !audible) $("mood-label").textContent = value;
             scroll();

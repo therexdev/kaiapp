@@ -27,7 +27,7 @@
     <g class="kai3d-leg kai3d-leg-left"><image href="assets/kai-character.png" width="1024" height="1536" mask="url(#kai-thigh-left-cutout)"/><g class="kai3d-shin kai3d-shin-left"><image href="assets/kai-character.png" width="1024" height="1536" mask="url(#kai-shin-left-cutout)"/></g></g>
     <g class="kai3d-leg kai3d-leg-right"><image href="assets/kai-character.png" width="1024" height="1536" mask="url(#kai-thigh-right-cutout)"/><g class="kai3d-shin kai3d-shin-right"><image href="assets/kai-character.png" width="1024" height="1536" mask="url(#kai-shin-right-cutout)"/></g></g>
     <g class="kai3d-torso"><image href="assets/kai-character.png" width="1024" height="1536" mask="url(#kai-torso-cutout)"/></g>
-    <g class="kai3d-head">
+    <g class="kai3d-head"><g class="kai3d-head-motion">
       <image href="assets/kai-character.png" width="1024" height="1536" mask="url(#kai-head-cutout)"/>
       <g class="kai3d-gaze" filter="url(#kai-face-glow)" fill="#35e4ff" stroke="#35e4ff" stroke-linecap="round">
         <g class="kai3d-brows" fill="none" stroke-width="13"><path d="M302 285Q329 266 358 280"/><path d="M660 280Q690 266 718 285"/></g>
@@ -41,8 +41,19 @@
         <g class="kai3d-thought" stroke="none"><circle cx="473" cy="535" r="11"/><circle cx="512" cy="535" r="11"/><circle cx="551" cy="535" r="11"/></g>
       </g>
       <g class="kai3d-listen" fill="none" stroke="#09baff" stroke-width="13" stroke-linecap="round"><path d="M27 358Q-5 418 27 479M994 358Q1026 418 994 479"/></g>
+    </g></g>
+    <g class="kai3d-search-props">
+      <g class="kai3d-search-pages" fill="#d7f8ff" fill-opacity=".83" stroke="#19c6ff" stroke-width="7"><g class="kai3d-page-one"><rect x="52" y="663" width="134" height="165" rx="17" transform="rotate(-12 119 746)"/><path d="M78 707H149M78 733H142M78 759H129"/></g><g class="kai3d-page-two"><rect x="848" y="665" width="134" height="165" rx="17" transform="rotate(12 915 746)"/><path d="M880 707H952M880 733H942M880 759H927"/></g></g>
+      <g class="kai3d-magnifier"><path d="M378 550 419 707" stroke="#032c71" stroke-width="53" stroke-linecap="round"/><path d="M379 550 419 707" stroke="url(#kai-prop-metal)" stroke-width="36" stroke-linecap="round"/><circle cx="298" cy="439" r="140" fill="#07315a" fill-opacity=".2" stroke="#05377c" stroke-width="30"/><circle cx="298" cy="439" r="140" fill="url(#kai-prop-glass)" stroke="url(#kai-prop-metal)" stroke-width="19"/><circle cx="298" cy="439" r="119" fill="none" stroke="#1fe4ff" stroke-width="5"/><path d="M211 408Q224 350 280 347" fill="none" stroke="#c5fcff" stroke-width="15" stroke-linecap="round"/></g>
     </g>
-    <g class="kai3d-arm kai3d-arm-left"><image href="assets/kai-character.png" width="1024" height="1536" mask="url(#kai-upper-arm-left-cutout)"/><g class="kai3d-forearm kai3d-forearm-left"><image href="assets/kai-character.png" width="1024" height="1536" mask="url(#kai-forearm-left-cutout)"/><g class="kai3d-wave-forearm"><image href="assets/kai-character.png" width="1024" height="1536" mask="url(#kai-wave-sleeve-cutout)"/><g transform="translate(142 965) rotate(-120)"><g class="kai3d-wave-palm" fill="url(#kai-palm-shade)" stroke="#071c3c" stroke-width="7" stroke-linejoin="round">
+    <g class="kai3d-arm kai3d-arm-left"><image href="assets/kai-character.png" width="1024" height="1536" mask="url(#kai-upper-arm-left-cutout)"/><g class="kai3d-forearm kai3d-forearm-left"><image href="assets/kai-character.png" width="1024" height="1536" mask="url(#kai-forearm-left-cutout)"/><g class="kai3d-curled-forearm"><image href="assets/kai-character.png" width="1024" height="1536" mask="url(#kai-wave-sleeve-cutout)"/>
+      <g class="kai3d-curled-hand" transform="translate(142 965) rotate(187)" fill="url(#kai-palm-shade)" stroke="#071c3c" stroke-width="6" stroke-linejoin="round">
+        <!-- A relaxed fist: upright knuckles and a thumb folded across the fingers. -->
+        <path d="M-40 0Q-58-22-53-46L-48-67Q-45-82-31-78Q-25-95-10-87Q2-99 15-87Q33-96 43-78L48-42Q58-24 40-3Z"/>
+        <path d="M-31-75-32-48Q-23-38-13-47L-10-84M-12-47Q1-38 12-49L15-84M12-49Q27-39 37-51L36-74" fill="none" stroke="#6f91b8" stroke-width="4" stroke-linecap="round"/>
+        <path d="M42-48Q63-49 60-29Q48-5 18-9L-6-18Q-18-29-8-38Q0-44 14-34L30-32Z"/>
+        <path d="M-40 0Q0-11 42 0L37 24Q-1 33-37 22Z" fill="url(#kai-prop-metal)" stroke="#1255a2"/>
+      </g></g><g class="kai3d-wave-forearm"><image href="assets/kai-character.png" width="1024" height="1536" mask="url(#kai-wave-sleeve-cutout)"/><g transform="translate(142 965) rotate(-120)"><g class="kai3d-wave-palm" fill="url(#kai-palm-shade)" stroke="#071c3c" stroke-width="7" stroke-linejoin="round">
         <path d="M-43-2C-61-31-70-43-77-64L-90-94Q-94-108-83-112Q-72-116-63-99L-47-78-58-155Q-60-170-48-172Q-34-174-32-157L-21-99-22-177Q-22-191-9-191Q5-190 5-175L8-101 17-166Q19-182 32-179Q44-176 41-160L33-92 49-136Q54-150 66-143Q77-137 71-124L53-64Q48-38 36-3Z"/>
         <path d="M-33-55Q-2-69 26-49M-37-79-29-42M-6-89-4-50M24-82 16-47" fill="none" stroke="#6989af" stroke-opacity=".5" stroke-width="5" stroke-linecap="round"/>
         <path d="M-42-4Q-3-13 39-4L35 21Q-4 30-39 19Z" fill="url(#kai-prop-metal)" stroke="#1255a2"/>
@@ -53,10 +64,7 @@
       <g class="kai3d-question-prop" transform="translate(865 224)"><path d="M-57-70Q-8-103 45-66Q88-35 54 12L23 40V70H-17V23Q-16 6 5-10Q35-32 8-47Q-12-61-31-43Z" fill="#0c80ff" stroke="#84eaff" stroke-width="8"/><circle cy="103" r="23" fill="#05cfff" stroke="#8bf0ff" stroke-width="6"/></g>
       <g class="kai3d-idea-prop"><g transform="translate(887 262)"><g class="kai3d-idea-rays" fill="none" stroke="#ffcf4f" stroke-width="12" stroke-linecap="round"><path d="M0-129V-159M91-91L112-112M127 0H157M-91-91L-112-112M-127 0H-157M0-129V-159"/></g><path d="M-41 57C-44 32-79 14-79-28A79 79 0 0 1 79-28C79 14 44 32 41 57Z" fill="url(#kai-bulb-light)" stroke="#fff4be" stroke-width="9"/><path d="M-15 55V-11L0 2 15-11V55M-39 74H39M-31 90H31" fill="none" stroke="#f8fcff" stroke-width="11" stroke-linecap="round"/><path d="M-28 101Q0 128 28 101" fill="#2876c2"/></g></g>
     </g>
-    <g class="kai3d-search-props">
-      <g class="kai3d-search-pages" fill="#d7f8ff" fill-opacity=".83" stroke="#19c6ff" stroke-width="7"><g class="kai3d-page-one"><rect x="52" y="663" width="134" height="165" rx="17" transform="rotate(-12 119 746)"/><path d="M78 707H149M78 733H142M78 759H129"/></g><g class="kai3d-page-two"><rect x="848" y="665" width="134" height="165" rx="17" transform="rotate(12 915 746)"/><path d="M880 707H952M880 733H942M880 759H927"/></g></g>
-      <g class="kai3d-magnifier"><path d="M378 550 467 680" stroke="#032c71" stroke-width="53" stroke-linecap="round"/><path d="M379 550 467 680" stroke="url(#kai-prop-metal)" stroke-width="36" stroke-linecap="round"/><circle cx="298" cy="439" r="140" fill="#07315a" fill-opacity=".2" stroke="#05377c" stroke-width="30"/><circle cx="298" cy="439" r="140" fill="url(#kai-prop-glass)" stroke="url(#kai-prop-metal)" stroke-width="19"/><circle cx="298" cy="439" r="119" fill="none" stroke="#1fe4ff" stroke-width="5"/><path d="M211 408Q224 350 280 347" fill="none" stroke="#c5fcff" stroke-width="15" stroke-linecap="round"/></g>
-    </g>
+
   </g></g>
   <g class="kai3d-ledge"><path d="M166 1470H858" stroke="#053971" stroke-width="13" stroke-linecap="round"/><path d="M166 1467H858" stroke="#15c8ff" stroke-width="5" stroke-linecap="round"/></g>
 </svg>
