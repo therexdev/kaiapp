@@ -11,7 +11,7 @@
   document.body.dataset.pose = "free";
   let voiceReplies = read("kai-mascot-voice", "0") === "1";
   let motion = read("kai-mascot-motion", "1") !== "0";
-  let booted = false, savedFailure = false, approvalPending = false;
+  let booted = false, savedFailure = false, approvalPending = false, computerActive = false, computerAvailable = false;
 
   async function json(url, options) {
     const response = await fetch(url, options);
@@ -94,7 +94,7 @@
     const locked = busy || voicePending;
     $("send").hidden = busy;
     $("stop").hidden = !busy && !speaking;
-    $("send").disabled = locked || (!$("model").value && !api.folderRequest($("question").value) && !KaiAppNavigation.request($("question").value)) || !$("question").value.trim();
+    $("send").disabled = locked || (!$("model").value && !api.folderRequest($("question").value) && !KaiAppNavigation.request($("question").value) && !KaiComputerTools.websiteRequest($("question").value)) || !$("question").value.trim();
     $("new-chat").disabled = locked;
     $("model").disabled = locked;
     for (const id of ["mic", "quick-mic"]) {
@@ -103,7 +103,10 @@
       $(id).setAttribute("aria-label", busy || speaking ? "Interrupt KAI and talk" : "Talk to KAI");
       $(id).title = busy || speaking ? "Interrupt and talk" : "Talk now · no wake phrase needed";
     }
-    $("quick-stop").hidden = !busy && !speaking;
+    $("quick-stop").hidden = !busy && !speaking && !computerActive;
+    $("quick-stop").title = computerActive ? "Stop desktop control · Ctrl+Alt+Backspace" : "Stop response";
+    $("menu-computer").textContent = computerActive ? "Stop desktop control ■" : "Desktop control";
+    document.body.classList.toggle("computer-active", computerActive);
     $("composer-hint").textContent = voicePending ? "Preparing your voice…" : wakeEnabled ? "Pause to send · keep talking after replies" : "Enter to send";
     $("welcome").hidden = history.length > 0 || $("messages").childElementCount > 0;
     $("preview-voice").textContent = speaking ? "Stop voice" : "Hear a hello";
@@ -546,8 +549,9 @@
   async function send({ source = "typed" } = {}) {
     const text = $("question").value.trim(), model = $("model").value;
     const folder = api.folderRequest(text), destination = folder ? null : KaiAppNavigation.request(text);
+    const website = !folder && !destination ? KaiComputerTools.websiteRequest(text) : null;
     if (!text || busy || voicePending) return;
-    if (!model && !folder && !destination) {
+    if (!model && !folder && !destination && !website) {
       notice("Open the full app to choose a chat model so KAI can answer, then try again."); mood("error"); return;
     }
     stopSpeech(); notice(""); toolActivity = null; busy = true; mood("thinking");
@@ -570,7 +574,12 @@
       return j;
     };
     try {
-      if (destination) {
+      if (website) {
+        const result = bridge?.openWebsite ? await bridge.openWebsite(text) : null;
+        if (chatAbort.signal.aborted) throw new DOMException("Stopped", "AbortError");
+        content = result?.message || "Opening websites needs the installed desktop companion.";
+        request.keepUser = true;
+      } else if (destination) {
         const result = open ? await open(destination) : { ok: false };
         content = result.ok ? "The main app is open. I'm still here if you need me. If that feature is disabled, you'll see its switch in Settings." : "I couldn't open the main app. This control needs the installed desktop companion.";
       } else if (folder) {
@@ -584,6 +593,7 @@
       } else {
         const contextSize = aliases.find(a => a.alias === model)?.contextSize || 4096;
         phase = await KaiMascotTools.run({ question: text, history, chatId, contextSize, signal: chatAbort.signal, json: toolJson, open,
+          computer: computerAvailable ? { begin: () => bridge.computerBegin({ task: text, model }), call: (token, name, args) => bridge.computerCall(token, name, args) } : null,
           confirm: async (name, args) => {
             // Pause capture while a human reviews a mutation. Background audio
             // is never an approval, and Off/Stop/hide invalidate a late click.
@@ -598,9 +608,9 @@
             scroll();
           },
           onObservation: value => { observations.push(value); request.keepUser = true; },
-          askModel: async (messages, signal) => {
+          askModel: async (messages, signal, options = {}) => {
             const response = await KaiProviders.chatFetch("/core/chat/completions", { method: "POST", headers: { "content-type": "application/json" }, signal,
-              body: JSON.stringify({ model, stream: false, max_tokens: 450, messages }) });
+              body: JSON.stringify({ model, stream: false, max_tokens: 450, messages, ...(options.privateDesktop ? { kai_private_desktop: true } : {}) }) });
             let output = ""; for await (const delta of api.completion(response)) output += delta.content; return output;
           },
         });
@@ -610,7 +620,7 @@
         mood("thinking");
         const response = await KaiProviders.chatFetch("/core/chat/completions", {
         method: "POST", headers: { "content-type": "application/json" }, signal: chatAbort.signal,
-        body: JSON.stringify({ model, stream: true,
+        body: JSON.stringify({ model, stream: true, ...(phase.privateDesktop ? { kai_private_desktop: true } : {}),
           messages: api.messagesFor(history, contextSize, phase.context) }),
       });
       for await (const delta of api.completion(response)) {
@@ -632,6 +642,7 @@
         if (!suspended) notice(content || request.keepUser ? "Response stopped." : "Stopped. Your message is back in the composer.");
       } else { notice(error.message); mood("error"); }
     } finally {
+      await bridge?.computerEnd?.().catch(() => {});
       if (!content.trim() && observations.length) content = "I stopped before finishing the reply. App tool results so far:\n" + observations.filter(o => o.tool !== "app_capabilities").map(o => "- " + o.tool + ": " + String(o.result).slice(0, 500)).join("\n");
       reply.element.classList.remove("streaming");
       if (content.trim()) {
@@ -757,6 +768,12 @@
     else { ensureNatural(); warmSpeech(); }
   };
   $("wave").onclick = () => { wave(); $("mascot-menu").hidden = true; regions(); };
+  $("menu-computer").onclick = () => {
+    $("mascot-menu").hidden = true;
+    if (computerActive) interruptResponse(false);
+    else notice(computerAvailable ? "Try “open Tubi” or “play the movie on my screen.” KAI asks before taking control. Stop with Ctrl+Alt+Backspace. Local models can read controls; a vision model can also see screenshots." : "Website commands work in the desktop app. Screen control needs the Windows version and a local model or private API connection.");
+    regions();
+  };
   $("motion").onclick = () => {
     motion = !motion; write("kai-mascot-motion", motion ? "1" : "0");
     document.body.classList.toggle("motion-off", !motion);
@@ -854,9 +871,15 @@
     loadWindowsVoices();
     warmSpeech();
     await loadModels(); await loadChat(); booted = true;
+    if (bridge?.computerStatus) { try { computerAvailable = !!(await bridge.computerStatus()).available; } catch {} }
     regions(); wave(); wake();
   })();
   bridge?.onEvent(async ({ type, value }) => {
+    if (type === "computer") {
+      if (value.stopped) { interruptResponse(false); notice("Desktop control stopped."); return; }
+      computerActive = !!value.active;
+      approvalPending = !!value.pending; pauseWake(); controls(); regions();
+    }
     if (type === "placement") placement(value);
     if (type === "expanded") setExpanded(value);
     if (type === "suspend") suspend(value);

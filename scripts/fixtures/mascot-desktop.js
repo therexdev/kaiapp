@@ -22,7 +22,8 @@ app.whenReady().then(async () => {
     return typeof target[key] === "function" ? target[key].bind(target) : target[key];
   } });
   const controller = createMascotController({ BrowserWindow, screen: fixtureScreen, ipcMain, app,
-    shell: { ...shell, openPath: async target => { globalThis.__openedFolders.push(target); return ""; } },
+    globalShortcut: require("electron").globalShortcut, describeModel: () => ({ kind: "local", vision: false }),
+    shell: { ...shell, openExternal: async target => { (globalThis.__openedSites ||= []).push(target); }, openPath: async target => { globalThis.__openedFolders.push(target); return ""; } },
     dialog: { showMessageBox: async (_win, options) => { globalThis.__folderApprovals.push(options); return { response: globalThis.__approveFolder ? 1 : 0 }; } },
     prefs: new JsonStore(path.join(dir, "window.json"), {}), origin: fixture.origin, getMainWindow: () => main });
   const { DesktopProviders, registerProviderIPC } = require("../../electron/providers");

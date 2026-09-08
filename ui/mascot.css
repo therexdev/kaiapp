@@ -209,3 +209,5 @@ body.motion-off #robot,body.suspended #robot{transition:none!important}
 #windows-voice-controls{padding:10px;border:1px solid #c4dcf8;background:#edf6ff;border-radius:10px;margin:8px 0}
 #windows-voice-controls button{padding:7px 9px;margin:3px;border-radius:7px;background:#daeaff;color:#174b8b;font-size:11px}
 #windows-voice-controls #use-fast-voice{background:#1678fa;color:white}
+body.computer-active #status-pill { border-color: #0079fa; box-shadow: 0 0 0 2px #0079fa44; }
+body.computer-active #quick-stop { color: #c43e22; }

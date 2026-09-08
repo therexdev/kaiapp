@@ -154,16 +154,30 @@ async function start() {
     win.focus();
   }
 
+  const { DesktopProviders, registerProviderIPC } = require("./providers");
+  const providerService = new DesktopProviders({ dataDir, safeStorage: require("electron").safeStorage,
+    privacyMode: () => core.settings.get("network.privacyMode", "local-only") });
   mascot = require("./mascot").createMascotController({
     BrowserWindow, screen: require("electron").screen, ipcMain, shell, app, dialog: require("electron").dialog,
     prefs: winState, origin: "http://127.0.0.1:" + port, getMainWindow: () => win, hasTray: () => !!tray,
+    globalShortcut: require("electron").globalShortcut,
+    describeModel: model => {
+      if (model.startsWith("desktop:")) {
+        const selected = require("./provider-http").parseModel(model), status = providerService.status();
+        const provider = status.providers.find(p => p.id === selected.provider);
+        if (status.blocked) throw new Error("Local-Only blocks private online models. Choose a local model or change Privacy in the main app.");
+        if (!status.available || status.locked || !provider?.configured || !provider.models.some(m => m.id === selected.model)) throw new Error("Connect this private model in Settings first.");
+        const vision = selected.provider === "anthropic" ? /^claude-/.test(selected.model) : /^(?:gpt-(?:4o|4\.1|5)|chatgpt-|o[134](?:-|$))/.test(selected.model);
+        return { kind: "private", label: provider.label, vision };
+      }
+      const local = core.models.aliases().find(a => a.alias === model && a.status === "ready");
+      return local ? { kind: "local", label: local.label, vision: !!local.vision } : null;
+    },
   });
 
-  const { DesktopProviders, registerProviderIPC } = require("./providers");
   providers = registerProviderIPC({ ipcMain, origin: "http://127.0.0.1:" + port,
     getMainWindow: () => win, getMascotWindow: () => mascot?.getWindow(),
-    service: new DesktopProviders({ dataDir, safeStorage: require("electron").safeStorage,
-      privacyMode: () => core.settings.get("network.privacyMode", "local-only") }),
+    service: providerService,
   });
 
   /*

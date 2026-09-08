@@ -18,7 +18,7 @@
     "code": "node cli/koinos-code.js",
     "test": "node --test --test-concurrency=2 \"core/test/*.test.js\"",
     "start": "node scripts/run-test.js",
-    "predist": "node scripts/build-windows-voice.js --if-windows",
+    "predist": "node scripts/build-windows-helpers.js",
     "dist": "electron-builder",
     "dist:mac": "electron-builder --mac --x64 --arm64 --publish never",
     "version:set": "node core/scripts/set-version.js",

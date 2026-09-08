@@ -11,7 +11,7 @@ function trustedFrame(event, window, origin) {
 
 // A second view of the same running Core. Hiding either window never stops the
 // node, changes the wallet, or creates another model/runtime process.
-function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, dialog, prefs, origin, getMainWindow, hasTray = () => true }) {
+function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, dialog, prefs, origin, getMainWindow, hasTray = () => true, globalShortcut, describeModel = () => null }) {
   const actions = app && dialog ? require("./desktop-actions").createFolderActions({ app, dialog, shell }) : null;
   const approval = dialog ? require("./tool-approval").createToolApproval({ dialog }) : null;
   const navigation = require("../ui/app-navigation");
@@ -23,6 +23,9 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, di
   const send = (type, value) => {
     if (window && !window.isDestroyed()) window.webContents.send("mascot:event", { type, value });
   };
+  const computer = new (require("./computer-control").ComputerControl)({ dialog, shell, globalShortcut,
+    getWindow: () => window, describeModel, onEvent: value => send("computer", value),
+    highlight: (view, args) => require("./computer-highlight").highlight({ BrowserWindow, screen }, view, args) });
   function savePosition() {
     if (!window || window.isDestroyed()) return;
     const b = window.getBounds();
@@ -113,11 +116,12 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, di
           if (/^https?:\/\//i.test(url) && new URL(url).origin !== origin) shell.openExternal(url);
         }
       });
-      created.on("hide", () => { actions?.cancel(); approval?.cancel(); windowsVoice.cancel(); finishDrag(true); pose(); send("suspend", true); });
+      created.on("hide", () => { computer.cancel(); actions?.cancel(); approval?.cancel(); windowsVoice.cancel(); finishDrag(true); pose(); send("suspend", true); });
       created.on("blur", () => { if (dragging) finishDrag(true); });
       created.on("show", () => send("suspend", false));
-      created.webContents.on("render-process-gone", () => { windowsVoice.cancel(); showMain(); });
+      created.webContents.on("render-process-gone", () => { computer.cancel(); windowsVoice.cancel(); showMain(); });
       created.on("closed", () => {
+        computer.cancel();
         windowsVoice.cancel(); clearInterval(timer); timer = null;
         window = null; loading = null; dragging = null; regions = []; ignored = false; shaped = false;
       });
@@ -153,14 +157,20 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, di
     };
     ipcMain.on(channel, listener); listeners.push([channel, listener]);
   }
-  function handle(channel, getWindow, fn) {
+  function handle(channel, getWindow, fn, exactDocument = false) {
     ipcMain.handle(channel, (event, ...args) => {
       if (!trustedFrame(event, getWindow(), origin)) throw new Error("Untrusted KAI window");
+      if (exactDocument && new URL(event.senderFrame.url).pathname !== "/mascot.html") throw new Error("Desktop control access denied.");
       return fn(...args);
     });
     handles.push(channel);
   }
   handle("mascot:launch", getMainWindow, options => launch(options || {}));
+  handle("mascot:computer-status", () => window, () => computer.status(), true);
+  handle("mascot:computer-begin", () => window, request => computer.begin(request), true);
+  handle("mascot:computer-call", () => window, (token, name, args) => computer.call(token, name, args), true);
+  handle("mascot:computer-end", () => window, () => computer.cancel("Desktop task finished."), true);
+  handle("mascot:open-website", () => window, text => computer.openWebsite(text), true);
   handle("mascot:expand", () => window, open => { resize(open); return { expanded }; });
   handle("mascot:open-folder", () => window, folder => {
     if (!actions) throw new Error("Desktop actions are unavailable in this window.");
@@ -182,7 +192,7 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, di
     return shell.openExternal("ms-settings:speech").then(() => true);
   });
   on("mascot:windows-speech-cancel", () => windowsVoice.cancel());
-  on("mascot:cancel-action", () => { actions?.cancel(); approval?.cancel(); });
+  on("mascot:cancel-action", () => { computer.cancel(); actions?.cancel(); approval?.cancel(); });
   on("mascot:main", showMain);
   on("mascot:regions", value => {
     if (!Array.isArray(value)) return;
@@ -238,7 +248,7 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, di
     hide() { if (window && !window.isDestroyed()) { savePosition(); window.hide(); } },
     dispose() {
       if (disposed) return;
-      disposed = true; actions?.cancel(); approval?.cancel(); windowsVoice.close(); clearInterval(timer);
+      disposed = true; computer.cancel(); actions?.cancel(); approval?.cancel(); windowsVoice.close(); clearInterval(timer);
       screen.removeListener("display-removed", onDisplayChange);
       screen.removeListener("display-metrics-changed", onDisplayChange);
       for (const channel of handles) ipcMain.removeHandler(channel);

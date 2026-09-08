@@ -61,6 +61,10 @@ jobs:
       - run: npm ci
       - name: Build fast Windows voice helper
         run: node scripts/build-windows-voice.js
+      - name: Build private desktop control helper
+        run: node scripts/build-windows-computer.js
+      - name: Verify real Windows browser control
+        run: node scripts/verify-computer-control.js
       - name: Verify fast Windows voices and character effects
         run: node scripts/verify-windows-voice.js
         env:
@@ -86,6 +90,8 @@ jobs:
         run: node scripts/verify-test-package.js --preflight
       - name: Verify packaged fast Windows voices
         run: node scripts/verify-windows-voice.js --packaged
+      - name: Verify packaged desktop control
+        run: node scripts/verify-computer-control.js --packaged
       - name: Verify packaged voice recovery with native DLL unavailable
         run: node scripts/verify-neural-voice.js --packaged --without-native
       - name: Enable code signing (when configured)

@@ -1615,6 +1615,15 @@ class Gateway {
       return this._json(res, 400, { error: { message: "Body must be JSON", type: "invalid_request_error" } });
     }
     const alias = String(body.model || "");
+    // An opt-out, never a grant of desktop authority. Private screen data must
+    // not overflow to network operators when a local model fails or is full.
+    const privateDesktop = body.kai_private_desktop === true;
+    if (body.kai_private_desktop !== undefined) {
+      delete body.kai_private_desktop; raw = Buffer.from(JSON.stringify(body));
+    }
+    if (privateDesktop && /^koinos-network(?:$|:)/.test(alias)) return this._json(res, 403, { error: {
+      message: "Desktop observations require a local model or private desktop API connection.", type: "desktop_only",
+    } });
     // Desktop provider keys never enter Core. Reject before grounding, runtime
     // loading or overflow so even a headless caller cannot route these models.
     if (alias.startsWith("desktop:")) return this._json(res, 403, { error: {
@@ -1757,7 +1766,7 @@ class Gateway {
       const net = this.network ? this.network.status() : null;
       // A grounded request never overflows to the network: the whole promise
       // is that the fetched material and the question stay on this machine.
-      const canNetwork = !groundSpec && net && net.privacyMode !== "local-only" && net.schedulerUrl;
+      const canNetwork = !privateDesktop && !groundSpec && net && net.privacyMode !== "local-only" && net.schedulerUrl;
       const netCtx = canNetwork ? (await this._networkRates(net.schedulerUrl)).ctxTokens : 0;
       if (canNetwork && estTok <= netCtx - CTX_HEADROOM_TOKENS) {
         const reason = `prompt ~${estTok} tokens exceeds the ${localCtx}-token local context`;
@@ -1794,7 +1803,7 @@ class Gateway {
       // permits it (Local-First and Network — never Local-Only, where the
       // request must not leave the machine even if it cannot be served).
       const net = this.network ? this.network.status() : null;
-      if (!groundSpec && net && net.privacyMode !== "local-only" && net.schedulerUrl) {
+      if (!privateDesktop && !groundSpec && net && net.privacyMode !== "local-only" && net.schedulerUrl) {
         this.onEvent({ type: "gateway:overflow", from: alias, reason: String(e.message) });
         return this._chatNetwork(body, req, res, { overflowFrom: alias, localError: String(e.message) });
       }

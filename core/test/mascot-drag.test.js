@@ -88,3 +88,16 @@ test("Drag rejects foreign frames and migrates to the cursor monitor even with n
   assert.equal(win.bounds.y + win.bounds.height, 720); assert.equal(f.pose().pose, "perched");
   win.destroy(); await f.controller.launch(); assert.equal(f.pose().pose, "perched");
 });
+
+test("Every desktop control IPC requires the exact companion document and main frame", async t => {
+  const f = nativeFixture(t); await f.controller.launch();
+  assert.equal(typeof f.ipcMain.handles.get("mascot:computer-status")(f.event()).available, "boolean");
+  for (const channel of ["computer-status", "computer-begin", "computer-call", "computer-end", "open-website"]) {
+    const call = f.ipcMain.handles.get("mascot:" + channel), e = f.event();
+    assert.throws(() => call({ ...e, sender: {} }), /Untrusted/);
+    assert.throws(() => call({ ...e, senderFrame: { url: e.senderFrame.url } }), /Untrusted/);
+    e.senderFrame.url = "http://localhost:7777/another-document";
+    assert.throws(() => call(e), /denied/);
+    e.senderFrame.url = "http://localhost:7777/mascot.html";
+  }
+});

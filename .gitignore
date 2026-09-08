@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 
 build/bin/kai-windows-voice.exe
+build/bin/kai-computer.exe

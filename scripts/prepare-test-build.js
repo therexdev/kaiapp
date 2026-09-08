@@ -30,10 +30,13 @@ function prepare(rootDir, buildNumber, attempt = "1") {
   pkg.build.nsis.shortcutName = pkg.productName;
   // Installing Test must not claim the live app's koinos-code command.
   delete pkg.build.nsis.include;
-  // Keep the companion's runtime helper without shipping the live CLI launchers.
+  // Keep private companion helpers without shipping the live CLI launchers.
   pkg.build.win.extraResources = [{
     from: "build/bin/kai-windows-voice.exe",
     to: "bin/kai-windows-voice.exe",
+  }, {
+    from: "build/bin/kai-computer.exe",
+    to: "bin/kai-computer.exe",
   }];
   fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + "\n");
   const coreFile = path.join(rootDir, "core/package.json");

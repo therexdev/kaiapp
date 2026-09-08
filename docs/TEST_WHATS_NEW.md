@@ -101,3 +101,12 @@ KAI does not recognize your individual voice yet. Sensitivity filters sound leve
 Listening remains opt-in, with a green microphone indicator. Hiding KAI, returning to the full app or quitting turns it off. Microphone audio stays on this computer; accepted questions go to your selected chat model. Local transcription and voice generation still take some processing time, and speaker/microphone hardware affects interruption performance.
 
 Test continues using your existing profile, wallet, models and earning node.
+### KAI can work in your browser and desktop apps
+
+- **“Open Tubi” just opens Tubi.** Known website commands launch your default browser immediately. You can also give KAI a complete website address.
+- **Ask about what is on your screen.** On Windows, KAI can inspect visible window controls, switch windows, click buttons, type into text fields and scroll. A vision-capable model can also see screenshots and propose visual clicks or drags. Try **“Play the movie on my screen.”** If several movies could match, tell KAI the title or point at it first.
+- **Your existing browser session.** KAI works with the apps and browser where you are already signed in. It checks the updated screen after each action; availability depends on how the app exposes its controls and how well your selected model understands the task.
+- **You stay in control.** Approve each desktop task once. Purchases, rentals, messages, destructive actions, unknown controls and visual clicks require another confirmation. Visual targets are marked on screen. **Ctrl+Alt+Backspace** stops control immediately; KAI reserves **F8** if that shortcut is already taken. The red Stop button and **KAI options → Stop desktop control** also work. Closing or hiding KAI ends permission.
+- **Private to your desktop.** Choose an installed local model or your own OpenAI/Anthropic connection. The permission prompt tells you whether screen text and screenshots will go to your API provider. Desktop observations never overflow to network workers. Screenshots are held in memory for the current task and are not saved as chat attachments.
+
+Passwords, CAPTCHAs, administrator prompts and terminal commands remain manual. Protected video cannot be inspected through screenshots; KAI uses visible player controls. No streaming subscription, rental or paid API connection is included or enabled automatically.

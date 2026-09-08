@@ -60,7 +60,7 @@ test("Packaging Test separates installer identity and does not claim the live CL
   assert.equal(pkg.build.nsis.include, undefined);
   assert.deepEqual(pkg.build.win.extraResources, [{
     from: "build/bin/kai-windows-voice.exe", to: "bin/kai-windows-voice.exe",
-  }], "Test needs the voice helper but must not copy the live CLI launchers");
+  }, { from: "build/bin/kai-computer.exe", to: "bin/kai-computer.exe" }], "Test needs private helpers but must not copy the live CLI launchers");
   assert.equal(JSON.parse(fs.readFileSync(path.join(root, "core/package.json"))).version, version);
   assert.throws(() => prepare(root, "13"), /Already prepared/);
 });
