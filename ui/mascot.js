@@ -307,7 +307,11 @@
       else if (!voicePending) mood(busy ? "thinking" : "idle");
       controls();
     },
-    onError: error => notice(error.message + " The reply is still in your chat."),
+    onError: error => {
+      // Do not retry an unavailable language/voice for every streamed sentence.
+      // The text answer continues, and the next turn can speak normally.
+      speechEpoch++; notice(error.message + " The reply is still in your chat.");
+    },
   });
   function stopSpeech() { speechEpoch++; speech.stop(); }
   function speak(text) {
@@ -330,7 +334,7 @@
   }
   function voiceEngineUI() {
     $("voice-engine-help").textContent = voiceChoice.startsWith("windows:") ?
-      "Fast local Windows speech. Cute KAI, Squeak and Classic robot are applied directly to the audio. No voice-model download." :
+      "Fast local Windows speech with Cute, Squeak and Classic effects. Korean replies use an installed Korean voice; add Korean speech below if needed. Your usual voice stays selected." :
       voiceChoice.startsWith("natural:") ? "These four natural voices share one engine. On slower computers, choose Whole reply to avoid synthesis pauses, or try a fast Windows voice." :
       "Browser computer voices are fast, but some ignore pitch changes. On Windows, choose the matching fast voice above for full character effects.";
     $("speech-start-help").textContent = speechStart === "complete" ? "Prepares the reply's audio before speaking. Longer initial wait, then continuous playback. Very long replies play in sections." :
@@ -834,7 +838,10 @@
   $("conversation").addEventListener("animationend", regions);
   document.addEventListener("visibilitychange", () => suspend(document.hidden));
   window.addEventListener("beforeunload", () => { suspend(true); clearTimeout(setupTimer); clearTimeout(speechSetupTimer); });
-  new ResizeObserver(regions).observe($("conversation"));
+  // setShape clips pixels as well as mouse input on Windows. Keep every visible
+  // surface's native region current when labels, Stop or notices change size.
+  const regionObserver = new ResizeObserver(regions);
+  document.querySelectorAll(".interactive").forEach(el => regionObserver.observe(el));
 
   const ready = (async () => {
     try { const response = await fetch("kai-robot.svg"); if (!response.ok) throw new Error("KAI's artwork could not load."); $("kai-art").innerHTML = await response.text(); }

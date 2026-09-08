@@ -54,3 +54,35 @@ test("Missing/unsupported Windows voices do not launch a process or select anoth
     await assert.rejects(manager.generate({ text: "Hi.", voice: "invented" }), /unavailable/); manager.close();
   }
 });
+
+test("Empty language output is distinct from corruption, and extensible PCM stays processable", () => {
+  const empty = tone().subarray(0, 44); empty.writeUInt32LE(36, 4); empty.writeUInt32LE(0, 40);
+  assert.throws(() => normalizeWav(empty), error => error.code === "WINDOWS_VOICE_EMPTY" && /language/.test(error.message));
+  const source = tone(), extended = Buffer.concat([source.subarray(0, 36), Buffer.alloc(24), source.subarray(36)]);
+  extended.writeUInt32LE(extended.length - 8, 4); extended.writeUInt32LE(40, 16); extended.writeUInt16LE(0xfffe, 20);
+  extended.writeUInt16LE(22, 36); extended.writeUInt16LE(16, 38); extended.writeUInt32LE(1, 40);
+  Buffer.from("0100000000001000800000aa00389b71", "hex").copy(extended, 44);
+  assert.deepEqual(normalizeWav(extended), source);
+  extended[59] ^= 1; assert.throws(() => normalizeWav(extended), /unsupported/);
+});
+
+test("Korean uses an installed Korean voice without changing the usual English choice", async t => {
+  const f = fixture(); t.after(() => f.manager.close());
+  const korean = { id: "onecore:heami", name: "Microsoft Heami", lang: "ko-KR" };
+  const status = f.manager.status(); f.respond({ voices: [...voices, korean] }); await status;
+  for (const [text, expected] of [["안녕하세요. 저는 카이입니다.", korean.id], ["Hello again.", voices[0].id], ["Here is Korean: 안녕하세요!", korean.id]]) {
+    const pending = f.manager.generate({ text, voice: voices[0].id }); await new Promise(setImmediate);
+    assert.equal(f.requests[0].request.voice, expected); assert.equal(f.requests[0].request.text, text);
+    f.respond({ wav: tone().toString("base64") }); assert.deepEqual(await pending, tone());
+  }
+  assert.equal(f.children.length, 1);
+});
+
+test("Missing Korean speech gives installation guidance before synthesis and leaves English usable", async t => {
+  const f = fixture(); t.after(() => f.manager.close());
+  const status = f.manager.status(); f.respond({ voices }); await status;
+  await assert.rejects(f.manager.generate({ text: "안녕하세요.", voice: voices[0].id }), /Korean Windows voice.*Add Windows voices.*Refresh voices/);
+  assert.equal(f.requests.length, 0, "Do not try the incompatible English voice or install anything");
+  const pending = f.manager.generate({ text: "English still works.", voice: voices[0].id }); await new Promise(setImmediate);
+  f.respond({ wav: tone().toString("base64") }); assert.ok((await pending).length > 44);
+});

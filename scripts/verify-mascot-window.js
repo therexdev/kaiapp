@@ -22,6 +22,39 @@ async function main() {
     const voiceBytes = await mascot.evaluate(async id => Array.from((await window.kaiDesktop.windowsSpeech({ voice: id, text: "Hey, I'm KAI." })).slice(0, 44)), voiceStatus.voices[0].id);
     assert.equal(Buffer.from(voiceBytes).toString("ascii", 0, 4), "RIFF", "Sandboxed Windows audio reaches the renderer for character processing");
     console.log("PASS: native fast Windows voice enumeration and PCM speech through the private companion preload.");
+    if (!voiceStatus.voices.some(v => /^ko(?:[-_]|$)/i.test(v.lang))) {
+      const languageError = await mascot.evaluate(async voice => {
+        try { await window.kaiDesktop.windowsSpeech({ voice, text: "안녕하세요. 저는 카이입니다." }); return ""; }
+        catch (error) { return error.message; }
+      }, voiceStatus.voices.find(v => /^en/i.test(v.lang)).id);
+      assert.match(languageError, /Korean Windows voice.*Add Windows voices/);
+      assert.doesNotMatch(languageError, /invoking remote method|mascot:windows-speech|unsupported audio format/);
+      console.log("PASS: missing Korean speech gives actionable guidance through the real sandboxed preload.");
+    }
+    // Preserve real native shaping, recording only the rectangles it receives.
+    await app.evaluate(() => {
+      const w = globalThis.__kaiController.getWindow(), setShape = w.setShape.bind(w);
+      w.setShape = value => { globalThis.__kaiShape = value; return setShape(value); };
+    });
+    const checkPill = async (label, stop) => {
+      await mascot.evaluate(({ label, stop }) => {
+        document.querySelector("#mood-label").textContent = label;
+        document.querySelector("#quick-stop").hidden = !stop;
+      }, { label, stop });
+      let covered = false;
+      for (let attempt = 0; attempt < 30 && !covered; attempt++) {
+        await mascot.waitForTimeout(50);
+        const bounds = await mascot.locator("#status-pill").boundingBox();
+        covered = await app.evaluate((_electron, b) => (globalThis.__kaiShape || []).some(r =>
+          r.x <= b.x && r.y <= b.y && r.x + r.width >= b.x + b.width && r.y + r.height >= b.y + b.height), bounds);
+      }
+      assert.ok(covered, "The native window must show the entire changing status bubble: " + label);
+    };
+    await checkPill("Hi", false);
+    await checkPill("Thinking it through…", true);
+    await checkPill("KAI is speaking", true);
+    await checkPill("Here when you need me", false);
+    console.log("PASS: native window shape follows status text growth, shrinkage and Stop visibility.");
     let native = await app.evaluate(({ BrowserWindow }) => {
       const w = globalThis.__kaiController.getWindow();
       return { count: BrowserWindow.getAllWindows().length, mainVisible: globalThis.__kaiMain.isVisible(),
@@ -91,6 +124,7 @@ async function main() {
     await app.evaluate((_electron, area) => { globalThis.__kaiCursor = { x: area.x + area.width / 2, y: area.y + area.height - 2 }; }, area);
     await drop(false);
     await mascot.waitForFunction(() => document.body.dataset.pose === "perched");
+    await checkPill("Hi", false); await checkPill("Getting my reply ready…", true); await checkPill("Here when you need me", false);
     const edge = await app.evaluate(() => globalThis.__kaiController.getWindow().getBounds());
     assert.equal(edge.y + edge.height, area.y + area.height, "Dropping at the bottom never jumps to the top");
     await mascot.evaluate(() => window.kaiDesktop.startDrag());

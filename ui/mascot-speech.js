@@ -32,8 +32,25 @@
   }
   function joinWavs(buffers) {
     if (!buffers.length) throw new Error("KAI's voice returned no audio.");
-    const parts = buffers.map(pcm), rate = parts[0].rate;
-    if (parts.some(p => p.rate !== rate)) throw new Error("KAI's voice changed sample rate within a sentence.");
+    let parts = buffers.map(pcm);
+    const rate = Math.max(...parts.map(p => p.rate));
+    // An English introduction and a Korean answer can use different installed
+    // voices/rates. Upsample to the highest rate before joining; retain duration
+    // and pitch, rather than treating a language change as corrupt audio.
+    buffers = buffers.map((buffer, index) => {
+      const part = parts[index]; if (part.rate === rate) return buffer;
+      const count = Math.ceil(part.count * rate / part.rate), result = new ArrayBuffer(44 + count * 2), view = new DataView(result);
+      new Uint8Array(result, 0, 44).set(new Uint8Array(buffer, 0, 44));
+      view.setUint32(4, result.byteLength - 8, true); view.setUint32(40, count * 2, true);
+      view.setUint32(24, rate, true); view.setUint32(28, rate * 2, true);
+      for (let i = 0; i < count; i++) {
+        const position = Math.min(part.count - 1, i * part.rate / rate), low = Math.floor(position), high = Math.min(part.count - 1, low + 1);
+        const a = part.view.getInt16(44 + low * 2, true), b = part.view.getInt16(44 + high * 2, true);
+        view.setInt16(44 + i * 2, Math.round(a + (b - a) * (position - low)), true);
+      }
+      return result;
+    });
+    parts = buffers.map(pcm);
     // Keep natural opening/closing silence. Remove excess internal chunk
     // padding so the inference limit cannot create a long mid-sentence pause.
     const ranges = parts.map((part, index) => {

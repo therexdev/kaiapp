@@ -1,3 +1,10 @@
+### Clear status bubbles and Korean Windows speech
+
+- **The whole status bubble stays visible.** Thinking, speaking, microphone and Stop changes now update the native desktop window's visible area, including while KAI rests on the bottom edge.
+- **Korean replies use an installed Korean Windows voice.** Your usual voice remains selected for later replies, and Cute, Squeak and Classic effects still apply. If Korean speech is missing, KAI explains how to add it through **Voice & listening → Add Windows voices**, followed by **Refresh voices**. Nothing is installed automatically.
+- **A missing language no longer looks like a broken audio format.** KAI shows one helpful message, keeps the full text answer and lets the next conversation continue normally. Internal Windows IPC error text is removed.
+- **Continuous replies handle different voice sample rates.** An English introduction and Korean answer can play together without a rate-mismatch error.
+
 ### A proper wave and faster character voices
 
 - **A natural little wave.** KAI bends his elbow and shows an open palm. His wrist waves gently instead of swinging the entire arm backward. This works on the desktop and while resting along the edge.

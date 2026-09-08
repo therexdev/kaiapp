@@ -372,3 +372,61 @@ test("Fast Windows voices apply actual PCM effects, whole replies play once, and
   assert.equal(fixture.state.speech.length, 0, "Fast Windows voices never use neural synthesis");
   assert.deepEqual(errors, []);
 });
+
+test("Status bubbles update native regions and Korean speech failures preserve the full reply", { skip: !fs.existsSync(CHROMIUM), timeout: 45000 }, async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-language-ui-")), fixture = await startMascotServer(dir);
+  const { chromium } = require("playwright-core"), { selectWindowsVoice } = require("../../electron/windows-voice");
+  const { encodeWav16kMono } = require("../../ui/audio-wav");
+  const browser = await chromium.launch({ executablePath: CHROMIUM, args: ["--no-sandbox"] });
+  t.after(async () => { await browser.close(); await fixture.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  const page = await browser.newPage({ viewport: { width: 248, height: 304 }, deviceScaleFactor: 1.25 }), errors = [], spoken = [];
+  const voices = [{ id: "onecore:zira", name: "Microsoft Zira", lang: "en-US" }]; let attempts = 0;
+  page.on("pageerror", error => errors.push(error.message));
+  await page.exposeFunction("__installedVoices", () => ({ supported: true, available: true, voices }));
+  await page.exposeFunction("__speakWindows", request => {
+    attempts++; const selected = selectWindowsVoice(request.text, request.voice, voices); spoken.push({ text: request.text, voice: selected.id });
+    return Array.from(new Uint8Array(encodeWav16kMono(Float32Array.from({ length: 16000 }, (_, i) => .3 * Math.sin(i / 10)), 16000)));
+  });
+  await page.addInitScript(() => {
+    localStorage.setItem("kai-mascot-cute-default-v1", "1"); localStorage.setItem("kai-mascot-voice-choice", "windows:onecore:zira");
+    localStorage.setItem("kai-mascot-voice", "1");
+    window.kaiDesktop = { regions: value => { window.__regions = value; }, expand: async () => ({}),
+      onEvent: fn => { window.__kaiEvent = fn; }, cancelAction() {}, cancelWindowsSpeech() {},
+      windowsVoices: () => window.__installedVoices(), windowsSpeech: request => window.__speakWindows(request) };
+  });
+  await page.goto(fixture.origin + "/mascot.html"); await page.waitForFunction(() => document.querySelector("#model").value === "tiny-live");
+  const covered = () => page.waitForFunction(() => {
+    const b = document.querySelector("#status-pill").getBoundingClientRect();
+    return (window.__regions || []).some(r => r.x <= b.x && r.y <= b.y && r.x + r.width >= b.right && r.y + r.height >= b.bottom);
+  });
+  for (const pose of ["free", "perched"]) {
+    await page.evaluate(pose => window.__kaiEvent({ type: "placement", value: { pose } }), pose);
+    for (const [label, stop] of [["Hi", false], ["Thinking it through…", true], ["KAI is speaking", true], ["Here when you need me", false]]) {
+      await page.evaluate(({ label, stop }) => { document.querySelector("#mood-label").textContent = label; document.querySelector("#quick-stop").hidden = !stop; }, { label, stop });
+      await covered();
+      if (stop && process.env.KAI_MASCOT_QA_DIR) await page.screenshot({ path: path.join(process.env.KAI_MASCOT_QA_DIR, `status-bubble-${pose}-${label.startsWith("KAI") ? "speaking" : "thinking"}.png`) });
+    }
+  }
+  await page.evaluate(() => window.__kaiEvent({ type: "placement", value: { pose: "free" } }));
+  await page.setViewportSize({ width: 660, height: 560 }); await page.click("#toggle-chat");
+  fixture.state.reply = "안녕하세요. 저는 카이입니다. 만나서 반갑습니다."; fixture.state.delay = 35;
+  await page.fill("#question", "Please speak Korean."); await page.press("#question", "Enter"); await page.click("#collapse");
+  await page.waitForFunction(() => !document.querySelector("#compact-notice").hidden && document.querySelector("#stop").hidden);
+  assert.match(await page.textContent("#compact-notice"), /Korean Windows voice.*Add Windows voices.*Refresh voices/);
+  assert.equal(attempts, 1, "Do not retry each streamed sentence after the missing-language error");
+  assert.equal(spoken.length, 0); await covered();
+  assert.match(await page.textContent("#messages"), /안녕하세요.*만나서 반갑습니다/);
+  if (process.env.KAI_MASCOT_QA_DIR) await page.screenshot({ path: path.join(process.env.KAI_MASCOT_QA_DIR, "korean-voice-guidance.png") });
+  // Simulate an installed language pack; native CI separately verifies the
+  // real Windows API and missing-pack path. This is not a Korean voice model.
+  voices.push({ id: "onecore:heami", name: "Microsoft Heami", lang: "ko-KR" });
+  await page.click("#dismiss-compact-notice"); await page.click("#toggle-chat"); await page.click("#voice-options"); await page.click("#refresh-windows-voices");
+  await page.waitForFunction(() => [...document.querySelector("#voice-choice").options].some(o => o.value === "windows:onecore:heami"));
+  await page.click("#close-voice-options");
+  await page.fill("#question", "Please try Korean again."); await page.press("#question", "Enter"); await page.click("#collapse");
+  await page.waitForFunction(() => document.body.dataset.state === "speaking"); await covered();
+  await page.waitForFunction(() => document.body.dataset.state === "idle");
+  assert.ok(spoken.length >= 3); assert.ok(spoken.every(r => r.voice === "onecore:heami"));
+  assert.equal(await page.inputValue("#voice-choice"), "windows:onecore:zira", "Matching the reply does not overwrite the user's usual voice");
+  assert.equal(fixture.state.speech.length, 0); assert.deepEqual(errors, []);
+});

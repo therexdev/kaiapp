@@ -10,7 +10,14 @@ contextBridge.exposeInMainWorld("kaiDesktop", {
   cancelAction: () => ipcRenderer.send("mascot:cancel-action"),
   regions: regions => ipcRenderer.send("mascot:regions", regions),
   windowsVoices: refresh => ipcRenderer.invoke("mascot:windows-voices", refresh === true),
-  windowsSpeech: request => ipcRenderer.invoke("mascot:windows-speech", request),
+  windowsSpeech: async request => {
+    try { return await ipcRenderer.invoke("mascot:windows-speech", request); }
+    catch (error) {
+      // Electron decorates rejected IPC calls with its internal method name.
+      // Preserve the actionable voice message without exposing that wrapper.
+      throw new Error(String(error.message || error).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, ""));
+    }
+  },
   cancelWindowsSpeech: () => ipcRenderer.send("mascot:windows-speech-cancel"),
   windowsVoiceSettings: () => ipcRenderer.invoke("mascot:windows-voice-settings"),
   startDrag: () => ipcRenderer.send("mascot:drag-start"),

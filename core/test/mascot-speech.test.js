@@ -97,14 +97,27 @@ test("Robot treatment deepens pitch, adds a subtle texture, preserves silence an
   assert.throws(() => robotTone(new ArrayBuffer(44)), /unreadable/);
 });
 
-test("Joining chunks removes excess internal silence and rejects malformed or mismatched WAVs", () => {
+test("Joining chunks removes excess internal silence and rejects malformed WAVs", () => {
   const samples = new Float32Array(16000); samples.fill(.1, 4000, 12000);
   const piece = encodeWav16kMono(samples, 16000);
   const joined = joinWavs([piece, piece]);
   assert.ok((joined.byteLength - 44) / 32000 < 1.7, "Trim excessive internal padding");
   assert.throws(() => joinWavs([new ArrayBuffer(4)]), /unreadable/);
-  const different = piece.slice(0); new DataView(different).setUint32(24, 24000, true);
-  assert.throws(() => joinWavs([piece, different]), /sample rate/);
+});
+
+test("Whole replies can join voices with different sample rates without changing pitch or duration", () => {
+  const first = wav(1, 220);
+  const second = encodeWav16kMono(Float32Array.from({ length: 24000 }, (_, i) => .4 * Math.sin(2 * Math.PI * 440 * i / 24000)), 16000);
+  const header = new DataView(second); header.setUint32(24, 24000, true); header.setUint32(28, 48000, true);
+  const joined = joinWavs([first, second]), view = new DataView(joined);
+  assert.equal(view.getUint32(24, true), 24000);
+  assert.equal(joined.byteLength, 44 + 48000 * 2, "Both one-second phrases retain their duration");
+  const crossings = start => {
+    let count = 0;
+    for (let i = start + 1; i < start + 24000; i++) if (view.getInt16(44 + (i - 1) * 2, true) <= 0 && view.getInt16(44 + i * 2, true) > 0) count++;
+    return count;
+  };
+  assert.ok(Math.abs(crossings(0) - 220) <= 1); assert.ok(Math.abs(crossings(24000) - 440) <= 1);
 });
 
 test("Whole reply prepares past two sentences, waits for the stream, then plays one joined clip", async () => {

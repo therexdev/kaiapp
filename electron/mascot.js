@@ -195,7 +195,8 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, di
         // the desktop receive clicks through the large empty part of chat mode.
         window.setShape(regions.map(r => ({
           x: Math.floor(r.x), y: Math.floor(r.y),
-          width: Math.ceil(r.width), height: Math.ceil(r.height),
+          width: Math.ceil(r.x + r.width) - Math.floor(r.x),
+          height: Math.ceil(r.y + r.height) - Math.floor(r.y),
         })));
         shaped = true; ignore(false);
       } catch { shaped = false; }

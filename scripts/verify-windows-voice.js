@@ -1,6 +1,6 @@
 "use strict";
 const fs = require("fs"), path = require("path"), assert = require("assert/strict");
-const { WindowsVoice } = require("../electron/windows-voice");
+const { WindowsVoice, normalizeWav } = require("../electron/windows-voice");
 const { characterTone } = require("../ui/mascot-speech");
 async function main() {
   assert.equal(process.platform, "win32");
@@ -27,7 +27,24 @@ async function main() {
       results.push({ name: v.name, lang: v.lang, elapsedMs, audioSeconds: seconds, realtimeFactor: +(elapsedMs / (seconds * 1000)).toFixed(3) });
     }
     assert.ok(results.length, "At least one English Windows voice must be verified");
-    const report = { coldStartMs, voices: results };
+    const english = status.voices.find(v => /^en/i.test(v.lang)), korean = status.voices.find(v => /^ko(?:[-_]|$)/i.test(v.lang));
+    const koreanText = "안녕하세요. 저는 카이입니다. 만나서 반갑습니다.";
+    // Reproduce what the old path passed straight to an English Windows voice.
+    // Log only RIFF metadata, never the user's audio or a prompt from the app.
+    const raw = Buffer.from((await manager.request({ op: "speak", text: koreanText, voice: english.id })).wav, "base64");
+    const chunks = [];
+    for (let at = 12; at + 8 <= raw.length;) {
+      const tag = raw.toString("ascii", at, at + 4), bytes = raw.readUInt32LE(at + 4);
+      chunks.push({ tag, bytes, ...(tag === "fmt " && bytes >= 16 ? { format: raw.readUInt16LE(at + 8), bits: raw.readUInt16LE(at + 22) } : {}) });
+      at += 8 + bytes + bytes % 2;
+    }
+    let rawKorean = "audio";
+    try { normalizeWav(raw); } catch (error) { assert.equal(error.code, "WINDOWS_VOICE_EMPTY"); rawKorean = "empty-language-output"; }
+    if (korean) {
+      const wav = await manager.generate({ text: koreanText, voice: english.id });
+      assert.ok(wav.length > 44); if (dir) fs.writeFileSync(path.join(dir, "korean-installed.wav"), wav);
+    } else await assert.rejects(manager.generate({ text: koreanText, voice: english.id }), /Korean Windows voice.*Add Windows voices/);
+    const report = { coldStartMs, voices: results, korean: { installed: !!korean, englishVoiceResult: rawKorean, chunks } };
     if (dir) fs.writeFileSync(path.join(dir, "fast-voices.json"), JSON.stringify(report, null, 2));
     const pending = manager.generate({ text: "Please stop this voice check. ".repeat(35), voice: status.voices[0].id });
     await new Promise(setImmediate); const cancelled = assert.rejects(pending, /cancelled/); manager.cancel(); await cancelled;

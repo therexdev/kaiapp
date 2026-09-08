@@ -15,7 +15,14 @@ function normalizeWav(input) {
     if (tag === "data") data = wav.subarray(at + 8, end);
     at = end + (size % 2);
   }
-  if (!format || format.length < 16 || !data?.length || format.readUInt16LE(0) !== 1 || format.readUInt16LE(14) !== 16) throw new Error("Windows returned an unsupported audio format.");
+  if (!format || format.length < 16 || !data) throw new Error("Windows returned an unsupported audio format.");
+  if (!data.length) throw Object.assign(new Error("The selected Windows voice could not pronounce this text. Choose a voice for the reply's language in Voice & listening."), { code: "WINDOWS_VOICE_EMPTY" });
+  let encoding = format.readUInt16LE(0);
+  // WAVE_FORMAT_EXTENSIBLE can describe the same 16-bit PCM with a GUID.
+  // Check the complete subtype, not just its first two bytes.
+  if (encoding === 0xfffe && format.length >= 40 && format.readUInt16LE(16) >= 22 &&
+      format.readUInt16LE(18) === 16 && format.subarray(24, 40).equals(Buffer.from("0100000000001000800000aa00389b71", "hex"))) encoding = 1;
+  if (encoding !== 1 || format.readUInt16LE(14) !== 16) throw new Error("Windows returned an unsupported audio format. Choose another installed voice in Voice & listening.");
   const channels = format.readUInt16LE(2), rate = format.readUInt32LE(4);
   if (![1, 2].includes(channels) || rate < 8000 || rate > 48000 || data.length % (2 * channels)) throw new Error("Windows returned an unsupported audio format.");
   const count = data.length / (2 * channels), out = Buffer.alloc(44 + count * 2);
@@ -24,6 +31,19 @@ function normalizeWav(input) {
   out.writeUInt16LE(2, 32); out.writeUInt16LE(16, 34); out.write("data", 36); out.writeUInt32LE(count * 2, 40);
   for (let i = 0; i < count; i++) out.writeInt16LE(channels === 1 ? data.readInt16LE(i * 2) : Math.round((data.readInt16LE(i * 4) + data.readInt16LE(i * 4 + 2)) / 2), 44 + i * 2);
   return out;
+}
+function selectWindowsVoice(text, requested, voices) {
+  const selected = voices.find(v => v.id === requested);
+  if (!selected) throw new Error("That Windows voice is unavailable. Refresh voices in Voice & listening.");
+  // Hangul identifies Korean unambiguously. English Windows voices can return
+  // an empty WAV for it; this is a language mismatch, not a broken audio codec.
+  // Match only an already installed voice within the user's Windows engine.
+  if (/\p{Script=Hangul}/u.test(text) && !/^ko(?:[-_]|$)/i.test(selected.lang)) {
+    const korean = voices.find(v => /^ko(?:[-_]|$)/i.test(v.lang));
+    if (!korean) throw new Error("Korean speech needs a Korean Windows voice. In Voice & listening, choose Add Windows voices, install Korean speech, then Refresh voices.");
+    return korean;
+  }
+  return selected;
 }
 class WindowsVoice {
   constructor({ platform = process.platform, spawnImpl = spawn, executable = __dirname.includes("app.asar") ? path.join(process.resourcesPath, "bin/kai-windows-voice.exe") : path.join(__dirname, "../build/bin/kai-windows-voice.exe"), exists = fs.existsSync } = {}) {
@@ -42,8 +62,8 @@ class WindowsVoice {
   async generate({ text, voice } = {}) {
     if (typeof text !== "string" || !text.trim() || text.length > 1200) throw new Error("Speak one sentence at a time.");
     const status = await this.status();
-    if (!status.voices.some(v => v.id === voice)) throw new Error("That Windows voice is unavailable. Refresh voices in Voice & listening.");
-    const value = await this.request({ op: "speak", text, voice });
+    const selected = selectWindowsVoice(text, voice, status.voices);
+    const value = await this.request({ op: "speak", text, voice: selected.id });
     if (typeof value.wav !== "string" || value.wav.length > 12 * 1024 * 1024) throw new Error("Windows returned invalid voice audio.");
     return normalizeWav(Buffer.from(value.wav, "base64"));
   }
@@ -87,4 +107,4 @@ class WindowsVoice {
   }
   close() { this.closed = true; this.cancel(); }
 }
-module.exports = { WindowsVoice, normalizeWav };
+module.exports = { WindowsVoice, normalizeWav, selectWindowsVoice };
