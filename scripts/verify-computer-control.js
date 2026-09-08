@@ -21,13 +21,26 @@ async function main() {
     assert.match(out.screen.window.title, /KAI browser control fixture/);
     assert.match(out.screen.image, /^data:image\/png;base64,/); assert.ok(out.screen.imageWidth <= 1280);
     assert.ok(!JSON.stringify(out.screen).includes("MUST_NOT_READ"), "Password values never leave native UIA");
+    assert.ok(out.screen.elements.some(e => e.password && !e.value), "A visible password field is marked and redacted");
     const find = name => { const item = out.screen.elements.find(e => e.name === name); assert.ok(item, `Observed ${name}; controls: ${JSON.stringify(out.screen.elements)}`); return item.id; };
     out = await control.call(session.id, "computer_type", { frame: out.screen.frame, element: find("Search movies"), text: "The Test Movie" });
     assert.equal(await page.inputValue("#search"), "The Test Movie", "Real UIA typed into Chromium");
+    out = await control.call(session.id, "computer_key", { frame: out.screen.frame, key: "ENTER" });
+    assert.equal(await page.textContent("#search-result"), "Results for The Test Movie", "Native keyboard input submits the search");
     out = await control.call(session.id, "computer_click", { frame: out.screen.frame, element: find("Play") });
     assert.equal(await page.textContent("#output"), "Playing The Test Movie", "Real UIA invoked the browser Play button");
     assert.ok(out.screen.elements.some(e => /Playing The Test Movie/.test(e.name)), "Post-action view verifies the outcome");
     assert.equal(approvals.length, 1, "Ordinary search and Play use the approved task");
+    const point = (name, portion = .5) => {
+      const b = out.screen.elements.find(e => e.name === name && (name !== "Volume" || e.role === "Slider"))?.bounds; assert.ok(b, "Visible coordinates for " + name);
+      return { x: Math.round(b.x + b.width * portion), y: Math.round(b.y + b.height / 2) };
+    };
+    out = await control.call(session.id, "computer_point", { frame: out.screen.frame, ...point("Show subtitles"), reason: "Show subtitles checkbox" });
+    assert.equal(await page.isChecked("#subtitles"), true, "Native pointer input hits the reviewed screenshot coordinate");
+    const start = point("Volume", .12), end = point("Volume", .8);
+    out = await control.call(session.id, "computer_drag", { frame: out.screen.frame, ...start, toX: end.x, toY: end.y, reason: "Raise the visible Volume slider" });
+    assert.ok(Number(await page.inputValue("#volume")) > 65, "Native drag adjusts the real browser slider");
+    assert.equal(approvals.length, 3, "Both coordinate operations require separate review");
     approve = false;
     await assert.rejects(control.call(session.id, "computer_click", { frame: out.screen.frame, element: find("Rent for $9.99") }), /declined/);
     assert.equal(await page.textContent("#output"), "Playing The Test Movie", "Declined rental never executes");
@@ -35,12 +48,15 @@ async function main() {
     approve = true;
     const next = await control.begin({ task: "Read my screen", model: "qa-local" });
     out = await control.call(next.id, "computer_look", {});
+    out = await control.call(next.id, "computer_scroll", { frame: out.screen.frame, direction: "down", amount: 2 });
+    assert.ok(await page.evaluate(() => window.scrollY > 0), "Native mouse wheel scrolls the browser");
+    out = await control.call(next.id, "computer_scroll", { frame: out.screen.frame, direction: "up", amount: 5 });
     const frame = out.screen.frame, element = find("Pause");
     await browser.evaluate(() => { const w = globalThis.__qaWindow, [x, y] = w.getPosition(); w.setPosition(x + 20, y + 10); });
     await assert.rejects(control.call(next.id, "computer_click", { frame, element }), /window moved/i);
     const visual = await native.request({ op: "look", accessibility: false, image: true });
     assert.equal(visual.elements.length, 0); assert.match(visual.image, /^data:image\/png/);
-    console.log("PASS: actual Windows UIA reads Chromium, excludes passwords, types a search, presses Play, verifies playback UI, declines Rent, rejects moved-window input, and captures a bounded screenshot.");
+    console.log("PASS: actual Windows UIA reads Chromium and redacts passwords; native input submits a search, clicks coordinates, drags a slider and scrolls; Play is verified, Rent is declined, stale windows are refused, and screenshots are bounded.");
     console.log("Helper:", native.executable);
   } finally { control?.cancel(); native.cancel(); await browser?.close(); fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
 }

@@ -1,8 +1,11 @@
 <!doctype html><html lang="en"><meta charset="utf-8"><title>KAI browser control fixture</title>
-<style>body{font:22px system-ui;padding:35px}button,input{font:inherit;padding:12px;margin:10px}#output{padding:20px;background:#def}#spacer{height:900px}</style>
+<style>body{font:18px system-ui;padding:20px;margin:0}h1,h2{font-size:22px;margin:8px 0}button,input{font:inherit;padding:8px;margin:6px}#output{padding:10px;background:#def}#spacer{height:900px}#volume{width:280px;padding:0}</style>
 <h1>Movie library</h1><label>Search movies <input id="search" aria-label="Search movies"></label>
 <h2>The Test Movie</h2><button id="play">Play</button><button id="rent">Rent for $9.99</button>
 <p id="output" role="status">Ready to play</p><label>Password <input id="password" type="password" value="MUST_NOT_READ" aria-label="Password"></label>
+<p><label><input id="subtitles" type="checkbox" aria-label="Show subtitles"> Show subtitles</label></p>
+<label>Volume <input id="volume" type="range" min="0" max="100" value="10" aria-label="Volume"></label>
+<p id="search-result" role="status">No search submitted</p>
 <div id="spacer"></div><p>End of page</p>
-<script>document.querySelector('#play').onclick=()=>{document.querySelector('#output').textContent='Playing The Test Movie';document.querySelector('#play').textContent='Pause';};document.querySelector('#rent').onclick=()=>{document.querySelector('#output').textContent='RENT MUST NOT RUN';};</script>
+<script>document.querySelector('#play').onclick=()=>{document.querySelector('#output').textContent='Playing The Test Movie';document.querySelector('#play').textContent='Pause';};document.querySelector('#rent').onclick=()=>{document.querySelector('#output').textContent='RENT MUST NOT RUN';};document.querySelector('#search').onkeydown=e=>{if(e.key==='Enter')document.querySelector('#search-result').textContent='Results for '+e.target.value;};</script>
 </html>
