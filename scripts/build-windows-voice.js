@@ -7,13 +7,13 @@ if (process.platform !== "win32") {
 const framework = path.join(process.env.WINDIR, "Microsoft.NET/Framework64/v4.0.30319");
 const programFiles = process.env["ProgramFiles(x86)"];
 const union = path.join(programFiles, "Windows Kits/10/UnionMetadata");
-const version = fs.readdirSync(union).filter(v => fs.existsSync(path.join(union, v, "Windows.winmd"))).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))[0];
+const version = fs.readdirSync(union).filter(v => /^\d/.test(v) && fs.existsSync(path.join(union, v, "Windows.winmd"))).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))[0];
 if (!version) throw new Error("The Windows SDK metadata is required to compile the local voice helper.");
 const referenceRoot = path.join(programFiles, "Reference Assemblies/Microsoft/Framework/.NETFramework/v4.8");
 const facades = path.join(referenceRoot, "Facades");
 const references = [path.join(union, version, "Windows.winmd"), path.join(framework, "System.Runtime.WindowsRuntime.dll"),
-  path.join(referenceRoot, "System.Speech.dll"), path.join(referenceRoot, "System.Web.Extensions.dll"), ...fs.readdirSync(facades).filter(f => f.endsWith(".dll")).map(f => path.join(facades, f))];
+  ...["System.dll", "System.Core.dll", "System.Speech.dll", "System.Web.Extensions.dll"].map(f => path.join(referenceRoot, f)), ...fs.readdirSync(facades).filter(f => f.endsWith(".dll")).map(f => path.join(facades, f))];
 const output = path.resolve("build/bin/kai-windows-voice.exe"); fs.mkdirSync(path.dirname(output), { recursive: true });
-execFileSync(path.join(framework, "csc.exe"), ["/nologo", "/target:exe", "/platform:x64", "/optimize+", "/out:" + output,
+execFileSync(path.join(framework, "csc.exe"), ["/nologo", "/noconfig", "/target:exe", "/platform:x64", "/optimize+", "/out:" + output,
   ...references.map(r => "/reference:" + r), path.resolve("build/windows/voice.cs")], { stdio: "inherit", windowsHide: true });
 console.log("Built local Windows voice helper:", output);
