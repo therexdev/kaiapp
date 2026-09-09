@@ -32,11 +32,12 @@
   const field = (label, content) => `<label class="cn-field"><span>${esc(label)}</span>${content}</label>`;
   const logos = new Map(featured.map(t => [t.slug, "assets/connections/" + t.slug + ".svg"]));
   const logo = t => `<span class="cn-logo"><span>${esc(t.name?.slice(0, 1).toUpperCase() || "+")}</span><img alt="" data-cn-logo="${esc(t.slug)}" ${logos.has(t.slug) ? 'src="' + esc(logos.get(t.slug)) + '"' : ""}></span>`;
-  let epoch = 0, search = "", category = "";
+  let epoch = 0, search = "", category = "", keyboard;
   let categories = [...new Set(featured.map(t => t.categories[0]))].map(name => ({ id: name, name }));
   function render(host, { state: initial, section, manage, navigate }) {
+    keyboard?.abort(); keyboard = new AbortController();
     const generation = ++epoch; let state = initial, items = [], nextCursor = null, realCatalog = false, loading = false, timer, drawer = null, queryId = 0, focusBeforeDrawer = null;
-    const alive = () => generation === epoch && host.isConnected && !host.closest(".view")?.hidden;
+    const alive = () => generation === epoch && host.isConnected && host.getClientRects().length > 0;
     const status = () => state.composio || {};
     const ready = () => !status().blocked && (status().mode === "personal" ? status().personalConfigured : status().managedAvailable && status().signedIn);
     const connections = () => state.connections.filter(c => c.provider === "composio");
@@ -112,8 +113,8 @@
         const c = d.connection;
         openDrawer("Manage " + c.name, `<form id="cn-access">${field("Account name", `<input name="name" value="${esc(c.name)}" maxlength="100">`)}
           ${check("allowAgent", "Use in conversations", "KAI asks before using an action from this account.", c.allowAgent || !c.operations.length)}
-          ${check("allowWrite", "Allow reviewed actions", "Changes and actions without read-only metadata always ask for approval.", c.allowWrite)}
-          ${check("allowSync", "Allow Brain and workflow reads", "Only selected actions marked read-only can run in the background.", c.allowSync)}
+          ${check("allowWrite", "Allow reviewed actions", "Changes and actions without verified read-only behavior always ask for approval.", c.allowWrite)}
+          ${check("allowSync", "Allow Brain and workflow reads", "Only selected, verified read actions can run in the background.", c.allowSync)}
           <div class="cn-actions-heading"><h3>Choose actions for KAI</h3><span id="cn-selected-count"></span></div><input type="search" id="cn-action-search" aria-label="Search app actions" placeholder="Search actions and data…"><div class="cn-tool-list" id="cn-tool-list"></div><div id="cn-tool-more"></div>
           <div class="cn-sticky-actions"><button class="cn-button cn-primary" type="submit">Save access</button>${c.operations.length ? btn("Try an action", "try", c.id) : ""}${c.operations.some(o => o.readOnly) ? btn("Collect into Brain", "collect", c.id) : ""}</div></form>`); drawTools();
       } else if (d.kind === "collect" || d.kind === "try") {
@@ -131,7 +132,8 @@
     async function loadTools(append = false) {
       const d = drawer; if (d?.kind !== "access") return;
       const r = await manage("composioTools", { toolkit: d.connection.toolkit, search: host.querySelector("#cn-action-search")?.value || "", cursor: append ? d.nextCursor : "" });
-      if (!alive() || drawer !== d) return; d.tools = append ? d.tools.concat(r.items) : r.items; d.nextCursor = r.nextCursor; for (const t of r.items) d.known.set(t.id, t);
+      if (!alive() || drawer !== d) return; d.tools = append ? d.tools.concat(r.items) : r.items; d.nextCursor = r.nextCursor; for (const t of r.items) if (!d.selected.has(t.id) || !d.known.has(t.id)) d.known.set(t.id, t);
+      d.tools = d.tools.map(t => d.selected.has(t.id) && d.known.has(t.id) ? d.known.get(t.id) : t);
       if (d.initial) { if (!d.connection.operations.length) r.items.filter(t => t.readOnly).slice(0, 8).forEach(t => d.selected.add(t.id)); d.initial = false; }
       drawTools();
     }
@@ -187,23 +189,23 @@
       if (e.target.dataset.cnTool && drawer?.kind === "access") { if (e.target.checked) drawer.selected.add(e.target.dataset.cnTool); else drawer.selected.delete(e.target.dataset.cnTool); host.querySelector("#cn-selected-count").textContent = drawer.selected.size + " selected"; }
       if (e.target.id === "cn-operation") { drawer.operation = e.target.value; drawDrawer(); }
     });
-    host.addEventListener("keydown", e => {
-      if (!drawer) return;
-      if (e.key === "Escape") { e.preventDefault(); void action("close"); }
+    document.addEventListener("keydown", e => {
+      if (!alive() || !drawer) return;
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); void action("close"); }
       if (e.key === "Tab") {
         const targets = [...host.querySelectorAll('.cn-drawer button:not(:disabled), .cn-drawer input:not(:disabled), .cn-drawer select, .cn-drawer textarea, .cn-drawer a[href]')].filter(el => el.getClientRects().length);
         if (e.shiftKey && document.activeElement === targets[0]) { e.preventDefault(); targets.at(-1)?.focus(); }
         else if (!e.shiftKey && document.activeElement === targets.at(-1)) { e.preventDefault(); targets[0]?.focus(); }
       }
-    });
+    }, { capture: true, signal: keyboard.signal });
     host.addEventListener("submit", async e => {
       if (!e.target.id.startsWith("cn-")) return; e.preventDefault(); if (busy) return; busy = true; const f = e.target, b = f.querySelector('button[type="submit"]'); b.disabled = true;
       try {
         if (f.id === "cn-settings") { const key = f.elements.key.value.trim(); f.elements.key.value = ""; await manage("composioSettings", { mode: f.elements.mode.value, key }); await refresh(); if (alive()) navigate("explore"); }
-        if (f.id === "cn-access") { await manage("composioPermissions", { id: drawer.connection.id, name: f.elements.name.value, allowAgent: f.elements.allowAgent.checked, allowWrite: f.elements.allowWrite.checked, allowSync: f.elements.allowSync.checked, tools: [...drawer.selected] }); state = await manage("status"); drawer = null; if (alive()) navigate("connected"); }
+        if (f.id === "cn-access") { await manage("composioPermissions", { id: drawer.connection.id, name: f.elements.name.value, allowAgent: f.elements.allowAgent.checked, allowWrite: f.elements.allowWrite.checked, allowSync: f.elements.allowSync.checked, tools: [...drawer.selected].map(id => ({ id, version: drawer.known.get(id)?.version || "latest" })) }); state = await manage("status"); drawer = null; if (alive()) navigate("connected"); }
         if (f.id === "cn-run-action") {
           const d = drawer, op = d.connection.operations.find(o => o.id === d.operation), variables = readArguments(f, op);
-          if (d.kind === "collect") { const source = d.source || await manage("source", { connectionId: d.connection.id, operationId: op.id, variables, name: f.elements.sourceName.value, autoSync: f.elements.autoSync.checked }); d.source = source; try { await manage("sync", { id: source.id }); notice("Added to Brain and synced. Find it under Brain → Sources & sync."); b.textContent = "Refresh this source"; } catch (error) { b.textContent = "Retry sync"; throw new Error("Source added to Brain, but its first sync failed: " + error.message); } }
+          if (d.kind === "collect") { const source = d.source || await manage("source", { connectionId: d.connection.id, operationId: op.id, variables, name: f.elements.sourceName.value, autoSync: f.elements.autoSync.checked }); d.source = source; for (const el of f.querySelectorAll("input, select, textarea")) el.disabled = true; try { await manage("sync", { id: source.id }); notice("Added to Brain and synced. Find it under Brain → Sources & sync."); b.textContent = "Refresh this source"; } catch (error) { b.textContent = "Retry sync"; throw new Error("Source added to Brain, but its first sync failed: " + error.message); } }
           else { const result = await manage("request", { connectionId: d.connection.id, operationId: op.id, variables }); const out = host.querySelector("#cn-result"); out.hidden = false; out.textContent = result; notice("Action completed."); }
         }
       } catch (error) { notice(error.message, true); } finally { busy = false; b.disabled = false; }

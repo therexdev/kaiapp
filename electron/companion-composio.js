@@ -116,9 +116,9 @@ class CompanionComposio {
     return this.guarded(async s => {
       const c = this.store.data.connections.find(c => c.id === input.id && c.provider === "composio");
       if (!c || !this.current(c) || c.status !== "ACTIVE") throw new CompanionError("Refresh or reconnect this account first.");
-      const chosen = [...new Set(input.tools || [])]; if (chosen.length > 30) throw new CompanionError("Choose up to 30 actions for this account.");
+      const chosen = [...new Map((input.tools || []).map(t => { const value = typeof t === "string" ? { id: t } : t; return [slug(value.id), value]; })).values()]; if (chosen.length > 30) throw new CompanionError("Choose up to 30 actions for this account.");
       const operations = [], revision = c.revision;
-      for (const key of chosen) { const t = await this.call("tool", { slug: slug(key) }, s); if (t.toolkit !== c.toolkit) throw new CompanionError("Choose actions belonging to this app."); if (!t.readOnly && input.allowWrite !== true) throw new CompanionError("Enable reviewed actions to select actions that can make changes."); operations.push(t); }
+      for (const ref of chosen) { const t = await this.call("tool", { slug: slug(ref.id), version: ref.version || "latest" }, s); if (t.toolkit !== c.toolkit) throw new CompanionError("Choose actions belonging to this app."); if (!t.readOnly && input.allowWrite !== true) throw new CompanionError("Enable reviewed actions to select actions that can make changes."); operations.push(t); }
       s.throwIfAborted(); if (!this.current(c) || this.store.data.connections.find(x => x.id === c.id)?.revision !== revision) throw new CompanionError("Connection settings changed. Refresh first.");
       this.store.change(d => { const saved = d.connections.find(x => x.id === c.id); Object.assign(saved, { name: text(input.name || c.name, 100, "Account name"), operations, allowAgent: input.allowAgent === true, allowSync: input.allowSync === true, allowWrite: input.allowWrite === true, revision: saved.revision + 1 }); });
       return true;

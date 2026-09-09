@@ -72,7 +72,7 @@ class CompanionHub {
       { name: "workflow_propose", description: "Save a disabled workflow draft for the user to review in Workflows. Cannot run or enable it.", params: { name: "workflow name", model: "installed local model alias", steps: "array of {type,label,text}; types brain_search,prompt,approval,remember,output; use {{input}} and {{previous}}" } },
     ];
     for (const c of this.connections.list().filter(c => c.enabled && c.allowAgent)) for (const o of c.operations) tools.push({
-      name: "connection_" + c.id.replace(/-/g, "") + "_" + o.id, description: `${c.name}: ${o.name}. ${o.method} ${o.path}. KAI asks for approval before each call.`, params: { variables: "JSON object for path placeholders", body: "JSON request body for writes" },
+      name: "connection_" + c.id.replace(/-/g, "") + "_" + o.id, description: `${c.name}: ${o.name}. ${o.method} ${o.path}. KAI asks for approval before each call.`, params: c.provider === "composio" ? { variables: o.schema } : { variables: "JSON object for path placeholders", body: "JSON request body for writes" },
     });
     return tools.map(t => ({ ...t, egress: false, sensitive: false, privateCompanion: true, label: t.name }));
   }
