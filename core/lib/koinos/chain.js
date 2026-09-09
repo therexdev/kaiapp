@@ -343,13 +343,14 @@ class ChainService {
     }
   }
 
-  async registeredPublicKey(producer) {
+  async registeredPublicKey(producer, { strict = false } = {}) {
     try {
       const pob = await this._contract("pob");
       // Reverts with "given address has no public key record" when unset.
       const res = await pob.functions.get_public_key({ producer });
       return res?.result?.value ?? null;
-    } catch {
+    } catch (e) {
+      if (strict) throw rpcError(e);
       return null;
     }
   }

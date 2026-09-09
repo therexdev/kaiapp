@@ -2,6 +2,7 @@
 
 const { parseAmount, percentOf, addSats, subSats, cmpSats, formatAmount } = require("./format");
 const { BURN_MANA_CUSHION } = require("./constants");
+const { externalMode } = require("./producer-custody");
 
 // "0" for an empty/zero/invalid cap (meaning "no cap"), otherwise the human
 // amount string as entered (this is what gets stored in the config).
@@ -122,10 +123,12 @@ class RewardEngine {
   }
 
   config() {
-    return this.settings.get("rewards");
+    const cfg = this.settings.get("rewards");
+    return externalMode(this.settings) ? { ...cfg, enabled: false, external: true } : cfg;
   }
 
   configure(patch) {
+    if (externalMode(this.settings) && patch.enabled) throw new Error("Automatic returns are disabled for an external producer wallet.");
     const cfg = validateRewardsConfig({ ...this.config(), ...patch });
     if (cfg.enabled && cfg.mode === "send" && !this.chain.isValidAddress(cfg.toAddress)) {
       throw new Error("Enter a valid Koinos address to send returns to");
@@ -183,6 +186,7 @@ class RewardEngine {
       this.last = { time: Date.now(), trigger, outcome, ...detail };
       return this.status();
     };
+    if (externalMode(this.settings)) return done("external-wallet", { message: "Sign funds operations with your external wallet." });
     const cfg = this.config();
     if (!cfg.enabled && trigger === "timer") return done("disabled");
     const ws = this.wallet.status();
@@ -284,6 +288,7 @@ class RewardEngine {
       return done("config-error", { message: "Return mode is `send` but the target address is invalid." });
     }
 
+    if (externalMode(this.settings)) return done("external-wallet");
     let tx;
     try {
       tx =

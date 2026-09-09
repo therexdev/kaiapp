@@ -1,3 +1,7 @@
+### External producer wallets
+
+- Koinos Node now supports a watch-only producer address separate from the KAI earning wallet. Generate/copy/rotate the hot block key, verify registration on-chain, and prepare externally signed registration, burn and transfer transactions. Automatic funds operations are disabled in external mode. See [setup and offline signing](EXTERNAL_PRODUCER.md).
+
 ### Steadier KAI animations
 
 - The Launch KAI card no longer jumps during desktop-provider status refreshes.

@@ -4,7 +4,7 @@ const path = require("path");
 const fs = require("fs");
 
 const { JsonStore } = require("./store");
-// From Koinos AI's own wallet — the one and only keystore in this app.
+// The local earning wallet; external producer custody never imports its account key.
 const { MIN_PASSWORD_LENGTH } = require("./wallet");
 const { NETWORKS, DEFAULT_SETTINGS } = require("./koinos/constants");
 const { ChainService } = require("./koinos/chain");
@@ -40,7 +40,9 @@ const { compareRoutes, descriptor } = require("./koinos/fund-routes");
  *
  *   1. ONE WALLET. Koinos Node's own WalletService is NOT vendored. Everything
  *      here uses core/lib/wallet.js — the same keystore Koinos AI earns with,
- *      the same address, the same backup code. There is no second wallet.
+ *      the same address, the same backup code in local/hot mode. External
+ *      producer mode stores a watch-only account address plus a separate hot
+ *      block key; account transactions are signed on another machine.
  *
  *   2. THE PASSWORD GUARDS VALUE LEAVING. Sending KOIN, sending ETH/USDT/vKOIN,
  *      and starting a bridge or swap all prove the wallet password on the call.
@@ -67,6 +69,13 @@ const ONRAMP_APP_KEY = "kkapp_71854dc40591df1aeb8811a514e3dbc302bb382f";
 function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards, stats, bridge, routeC, userData, appVersion, defaultNodeData = null, priceCache: injectedPriceCache = null, onEvent = () => {} }) {
   const channels = new Map();
   const handle = (channel, fn) => channels.set(channel, fn);
+  const { ProducerCustody } = require("./koinos/producer-custody");
+  const custody = new ProducerCustody({ settings, state, wallet, chain, nodeMgr, rewards });
+  const producerAddress = () => custody.config().address;
+  handle("producer:configure", input => custody.configure(input));
+  handle("producer:key", input => custody.key(input));
+  handle("producer:prepare", input => custody.prepare(input));
+  handle("producer:broadcast", input => custody.broadcast(input));
 
   // One KOIN price for this Core, refreshed at most every few minutes and kept
   // across failures. Scoped here rather than module-level so a second Core in
@@ -152,6 +161,10 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
   handle("wallet:remove", ({ password, confirm }) => wallet.remove({ password, confirm }));
 
   // ----- chain -----
+  handle("producer:balances", async () => {
+    const address = producerAddress();
+    return address ? { address, ...await chain.balances(address) } : { address: null };
+  });
   handle("chain:balances", async () => {
     const address = wallet.address;
     if (!address) return { address: null };
@@ -168,6 +181,7 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
   });
 
   handle("chain:burn", async ({ amount }) => {
+    custody.requireLocal();
     const amountSat = parseAmount(amount);
     const res = await chain.burn(wallet.signer, amountSat);
     onEvent({
@@ -179,6 +193,7 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
   });
 
   handle("chain:send", async ({ to, amount, token, password }) => {
+    custody.requireLocal();
     const amountSat = parseAmount(amount);
     // Sending moves value to somebody else: the password is proved HERE,
     // on this call, because the wallet auto-unlocks at start-up and being
@@ -195,6 +210,7 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
   handle("chain:sync", () => chain.syncStatus());
 
   handle("chain:maxBurn", async () => {
+    custody.requireLocal();
     const address = wallet.address;
     if (!address) throw new Error("No wallet");
     const { koin, mana } = await chain.balances(address);
@@ -215,23 +231,10 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
   });
 
   // ----- block producer registration -----
-  handle("producer:status", async () => {
-    const networkId = chain.network().id;
-    const address = wallet.address;
-    const filePublicKey = nodeMgr.readProducerPublicKey(networkId);
-    let registeredPublicKey = null;
-    if (address) {
-      registeredPublicKey = await chain.registeredPublicKey(address);
-    }
-    return {
-      address,
-      filePublicKey,
-      registeredPublicKey,
-      matches: !!filePublicKey && filePublicKey === registeredPublicKey,
-    };
-  });
+  handle("producer:status", () => custody.status());
 
   handle("producer:register", async () => {
+    custody.requireLocal();
     const networkId = chain.network().id;
     const pub = nodeMgr.readProducerPublicKey(networkId);
     if (!pub) {
@@ -327,7 +330,12 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
     }
     let producerAddress = null;
     if (produce) {
-      producerAddress = wallet.address;
+      producerAddress = custody.config().address;
+      if (custody.config().mode === "external") {
+        if (producerAddress === wallet.address) throw new Error("External producer key is present in the local earning wallet. Use a separate cold address.");
+        const registration = await custody.status();
+        if (!registration.matches) throw new Error(registration.verificationError || "Verify the hot public key registration on-chain before enabling external production.");
+      }
       if (!producerAddress) throw new Error("Create a wallet first to enable block production");
     }
     // One click means the WHOLE chain (field report: this button answered
@@ -432,11 +440,12 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
 
   handle("dashboard:summary", async () => {
     const net = chain.network();
-    const address = wallet.address;
+    const address = producerAddress();
     const ws = wallet.status();
     const out = {
       network: { id: net.id, label: net.label, tokenSymbol: net.tokenSymbol, explorer: net.explorer },
-      wallet: { exists: ws.exists, unlocked: ws.unlocked, address },
+      wallet: { exists: !!address, unlocked: custody.config().mode === "local" && ws.unlocked, address },
+      custody: custody.config(),
       node: null,
       balances: null,
       stats: null,
@@ -532,6 +541,7 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
    * them can move a satoshi anywhere the wallet does not already own.
    */
   handle("rewards:configure", (patch) => {
+    if (patch?.enabled) custody.requireLocal();
     // NEVER let the password reach rewards.configure: that object is persisted.
     const { password, ...settingsPatch } = patch || {};
     const before = rewards.config();
@@ -552,7 +562,7 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
     }
     return rewards.configure(settingsPatch);
   });
-  handle("rewards:runNow", () => rewards.tick("manual"));
+  handle("rewards:runNow", () => { custody.requireLocal(); return rewards.tick("manual"); });
 
   // ----- fund node (Ethereum on-ramp — Phase 1) -----
   // Shared, app-hosted Coinbase Onramp endpoint. Every install uses this by
@@ -835,6 +845,17 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
 
 
 
+  // Serialize custody/network/node mutations so asynchronous RPC checks cannot
+  // authorize a start, rotation or draft against a different producer context.
+  let producerMutation = false;
+  for (const name of ["producer:configure", "producer:key", "producer:prepare", "producer:broadcast", "producer:register", "settings:update", "node:start", "node:stop", "chain:burn", "chain:send", "rewards:runNow", "rewards:configure"]) {
+    const fn = channels.get(name);
+    channels.set(name, async input => {
+      if (producerMutation) throw new Error("Wait for the current producer operation to finish.");
+      producerMutation = true;
+      try { return await fn(input); } finally { producerMutation = false; }
+    });
+  }
   return channels;
 }
 

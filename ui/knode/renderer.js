@@ -166,6 +166,7 @@ async function refreshNode() {
   }
   try {
     S.producer = await call("producer:status");
+    S.producerBalances = await call("producer:balances").catch(() => null);
   } catch {
     S.producer = null;
   }
@@ -898,6 +899,7 @@ function txToast(res, label) {
 
 function renderBurnView() {
   const root = $("#view-burn");
+  if (S.appInfo.settings.producer?.mode === "external") { root.innerHTML = '<h1>Burn KOIN → VHP</h1><div class="banner info">External producer mode: prepare and sign burns through Node → External signing. KAI will not use the earning wallet.</div>'; return; }
   if (S.walletStage !== "unlocked") {
     root.innerHTML = `
       <h1>Burn ${esc(sym())} → VHP</h1>
@@ -1026,6 +1028,7 @@ function onBurn() {
 // ---------- node view ----------
 
 function renderNodeView() {
+  const custody = S.appInfo.settings.producer || { mode: "local", addresses: {} };
   const root = $("#view-node");
   root.innerHTML = `
     <div class="row spread">
@@ -1038,6 +1041,29 @@ function renderNodeView() {
       </div>
     </div>
     <p class="lead">Runs the official Koinos microservices with Docker. First start downloads images and syncs the chain — this can take a while.</p>
+    <div class="card">
+      <h2>Producer wallet custody</h2>
+      <p class="hint">Your KAI earning wallet stays separate from an external producer. Stop the node before changing custody or rotating its hot key.</p>
+      <label class="field"><span>Wallet mode</span><select id="pc-mode"><option value="local" ${custody.mode !== "external" ? "selected" : ""}>Local earning wallet (hot wallet)</option><option value="external" ${custody.mode === "external" ? "selected" : ""}>External/cold producer wallet</option></select></label>
+      <label class="field"><span>Watch-only producer address</span><input id="pc-address" placeholder="Public Koinos address only — never a private key" value="${esc(custody.addresses?.[net().id] || "")}"></label>
+      <div class="row"><button id="pc-save" class="btn">Save custody mode</button><button id="pc-key" class="btn">Generate hot key</button><button id="pc-rotate" class="btn">Rotate hot key…</button><button id="pc-verify" class="btn">Verify registration</button></div>
+      <label class="field"><span>Hot block-production public key</span><input id="pc-public" readonly aria-label="Block-production public key"></label>
+      <button id="pc-copy" class="btn ghost">Copy public key</button><p id="pc-result" class="hint" role="status"></p>
+      <details><summary>External signing: registration, burns and transfers</summary>
+        <button id="pc-guide" class="btn ghost">Open signing and backup guide</button>
+        <p class="hint">Prepare a transaction here, then sign it on a separate machine with the offline signing helper documented in docs/EXTERNAL_PRODUCER.md. Never import the producer WIF here. Drafts expire after 15 minutes. Automatic funds operations are disabled in external mode.</p>
+        <label class="field"><span>Operation</span><select id="pc-action"><option value="register">Register hot public key</option><option value="burn">Burn KOIN to this producer's VHP</option><option value="transfer">Transfer tokens</option></select></label>
+        <label class="field"><span>Amount (burn/transfer)</span><input id="pc-amount" inputmode="decimal" placeholder="0.00"></label>
+        <label class="field"><span>Token (transfer)</span><select id="pc-token"><option value="koin">KOIN</option><option value="vhp">VHP</option></select></label>
+        <label class="field"><span>Recipient (transfer)</span><input id="pc-to" placeholder="Koinos address"></label>
+        <button id="pc-prepare" class="btn">Prepare unsigned transaction</button>
+        <label class="field"><span>Unsigned transaction — copy to a JSON file</span><textarea id="pc-unsigned" rows="7" readonly></textarea></label>
+        <button id="pc-copy-draft" class="btn ghost">Copy unsigned JSON</button>
+        <label class="field"><span>Signed transaction JSON returned by your external signer</span><textarea id="pc-signed" rows="7" placeholder="Paste signed transaction JSON only"></textarea></label>
+        <label class="field"><span><input type="checkbox" id="pc-confirm" style="width:auto"> I reviewed the actual operations, recipient, amount and network on my signing machine.</span></label>
+        <button id="pc-broadcast" class="btn primary">Broadcast signed transaction</button>
+      </details>
+    </div>
     <div id="n-docker"></div>
     <div id="n-op"></div>
     <div class="grid-2">
@@ -1075,6 +1101,25 @@ function renderNodeView() {
       <pre class="logs" id="n-log-out">Press Refresh to load logs.</pre>
     </div>`;
 
+  const producerAction = (id, fn) => $(id).addEventListener("click", async () => {
+    const button = $(id); button.disabled = true;
+    try { await fn(); } catch (e) { $("#pc-result").textContent = e.message; }
+    finally { button.disabled = false; }
+  });
+  producerAction("#pc-save", async () => {
+    await call("producer:configure", { mode: $("#pc-mode").value, address: $("#pc-address").value });
+    S.appInfo = await call("app:info"); S.balancesAt = 0; S.balances = null;
+    await refreshNode(); renderBurnView(); renderReturnsView(); await refreshRewards();
+    $("#pc-result").textContent = "Custody saved. Automatic returns are off. Verify registration before starting production.";
+  });
+  producerAction("#pc-key", async () => { const r = await call("producer:key"); await refreshNode(); $("#pc-result").textContent = "Hot key ready. Back up private.key and public.key securely from: " + r.keyDirectory; });
+  producerAction("#pc-rotate", async () => showModal({ title: "Rotate hot production key?", body: "<p>Stop the node first. KAI will preserve a local backup of the old hot key. Register the new public key with your external wallet before restarting production.</p>", actions: [{ label: "Cancel", onClick: close => close() }, { label: "Rotate key", onClick: async close => { try { const r = await call("producer:key", { rotate: true, confirm: true }); close(); await refreshNode(); $("#pc-result").textContent = "New hot key ready. Old key backup: " + (r.backupDirectory || "none"); } catch (e) { toast(e.message, "bad"); } } }] }));
+  producerAction("#pc-verify", async () => { await refreshNode(); $("#pc-result").textContent = S.producer?.matches ? "On-chain registration matches this node's hot key." : S.producer?.verificationError || "Registration does not match yet. Sign and confirm the registration, then check again."; });
+  producerAction("#pc-guide", () => call("util:openExternal", { url: "https://github.com/therexdev/kaiapp/blob/test/docs/EXTERNAL_PRODUCER.md" }));
+  producerAction("#pc-copy", () => call("util:copy", { text: $("#pc-public").value }));
+  producerAction("#pc-prepare", async () => { const d = await call("producer:prepare", { action: $("#pc-action").value, amount: $("#pc-amount").value, token: $("#pc-token").value, to: $("#pc-to").value.trim() }); $("#pc-unsigned").value = JSON.stringify(d, null, 2); $("#pc-signed").value = ""; $("#pc-confirm").checked = false; $("#pc-result").textContent = "Prepared only — nothing signed or broadcast. Review decoded operations on your separate signing machine."; });
+  producerAction("#pc-copy-draft", () => call("util:copy", { text: $("#pc-unsigned").value }));
+  producerAction("#pc-broadcast", async () => { const tx = JSON.parse($("#pc-signed").value); const r = await call("producer:broadcast", { transaction: tx, confirm: $("#pc-confirm").checked }); $("#pc-signed").value = ""; $("#pc-unsigned").value = ""; $("#pc-confirm").checked = false; txToast(r, "External transaction"); $("#pc-result").textContent = r.note; await refreshNode(); });
   $("#n-open").addEventListener("click", () => call("util:openPath", { which: "nodeData" }).catch(() => {}));
   $("#n-docker").addEventListener("click", onSetupClick);
   $("#n-start").addEventListener("click", onStartNode);
@@ -1153,13 +1198,13 @@ async function onQuickSync() {
 }
 
 function onStartNode() {
-  const canProduce = S.wallet?.exists;
+  const canProduce = S.producer?.mode === "external" ? !!S.producer.matches : S.wallet?.exists;
   showModal({
     title: "Start Koinos node",
     body: `
       <label class="field"><span class="row" style="gap:8px">
         <input type="checkbox" id="ns-produce" ${canProduce ? "checked" : "disabled"} style="width:auto">
-        <span>Enable block production (uses your wallet address <span class="mono">${esc(S.wallet?.address ?? "no wallet yet")}</span> as producer)</span>
+        <span>Enable block production (uses producer address <span class="mono">${esc(S.producer?.address || S.wallet?.address || "not configured")}</span> as producer)</span>
       </span></label>
       <p class="small muted">The node runs in Docker in the background and keeps running even if you close this app. First sync downloads the whole chain.</p>`,
     actions: [
@@ -1482,12 +1527,12 @@ function patchNodeView() {
     // wallet is LOCKED. Distinguish "still checking" from a real zero so the list
     // never claims you have no VHP when it simply hasn't looked yet (the node
     // produces blocks whether or not the app wallet is unlocked).
-    const balLoaded = S.balances && !S.balances.error;
-    const hasVhp = balLoaded && BigInt(S.balances.vhp ?? "0") > 0n;
+    const balLoaded = S.producerBalances && !S.producerBalances.error;
+    const hasVhp = balLoaded && BigInt(S.producerBalances.vhp ?? "0") > 0n;
     const vhpState = hasVhp ? "ok" : balLoaded ? "empty" : "pending";
     const st = (ok) => (ok ? "ok" : "empty");
     const items = [
-      [st(S.wallet?.exists), "Wallet created", "Create one in the Wallet tab."],
+      [st(!!p?.address), "Producer address configured", "Choose a local or external producer address above."],
       [
         vhpState,
         "VHP staked at your address",
@@ -1508,9 +1553,12 @@ function patchNodeView() {
       .join("");
     const reg = $("#n-register");
     const regHint = $("#n-reg-hint");
-    const canRegister = !!p?.filePublicKey && S.walletStage === "unlocked" && !p?.matches;
+    const canRegister = p?.mode !== "external" && !!p?.filePublicKey && S.walletStage === "unlocked" && !p?.matches;
     reg.disabled = !canRegister;
-    if (p?.matches) {
+    if ($("#pc-public")) $("#pc-public").value = p?.filePublicKey || "";
+    if (p?.mode === "external") {
+      regHint.textContent = p.matches ? "External producer registration verified. The node holds only its hot production key." : p.verificationError || "Use External signing above to register this hot key with your separate wallet.";
+    } else if (p?.matches) {
       regHint.textContent = "✅ Registered — your node signs blocks with this key. Rewards arrive at your wallet address.";
     } else if (p?.registeredPublicKey && p?.filePublicKey && !p.matches) {
       regHint.textContent = "⚠️ A different key is registered on chain for this address. Register the current node key to replace it.";
@@ -2406,6 +2454,7 @@ async function onSaveOnrampEndpoint() {
 
 function renderReturnsView() {
   const root = $("#view-returns");
+  if (S.appInfo.settings.producer?.mode === "external") { root.innerHTML = '<h1>Reward returns</h1><div class="banner info">Automatic burns and transfers are disabled for your external producer. Use Node → External signing for each funds operation.</div>'; return; }
   const cfg = S.rewards?.config ?? S.appInfo.settings.rewards;
   root.innerHTML = `
     <h1>Reward returns</h1>
