@@ -34,9 +34,11 @@
     listening: "Listening…", transcribing: "Got it · one moment…",
     speaking: "KAI is speaking", voicing: "Getting my reply ready…", error: "Let's try that again",
   };
+  let replyPose = false;
   function mood(value) {
+    if (!audible && !speaking && !busy) replyPose = false;
     if (["idle", "thinking", "searching", "voicing", "speaking"].includes(value)) {
-      value = audible ? "speaking" : speaking ? (speech.held ? "listening" : "voicing") : busy ? (toolActivity || "thinking") : "idle";
+      value = speech.held ? "listening" : audible || replyPose ? "speaking" : speaking ? "voicing" : busy ? (toolActivity || "thinking") : "idle";
     }
     const engaged = wakeListener?.engaged;
     if (wakePhase === "capturing" && engaged && ((!busy && !speaking) || speech.held)) value = "listening";
@@ -210,6 +212,8 @@
   let wakeEnabled = false, wakeStarting = false, wakePhase = "off";
   function playbackState(value) {
     audible = value;
+    if (value) replyPose = true;
+    document.body.dataset.audible = String(value);
     wakeListener.setPlayback(value);
     mood("idle");
   }
@@ -336,7 +340,7 @@
       speechEpoch++; notice(error.message + " The reply is still in your chat.");
     },
   });
-  function stopSpeech() { speechEpoch++; speech.stop(); }
+  function stopSpeech() { replyPose = false; speechEpoch++; speech.stop(); }
   function speak(text) {
     stopSpeech();
     if (voiceReplies && !suspended && ensureNatural()) { speech.enqueue(new api.SpeechPhrases().push(text, true)); speech.end(); }
@@ -698,7 +702,7 @@
             // thinking pose between every quickly returning web request.
             toolActivity = detail?.activity === "searching" || (detail?.phase === "planning" && toolActivity === "searching") ? "searching" : null;
             trace.textContent = value; mood("thinking");
-            if (value && !audible) $("mood-label").textContent = value;
+            if (value && !audible && !replyPose) $("mood-label").textContent = value;
             scroll();
           },
           onObservation: value => { observations.push(value); request.keepUser = true; },

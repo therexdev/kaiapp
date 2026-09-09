@@ -60,6 +60,9 @@ async function refresh() {
   const entry = models.aliases.find((a) => a.alias === state.alias) || first;
   const running = models.runtime?.runtime?.running && models.runtime.activeAlias === state.alias;
   state.ready = !!(entry && entry.status === "ready");
+  // Finish asynchronous provider discovery before painting either status.
+  // Otherwise every poll briefly renders local-model status above the launcher.
+  await updateModelPick(models.aliases);
 
   if (models.download) {
     const { pct, done, total } = models.download;
@@ -91,7 +94,6 @@ async function refresh() {
     setStatus("busy", "Setup needed");
   }
   $("status-model").textContent = entry ? entry.label.split(" (")[0] : "No models in catalog";
-  await updateModelPick(models.aliases);
   const desktopReady = KaiProviders.models().some(m => m.alias === composedChatModel());
   if (desktopReady && !models.download && !models.ensure?.state) {
     setStatus("ok", "Desktop provider ready");

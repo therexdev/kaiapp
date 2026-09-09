@@ -1,3 +1,8 @@
+### Steadier KAI animations
+
+- The Launch KAI card no longer jumps during desktop-provider status refreshes.
+- Speaking keeps one continuous arm/head pose between audio phrases and buffering pauses. The mouth still follows audible playback, and the status bubble keeps a consistent size.
+
 ### KAI-managed connection fix
 
 - Fixed the desktop account-service wiring that incorrectly showed managed connections as disabled even when the server was enabled. Connections now shares the account server and sign-in service used by Settings. Existing server environment variables and personal Composio keys need no changes.

@@ -64,6 +64,23 @@ test("desktop connections UI: settings, provider selection, chat/mascot streamin
   }
   await page.click("#provider-openai [data-provider-action=use]");
   await page.waitForFunction(() => document.querySelector("#model-pick").value === "desktop:openai:gpt-fixture");
+  const statusFrames = await page.evaluate(async () => {
+    await refresh();
+    document.getElementById("launch-kai").hidden = false;
+    const original = window.kaiProviderBridge.status;
+    window.kaiProviderBridge.status = async () => { await new Promise(r => setTimeout(r, 180)); return original(); };
+    const frames = []; let running = true;
+    const sample = () => {
+      frames.push({ text: document.getElementById("status-text").textContent, y: document.getElementById("launch-kai").getBoundingClientRect().y });
+      if (running) requestAnimationFrame(sample);
+    };
+    sample(); await refresh(); running = false;
+    window.kaiProviderBridge.status = original;
+    return frames;
+  });
+  assert.ok(statusFrames.length > 1);
+  assert.ok(statusFrames.every(frame => frame.text === "Desktop provider ready"));
+  assert.ok(statusFrames.every(frame => Math.abs(frame.y - statusFrames[0].y) < .1), "Provider refresh must not move Launch KAI");
   await page.fill("#input", "Hello from the desktop."); await page.click("#btn-send");
   await page.waitForFunction(() => document.querySelector("#messages").textContent.includes("Answered by OpenAI") && document.querySelector("#btn-stop").hidden);
   assert.match(await page.textContent("#privacy-note"), /directly to OpenAI/);

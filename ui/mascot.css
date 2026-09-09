@@ -129,7 +129,7 @@ body.wake-on #status-pill>span:first-child{background:#8af0ba}
 #welcome>p{margin-bottom:10px}
 .suggestions button{padding-top:7px;padding-bottom:7px}
 /* Voice controls and setup remain available in the 248 × 304 compact window. */
-#status-pill{pointer-events:auto;gap:5px;padding:7px 8px;right:8px;max-width:232px}
+#status-pill{pointer-events:auto;gap:5px;padding:7px 8px;right:8px;width:232px;max-width:232px;height:38px;box-sizing:border-box}
 #status-pill #mood-label{overflow:hidden;text-overflow:ellipsis}
 #quick-stop{padding:0 3px;background:none;color:#ffd6c3;font-size:11px}
 .voice-card{position:absolute;z-index:11;left:8px;right:8px;top:38px;max-height:210px;overflow:auto;padding:15px;border:1px solid #8bdcd144;border-radius:16px;background:#112332;box-shadow:0 8px 28px #0005;font-size:12px;line-height:1.5}

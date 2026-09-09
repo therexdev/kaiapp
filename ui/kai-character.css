@@ -23,6 +23,9 @@ body[data-state=thinking] .kai3d-thought,body[data-state=transcribing] .kai3d-th
 body[data-state=speaking] .kai3d-head-motion{animation:kai3d-talk 1.4s ease-in-out infinite}
 body[data-state=speaking] .kai3d-smile{opacity:0}
 body[data-state=speaking] .kai3d-mouth{opacity:1;animation:kai3d-speech .31s ease-in-out infinite alternate}
+/* Buffering pauses close the mouth without restarting the arm/head timeline. */
+body[data-state=speaking][data-audible=false] .kai3d-mouth{opacity:0;animation-play-state:paused}
+body[data-state=speaking][data-audible=false] .kai3d-smile{opacity:1}
 body[data-state=error] .kai3d-head-motion{animation:kai3d-ponder 3s ease-in-out infinite}
 body[data-state=error] .kai3d-brows{transform:rotate(-7deg);transform-origin:512px 280px}
 body.waving .kai3d-head-motion{animation:kai3d-hello 2.4s ease-in-out}

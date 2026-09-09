@@ -123,3 +123,40 @@ test("Web planning does not flash back to thinking; every voice receives clean s
   assert.equal(await page.evaluate(() => window.__browserSpeech.join(" ")), expected);
   assert.deepEqual(errors, []);
 });
+
+test("Speaking keeps its gesture and bubble through playback gaps, but closes the mouth and stops promptly", { skip: !fs.existsSync(CHROMIUM), timeout: 45000 }, async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-speaking-steady-")), fixture = await startMascotServer(dir);
+  fixture.state.reply = "Here is the first sentence. Here is the second sentence.";
+  const browser = await require("playwright-core").chromium.launch({ executablePath: CHROMIUM, args: ["--no-sandbox"] });
+  t.after(async () => { await browser.close(); await fixture.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  const page = await browser.newPage({ viewport: { width: 660, height: 560 } });
+  await page.addInitScript(() => {
+    localStorage.setItem("kai-mascot-cute-default-v1", "1");
+    localStorage.setItem("kai-mascot-voice", "1");
+    localStorage.setItem("kai-mascot-voice-choice", "system:fixture");
+    window.__utterances = [];
+    Object.defineProperty(window, "speechSynthesis", { value: {
+      getVoices: () => [{ localService: true, voiceURI: "fixture", name: "Test voice", lang: "en-US" }],
+      cancel() {}, resume() {}, speak(u) { window.__utterances.push(u); u.onstart?.(); },
+    } });
+    window.SpeechSynthesisUtterance = class { constructor(text) { this.text = text; } };
+    window.kaiDesktop = { expand: async () => ({}), regions() {}, onEvent() {}, cancelAction() {} };
+  });
+  await page.goto(fixture.origin + "/mascot.html");
+  await page.waitForFunction(() => document.querySelector("#model").value);
+  const width = await page.locator("#status-pill").evaluate(el => el.getBoundingClientRect().width);
+  await page.click("#toggle-chat");
+  await page.fill("#question", "Say two sentences."); await page.press("#question", "Enter");
+  await page.waitForFunction(() => window.__utterances.length === 1 && document.body.dataset.audible === "true");
+  await page.evaluate(() => { window.__gesture = document.querySelector(".kai3d-arm-right").getAnimations()[0]; window.__utterances[0].onpause(); });
+  assert.equal(await page.locator("body").getAttribute("data-state"), "speaking");
+  assert.equal(await page.locator(".kai3d-mouth").evaluate(el => getComputedStyle(el).opacity), "0");
+  await page.evaluate(() => { window.__utterances[0].onresume(); window.__utterances[0].onend(); });
+  await page.waitForFunction(() => window.__utterances.length === 2 && document.body.dataset.audible === "true");
+  assert.equal(await page.evaluate(() => document.querySelector(".kai3d-arm-right").getAnimations()[0] === window.__gesture), true);
+  assert.equal(await page.locator("#mood-label").textContent(), "KAI is speaking");
+  assert.equal(await page.locator("#status-pill").evaluate(el => el.getBoundingClientRect().width), width);
+  await page.click("#quick-stop");
+  await page.waitForFunction(() => document.body.dataset.state === "idle");
+  assert.equal(await page.locator(".kai3d-mouth").evaluate(el => getComputedStyle(el).opacity), "0");
+});
