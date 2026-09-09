@@ -11,6 +11,14 @@ async function main() {
     app = await electron.launch({ executablePath: require("electron"), args: [path.join(__dirname, "fixtures/mascot-desktop.js")], env, timeout: 30000 });
     const main = await app.firstWindow();
     await main.waitForSelector("#launch-kai:not([hidden])");
+    // Capture the initial native shape too: fixed-size status pills need no
+    // resize when their text changes, so installing this later misses it.
+    await app.evaluate(({ app }) => {
+      app.once("browser-window-created", (_event, w) => {
+        const setShape = w.setShape.bind(w);
+        w.setShape = value => { globalThis.__kaiShape = value; return setShape(value); };
+      });
+    });
     const nextWindow = app.waitForEvent("window");
     await main.click("#launch-kai");
     const mascot = await nextWindow;
@@ -44,11 +52,6 @@ async function main() {
       assert.doesNotMatch(languageError, /invoking remote method|mascot:windows-speech|unsupported audio format/);
       console.log("PASS: missing Korean speech gives actionable guidance through the real sandboxed preload.");
     }
-    // Preserve real native shaping, recording only the rectangles it receives.
-    await app.evaluate(() => {
-      const w = globalThis.__kaiController.getWindow(), setShape = w.setShape.bind(w);
-      w.setShape = value => { globalThis.__kaiShape = value; return setShape(value); };
-    });
     const checkPill = async (label, stop) => {
       await mascot.evaluate(({ label, stop }) => {
         document.querySelector("#mood-label").textContent = label;
@@ -67,7 +70,7 @@ async function main() {
     await checkPill("Thinking it through…", true);
     await checkPill("KAI is speaking", true);
     await checkPill("Here when you need me", false);
-    console.log("PASS: native window shape follows status text growth, shrinkage and Stop visibility.");
+    console.log("PASS: native window shape covers every status label and Stop visibility.");
     let native = await app.evaluate(({ BrowserWindow }) => {
       const w = globalThis.__kaiController.getWindow();
       return { count: BrowserWindow.getAllWindows().length, mainVisible: globalThis.__kaiMain.isVisible(),
