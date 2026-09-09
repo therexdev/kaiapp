@@ -23,10 +23,10 @@ test("existing enabled auth configs are reused without exposing their credential
 test("curated reads require the exact documented version; changed or explicit unsafe metadata requires review",()=>{const raw={...TOOLS[0],slug:"GITHUB_LIST_REPOSITORY_ISSUES",version:"20260902_00",tags:[]};assert.equal(tool(raw).readOnly,true);assert.equal(tool({...raw,version:"20260910_00"}).readOnly,false);assert.equal(tool({...raw,annotations:{readOnlyHint:false}}).readOnly,false);assert.equal(tool({...raw,slug:"GITHUB_CREATE_AN_ISSUE"}).readOnly,false);});
 
 test("managed session rejection is distinct from server availability and recovers without deleting the token", async t => {
- let token = "session-a", httpStatus = 401;
+ let token = "session-a", httpStatus = 401, error;
  const { hub } = setup(t, { account: { origin: () => "https://kai.example", _token: () => token }, fetchImpl: async url =>
   new Response(JSON.stringify(url.endsWith("/status") ? { available: true, protocol: 1, generation: "project-a" } :
-   { ok: httpStatus === 200, result: { userId: "kai:alice", accounts: [] } }), { status: url.endsWith("/status") ? 200 : httpStatus }) });
+   { ok: httpStatus === 200, error, result: { userId: "kai:alice", accounts: [] } }), { status: url.endsWith("/status") ? 200 : httpStatus }) });
  await assert.rejects(hub.composio.refresh(), /sign-in has expired/);
  assert.equal(hub.status().composio.managedAvailable, true);
  assert.equal(hub.status().composio.signedIn, false);
@@ -39,5 +39,9 @@ test("managed session rejection is distinct from server availability and recover
  httpStatus = 503;
  await assert.rejects(hub.composio.refresh(), /Connection request failed/);
  assert.equal(hub.status().composio.signedIn, true, "an outage must not sign the desktop out");
+ assert.equal(hub.status().composio.sessionExpired, false);
+ httpStatus = 401; error = "Composio rejected this key. Check your project API key.";
+ await assert.rejects(hub.composio.refresh(), /server's Composio key was rejected/);
+ assert.equal(hub.status().composio.signedIn, true, "a rejected server key must not be reported as an expired desktop sign-in");
  assert.equal(hub.status().composio.sessionExpired, false);
 });

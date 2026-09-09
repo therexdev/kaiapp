@@ -50,11 +50,18 @@ class CompanionComposio {
       if (!this.managed?.available) throw new CompanionError("KAI-managed connections are not enabled yet. You can use your own Composio key in Connection settings.");
       const r = await this.fetch(ctx.origin + "/connections/api/" + action, { method: "POST", redirect: "error", signal,
         headers: { "content-type": "application/json", authorization: "Bearer " + ctx.token }, body: JSON.stringify({ ...input, generation: this.managed.generation }) });
-      if (r.status === 401) this.rejectedSession = { origin: ctx.origin, binding: ctx.binding };
       let content = "", bytes = 0; const decoder = new TextDecoder();
       for await (const chunk of r.body || []) { bytes += chunk.length; if (bytes > 4 * 1024 * 1024) throw new CompanionError("The connection result is too large."); content += decoder.decode(chunk, { stream: true }); }
       content += decoder.decode(); signal?.throwIfAborted();
       let p; try { p = JSON.parse(content); } catch { throw new CompanionError("Update the KAI connection server before using this option."); }
+      // The current server forwards Composio's HTTP status. Its own account
+      // middleware also uses 401, so preserve the upstream key error separately.
+      const keyRejected = r.status === 401 && p.error === "Composio rejected this key. Check your project API key.";
+      if (r.status === 401 && !keyRejected) this.rejectedSession = { origin: ctx.origin, binding: ctx.binding };
+      if (keyRejected) {
+        this.rejectedSession = null;
+        throw new CompanionError("The server's Composio key was rejected. Ask the server administrator to check COMPOSIO_API_KEY. Your KAI account sign-in is separate.");
+      }
       if (!r.ok || !p.ok) throw new CompanionError(r.status === 401 ? "Your KAI sign-in has expired. Sign in again in Settings." : p.error || "Connection request failed.");
       this.rejectedSession = null; return p.result;
     }

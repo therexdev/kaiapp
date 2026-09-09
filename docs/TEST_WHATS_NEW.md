@@ -2,6 +2,7 @@
 
 - **App cards keep the chosen app open.** Connect checks the current server status and explains whether KAI sign-in, a personal key, or a privacy change is needed.
 - **Server setup and desktop sign-in are shown separately.** When the server enables Composio, KAI-managed connections need only your KAI account sign-in. Expired sessions get a clear sign-in prompt.
+- **Key errors identify the right setting.** A rejected server Composio key asks the administrator to check it, without reporting your desktop sign-in as expired.
 - **Fresh status without losing your place.** Refresh picks up a newly enabled server, keeps useful errors visible, and preserves a key or connection method being edited.
 
 ### Easier app connections
