@@ -3,7 +3,7 @@
   "productName": "Koinos AI",
   "version": "0.54.1",
   "private": true,
-  "description": "Koinos AI Core \u2014 local-first AI with a self-hosted OpenAI-compatible API",
+  "description": "Koinos AI Core — local-first AI with a self-hosted OpenAI-compatible API",
   "license": "MIT",
   "author": "therexdev",
   "repository": {
@@ -120,6 +120,7 @@
     "@huggingface/transformers": "3.5.1",
     "@noble/hashes": "^1.8.0",
     "@noble/secp256k1": "^1.7.2",
+    "cron-parser": "5.10.0",
     "electron-updater": "^6.8.9",
     "ethers": "^6.17.0",
     "imapflow": "^1.7.1",
@@ -128,6 +129,7 @@
     "mailparser": "^3.9.17",
     "nodemailer": "^9.0.5",
     "onnxruntime-web": "1.22.0-dev.20250409-89f8206ba4",
+    "quickjs-emscripten": "0.32.0",
     "sherpa-onnx-node": "1.13.7"
   },
   "overrides": {

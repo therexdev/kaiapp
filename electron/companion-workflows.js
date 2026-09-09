@@ -130,4 +130,4 @@ class CompanionWorkflows {
   start() { this.timer = setInterval(() => this.tick().catch(() => {}), 30000); this.timer.unref?.(); }
   stop() { clearInterval(this.timer); for (const c of this.active.values()) c.abort(); }
 }
-module.exports = { CompanionWorkflows, validate, fill, TYPES };
+module.exports = { CompanionWorkflows: require("./workflow-engine").createClass(CompanionWorkflows), validate, fill, TYPES };

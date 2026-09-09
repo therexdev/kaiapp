@@ -8,6 +8,7 @@
   <title>Koinos AI</title>
   <link rel="stylesheet" href="styles.css" />
   <link rel="stylesheet" href="brain.css" />
+  <link rel="stylesheet" href="workflows.css" />
   <link rel="stylesheet" href="kai-character.css" />
 </head>
 <body>
@@ -48,7 +49,7 @@
         <div class="nav-group-label">Your toolkit</div>
         <button class="nav-item" data-view="models"><svg class="nav-symbol" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5ZM3 12l9 5 9-5M3 16l9 5 9-5"/></svg><span>Model library</span></button>
         <button class="nav-item" data-view="tools"><svg class="nav-symbol" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 6a5 5 0 0 0-6 6L3 17a3 3 0 0 0 4 4l5-5a5 5 0 0 0 6-6l-3 3-4-4Z"/></svg><span>Tools</span></button>
-        <button class="nav-item" data-view="tasks"><svg class="nav-symbol" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11M3 6l1 1 2-3M3 12l1 1 2-3M3 18l1 1 2-3"/></svg><span>Tasks</span></button>
+        <button class="nav-item" data-view="tasks" id="legacy-tasks-nav"><svg class="nav-symbol" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11M3 6l1 1 2-3M3 12l1 1 2-3M3 18l1 1 2-3"/></svg><span>Tasks</span></button>
         <button class="nav-item" data-view="api"><svg class="nav-symbol" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 6-6 6 6 6M16 6l6 6-6 6M14 3l-4 18"/></svg><span>Local API</span></button>
         <button class="nav-item" data-view="devtools" id="nav-devtools" hidden><svg class="nav-symbol" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18v14H3ZM6 9l3 3-3 3M12 15h5"/></svg><span>Developer tools</span></button>
         <div class="nav-group-label">Contribute</div>
@@ -1060,6 +1061,8 @@
   <script src="connection-catalog.js"></script>
   <script src="connections.js"></script>
   <script src="brain.js"></script>
+  <script src="workflow-model.js"></script>
+  <script src="workflows.js"></script>
   <script src="companion-hub.js"></script>
   <script src="docs-view.js"></script>
   <script src="koinos-view.js"></script>

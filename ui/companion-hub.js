@@ -21,7 +21,7 @@
   async function refresh() { state = await manage("status"); }
   function shell() {
     const titles = { brain: ["KAI Brain", "A memory of your world, built from what you choose to share."], workflows: ["Workflows", "Teach KAI a routine. Review the steps, then run it whenever you need."], connections: ["Connections", "Connect the apps you use and choose what KAI can do with them."] };
-    const tabs = { brain: [["overview", "Overview"], ["map", "Memory graph"], ["notes", "Memories"], ["goals", "Goals & tasks"], ["sources", "Sources"], ["sync", "Sync & changes"], ["awareness", "Awareness"], ["orchestration", "Orchestration"]], workflows: [["saved", "My workflows"], ["runs", "Run history"]], connections: [["explore", "Explore apps"], ["connected", "Connected"], ["setup", "Connection settings"], ["apis", "Custom APIs"], ["tools", "Models & other tools"]] };
+    const tabs = { brain: [["overview", "Overview"], ["map", "Memory graph"], ["notes", "Memories"], ["goals", "Goals & tasks"], ["sources", "Sources"], ["sync", "Sync & changes"], ["awareness", "Awareness"], ["orchestration", "Orchestration"]], workflows: [["saved", "My workflows"], ["runs", "Run history"], ["templates", "Templates"], ["discover", "Discover workflows"]], connections: [["explore", "Explore apps"], ["connected", "Connected"], ["setup", "Connection settings"], ["apis", "Custom APIs"], ["tools", "Models & other tools"]] };
     host().innerHTML = `<div class="hub-notice" role="status" aria-live="polite"></div><div class="hub-shell"><nav class="hub-rail" aria-label="${current} sections"><div class="hub-rail-label">${titles[current][0]}</div>${tabs[current].map(([key, label]) => button(label, "tab", key, key === tab[current] ? "active" : "")).join("")}</nav><main class="hub-content"></main></div>`;
   }
   function draw() {
@@ -30,7 +30,7 @@
     if (state.locked) { out.innerHTML = empty("Your companion data is locked", "Unlock your original OS keychain and restart KAI. Your saved data will stay intact."); return; }
     if (editor) { out.innerHTML = editorHTML(); return; }
     if (current === "brain") window.KaiBrain.render(out, { state, section: tab.brain, manage: childManage, navigate: async key => { await refresh(); return action("tab", key); } });
-    if (current === "workflows") drawWorkflows(out);
+    if (current === "workflows") window.KaiWorkflows.render(out, { state, section: tab.workflows, manage: childManage, navigate: async key => { await refresh(); return action("tab", key); } });
     if (current === "connections") drawConnections(out);
   }
   function drawWorkflows(out) {
@@ -82,7 +82,7 @@
   }
   function poll() {
     clearTimeout(timer); if (!bridge || editor || host()?.hidden) return;
-    timer = setTimeout(async () => { if (host()?.hidden || editor || busy) return poll(); try { const before = JSON.stringify([state.runs, state.brain, state.syncing]); await refresh(); if (before !== JSON.stringify([state.runs, state.brain, state.syncing]) && (current === "workflows" && tab.workflows === "runs" || current === "brain" && ["overview", "orchestration", "sync"].includes(tab.brain)) && !host().querySelector("form:focus-within, details[open]:focus-within")) draw(); } catch { /* show next explicit operation error */ } poll(); }, 2500);
+    timer = setTimeout(async () => { if (host()?.hidden || editor || busy) return poll(); try { const before = JSON.stringify([state.runs, state.brain, state.syncing]); await refresh(); if (before !== JSON.stringify([state.runs, state.brain, state.syncing]) && (false || current === "brain" && ["overview", "orchestration", "sync"].includes(tab.brain)) && !host().querySelector("form:focus-within, details[open]:focus-within")) draw(); } catch { /* show next explicit operation error */ } poll(); }, 2500);
   }
   async function action(name, key) {
     if (name === "tab") { editor = null; tab[current] = key; draw(); poll(); return; }

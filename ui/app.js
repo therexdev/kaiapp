@@ -495,7 +495,8 @@ function showView(name, { navOnly = false } = {}) {
   $(`view-${phys}`).hidden = false;
   // Every navigable thing carries data-view — the full-width nav rows AND
   // the Settings/Network icons under the status pane.
-  for (const b of document.querySelectorAll("[data-view]")) {
+  if (window.kaiCompanionBridge) document.getElementById("legacy-tasks-nav")?.setAttribute("hidden", "");
+for (const b of document.querySelectorAll("[data-view]")) {
     b.classList.toggle("active", b.dataset.view === name);
   }
 }
@@ -590,6 +591,8 @@ function renderSettings() {
  *  (the sidebar, the Koinos switch) goes through one path and leaves
  *  `state.view` telling the truth. */
 function activateView(name) {
+  if (state.view === "workflows" && name !== "workflows") { if (!window.KaiWorkflows?.canLeave()) return; window.KaiWorkflows?.leave(); }
+  if (name === "tasks" && window.kaiCompanionBridge) name = "workflows";
   state.view = name;
   state.routed = true; // they chose this; the boot poll must stop overriding it
   showView(name);

@@ -113,6 +113,7 @@ class TaskRunner {
   update(id, patch) {
     const t = this.tasks.find((x) => x.id === id);
     if (!t) throw new Error("no such task");
+    if (t.migratedWorkflowId) throw new Error("This scheduled prompt has moved to Workflows.");
     if (typeof patch.enabled === "boolean") {
       t.enabled = patch.enabled;
       // Re-enabling starts the clock fresh — no burst of missed runs.
@@ -145,11 +146,13 @@ class TaskRunner {
   async runNow(id) {
     const t = this.tasks.find((x) => x.id === id);
     if (!t) throw new Error("no such task");
+    if (t.migratedWorkflowId) throw new Error("This scheduled prompt has moved to Workflows.");
     await this._run(t);
     return t;
   }
 
   async _run(t) {
+    if (t.migratedWorkflowId) return;
     // Advance the clock FIRST so a crashing run can't tight-loop.
     t.nextRunAt = computeNext(t.schedule).toISOString();
     this._runningIds.add(t.id);
@@ -181,6 +184,12 @@ class TaskRunner {
     if (this._timer) return;
     this._timer = setInterval(() => this.tick().catch(() => {}), 60e3);
     this._timer.unref?.();
+  }
+
+  migrateToWorkflow(id, workflowId) {
+    const task = this.tasks.find(t => t.id === id);
+    if (!task || this._runningIds.has(id)) return false;
+    task.migratedWorkflowId = workflowId; task.enabled = false; this._persist(); return true;
   }
 
   stop() {

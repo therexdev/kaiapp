@@ -36,6 +36,22 @@ test("companion UI: Brain CRUD, API setup, workflow approval/recovery and respon
  await page.getByRole("button",{name:"Save task",exact:true}).click();
  await page.getByRole("heading",{name:"Review the Test installer",exact:true}).waitFor();
  assert.equal(hub.store.data.brain.tasks.length,1);
+ // Exercise the actual canvas: editable positions, ports, undo and typed config.
+ await page.click('[data-view="workflows"]'); await page.getByRole("button",{name:"My workflows",exact:true}).click();
+ await page.getByRole("button",{name:"New workflow",exact:true}).click();
+ await page.locator('[data-wf="add"][data-id="transform"]').click();
+ await page.locator('[data-field="config.set"]').fill('{"result":"=item.text.toUpperCase()"}');
+ await page.locator('[data-field="config.set"]').dispatchEvent("change");
+ const added = await page.locator('.wf-node[data-node]:not([data-node="start"])').getAttribute("data-node");
+ await page.locator('[data-wf="connectFrom"][data-id="start"]').evaluate(el=>el.click());
+ await page.locator(`[data-wf="connectTo"][data-id="${added}"]`).evaluate(el=>el.click());
+ assert.equal(await page.locator('.wf-edge').count(),1);
+ await page.getByRole("button",{name:"Undo",exact:true}).click(); assert.equal(await page.locator('.wf-edge').count(),0);
+ await page.getByRole("button",{name:"Redo",exact:true}).click(); assert.equal(await page.locator('.wf-edge').count(),1);
+ await page.getByRole("button",{name:"Save workflow",exact:true}).click();
+ await page.getByRole("button",{name:"Run",exact:true}).click(); await page.getByLabel("Run input (optional)").fill("hello"); await page.getByRole("button",{name:"Start run",exact:true}).click();
+ await page.waitForFunction(()=>document.querySelector('.wf-run .hub-badge.completed'));
+ assert.equal(hub.store.data.runs[0].output[0].result,"HELLO");
  const qa=process.env.KAI_MASCOT_QA_DIR;if(qa)fs.mkdirSync(qa,{recursive:true});
  for(const width of [1280,960,720]) {
   await page.setViewportSize({width,height:900});
@@ -52,7 +68,7 @@ test("companion UI: Brain CRUD, API setup, workflow approval/recovery and respon
    if(qa)await page.screenshot({path:path.join(qa,`brain-${key}-${width}.png`),animations:"disabled"});
   }
   await page.click('[data-view="workflows"]');await page.getByRole("button",{name:"My workflows",exact:true}).click();await page.getByRole("button",{name:"New workflow",exact:true}).click();
-  const fields=await page.locator('.hub-step').first().evaluate(el=>({scroll:el.scrollWidth,width:el.clientWidth}));assert.ok(fields.scroll<=fields.width+2,"builder overflow "+width);if(qa)await page.screenshot({path:path.join(qa,`companion-builder-${width}.png`),animations:"disabled"});await page.getByRole("button",{name:"← Back",exact:true}).click();
+  const fields=await page.locator('.wf-builder').first().evaluate(el=>({scroll:el.scrollWidth,width:el.clientWidth}));assert.ok(fields.scroll<=fields.width+2,"builder overflow "+width);if(qa)await page.screenshot({path:path.join(qa,`companion-builder-${width}.png`),animations:"disabled"});await page.getByRole("button",{name:"← Back",exact:true}).click();
  }
  await page.reload();await page.click('[data-view="brain"]');await page.getByRole("button",{name:"Memories",exact:true}).click();await page.getByText("KAI project",{exact:true}).waitFor();assert.deepEqual(errors,[]);
 });

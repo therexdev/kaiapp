@@ -6,13 +6,14 @@ const { CompanionWorkflows, TYPES } = require("./companion-workflows");
 const { trustedFrame } = require("./mascot");
 
 class CompanionHub {
-  constructor({ dataDir, safeStorage, privacyMode, models, runLocal, fetchImpl, canUseModel, legacyMemory, account, openExternal, chats, lookup }) {
+  constructor({ dataDir, safeStorage, privacyMode, models, runLocal, fetchImpl, canUseModel, legacyMemory, account, openExternal, chats, lookup, legacyTasks }) {
     this.store = new CompanionStore({ dataDir, safeStorage }); this.models = models; this.canUseModel = canUseModel; this.legacyMemory = legacyMemory;
     this.connections = new CompanionConnections({ store: this.store, privacyMode, fetchImpl });
     const { CompanionComposio } = require("./companion-composio");
     this.composio = new CompanionComposio({ store: this.store, privacyMode, account, fetchImpl, openExternal });
     this.connections.composio = this.composio;
-    this.workflows = new CompanionWorkflows({ store: this.store, connections: this.connections, runLocal, models });
+    this.workflows = new CompanionWorkflows({ store: this.store, connections: this.connections, runLocal, models, privacyMode, fetchImpl, lookup, chats, legacyTasks });
+    this.workflowAssistant = new (require("./workflow-assistant").WorkflowAssistant)(this.workflows);
     const { CompanionBrain } = require("./companion-brain"), { CompanionSources } = require("./companion-sources"), { CompanionAwareness } = require("./companion-awareness");
     this.brain = new CompanionBrain({ store: this.store });
     this.sources = new CompanionSources({ store: this.store, chats, privacyMode, fetchImpl, lookup });
@@ -103,7 +104,7 @@ class CompanionHub {
   }
   start() {
     if (this.store.data.connections.some(c => c.provider === "composio")) this.composio.refresh().catch(() => {});
-    this.workflows.start(); this.awareness.start(); this.timer = setInterval(() => {
+    this.workflows.migrateTasks(); this.workflows.start(); this.awareness.start(); this.timer = setInterval(() => {
       if (this.store.locked || !this.store.available()) return;
       for (const s of this.store.data.sources) if (s.autoSync && s.nextSync <= Date.now() && !this.syncing.has(s.id)) this.sync(s.id).catch(() => {});
     }, 30000); this.timer.unref?.();
@@ -222,6 +223,14 @@ function registerCompanionIPC({ ipcMain, service, origin, getMainWindow, getMasc
       case "sync": return service.sync(input.id, ctx.signal);
       case "sourceToggle": return service.store.change(d => { const s = d.sources.find(s => s.id === input.id); if (!s || s.kind === "file") throw new CompanionError("Source unavailable."); if (s.kind === "connection" && input.enabled && !d.connections.find(c => c.id === s.connectionId)?.allowSync) throw new CompanionError("Enable background reads for this connection first."); s.autoSync = input.enabled === true; s.nextSync = Date.now() + (s.intervalMinutes || 20) * 60000; });
       case "workflow": return service.workflows.save(input);
+      case "workflowValidate": return service.workflows.validate(input);
+      case "workflowAssist": return service.workflowAssistant.ask(input, ctx.signal);
+      case "workflowDiscover": return service.workflowAssistant.ask(input, ctx.signal, true);
+      case "workflowDismiss": return service.store.change(d => { if (d.workflowState) d.workflowState.suggestions = (d.workflowState.suggestions || []).filter(s => s.id !== input.id); });
+      case "workflowDraft": return service.workflows.save(input, { draft: true });
+      case "workflowEnabled": return service.workflows.setEnabled(input.id, input.enabled);
+      case "workflowPreview": return service.workflows.begin(input.id, input.input, "preview", { dryRun: true });
+      case "workflowReject": return service.workflows.decide(input.id, "rejected");
       case "removeWorkflow": return service.workflows.remove(input.id);
       case "run": return service.workflows.begin(input.id, input.input);
       case "cancelRun": return service.workflows.cancel(input.id);
@@ -238,8 +247,8 @@ function registerCompanionIPC({ ipcMain, service, origin, getMainWindow, getMasc
       case "importWorkflow": {
         const result = await dialog.showOpenDialog(ctx.window, { properties: ["openFile"], filters: [{ name: "KAI workflow", extensions: ["json"] }] });
         ctx.signal.throwIfAborted(); if (result.canceled || !result.filePaths[0]) return null;
-        if (fs.statSync(result.filePaths[0]).size > 100000) throw new CompanionError("Workflow file is too large.");
-        const spec = JSON.parse(fs.readFileSync(result.filePaths[0], "utf8")); delete spec.id; return service.workflows.save(spec, { draft: true });
+        if (fs.statSync(result.filePaths[0]).size > 160000) throw new CompanionError("Workflow file is too large.");
+        const spec = require("../ui/workflow-model").importDocument(JSON.parse(fs.readFileSync(result.filePaths[0], "utf8"))); delete spec.id; return service.workflows.save(spec, { draft: true });
       }
       default: throw new CompanionError("Unknown companion action.");
     }
