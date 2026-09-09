@@ -151,3 +151,8 @@ Credits are visible in `ui/pocket-credits.html`. The model conversion is CC BY 4
 ## Conversation turn handling
 
 The companion's **Conversation pauses** preference is independent of microphone loudness sensitivity: Quick uses 500 ms of silence, Natural (default) 900 ms, and Patient 1400 ms. Audio captured during a guarded reply retains the 500 ms endpoint for prompt KAI-name recognition. It does not pause output on speech onset. If recognition completes while more input is being captured or queued, accepted fragments wait and join into one question before dispatch. Pending text is capped at 12,000 characters and 45 seconds; overload drops the unfinished turn with a repeat prompt. Stop, pause, settings changes and hide invalidate it. This does not identify speakers or infer semantic turn completion.
+
+
+## Brain, Workflows and self-managed Connections
+
+The desktop companion now shares a private encrypted Brain and connection tool layer with main chat. See [setup](KAI_COMPANION_QUICKSTART.md) and [feature scope / roadmap](KAI_COMPANION_ROADMAP.md). These new services use exact trusted-frame IPC and do not register in the Core/public tool registry. New scheduled workflow reasoning is local-only; private provider keys are still for attended chat. Existing Test identity, shared profile, wallet, node, voice and computer-control boundaries remain in place.

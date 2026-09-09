@@ -436,6 +436,7 @@
     var confirmTool = deps.confirmTool || function () { return Promise.resolve(false); };
 
     function coreJson(path, opts) {
+      if (deps.json) return deps.json(path, opts);
       return fetch(path, opts).then(function (r) {
         return r.json().then(function (j) {
           j._status = r.status;

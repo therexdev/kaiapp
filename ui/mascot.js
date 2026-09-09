@@ -683,7 +683,7 @@
           "Opening folders is available in the installed KAI desktop companion.";
       } else {
         const contextSize = aliases.find(a => a.alias === model)?.contextSize || 4096;
-        phase = await KaiMascotTools.run({ question: text, history, chatId, contextSize, signal: chatAbort.signal, json: toolJson, open,
+        phase = await KaiMascotTools.run({ question: text, history, chatId, contextSize, signal: chatAbort.signal, json: window.KaiCompanionClient?.toolJSON(model, toolJson, chatAbort.signal) || toolJson, open,
           computer: computerAvailable ? { begin: () => bridge.computerBegin({ task: text, model }), call: (token, name, args) => bridge.computerCall(token, name, args) } : null,
           confirm: async (name, args) => {
             // Pause capture while a human reviews a mutation. Background audio

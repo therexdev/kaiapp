@@ -480,6 +480,7 @@ function showView(name, { navOnly = false } = {}) {
     docs: ["Documents", "From a first thought to the final draft."],
     compare: ["Compare models", "One question. A few different perspectives."],
     models: ["Model library", "Find the right mind for the job."],
+    brain: ["Brain", "Your world, remembered."], workflows: ["Workflows", "Give your routines to KAI."], connections: ["Connections", "Your accounts, your control."],
     tasks: ["Tasks", "Put your ideas in motion."], tools: ["Tools", "Give your AI a few more abilities."],
     api: ["Local API", "Your models, connected to your workflow."],
     earn: ["Earn KAI", "Let your compute contribute."],
@@ -605,6 +606,7 @@ function activateView(name) {
   if (name === "models") renderModels();
   if (name === "compare") renderCompare();
   if (name === "tasks") renderTasks();
+  if (["brain", "workflows", "connections"].includes(name)) window.KaiCompanionHub?.render(name);
   if (name === "network") renderNetwork();
   if (name === "settings") renderSettings();
   if (name === "docs") renderDocs();
@@ -942,6 +944,9 @@ async function send(replayText) {
       const rt = KaiAgents.makeRuntime({
         askModelOnce,
         confirmTool,
+        json: window.KaiCompanionClient?.toolJSON(chatModel, async (url, options) => {
+          const response = await fetch(url, { ...options, signal: state.abort.signal }); return response.json();
+        }, state.abort.signal),
         setStatus: (t) => { status.textContent = t; },
       });
       const phase = answerMode === "research" ? await rt.deepResearch(text, chatModel) : await rt.runAgent(text, chatModel);

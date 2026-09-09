@@ -1,5 +1,11 @@
 "use strict";
 const { contextBridge, ipcRenderer } = require("electron");
+contextBridge.exposeInMainWorld("kaiCompanionBridge", {
+  context: (model, query) => ipcRenderer.invoke("companion:context", model, query),
+  tools: model => ipcRenderer.invoke("companion:tools", model),
+  tool: (name, args, model) => ipcRenderer.invoke("companion:tool", name, args, model),
+  cancel: () => ipcRenderer.invoke("companion:cancel"),
+});
 async function computerInvoke(channel, ...args) {
   try { return await ipcRenderer.invoke(channel, ...args); }
   catch (error) {

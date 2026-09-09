@@ -10,6 +10,14 @@
 
 const { contextBridge, ipcRenderer } = require("electron");
 
+contextBridge.exposeInMainWorld("kaiCompanionBridge", {
+  manage: (action, input) => ipcRenderer.invoke("companion:manage", action, input),
+  context: (model, query) => ipcRenderer.invoke("companion:context", model, query),
+  tools: model => ipcRenderer.invoke("companion:tools", model),
+  tool: (name, args, model) => ipcRenderer.invoke("companion:tool", name, args, model),
+  cancel: () => ipcRenderer.invoke("companion:cancel"),
+});
+
 contextBridge.exposeInMainWorld("koinosShell", {
   minimize: () => ipcRenderer.send("win:minimize"),
   toggleMaximize: () => ipcRenderer.send("win:toggle-maximize"),

@@ -1,5 +1,13 @@
 ### Tidier Developer Tools
 
+## Companion workspaces: Brain, Workflows and Connections
+
+- **Brain:** editable notes, people/projects/preferences, tags, pins, goals, a category map, text imports, selected API sources, optional 20-minute sync, and Markdown export. Relevant context supports private/local chat and desktop KAI.
+- **Workflows:** visual ordered steps, local-model drafting, templates, manual/recurring schedules, API steps, conditions, approvals, cancellation and persistent run history. Reasoning uses installed local models; private provider keys remain reserved for attended chat.
+- **Connections:** self-managed tokens/API keys, starter GitHub/Notion/Slack/Home Assistant operations, custom APIs, request testing and separate agent/background-read grants. Keys are encrypted in the desktop app; writes and model-requested calls ask for approval.
+- Includes a [setup guide](KAI_COMPANION_QUICKSTART.md) and [full companion feature inventory/roadmap](KAI_COMPANION_ROADMAP.md), distinguishing this implementation from future OpenHuman-inspired capabilities.
+
+
 - **Aligned fields and actions.** Multi-agent, Playground and Pipelines now use consistent labels, field heights and spacing. Saved-team controls stay together, and forms stack cleanly in smaller windows.
 - **Compact agent cards.** Tool lists expand when needed, show the selected count, and keep checkboxes beside readable names. Role instructions stay in a normal text font; JSON editors keep their code formatting.
 - **Clearer JSON controls.** Builder updates sit beside each JSON editor, with a reminder that saving and running use the JSON. Existing team definitions and execution behavior stay the same.
