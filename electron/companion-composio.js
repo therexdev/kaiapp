@@ -75,6 +75,10 @@ class CompanionComposio {
       case "connect": return client.connect(input.slug, ctx.userId, signal);
       case "disconnect": return client.disconnect(input.id, ctx.userId, signal);
       case "execute": return client.execute(input, ctx.userId, signal);
+      case "triggerTypes": return client.triggerTypes(input, signal);
+      case "triggerUpsert": return client.triggerUpsert(input, ctx.userId, signal);
+      case "triggerRemove": return client.triggerRemove(input, ctx.userId, signal);
+      case "webhookSetup": return client.webhookSetup(input.url, signal);
       default: throw new CompanionError("Unknown Composio action.");
     }
   }

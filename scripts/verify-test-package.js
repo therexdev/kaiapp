@@ -24,7 +24,7 @@ for (const archive of archives) {
     assert.equal(config.url, TEST_FEED);
     assert.equal(config.channel, "test");
   }
-  for (const required of ["electron/pocket-voice.js", "electron/pocket-voice-worker.js", "ui/mascot-pocket.js", "ui/pocket-credits.html", "core/runtimes/pocket.json", "electron/computer-highlight.js", "electron/computer-control.js", "electron/native-computer.js", "ui/computer-tools.js", "electron/providers.js", "electron/provider-http.js", "ui/desktop-providers.js", "electron/mascot.js", "electron/mascot-layout.js", "electron/windows-voice.js", "electron/mascot-preload.js", "ui/mascot.html",
+  for (const required of ["ui/workflows.js", "ui/workflows.css", "ui/workflow-model.js", "electron/workflow-engine.js", "electron/workflow-events.js", "electron/workflow-assistant.js", "electron/workflow-values.js", "electron/workflow-schedules.js", "core/lib/composio-triggers.js", "electron/pocket-voice.js", "electron/pocket-voice-worker.js", "ui/mascot-pocket.js", "ui/pocket-credits.html", "core/runtimes/pocket.json", "electron/computer-highlight.js", "electron/computer-control.js", "electron/native-computer.js", "ui/computer-tools.js", "electron/providers.js", "electron/provider-http.js", "ui/desktop-providers.js", "electron/mascot.js", "electron/mascot-layout.js", "electron/windows-voice.js", "electron/mascot-preload.js", "ui/mascot.html",
     "ui/brand.js", "ui/brand-mark.svg", "ui/kai-character.css", "ui/assets/kai-character.png", "ui/assets/kai-voice-hello.wav", "ui/node-brand.css",
     "ui/mascot.js", "ui/mascot-client.js", "ui/mascot.css", "ui/kai-robot.svg", "ui/mascot-launcher.js",
     "ui/mascot-speech.js", "ui/mascot-wake.js", "ui/mascot-audio-worklet.js", "ui/mascot-tools.js", "ui/app-navigation.js", "core/lib/app-tools.js", "electron/tool-approval.js",
@@ -48,5 +48,18 @@ for (const archive of archives) {
     const native = path.join(file + ".unpacked", "node_modules/sherpa-onnx-win-x64");
     for (const asset of ["sherpa-onnx.node", "onnxruntime.dll", "onnxruntime_providers_shared.dll", "sherpa-onnx-c-api.dll", "sherpa-onnx-cxx-api.dll"]) assert.ok(fs.statSync(path.join(native, asset)).size > 0, "Missing Pocket native runtime: " + asset);
   }
+  // Execute the isolated evaluator with only the dependencies shipped in this
+  // archive. This catches omitted WASM assets and broken production packaging.
+  const runtime = fs.mkdtempSync(path.join(require("os").tmpdir(), "kai-packaged-flow-"));
+  try {
+    const entries = asar.listPackage(file).map(p => p.replace(/\\/g, "/").replace(/^\//, ""));
+    for (const entry of entries.filter(p => /^node_modules\/(?:@jitl\/quickjs-|quickjs-|cron-parser\/|luxon\/)/.test(p) || ["electron/workflow-values.js", "electron/companion-store.js", "core/lib/memory.js"].includes(p))) {
+      if (!asar.statFile(file, path.normalize(entry)).size) continue;
+      const target = path.join(runtime, entry); fs.mkdirSync(path.dirname(target), { recursive: true }); fs.writeFileSync(target, asar.extractFile(file, path.normalize(entry)));
+    }
+    const script = "const V=require('./electron/workflow-values'); V.evaluate('items.map(x=>({n:x.n*2}))',{items:[{n:21}]}).then(x=>{require('assert/strict').equal(x[0].n,42);require('cron-parser').CronExpressionParser.parse('0 9 * * *');console.log('Packaged workflow WASM and scheduler verified')}).catch(e=>{console.error(e);process.exitCode=1})";
+    const check = require("child_process").spawnSync(process.execPath, ["-e", script], { cwd: runtime, encoding: "utf8", timeout: 30000 });
+    assert.equal(check.status, 0, "Packaged workflow runtime failed: " + check.stderr); console.log(check.stdout.trim());
+  } finally { fs.rmSync(runtime, { recursive: true, force: true }); }
   console.log(`Verified ${file}: ${pkg.version}`);
 }

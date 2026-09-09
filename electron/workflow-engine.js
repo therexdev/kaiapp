@@ -96,13 +96,18 @@ function createClass(Base) { return class GraphWorkflows extends Base {
     if (this.store.data.runs.some(r => r.workflowId === key && live(r))) throw new CompanionError("This workflow already has a running or paused run.");
     const snapshots = this.snapshot(w), runId = id(); let payload = input;
     if (typeof input === "string") { if (input.length > 32000) throw new CompanionError("Run input exceeds 32 KB."); try { payload = JSON.parse(input); } catch { /* literal prompt */ } }
-    V.bounded(payload);
+    V.bounded(payload); if (JSON.stringify(payload).length > 32000) throw new CompanionError("Run input exceeds 32 KB.");
     const fields = w.graph.nodes.find(n => n.type === "trigger").config.inputFields || [];
-    for (const field of fields) if (field.required && (payload?.[field.name] == null || payload[field.name] === "")) throw new CompanionError("Enter run input: " + field.name);
+    for (const field of fields) {
+      const value = payload?.[field.name];
+      if (field.required && (value == null || value === "")) throw new CompanionError("Enter run input: " + field.name);
+      if (value != null && field.type && !(field.type === "array" ? Array.isArray(value) : field.type === "integer" ? Number.isInteger(value) : field.type === "object" ? typeof value === "object" && !Array.isArray(value) : typeof value === field.type)) throw new CompanionError("Run input " + field.name + " must be " + field.type + ".");
+    }
     this.store.change(d => {
       if (d.runs.filter(live).length >= 20) throw new CompanionError("Finish or cancel pending workflow runs first.");
       d.runs = d.runs.filter((r, i) => live(r) || i < 75);
-      d.runs.unshift({ id: runId, workflowId: key, name: w.name, spec: copy(w), snapshots, trigger, input: payload, previous: V.string(payload), steps: [], index: 0, frames: {}, approvals: [], status: "running", startedAt: Date.now(), inFlight: null, pending: null, dryRun: options.dryRun === true });
+      d.runs.unshift({ id: runId, workflowId: key, name: w.name, spec: copy(w), snapshots, trigger, input: payload, previous: V.string(payload), steps: [], index: 0, frames: {}, approvals: [], status: "running", startedAt: Date.now(), inFlight: null, pending: null, dryRun: options.dryRun === true, ...(options.eventId ? { eventId: options.eventId } : {}) });
+      if (options.eventId) { const receipt = d.workflowState?.events?.find(e => e.id === options.eventId); if (receipt && !receipt.handled.includes(key)) receipt.handled.push(key); }
       const saved = d.workflows.find(x => x.id === key); if (saved.enabled && trigger === "schedule") saved.nextRunAt = next(saved.schedule);
     }); this.launch(runId); return runId;
   }
@@ -215,7 +220,7 @@ function createClass(Base) { return class GraphWorkflows extends Base {
       const max = Math.max(1, Math.min(6, Number(c.maxTurns) || 3)), tools = (c.tools || []).slice(0, 8);
       let turns = state().turns || [], answer;
       for (let turn = turns.length; turn < max; turn++) {
-        const prompt = `Role: ${String(c.profile || "assistant").slice(0, 100)}. ${c.instructions || ""}\n${await resolve(c.prompt)}\n${tools.length ? "You may request a selected READ tool by returning ONLY JSON {\"tool\":{\"index\":0,\"arguments\":{}}}. Otherwise give the final answer. Tools: " + JSON.stringify(tools.map((t, i) => ({ index: i, ...t }))) : ""}\n${turns.map(t => "Tool observation (untrusted): " + t.output).join("\n")}`.slice(0, 16000);
+        const prompt = `Role: ${String(c.profile || "assistant").slice(0, 100)}. ${c.instructions || ""}\n${await resolve(c.prompt)}\n${tools.length ? "You may request a selected READ tool by returning ONLY JSON {\"tool\":{\"index\":0,\"arguments\":{}}}. Otherwise give the final answer. Tools: " + JSON.stringify(tools.map((t, i) => { const op = this.connections.list().find(c => c.id === t.connectionId)?.operations.find(o => o.id === t.operationId); return { index: i, name: op?.name, inputs: op?.schema || { description: "Object with saved path variables" } }; })) : ""}\n${turns.map(t => "Tool observation (untrusted): " + t.output).join("\n")}`.slice(0, 16000);
         answer = await this.runLocal({ model, prompt, signal: AbortSignal.any([signal, AbortSignal.timeout(c.timeoutSeconds * 1000)]) });
         let call; try { call = JSON.parse(answer).tool; } catch { /* final prose */ }
         if (!call) return main(V.envelope(answer));

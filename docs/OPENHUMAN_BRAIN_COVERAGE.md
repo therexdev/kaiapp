@@ -51,7 +51,7 @@ The requested full OpenHuman scope remains larger than this revision. These item
 2. **Richer sources:** text extraction from PDF/DOCX, cursor-based app ingestion, connection event subscriptions and per-source retry/backoff dashboards.
 3. **Advanced orchestration:** parallel bounded workers, dependency graphs, per-goal budgets, separate fast/deep local models and auditable context compression. Preserve per-request model mutation approvals.
 4. **Vault round trips:** manifest-based import, conflict-aware reconciliation of user edits and full revision restoration.
-5. **Workflow builder:** loops/subflows/parallel branches, visual node canvas, reusable typed outputs and richer trigger configuration.
+5. **Workflow builder — delivered:** see [workflow coverage](OPENHUMAN_WORKFLOW_COVERAGE.md) for loops/subflows/parallel branches, the node canvas, typed outputs and trigger configuration.
 6. **Companion continuity:** opt-in per-conversation source collections, validated long-term goal reflection, incremental conversation summaries and carefully scoped proactive notifications.
 
 These extend the broader [companion product inventory](KAI_COMPANION_ROADMAP.md), which also covers desktop presence, voice, meetings, channels, MCP, skills, documents, teams and shared compute. The Koinos node, wallet, shared profile and Test updater identity remain the existing systems.

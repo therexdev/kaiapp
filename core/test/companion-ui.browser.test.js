@@ -38,7 +38,7 @@ test("companion UI: Brain CRUD, API setup, workflow approval/recovery and respon
  assert.equal(hub.store.data.brain.tasks.length,1);
  // Exercise the actual canvas: editable positions, ports, undo and typed config.
  await page.click('[data-view="workflows"]'); await page.getByRole("button",{name:"My workflows",exact:true}).click();
- await page.getByRole("button",{name:"New workflow",exact:true}).click();
+ await page.locator('[data-wf="new"]').click();
  await page.locator('[data-wf="add"][data-id="transform"]').click();
  await page.locator('[data-field="config.set"]').fill('{"result":"=item.text.toUpperCase()"}');
  await page.locator('[data-field="config.set"]').dispatchEvent("change");
@@ -67,7 +67,7 @@ test("companion UI: Brain CRUD, API setup, workflow approval/recovery and respon
    const nav=await page.locator('#view-brain .hub-rail').boundingBox(),pane=await page.locator('#view-brain .hub-content').boundingBox(); assert.ok(nav.x+nav.width<=pane.x,"navigation stays beside content");
    if(qa)await page.screenshot({path:path.join(qa,`brain-${key}-${width}.png`),animations:"disabled"});
   }
-  await page.click('[data-view="workflows"]');await page.getByRole("button",{name:"My workflows",exact:true}).click();await page.getByRole("button",{name:"New workflow",exact:true}).click();
+  await page.click('[data-view="workflows"]');await page.getByRole("button",{name:"My workflows",exact:true}).click();await page.locator('[data-wf="template"][data-id="review"]').click();await page.getByRole("button",{name:"Auto arrange",exact:true}).click();
   const fields=await page.locator('.wf-builder').first().evaluate(el=>({scroll:el.scrollWidth,width:el.clientWidth}));assert.ok(fields.scroll<=fields.width+2,"builder overflow "+width);if(qa)await page.screenshot({path:path.join(qa,`companion-builder-${width}.png`),animations:"disabled"});await page.getByRole("button",{name:"← Back",exact:true}).click();
  }
  await page.reload();await page.click('[data-view="brain"]');await page.getByRole("button",{name:"Memories",exact:true}).click();await page.getByText("KAI project",{exact:true}).waitFor();assert.deepEqual(errors,[]);

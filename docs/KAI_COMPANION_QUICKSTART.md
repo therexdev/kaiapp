@@ -71,32 +71,16 @@ Provider setup references: [GitHub API](https://docs.github.com/en/rest/users/us
 
 ## Build a useful workflow
 
-1. Install a local chat model from **Model library** if you want reasoning steps. Scheduled workflows do not use your private OpenAI/Anthropic keys.
-2. Open **Workflows** and choose **Project briefing**.
-3. Review the three steps: search Brain, ask the local model for a briefing, and keep the result. Edit the instructions and select the installed model.
-4. Leave the schedule manual for the first test. Save, then choose **Run** and enter the project name.
-5. Open **Run history** to inspect the output of every step. A failed step shows a failure; KAI does not report it as completed.
-6. Once the routine does what you need, edit it and choose hourly, every six hours, daily, or weekly. Daily/weekly schedules use this computer's local time. Enable the saved schedule.
+See the full [Workflows guide](KAI_WORKFLOWS.md) for the canvas, Copilot, templates, typed nodes, schedules, app events, approvals and recovery.
 
-| Step | What it does |
-| --- | --- |
-| Search Brain | Retrieves notes matching its text |
-| Ask local model | Produces text from the supplied instructions and previous output |
-| Call a connection | Executes a saved API operation with configured variables/body |
-| Continue if text matches | Continues only if the previous output contains the supplied text, ignoring case |
-| Wait for approval | Pauses until you review and resume |
-| Save to Brain | Shows the exact memory text for approval before saving |
-| Result | Records the final text in run history |
+1. Install a local chat model if you want Agent nodes.
+2. Open **Workflows → Templates → Project briefing**.
+3. Select and configure the Brain and Agent nodes. Connect any added nodes by their ports.
+4. **Validate**, **Save workflow**, then **Run** with a project name.
+5. Inspect **Run history** and use **View on canvas** for the saved graph.
+6. After a successful manual run, configure the Trigger schedule and enable automatic triggers.
 
-Use `{{input}}` for the text supplied when you click Run, and `{{previous}}` for the prior step's output. Scheduled runs have empty input, so put a fixed project name or topic in the Brain-search step before enabling a schedule.
-
-**Describe a workflow to KAI** asks the selected local model to draft steps in the builder. Inspect them before saving. You can also ask the companion to propose a workflow; proposals remain disabled drafts until you review them. Model-generated drafts can be imperfect, especially with small local models.
-
-API writes and save-memory steps wait in Run history. Choose **Review & resume** to approve once or **Cancel run** to stop. A workflow has only one running/paused run at a time. Completed steps have durable checkpoints. If KAI closes during an action, the next launch marks the run interrupted and refuses to replay an uncertain step automatically.
-
-The desktop must remain open, including in the tray, for schedules and source sync. Sleeping or closed computers do not run jobs. Missed schedules are coalesced into a later run rather than replayed in a burst. A pending approval prevents that workflow from starting another run.
-
-Existing single-prompt tasks remain under **Tasks**, also reachable from Workflows. Existing email, calendar and MCP connections remain under **Tools**. Private model keys remain under **Settings**, reachable from **Connections → Models & other tools**.
+Existing scheduled Tasks move into Workflows without duplicating their timers. Their previous chat answers remain in Chat. Brain's personal task board remains separate. The desktop must be open for automation. App and Brain writes pause for exact native review; uncertain interrupted writes are not automatically replayed.
 
 ## First things to try for KAI
 
@@ -106,6 +90,6 @@ Existing single-prompt tasks remain under **Tasks**, also reachable from Workflo
 - Create an API digest from that source. Review its output before enabling a schedule.
 - Ask desktop KAI to remember a preference. Confirm the native prompt, then verify the new note in Brain.
 
-Advanced graph branches, automatic entity relationships, a continuously edited Obsidian vault, OAuth setup, event triggers, automatic meeting attendance, messaging channels, and background reflection are documented in the [feature roadmap](KAI_COMPANION_ROADMAP.md); they are not claimed as implemented in this first Test revision.
+The [feature roadmap](KAI_COMPANION_ROADMAP.md), [Brain coverage](OPENHUMAN_BRAIN_COVERAGE.md) and [Workflows coverage](OPENHUMAN_WORKFLOW_COVERAGE.md) distinguish implemented behavior from remaining concepts such as automatic meeting attendance, a continuously edited Obsidian vault and general multi-agent orchestration.
 
 KAI includes version-pinned read actions for GitHub, Gmail, Google Calendar, Google Drive, Notion, and Slack. These appear first in access settings. They were checked against Composio’s published action descriptions. A changed version requires review unless Composio supplies explicit read-only metadata. You can search the full action catalog as well.

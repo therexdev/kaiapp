@@ -1,3 +1,14 @@
+### Workflows with a visual flow builder
+
+- **A cleaner sidebar.** Brain, Workflows and Connections sit flush beside the main navigation, with compact left-aligned menus.
+- **Build connected routines.** Drag nodes, connect branches, edit their settings, zoom/pan, auto-arrange and undo changes. Includes conditions, switches, merges, loops, sub-workflows, parsing, transformations and isolated JavaScript.
+- **Build with KAI.** Describe a routine, review Copilot's graph proposal or choose from nine templates. Discover suggestions from selected context, optionally once a day.
+- **Run when it matters.** Manual input, time-zone schedules, app/source change watches and Composio app events. Inspect each run's data, timing, retries and approvals on the canvas or in history.
+- **Tasks moves into Workflows.** Existing scheduled prompts migrate with their timing and previous chat links; old timers stop to prevent duplicates. Brain's personal to-dos remain.
+- **Review before changes.** App and Brain writes pause for approval, including individual items and nested flows. Preview uses simulated capability outputs without external changes.
+
+Read the [Workflows guide](KAI_WORKFLOWS.md) and [OpenHuman coverage comparison](OPENHUMAN_WORKFLOW_COVERAGE.md). Live Composio events need the matching server update and KAI sign-in. Existing connection environment values remain valid; no new Composio API key is required. Schedules and workflow reasoning run on your desktop while KAI is open, using installed local models.
+
 ### A connected Brain, with Awareness
 
 - **The same 1,516-app catalog in both connection modes.** Search the full list immediately, filter eight stable categories or authentication types, and browse compact logo cards. Category changes no longer repeat or grow the menu.

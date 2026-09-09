@@ -13,6 +13,7 @@ class CompanionHub {
     this.composio = new CompanionComposio({ store: this.store, privacyMode, account, fetchImpl, openExternal });
     this.connections.composio = this.composio;
     this.workflows = new CompanionWorkflows({ store: this.store, connections: this.connections, runLocal, models, privacyMode, fetchImpl, lookup, chats, legacyTasks });
+    this.workflowEvents = new (require("./workflow-events").WorkflowEvents)({ composio: this.composio, workflows: this.workflows, store: this.store });
     this.workflowAssistant = new (require("./workflow-assistant").WorkflowAssistant)(this.workflows);
     const { CompanionBrain } = require("./companion-brain"), { CompanionSources } = require("./companion-sources"), { CompanionAwareness } = require("./companion-awareness");
     this.brain = new CompanionBrain({ store: this.store });
@@ -75,7 +76,7 @@ class CompanionHub {
       { name: "brain_search", description: "Search private Brain notes, people, projects, preferences, and imported sources.", params: { query: "what to find" } },
       { name: "brain_remember", description: "Ask the user to approve a fact for persistent Brain memory.", params: { text: "fact to remember", title: "short title", category: "notes | preferences | people | projects" } },
       { name: "brain_goals", description: "Read the user's active goals from Brain.", params: {} },
-      { name: "workflow_propose", description: "Save a disabled workflow draft for the user to review in Workflows. Cannot run or enable it.", params: { name: "workflow name", model: "installed local model alias", steps: "array of {type,label,text}; types brain_search,prompt,approval,remember,output; use {{input}} and {{previous}}" } },
+      { name: "workflow_propose", description: "Save a disabled workflow draft for the user to review in Workflows. Cannot run or enable it.", params: { name: "workflow name", model: "installed local model alias", graph: "optional v2 canvas {version:2,nodes:[{id,type,label,position,config}],edges:[{id,from,to,port,input}]}; prefer workflow builder Copilot for complex graphs", steps: "array of {type,label,text}; types brain_search,prompt,approval,remember,output; use {{input}} and {{previous}}" } },
     ];
     for (const c of this.connections.list().filter(c => c.enabled && c.allowAgent)) for (const o of c.operations) tools.push({
       name: "connection_" + c.id.replace(/-/g, "") + "_" + o.id, description: `${c.name}: ${o.name}. ${o.method} ${o.path}. KAI asks for approval before each call.`, params: c.provider === "composio" ? { variables: o.schema } : { variables: "JSON object for path placeholders", body: "JSON request body for writes" },
@@ -92,7 +93,7 @@ class CompanionHub {
       signal?.throwIfAborted(); return this.store.note(note);
     }
     if (name === "workflow_propose") {
-      const w = this.workflows.save({ name: args.name, model: args.model, steps: args.steps, schedule: { kind: "manual" } }, { draft: true });
+      const w = this.workflows.save({ name: args.name, model: args.model, steps: args.steps, ...(args.graph ? { graph: args.graph } : {}), enabled: false, schedule: { kind: "manual" } }, { draft: true });
       return { id: w.id, message: "Draft saved in Workflows. The user must review and save it before it can run." };
     }
     for (const c of this.store.data.connections) for (const o of c.operations) if (name === "connection_" + c.id.replace(/-/g, "") + "_" + o.id) {
@@ -106,10 +107,12 @@ class CompanionHub {
     if (this.store.data.connections.some(c => c.provider === "composio")) this.composio.refresh().catch(() => {});
     this.workflows.migrateTasks(); this.workflows.start(); this.awareness.start(); this.timer = setInterval(() => {
       if (this.store.locked || !this.store.available()) return;
+      void this.workflowEvents.tick().catch(() => {});
+      void this.workflowAssistant.tick().catch(() => {});
       for (const s of this.store.data.sources) if (s.autoSync && s.nextSync <= Date.now() && !this.syncing.has(s.id)) this.sync(s.id).catch(() => {});
     }, 30000); this.timer.unref?.();
   }
-  stop() { clearInterval(this.timer); for (const c of this.sourceControllers.values()) c.abort(); this.awareness.stop(); this.workflows.stop(); this.connections.cancel(); this.composio.cancel(); }
+  stop() { clearInterval(this.timer); for (const c of this.sourceControllers.values()) c.abort(); this.awareness.stop(); this.workflowEvents.stop(); this.workflowAssistant.stop(); this.workflows.stop(); this.connections.cancel(); this.composio.cancel(); }
 }
 
 function registerCompanionIPC({ ipcMain, service, origin, getMainWindow, getMascotWindow, dialog }) {
@@ -222,13 +225,19 @@ function registerCompanionIPC({ ipcMain, service, origin, getMainWindow, getMasc
       case "source": return service.source(input);
       case "sync": return service.sync(input.id, ctx.signal);
       case "sourceToggle": return service.store.change(d => { const s = d.sources.find(s => s.id === input.id); if (!s || s.kind === "file") throw new CompanionError("Source unavailable."); if (s.kind === "connection" && input.enabled && !d.connections.find(c => c.id === s.connectionId)?.allowSync) throw new CompanionError("Enable background reads for this connection first."); s.autoSync = input.enabled === true; s.nextSync = Date.now() + (s.intervalMinutes || 20) * 60000; });
-      case "workflow": return service.workflows.save(input);
+      case "workflow": return service.workflows.save(await service.workflowEvents.prepareWorkflow(input, ctx.signal));
       case "workflowValidate": return service.workflows.validate(input);
       case "workflowAssist": return service.workflowAssistant.ask(input, ctx.signal);
+      case "workflowDiscoverySettings": return service.workflowAssistant.configure(input);
       case "workflowDiscover": return service.workflowAssistant.ask(input, ctx.signal, true);
-      case "workflowDismiss": return service.store.change(d => { if (d.workflowState) d.workflowState.suggestions = (d.workflowState.suggestions || []).filter(s => s.id !== input.id); });
+      case "workflowDismiss": return service.store.change(d => { if (d.workflowState) { const s = (d.workflowState.suggestions || []).find(s => s.id === input.id); if (s) d.workflowState.dismissed = [...(d.workflowState.dismissed || []), s.name.toLowerCase()].slice(-50); d.workflowState.suggestions = (d.workflowState.suggestions || []).filter(s => s.id !== input.id); } });
       case "workflowDraft": return service.workflows.save(input, { draft: true });
-      case "workflowEnabled": return service.workflows.setEnabled(input.id, input.enabled);
+      case "workflowEventTypes": return service.workflowEvents.types(input.connectionId, ctx.signal);
+      case "workflowEnabled": {
+        const w = service.store.data.workflows.find(w => w.id === input.id);
+        if (input.enabled && w?.graph?.nodes.some(n => n.type === "trigger" && n.config.kind === "app_event")) return service.workflows.save(await service.workflowEvents.prepareWorkflow({ ...w, enabled: true }, ctx.signal));
+        return service.workflows.setEnabled(input.id, input.enabled);
+      }
       case "workflowPreview": return service.workflows.begin(input.id, input.input, "preview", { dryRun: true });
       case "workflowReject": return service.workflows.decide(input.id, "rejected");
       case "removeWorkflow": return service.workflows.remove(input.id);

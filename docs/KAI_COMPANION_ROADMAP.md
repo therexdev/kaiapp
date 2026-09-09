@@ -24,8 +24,8 @@ This is an original KAI implementation informed by product behavior and publishe
 | Ingestion | Bounded chunks, source identity, content-hash deduplication, replacement on change, source removal deletes indexed chunks | Deterministic text retrieval; no embeddings, LLM compression, or summary-tree sealing |
 | Sync | Manual sync, opt-in 20-minute refresh, timestamps, error state, recent history | Desktop must be open; connection must allow background reads |
 | User ownership | Native Markdown Brain export and import of existing KAI remembered facts | Export is a plaintext snapshot; not a live Obsidian vault or bidirectional sync |
-| Workflow builder | Ordered visual step editor, reorder/remove, templates, local-model draft generation | Sequential flow with conditional stopping; not a freeform node-and-edge canvas |
-| Workflow steps | Brain search, local reasoning, API operation, text condition, approval, save memory, output | No arbitrary code nodes, loops, parallel fan-out, subflows, or external agent execution |
+| Workflow builder | Freeform node canvas, ports, inspector, undo/redo, templates and local Copilot | See the current [workflow coverage](OPENHUMAN_WORKFLOW_COVERAGE.md) |
+| Workflow steps | 17 graph node types including branches, loops, subflows, parsing and isolated JavaScript | Local reasoning and selected app tools; native review before changes |
 | Triggers | Manual input, hourly, every six hours, daily, weekly | Local computer time; no webhook listener or integration event stream yet |
 | Durable runs | Saved workflow snapshot, input/output, per-step checkpoints, run history, cancel, paused approval and resume | Uncertain interrupted actions cannot auto-replay; inspect destination then start a new run |
 | Workflow suggestions | Ask KAI in agent mode to propose a disabled draft; describe a routine in the builder | User reviews and saves before running; draft tools cannot enable schedules |
@@ -81,24 +81,9 @@ Reference: [goals and todos](https://github.com/tinyhumansai/openhuman/blob/0a2a
 
 ### Workflows and automation
 
-Reference: [workflow specification](https://github.com/tinyhumansai/openhuman/blob/0a2aeb00c8413b824e3ffdb16da6bdd83e0dda39/gitbooks/features/workflows.md).
+The [current workflow coverage comparison](OPENHUMAN_WORKFLOW_COVERAGE.md) supersedes the original ordered-step plan. The visual canvas, manual/Copilot creation, discovery, typed nodes, bounded parallel branches/loops/subflows, time-zone schedules, app-change watches and Composio event relay are implemented. The [guide](KAI_WORKFLOWS.md) explains limits and Tasks migration.
 
-| Capability to adopt | KAI value | Status / next work |
-| --- | --- | --- |
-| Natural-language workflow creation | User describes the job instead of programming it | Local draft generator and KAI draft tool implemented |
-| Review before enable | A suggestion never becomes an active automation by itself | Implemented |
-| Visual ordered steps | Make inputs, actions and outputs understandable | Implemented ordered builder and run inspector |
-| Schedule/manual triggers | Morning briefs, project checks, recurring digests | Implemented common intervals |
-| Webhook and integration event triggers | React to real changes instead of polling everything | Next: outbound event subscriptions or explicitly configured local ingress with authentication |
-| Branch/switch/transform/parser nodes | Handle realistic conditional work and structured data | Text-match stop now; next: typed branches and deterministic safe transforms |
-| Loops and parallel branches | Process lists and divide larger jobs | Later: bounded iteration, concurrency limits, join semantics, per-run spending caps |
-| Nested workflows | Reuse a trusted step sequence | Later, after workflow schema versioning and permission inheritance are established |
-| Sandbox code nodes | Allow advanced deterministic processing | Later: reuse established sandbox; no host-shell execution in companion workflows |
-| Approvals and resumable pauses | Keep the user in charge of meaningful changes | Implemented persisted pauses with native one-time review |
-| Deduplication and idempotency | Prevent duplicate messages or repeated writes | Per-workflow overlap lock now; next: provider-specific idempotency keys and event deduplication |
-| Discovery and reusable library | Suggest repeated work worth automating | Starter templates now; next: opt-in repetition detection with disabled proposals |
-| Export/import | Move routines between installations and version them | Implemented JSON; imported routines stay drafts |
-| Notification center | Make waiting approvals and failures hard to miss | Run history now; next: badge/tray notices and a companion summary, with quiet hours |
+Remaining workflow work: provider-specific idempotency receipts, notifications/quiet hours, lossless external graph import and optional additional isolated code languages. General multi-agent orchestration, workload routing and per-goal budgets remain separate roadmap items.
 
 ### Connections, channels, and tools
 
@@ -144,7 +129,7 @@ Reference: [integrations](https://github.com/tinyhumansai/openhuman/blob/0a2aeb0
 2. **Companion quality.** Friendly connection setup forms, more service adapters, richer file support, selected project scopes, per-thread todos, notification badges, read-only background reflection, and evidence-backed summaries. Success criterion: KAI can give a reliable daily project brief and remember corrections without the user repeating context.
 3. **Reliable automation.** Provider pagination/events, typed conditional branches, idempotency keys, robust retries for reads, schedule timezone choice, run budgets and richer action receipts. Success criterion: repeated workflows produce the expected result over restarts and partial service failures, without duplicate writes.
 4. **Proactive companion.** User-configured check-ins, goals/milestones, specialist delegation, channel pairing and mobile companion. Success criterion: useful timely assistance without noise or unintended action.
-5. **Advanced orchestration.** Bounded parallel/loop/subflow execution, private agent-to-agent coordination, workload routing and optional larger knowledge stores. Gate this on measured reliability and actual user needs.
+5. **Advanced orchestration.** Workflow branches/loops/subflows are implemented. Private agent-to-agent coordination, workload routing and larger knowledge stores remain future work.
 
 ## Implementation and verification notes
 
