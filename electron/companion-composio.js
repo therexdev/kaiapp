@@ -9,7 +9,9 @@ class CompanionComposio {
   }
   settings() { return this.store.data.composio || { mode: "managed", key: "", userId: "" }; }
   status() {
-    const s = this.settings(); return { mode: s.mode, personalConfigured: !!s.key, blocked: this.privacyMode() === "local-only", signedIn: !!this.account?._token(),
+    const s = this.settings(), token = this.account?._token();
+    const sessionExpired = !!(token && this.rejectedSession?.origin === this.account?.origin() && this.rejectedSession?.binding === fingerprint(token));
+    return { mode: s.mode, personalConfigured: !!s.key, blocked: this.privacyMode() === "local-only", signedIn: !!token && !sessionExpired, sessionExpired,
       managedAvailable: this.managed?.available ?? null, completed: this.completed, pending: this.pending ? { toolkit: this.pending.toolkit, expiresAt: this.pending.expiresAt } : null };
   }
   context() {
@@ -48,11 +50,13 @@ class CompanionComposio {
       if (!this.managed?.available) throw new CompanionError("KAI-managed connections are not enabled yet. You can use your own Composio key in Connection settings.");
       const r = await this.fetch(ctx.origin + "/connections/api/" + action, { method: "POST", redirect: "error", signal,
         headers: { "content-type": "application/json", authorization: "Bearer " + ctx.token }, body: JSON.stringify({ ...input, generation: this.managed.generation }) });
+      if (r.status === 401) this.rejectedSession = { origin: ctx.origin, binding: ctx.binding };
       let content = "", bytes = 0; const decoder = new TextDecoder();
       for await (const chunk of r.body || []) { bytes += chunk.length; if (bytes > 4 * 1024 * 1024) throw new CompanionError("The connection result is too large."); content += decoder.decode(chunk, { stream: true }); }
       content += decoder.decode(); signal?.throwIfAborted();
       let p; try { p = JSON.parse(content); } catch { throw new CompanionError("Update the KAI connection server before using this option."); }
-      if (!r.ok || !p.ok) throw new CompanionError(r.status === 401 ? "Your KAI sign-in has expired. Sign in again in Settings." : p.error || "Connection request failed."); return p.result;
+      if (!r.ok || !p.ok) throw new CompanionError(r.status === 401 ? "Your KAI sign-in has expired. Sign in again in Settings." : p.error || "Connection request failed.");
+      this.rejectedSession = null; return p.result;
     }
     let client = this.clients.get(ctx.project); if (!client) { this.clients.clear(); client = new ComposioClient({ key: ctx.key, fetchImpl: this.fetch }); this.clients.set(ctx.project, client); }
     switch (action) {

@@ -1,3 +1,9 @@
+### Connect without a settings loop
+
+- **App cards keep the chosen app open.** Connect checks the current server status and explains whether KAI sign-in, a personal key, or a privacy change is needed.
+- **Server setup and desktop sign-in are shown separately.** When the server enables Composio, KAI-managed connections need only your KAI account sign-in. Expired sessions get a clear sign-in prompt.
+- **Fresh status without losing your place.** Refresh picks up a newly enabled server, keeps useful errors visible, and preserves a key or connection method being edited.
+
 ### Easier app connections
 
 - **Explore your apps.** Search a catalog with platform logos, categories, and a guided browser sign-in. See your connected accounts and manage each one separately.

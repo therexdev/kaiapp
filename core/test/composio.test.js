@@ -21,3 +21,23 @@ test("managed requests use KAI authentication without accepting a caller user ID
 test("existing enabled auth configs are reused without exposing their credentials",async()=>{const f=fixture();let created=0;const api=new ComposioClient({key:f.key,fetchImpl:async(url,init)=>{if(new URL(url).pathname.endsWith("/auth_configs")){if(init.method==="POST")created++;else return new Response(JSON.stringify({items:[{id:"ac_github",toolkit:{slug:"github"},status:"ENABLED",is_composio_managed:false,credentials:{client_secret:"do-not-export"}}]}));}return f.fetch(url,init);}});const r=await api.connect("github","alice");assert.equal(created,0);assert.ok(!JSON.stringify(r).includes("do-not-export"));assert.equal(f.links[0].user_id,"alice");});
 
 test("curated reads require the exact documented version; changed or explicit unsafe metadata requires review",()=>{const raw={...TOOLS[0],slug:"GITHUB_LIST_REPOSITORY_ISSUES",version:"20260902_00",tags:[]};assert.equal(tool(raw).readOnly,true);assert.equal(tool({...raw,version:"20260910_00"}).readOnly,false);assert.equal(tool({...raw,annotations:{readOnlyHint:false}}).readOnly,false);assert.equal(tool({...raw,slug:"GITHUB_CREATE_AN_ISSUE"}).readOnly,false);});
+
+test("managed session rejection is distinct from server availability and recovers without deleting the token", async t => {
+ let token = "session-a", httpStatus = 401;
+ const { hub } = setup(t, { account: { origin: () => "https://kai.example", _token: () => token }, fetchImpl: async url =>
+  new Response(JSON.stringify(url.endsWith("/status") ? { available: true, protocol: 1, generation: "project-a" } :
+   { ok: httpStatus === 200, result: { userId: "kai:alice", accounts: [] } }), { status: url.endsWith("/status") ? 200 : httpStatus }) });
+ await assert.rejects(hub.composio.refresh(), /sign-in has expired/);
+ assert.equal(hub.status().composio.managedAvailable, true);
+ assert.equal(hub.status().composio.signedIn, false);
+ assert.equal(hub.status().composio.sessionExpired, true);
+ token = "session-b";
+ assert.equal(hub.status().composio.signedIn, true, "a new sign-in must not inherit the previous rejection");
+ token = "session-a"; httpStatus = 200;
+ await hub.composio.refresh();
+ assert.equal(hub.status().composio.signedIn, true, "a transient rejection can recover with the saved token");
+ httpStatus = 503;
+ await assert.rejects(hub.composio.refresh(), /Connection request failed/);
+ assert.equal(hub.status().composio.signedIn, true, "an outage must not sign the desktop out");
+ assert.equal(hub.status().composio.sessionExpired, false);
+});

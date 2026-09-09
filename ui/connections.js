@@ -42,8 +42,30 @@
     const ready = () => !status().blocked && (status().mode === "personal" ? status().personalConfigured : status().managedAvailable && status().signedIn);
     const connections = () => state.connections.filter(c => c.provider === "composio");
     const modeLabel = () => status().mode === "personal" ? "Your Composio" : "KAI-managed";
-    const refresh = async () => { await manage("composioRefresh"); state = await manage("status"); };
+    let refreshing = null;
+    const refresh = () => refreshing || (refreshing = (async () => {
+      try { await manage("composioRefresh"); }
+      finally { try { state = await manage("status"); } finally { refreshing = null; } }
+    })());
     const notice = (message, error = false) => { if (!alive()) return; for (const e of host.querySelectorAll(".cn-notice")) { e.textContent = message; e.classList.toggle("cn-error", error); } };
+    function readiness() {
+      const s = status();
+      if (s.blocked) return ["Online connections are paused", "Local-Only is on. Choose Local-First in Local API → Network & privacy to connect apps.", "Open privacy settings", "privacy"];
+      if (s.mode === "personal") return s.personalConfigured ? null : ["Add your Composio key", "My Composio key is selected. Add your project key, or choose KAI-managed to use the server's connection service.", "Connection settings", "setup"];
+      if (s.managedAvailable == null) return ["Checking KAI-managed connections…", "Checking whether your server's connection service is available.", "Check again", "refresh"];
+      if (!s.managedAvailable) return ["KAI-managed connections are not enabled", "Your server has not enabled its connection service yet. If you just updated it, check again.", "Check again", "refresh"];
+      if (!s.signedIn) return [s.sessionExpired ? "Sign in to KAI again" : "Sign in to KAI to connect apps", "The server's Composio service is enabled. Link this desktop app to your KAI account in Settings → Koinos AI account, then return here. No personal Composio key is needed.", "Sign in to KAI", "signin"];
+      return null;
+    }
+    function readinessHTML() {
+      const hint = readiness();
+      return hint ? `<div class="cn-readiness"><div><strong>${esc(hint[0])}</strong><p>${esc(hint[1])}</p></div>${btn(hint[2], hint[3])}</div>` : "";
+    }
+    function updateReadiness() {
+      for (const el of host.querySelectorAll("[data-cn-readiness]")) el.innerHTML = readinessHTML();
+      const managed = host.querySelector("#cn-managed-status");
+      if (managed) managed.textContent = status().managedAvailable == null ? "Checking server availability…" : status().managedAvailable ? status().signedIn ? "Available · KAI account signed in" : "Available · sign in to KAI to continue" : "Waiting for the server administrator to enable it";
+    }
     function imageFallback() {
       for (const img of host.querySelectorAll("img[data-cn-logo]")) { img.addEventListener("error", () => { img.hidden = true; }, { once: true }); if (!img.getAttribute("src")) img.hidden = true; }
     }
@@ -58,15 +80,15 @@
       host.innerHTML = `<div class="cn-workspace"><div class="cn-notice" role="status" aria-live="polite"></div><div class="cn-main"></div><div class="cn-modal-host"></div></div>`;
       const out = host.querySelector(".cn-main");
       if (section === "setup") drawSetup(out); else if (section === "connected") drawConnected(out); else drawExplore(out);
-      if (status().blocked) notice("Online connections are paused in Local-Only. Choose Local-First in Local API → Privacy when you're ready.");
+      updateReadiness();
       if (drawer) drawDrawer(); imageFallback();
     }
     function drawExplore(out) {
       out.innerHTML = `<div class="cn-hero"><div><span class="cn-kicker">YOUR WORLD, CONNECTED</span><h2>Bring your everyday apps to KAI.</h2><p>One connection. More useful conversations, a richer Brain, and routines that follow through.</p></div><div class="cn-route"><span class="cn-route-dot"></span>${esc(modeLabel())}${btn("Change", "setup")}</div></div>
-        <div class="cn-searchbar"><span aria-hidden="true">⌕</span><input type="search" id="cn-search" aria-label="Search apps" placeholder="Search apps, tools, or what you want to do…" value="${esc(search)}">${btn("Refresh", "refresh")}</div>
+        <div data-cn-readiness></div><div class="cn-searchbar"><span aria-hidden="true">⌕</span><input type="search" id="cn-search" aria-label="Search apps" placeholder="Search apps, tools, or what you want to do…" value="${esc(search)}">${btn("Refresh", "refresh")}</div>
         <div class="cn-categories"><label class="cn-category-picker">Category<select id="cn-category"><option value="">All apps</option>${categories.map(c => `<option value="${esc(c.id)}" ${c.id === category ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></label></div>
         <div class="cn-list-heading"><h3>Explore apps</h3><span id="cn-count"></span></div><div class="cn-app-grid" id="cn-apps"></div><div class="cn-more" id="cn-more"></div>
-        <div class="cn-bottom-note">${ready() ? "Sign in securely, then choose the actions and data KAI can use." : "Choose KAI-managed connections or add your Composio key to browse the full catalog and connect."} ${btn("Connection settings", "setup")}</div>`;
+        <div class="cn-bottom-note">Sign in securely, then choose the actions and data KAI can use. ${btn("Connection settings", "setup")}</div>`;
       drawCards();
     }
     function drawCards() {
@@ -92,8 +114,8 @@
     }
     function drawSetup(out) {
       const s = status();
-      out.innerHTML = `<div class="cn-setup-intro"><h2>How would you like to connect?</h2><p>Both options open the same app catalog and secure sign-in flow.</p></div><form id="cn-settings"><div class="cn-mode-grid">
-        <label class="cn-mode-card"><input type="radio" name="mode" value="managed" ${s.mode !== "personal" ? "checked" : ""}><span class="cn-mode-icon">K</span><strong>KAI-managed</strong><p>Use the Composio service configured by your KAI server. No Composio key to enter.</p><small>${s.managedAvailable ? s.signedIn ? "Available · KAI account signed in" : "Available · sign in to KAI to continue" : "Waiting for the server administrator to enable it"}</small></label>
+      out.innerHTML = `<div class="cn-setup-intro"><h2>How would you like to connect?</h2><p>Both options open the same app catalog and secure sign-in flow.</p></div><div data-cn-readiness></div><form id="cn-settings"><div class="cn-mode-grid">
+        <label class="cn-mode-card"><input type="radio" name="mode" value="managed" ${s.mode !== "personal" ? "checked" : ""}><span class="cn-mode-icon">K</span><strong>KAI-managed</strong><p>Use the Composio service configured by your KAI server. No Composio key to enter.</p><small id="cn-managed-status"></small></label>
         <label class="cn-mode-card"><input type="radio" name="mode" value="personal" ${s.mode === "personal" ? "checked" : ""}><span class="cn-mode-icon personal">C</span><strong>My Composio key</strong><p>Connect through your own Composio project. Manage your usage and billing directly.</p><small>${s.personalConfigured ? "Your key is saved securely" : "Bring your own project API key"}</small></label></div>
         <div class="cn-key-panel" ${s.mode !== "personal" ? "hidden" : ""}>${field("Composio project API key", `<input name="key" type="password" autocomplete="off" placeholder="${s.personalConfigured ? "Saved securely · leave blank to keep" : "Paste your Composio key"}">`)}<p>Find your project key in <a href="https://dashboard.composio.dev/" target="_blank" rel="noopener noreferrer">Composio settings ↗</a>. KAI encrypts it on this computer.</p></div>
         <div class="cn-setup-actions"><button class="cn-button cn-primary" type="submit">Save connection method</button>${!s.signedIn ? btn("Sign in to KAI", "signin") : ""}</div><p class="cn-muted">Connected accounts stay with the Composio project that created them. Changing methods does not move or disconnect those accounts.</p></form>`;
@@ -106,7 +128,7 @@
       if (!drawer) return; const d = drawer;
       if (d.kind === "app") {
         const t = d.app, active = connections().filter(c => c.toolkit === t.slug && c.status === "ACTIVE");
-        openDrawer(t.name, `<div class="cn-connect-intro">${logo(t)}<h3>Connect ${esc(t.name)} to your world.</h3><p>${esc(t.description)}</p></div><ol class="cn-connect-steps"><li>Sign in to ${esc(t.name)} in your browser.</li><li>Choose the account and permissions to share.</li><li>Return to KAI and choose what it can use.</li></ol><p class="cn-muted">${esc(modeLabel())} handles the connection through Composio. KAI receives access to the account you authorize.</p>${active.map(c => `<div class="cn-existing"><span>${esc(c.name)}</span>${btn("Manage", "access", c.id)}</div>`).join("")}${btn(active.length ? "Connect another account" : "Connect " + t.name, "connect", t.slug, true)}`);
+        openDrawer(t.name, `<div class="cn-connect-intro">${logo(t)}<h3>Connect ${esc(t.name)} to your world.</h3><p>${esc(t.description)}</p></div>${readinessHTML()}${ready() ? `<ol class="cn-connect-steps"><li>Sign in to ${esc(t.name)} in your browser.</li><li>Choose the account and permissions to share.</li><li>Return to KAI and choose what it can use.</li></ol><p class="cn-muted">${esc(modeLabel())} handles the connection through Composio. KAI receives access to the account you authorize.</p>${active.map(c => `<div class="cn-existing"><span>${esc(c.name)}</span>${btn("Manage", "access", c.id)}</div>`).join("")}${btn(active.length ? "Connect another account" : "Connect " + t.name, "connect", t.slug, true)}` : ""}`);
       } else if (d.kind === "waiting") {
         openDrawer("Finish connecting", `<div class="cn-connect-intro"><div class="cn-wait-orb">↗</div><h3>Continue in your browser</h3><p>Sign in and approve the account you want to connect. KAI will check when you return.</p></div><div class="cn-setup-actions">${btn("Check connection", "check", "", true)}${btn("Open sign-in again", "reopen")}</div><p class="cn-muted">The check stops after five minutes. You can start again if the link expires.</p>`);
       } else if (d.kind === "access") {
@@ -157,13 +179,31 @@
     }
     async function action(name, value) {
       if (["setup", "explore", "connected"].includes(name)) return navigate(name);
-      if (name === "signin") return window.activateView("settings");
+      if (name === "signin") { await window.activateView("settings"); void window.renderAccount?.(true); document.getElementById("account-heading")?.scrollIntoView({ block: "center" }); return; }
+      if (name === "privacy") return window.activateView("api");
       if (name === "close") { drawer = null; clearTimeout(timer); host.querySelector(".cn-modal-host").innerHTML = ""; focusBeforeDrawer?.focus(); return; }
       if (name === "category") { category = value; draw(); return catalog(); }
       if (name === "more") return catalog(true);
-      if (name === "refresh") { await refresh(); if (!alive()) return; draw(); if (section === "explore") await catalog(); return; }
-      if (name === "app") { if (!ready()) return navigate("setup"); drawer = { kind: "app", app: items.find(t => t.slug === value) }; drawDrawer(); return; }
-      if (name === "connect") { if (!ready()) return navigate("setup"); await manage("composioConnect", { slug: value }); if (!alive()) return; drawer = { kind: "waiting", toolkit: value, until: Date.now() + 5 * 60000 }; drawDrawer(); scheduleCheck(); return; }
+      if (name === "refresh") {
+        try { await refresh(); } finally { if (alive()) { updateReadiness(); if (drawer?.kind === "app") drawDrawer(); else if (section === "connected") draw(); } }
+        if (alive() && section === "explore") await catalog(); return;
+      }
+      if (name === "app") {
+        const app = items.find(t => t.slug === value); if (!app) return;
+        drawer = { kind: "app", app }; drawDrawer();
+        // Recheck a cached disabled service or a sign-in completed in Settings.
+        // Keep the chosen app open while the initial status request finishes.
+        if (!ready() && !status().blocked) void action("refresh").catch(error => notice(error.message, true)); return;
+      }
+      if (name === "connect") {
+        const selectedDrawer = drawer;
+        state = await manage("status");
+        if (!ready()) { await action("refresh"); if (!alive() || !ready()) return; }
+        if (!alive() || drawer !== selectedDrawer) return;
+        try { await manage("composioConnect", { slug: value }); }
+        catch (error) { state = await manage("status"); if (alive()) { updateReadiness(); if (drawer?.kind === "app") drawDrawer(); } throw error; }
+        if (!alive() || drawer !== selectedDrawer) return; drawer = { kind: "waiting", toolkit: value, until: Date.now() + 5 * 60000 }; drawDrawer(); scheduleCheck(); return;
+      }
       if (name === "reopen") return manage("composioReopen");
       if (name === "check") return checkConnection();
       if (name === "access") { const c = connections().find(c => c.id === value); if (!c) return; drawer = { kind: "access", connection: c, tools: c.operations, selected: new Set(c.operations.map(o => o.id)), known: new Map(c.operations.map(o => [o.id, o])), initial: true }; drawDrawer(); await loadTools(); return; }
@@ -180,7 +220,13 @@
       notice("Waiting for you to finish sign-in in the browser…"); scheduleCheck();
     }
     let busy = false, searchTimer, toolSearchTimer;
-    host.addEventListener("click", async e => { const b = e.target.closest("[data-cn]"); if (!b || busy) return; busy = true; b.disabled = true; try { await action(b.dataset.cn, b.dataset.value); } catch (error) { notice(error.message, true); } finally { busy = false; b.disabled = false; } });
+    host.addEventListener("click", async e => {
+      const b = e.target.closest("[data-cn]"); if (!b) return;
+      const blocking = !["close", "signin", "privacy"].includes(b.dataset.cn);
+      if (busy && blocking) return; if (blocking) busy = true; b.disabled = true;
+      try { await action(b.dataset.cn, b.dataset.value); } catch (error) { notice(error.message, true); }
+      finally { if (blocking) busy = false; b.disabled = false; }
+    });
     host.addEventListener("input", e => { if (e.target.id === "cn-search") { search = e.target.value; clearTimeout(searchTimer); searchTimer = setTimeout(() => catalog(), 300); } if (e.target.id === "cn-action-search") { clearTimeout(toolSearchTimer); toolSearchTimer = setTimeout(() => loadTools().catch(e => notice(e.message, true)), 300); } });
     host.addEventListener("change", e => {
       if (e.target.id === "cn-category") { category = e.target.value; void catalog(); }
@@ -211,7 +257,15 @@
       } catch (error) { notice(error.message, true); } finally { busy = false; b.disabled = false; }
     });
     items = featured; draw();
-    void (async () => { try { if (!status().blocked) await refresh(); if (!alive()) return; draw(); if (section === "explore") await catalog(); } catch (error) { notice(error.message, true); } })();
+    void (async () => {
+      let error;
+      try { if (!status().blocked) await refresh(); } catch (e) { error = e; }
+      if (!alive()) return;
+      // Updating status must not reset a key or connection method being edited.
+      updateReadiness(); if (section === "connected") draw(); else if (drawer?.kind === "app") drawDrawer();
+      if (section === "explore") await catalog();
+      if (error) notice(error.message, true);
+    })();
   }
   window.KaiConnections = { render };
 })();
