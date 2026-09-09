@@ -188,7 +188,7 @@
       notice("KAI cannot reach the app right now. Open the full app to check its status.");
     }
   }
-  let windowsVoices = [], windowsStatus = null, pocketStatus = null, pocketTimer = null;
+  let windowsVoices = [], windowsStatus = null, pocketStatus = null, pocketTimer = null, pocketStarting = false;
   let speechStatus = null, speechSetupTimer = null, cancelPlayback = null, holdPlayback = null;
   let voiceChoice = read("kai-mascot-voice-choice", "natural:af_bella");
   let voiceTone = read("kai-mascot-voice-tone", "cute");
@@ -269,6 +269,7 @@
           if (active && !heard) { heard = true; wakeListener.hearOutput(value.text); }
           playbackState(active);
         }, onMetric: metric => {
+          $("pocket-metric").hidden = false;
           $("pocket-metric").textContent = "Last sentence started in " + (metric.firstPlaybackMs / 1000).toFixed(1) + " s · " + (metric.pauses ? metric.pauses + " buffering pause(s)" : "no buffering pauses") + ".";
         } });
         cancelPlayback = player.cancel; holdPlayback = player.hold;
@@ -357,6 +358,8 @@
   }
   function voiceEngineUI() {
     if (!voiceChoice.startsWith("natural:")) $("natural-card").hidden = true;
+    if (!voiceChoice.startsWith("pocket:")) $("pocket-card").hidden = true;
+    pocketUI();
     $("speech-start").disabled = voiceChoice.startsWith("pocket:");
     $("voice-engine-help").textContent = voiceChoice.startsWith("pocket:") ? "Pocket streams each sentence as audio is generated, with Cute, Squeak and Classic effects. This trial is English-only. Speed depends on your computer; try Hear a hello and compare the timing below." : voiceChoice.startsWith("windows:") ?
       "Fast local Windows speech with Cute, Squeak and Classic effects. Korean replies use an installed Korean voice; add Korean speech below if needed. Your usual voice stays selected." :
@@ -393,22 +396,62 @@
     $("natural-status").textContent = speechStatus.setup?.state === "error" ? speechStatus.setup.error : speechStatus.available ? "Local voices are ready. Cute KAI works best with Bella. Speech stays on your computer." :
       speechStatus.modelPresent ? "Your voices are downloaded. Retry setup to start KAI’s voice." : "Download natural voices once (" + Math.ceil((speechStatus.downloadBytes || 93000000) / 1000000) + " MB). No account or subscription needed.";
   }
+  function pocketUI() {
+    const state = pocketStatus?.setup?.state, downloading = pocketStarting || state === "downloading";
+    const available = !!pocketStatus?.available, supported = !!pocketStatus?.supported;
+    const selected = pocketStatus?.voices?.find(v => "pocket:" + v.id === voiceChoice) || pocketStatus?.voices?.[0];
+    const copy = state === "error" ? pocketStatus.setup.error : downloading ? "Downloading Pocket voices · " + (pocketStatus?.setup?.pct || 0) + "%" :
+      available ? "Ready to talk. Try a voice with your current character settings." : "One download, about " + Math.ceil((pocketStatus?.downloadBytes || 201000000) / 1000000) + " MB. Speech stays on your computer.";
+    $("pocket-controls").hidden = !supported;
+    $("pocket-controls").dataset.ready = String(available);
+    $("setup-pocket").disabled = !supported || downloading;
+    $("setup-pocket").textContent = downloading ? "Downloading…" : state === "error" ? "Retry download" : available ? "Repair voices" : "Download Pocket voices";
+    $("preview-pocket").hidden = !available;
+    $("preview-pocket").textContent = "Try " + (selected?.name || "Alba");
+    $("pocket-status").textContent = copy;
+    $("pocket-card-title").textContent = available ? "Pocket voice is ready" : "Add KAI’s Pocket voice";
+    $("pocket-card-copy").textContent = supported ? copy : "Open Voice & listening to check Pocket voice availability.";
+    $("compact-pocket").disabled = !supported || downloading;
+    $("compact-pocket").textContent = available && !downloading ? "Try " + (selected?.name || "Alba") : $("setup-pocket").textContent;
+    regions();
+  }
   async function loadPocket() {
     if (!bridge?.pocketStatus) return;
-    try { pocketStatus = await bridge.pocketStatus(); } catch { return; }
-    $("pocket-controls").hidden = !pocketStatus.supported;
-    const state = pocketStatus.setup?.state;
-    $("setup-pocket").disabled = state === "downloading";
-    $("setup-pocket").textContent = pocketStatus.available ? "Repair Pocket voices" : "Download Pocket voices";
-    $("pocket-status").textContent = state === "error" ? pocketStatus.setup.error : state === "downloading" ? "Downloading Pocket voices · " + (pocketStatus.setup.pct || 0) + "%" : pocketStatus.available ? "Ready. Choose a Pocket voice above, then Hear a hello." : "Download once to try Alba, Marius, Javert and Azelma.";
+    try { pocketStatus = await bridge.pocketStatus(); }
+    catch (error) {
+      // Keep a visible retry when a status request fails during installation.
+      pocketStatus = { ...pocketStatus, setup: { state: "error", error: error.message } }; pocketUI(); return;
+    }
     voiceChoices();
-    if (state === "downloading" && !suspended) { clearTimeout(pocketTimer); pocketTimer = setTimeout(loadPocket, 1200); }
+    if (pocketStatus.setup?.state === "downloading" && !suspended) { clearTimeout(pocketTimer); pocketTimer = setTimeout(loadPocket, 1200); }
     else warmSpeech();
+  }
+  async function installPocket() {
+    if (pocketStarting || pocketStatus?.setup?.state === "downloading") return;
+    stopSpeech(); clearTimeout(pocketTimer); pocketStarting = true; pocketUI();
+    try { await bridge.pocketSetup(); }
+    catch (error) { pocketStatus = { ...pocketStatus, setup: { state: "error", error: error.message } }; return; }
+    finally { pocketStarting = false; pocketUI(); }
+    await loadPocket();
+  }
+  function previewPocket() {
+    if (!pocketStatus?.available || busy || voicePending) return;
+    if (!voiceChoice.startsWith("pocket:")) {
+      const selected = pocketStatus.voices.find(v => v.id === "alba") || pocketStatus.voices[0];
+      if (!selected) return;
+      stopSpeech(); bridge?.releasePocket?.(); voiceChoice = "pocket:" + selected.id;
+      write("kai-mascot-voice-choice", voiceChoice); voiceChoices();
+    }
+    $("pocket-card").hidden = true;
+    $("preview-voice").click(); regions();
   }
   function ensureNatural() {
     if (voiceChoice.startsWith("pocket:")) {
       if (pocketStatus?.available) return true;
-      notice("Download Pocket voices in Voice & listening first. Your reply will still appear in chat."); return false;
+      notice(""); pocketUI();
+      if (expanded && !$("voice-options-panel").hidden) $("voice-options-panel").scrollTop = 0;
+      else $("pocket-card").hidden = false;
+      regions(); return false;
     }
     if (!voiceChoice.startsWith("natural:") || speechStatus?.available) return true;
     $("natural-card").hidden = false;
@@ -421,7 +464,9 @@
     regions(); return false;
   }
   function voiceOptions(open) {
-    $("voice-options-panel").hidden = !open; $("voice-options").setAttribute("aria-expanded", String(open)); regions();
+    $("voice-options-panel").hidden = !open; $("voice-options").setAttribute("aria-expanded", String(open));
+    if (open) { $("voice-options-panel").scrollTop = 0; $("pocket-card").hidden = true; }
+    regions();
   }
   async function installNatural() {
     stopSpeech(); clearTimeout(speechSetupTimer);
@@ -765,10 +810,10 @@
   $("close-voice-options").onclick = () => voiceOptions(false);
   $("menu-voice").onclick = async () => { await expand(true); voiceOptions(true); };
   $("voice-choice").onchange = () => { stopSpeech(); bridge?.releasePocket?.(); voiceChoice = $("voice-choice").value; write("kai-mascot-voice-choice", voiceChoice); voiceReplyUI(); voiceEngineUI(); ensureNatural(); warmSpeech(); };
-  $("setup-pocket").onclick = async () => {
-    stopSpeech(); $("setup-pocket").disabled = true;
-    try { await bridge.pocketSetup(); await loadPocket(); } catch (error) { $("setup-pocket").disabled = false; notice(error.message); }
-  };
+  $("setup-pocket").onclick = installPocket;
+  $("compact-pocket").onclick = () => pocketStatus?.available ? previewPocket() : installPocket();
+  $("preview-pocket").onclick = previewPocket;
+  $("later-pocket").onclick = () => { $("pocket-card").hidden = true; regions(); };
   $("refresh-windows-voices").onclick = () => loadWindowsVoices(true);
   $("add-windows-voices").onclick = () => bridge?.windowsVoiceSettings?.().catch(error => notice(error.message));
   $("use-fast-voice").onclick = () => {

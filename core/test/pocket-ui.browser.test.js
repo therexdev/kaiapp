@@ -13,6 +13,7 @@ test("Pocket is opt-in, streams audibly before inference completes, preserves ef
     const events = new Set(); window.__pocket = { setup: 0, cancelled: 0, available: false, finished: false, generated: 0 };
     let pending;
     window.kaiDesktop = { expand: async () => ({}), regions() {}, onEvent(fn) { events.add(fn); return () => events.delete(fn); },
+      windowsVoices: async () => ({ supported: true, voices: [{ id: "zira", name: "Microsoft Zira", lang: "en-US" }] }),
       pocketStatus: async () => ({ supported: true, available: window.__pocket.available, voices: [{ id: "alba", name: "Alba" }], setup: { state: "idle" } }),
       pocketSetup: async () => { window.__pocket.setup++; window.__pocket.available = true; }, pocketWarm: async () => {},
       cancelPocketSpeech: async () => { window.__pocket.cancelled++; if (pending) { clearInterval(pending.timer); pending.reject(new Error("Stopped")); pending = null; } },
@@ -30,10 +31,31 @@ test("Pocket is opt-in, streams audibly before inference completes, preserves ef
   });
   await page.goto(fixture.origin + "/mascot.html"); await page.waitForFunction(() => document.querySelector("#model").value);
   assert.equal(await page.locator("#voice-choice").inputValue(), "system"); assert.equal(await page.evaluate(() => window.__pocket.setup), 0);
-  await page.locator("#toggle-chat").click(); await page.locator("#voice-options").click(); await page.locator("#setup-pocket").click();
+  await page.locator("#toggle-chat").click(); await page.locator("#voice-options").click();
+  for (const viewport of [{ width: 660, height: 560 }, { width: 600, height: 500 }]) {
+    await page.setViewportSize(viewport);
+    const visible = await page.locator("#setup-pocket").evaluate(button => {
+      const r = button.getBoundingClientRect(), panel = document.querySelector("#voice-options-panel"), p = panel.getBoundingClientRect();
+      return { inside: r.top >= p.top && r.bottom <= p.bottom && r.right <= p.right, scroll: panel.scrollTop,
+        clickable: document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) === button,
+        background: getComputedStyle(button).backgroundColor, color: getComputedStyle(button).color };
+    });
+    assert.equal(visible.inside, true, "Download is in the first visible panel, including narrow windows");
+    assert.equal(visible.scroll, 0, "No automated scrolling hides the original discovery bug");
+    assert.equal(visible.clickable, true);
+    assert.notEqual(visible.background, "rgba(0, 0, 0, 0)"); assert.notEqual(visible.background, visible.color);
+    if (process.env.KAI_MASCOT_QA_DIR) {
+      fs.mkdirSync(process.env.KAI_MASCOT_QA_DIR, { recursive: true });
+      await page.screenshot({ path: path.join(process.env.KAI_MASCOT_QA_DIR, "pocket-download-" + viewport.width + ".png") });
+    }
+  }
+  await page.setViewportSize({ width: 660, height: 560 });
+  await page.locator("#setup-pocket").click();
   await page.waitForFunction(() => !document.querySelector("#setup-pocket").disabled);
-  await page.locator("#voice-choice").selectOption("pocket:alba"); assert.equal(await page.locator("#speech-start").isDisabled(), true);
-  await page.locator("#preview-voice").click();
+  assert.equal(await page.locator("#voice-choice").inputValue(), "system", "Download alone keeps the current voice");
+  await page.locator("#preview-pocket").click();
+  assert.equal(await page.locator("#voice-choice").inputValue(), "pocket:alba");
+  assert.equal(await page.locator("#speech-start").isDisabled(), true);
   await page.waitForFunction(() => document.body.dataset.state === "speaking");
   assert.equal(await page.evaluate(() => window.__pocket.finished), false, "Audio starts while later chunks are still being generated");
   await page.waitForFunction(() => document.querySelector("#pocket-metric").textContent.includes("no buffering pauses"));
@@ -43,4 +65,41 @@ test("Pocket is opt-in, streams audibly before inference completes, preserves ef
   assert.ok(await page.evaluate(() => window.__pocket.cancelled) > 0);
   assert.notEqual(await page.locator("body").getAttribute("data-state"), "speaking");
   assert.deepEqual(errors, []);
+});
+
+
+test("Missing Pocket voice has a compact download action, progress and retry without opening chat", { skip: !fs.existsSync(CHROMIUM), timeout: 30000 }, async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-pocket-setup-")), fixture = await startMascotServer(dir);
+  const browser = await require("playwright-core").chromium.launch({ executablePath: CHROMIUM, args: ["--no-sandbox"] });
+  t.after(async () => { await browser.close(); await fixture.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  const page = await browser.newPage({ viewport: { width: 660, height: 560 } });
+  await page.addInitScript(() => {
+    localStorage.setItem("kai-mascot-cute-default-v1", "1"); localStorage.setItem("kai-mascot-voice-choice", "pocket:alba"); localStorage.setItem("kai-mascot-voice", "0");
+    window.__setup = { calls: 0, available: false, state: "idle", pct: 0 };
+    window.kaiDesktop = { expand: async () => ({}), regions: boxes => { window.__regions = boxes; }, onEvent() { return () => {}; },
+      pocketWarm: async () => {}, releasePocket: async () => {}, cancelPocketSpeech: async () => {},
+      pocketStatus: async () => ({ supported: true, available: window.__setup.available, voices: [{ id: "alba", name: "Alba" }],
+        setup: { state: window.__setup.state, pct: window.__setup.pct, error: "Connection interrupted. Try again." } }),
+      pocketSetup: async () => { window.__setup.calls++; window.__setup.state = "downloading"; window.__setup.pct = 25; },
+    };
+  });
+  await page.goto(fixture.origin + "/mascot.html"); await page.waitForFunction(() => document.querySelector("#model").value);
+  await page.locator("#toggle-chat").click(); await page.locator("#read-aloud").click();
+  await page.locator("#collapse").click(); await page.setViewportSize({ width: 248, height: 304 });
+  assert.equal(await page.locator("#pocket-card").isVisible(), true);
+  const button = await page.locator("#compact-pocket").boundingBox(); assert.ok(button.y + button.height < 304);
+  assert.equal(await page.evaluate(() => window.__setup.calls), 0, "Missing voice never downloads automatically");
+  await page.locator("#compact-pocket").click();
+  assert.equal(await page.locator("#compact-pocket").isDisabled(), true);
+  assert.match(await page.locator("#pocket-card-copy").textContent(), /25%/);
+  await page.evaluate(() => { window.__setup.state = "error"; });
+  await page.waitForFunction(() => document.querySelector("#compact-pocket").textContent === "Retry download");
+  await page.locator("#compact-pocket").click();
+  assert.equal(await page.evaluate(() => window.__setup.calls), 2);
+  await page.evaluate(() => { window.__setup.state = "done"; window.__setup.available = true; });
+  await page.waitForFunction(() => document.querySelector("#compact-pocket").textContent === "Try Alba");
+  assert.equal(await page.locator("#conversation").isVisible(), false, "Setup can finish with the chat closed");
+  const hit = await page.locator("#compact-pocket").evaluate(button => { const r = button.getBoundingClientRect(); return window.__regions.some(b => r.x >= b.x && r.y >= b.y && r.right <= b.x + b.width && r.bottom <= b.y + b.height); });
+  assert.equal(hit, true, "Native hit regions include the complete compact action");
+  if (process.env.KAI_MASCOT_QA_DIR) await page.screenshot({ path: path.join(process.env.KAI_MASCOT_QA_DIR, "pocket-compact-ready.png") });
 });

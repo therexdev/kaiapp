@@ -1,3 +1,9 @@
+### Pocket voice setup, right where you need it
+
+- **A visible download button beside the voice selector.** Pocket setup now sits at the top of **Voice & listening**, with a clear blue **Download Pocket voices** button and progress. There is no need to scroll past the other voice settings.
+- **Download directly from KAI’s prompt.** When a selected Pocket voice is missing, the desktop message includes the download button, progress and retry. Once ready, click **Try Alba** (or your selected Pocket voice) right there.
+- **An easy sample after setup.** The same voice panel offers a named sample button after the download. Downloads still require your click, and installing alone keeps your existing voice selected.
+
 ### Try Pocket voices with KAI
 
 - **Four optional English voices.** Download Pocket once in KAI’s **Voice & listening** panel, then choose Alba, Marius, Javert or Azelma. Your existing voice stays selected until you change it. The download is about 201 MB; no account, Python installation or subscription is needed.

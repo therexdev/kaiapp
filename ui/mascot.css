@@ -211,3 +211,12 @@ body.motion-off #robot,body.suspended #robot{transition:none!important}
 #windows-voice-controls #use-fast-voice{background:#1678fa;color:white}
 body.computer-active #status-pill { border-color: #0079fa; box-shadow: 0 0 0 2px #0079fa44; }
 body.computer-active #quick-stop { color: #c43e22; }
+
+/* Keep setup beside the voice that needs it, within the first visible panel. */
+#pocket-controls{margin:10px 0 12px;padding:10px 12px;border:1px solid #c6dcfa;border-radius:12px;background:#eef5ff;color:#234d7e}
+#voice-options-panel #pocket-controls p{margin:5px 0 8px;line-height:1.4}
+#pocket-controls a{display:inline-block;margin-top:7px;color:#456d9e;font-size:10px}
+.pocket-actions{display:flex;flex-wrap:wrap;gap:8px}
+.pocket-actions button{min-height:36px;padding:9px 12px;border-radius:9px;background:#146ced;color:#fff;font-size:12px;font-weight:650}
+.pocket-actions button:hover:not(:disabled){background:#095bce}
+#pocket-controls[data-ready=true] #setup-pocket{background:#fff;color:#285d9c;border:1px solid #bbd3f2;font-weight:500;order:2}

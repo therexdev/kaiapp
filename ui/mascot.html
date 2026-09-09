@@ -26,6 +26,13 @@
         <div class="voice-options-heading"><strong>A little voice. A lot of personality.</strong><button id="close-voice-options" class="icon-button" aria-label="Close voice settings">×</button></div>
         <label for="voice-choice">KAI's voice</label>
         <select id="voice-choice"><option value="system">Computer voice</option></select>
+        <div id="pocket-controls" hidden>
+          <strong>Pocket voices · English</strong>
+          <p id="pocket-status" role="status">One download, about 201 MB. Speech stays on your computer.</p>
+          <div class="pocket-actions"><button id="setup-pocket" type="button">Download Pocket voices</button><button id="preview-pocket" type="button" hidden>Try Alba</button></div>
+          <p id="pocket-metric" role="status" hidden></p>
+          <a href="pocket-credits.html" target="_blank" rel="noopener">Voice credits</a>
+        </div>
         <p id="voice-engine-help"></p>
         <div id="windows-voice-controls" hidden><button id="use-fast-voice" type="button">Use fast Cute KAI</button><button id="refresh-windows-voices" type="button">Refresh voices</button><button id="add-windows-voices" type="button">Add Windows voices ↗</button><p>Install speech voices in Windows Settings, then refresh this list. Available voices depend on your Windows installation.</p></div>
         <label for="voice-tone" class="tone-label">Voice character</label>
@@ -36,7 +43,6 @@
         <p id="speech-start-help"></p>
         <div class="voice-option-actions"><button id="preview-voice">Hear a hello</button><button id="setup-natural">Get natural voices</button></div>
         <p id="natural-status">Try Cute KAI with Bella. Hear a hello instantly, then download the local voice once for conversations.</p>
-        <div id="pocket-controls" hidden><strong>Try Pocket voices · English</strong><p>Local streaming voices with KAI’s character effects. Optional download, about 201 MB. Your current voice stays selected.</p><button id="setup-pocket">Download Pocket voices</button><p id="pocket-status" role="status"></p><p id="pocket-metric" role="status"></p><a href="pocket-credits.html" target="_blank" rel="noopener">Voice credits</a></div>
         <div class="voice-divider"></div>
         <strong>Just say “Hey KAI”</strong>
         <p>Tap the mic and talk, or turn on Hey KAI and say your question. Pause to send. Keep talking after KAI answers—you have a minute for follow-ups.</p>
@@ -79,6 +85,10 @@
       </footer>
     </section>
     <div id="mascot-stage">
+      <aside id="pocket-card" class="voice-card interactive" aria-label="Set up KAI's Pocket voice" hidden>
+        <strong id="pocket-card-title">Add KAI’s Pocket voice</strong><p id="pocket-card-copy" role="status"></p>
+        <button id="compact-pocket" type="button">Download Pocket voices</button><button id="later-pocket" class="text-button" type="button">Later</button>
+      </aside>
       <aside id="natural-card" class="voice-card interactive" aria-label="Set up KAI's natural voice" hidden>
         <strong>Meet KAI’s natural voice</strong><p id="natural-card-copy"></p>
         <button id="compact-natural">Get natural voice</button><button id="later-natural" class="text-button">Later</button>
