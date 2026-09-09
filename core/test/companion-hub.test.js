@@ -39,3 +39,19 @@ test("IPC denies remote documents, subframes and mascot management; cancellation
  main.webContents.mainFrame.url="http://127.0.0.1:41100/other";await assert.rejects(handlers.get("companion:manage")(event(main),"status"),/denied/);main.webContents.mainFrame.url="http://127.0.0.1:41100/";
  const pending=handlers.get("companion:tool")(event(main),"brain_remember",{text:"do not save"},"local");await new Promise(r=>setImmediate(r));await handlers.get("companion:cancel")(event(main));resolve({response:1});const result=await pending;assert.equal(result.ok,false);assert.equal(hub.store.data.notes.length,0);
 });
+
+test("renderer private context protects routing and never gives worker models Brain notes", async () => {
+ const vm=require("vm"),calls=[];const window={kaiCompanionBridge:{context:async model=>({ok:true,result:{eligible:model==="local",context:model==="local"?"Private fixture memory":""}})}};
+ vm.runInNewContext(fs.readFileSync(path.join(__dirname,"../../ui/companion-client.js"),"utf8"),{window,DOMException});
+ const body={model:"local",stream:true,messages:[{role:"user",content:"hello"}]};const out=await window.KaiCompanionClient.enrich(body);assert.equal(out.kai_private_desktop,true);assert.equal(out.messages[0].content,"Private fixture memory");assert.equal(body.messages.length,1);
+ const network=await window.KaiCompanionClient.enrich({...body,model:"koinos-network"});assert.equal(network.kai_private_desktop,undefined);assert.equal(network.messages.length,1);
+ const planning=await window.KaiCompanionClient.enrich({...body,stream:false});assert.equal(planning.messages.length,1);assert.equal(planning.kai_private_desktop,true);
+});
+test("private tool observations cannot be forwarded through ordinary web or Core tools", async () => {
+ const vm=require("vm");let coreCalls=0,privateCalls=0;const window={kaiCompanionBridge:{tools:async()=>({ok:true,result:[{name:"brain_search"}]}),tool:async()=>{privateCalls++;return {ok:true,result:"private data"};},cancel:async()=>({ok:true})}};
+ vm.runInNewContext(fs.readFileSync(path.join(__dirname,"../../ui/companion-client.js"),"utf8"),{window,DOMException});
+ const json=window.KaiCompanionClient.toolJSON("local",async url=>{coreCalls++;return url==="/core/tools"?{tools:[{name:"web_search"}]}:{ok:true,result:"public"};});
+ const list=await json("/core/tools");assert.equal(list.tools.length,2);
+ await json("/core/tools/call",{body:JSON.stringify({name:"brain_search",args:{query:"KAI"}})});assert.equal(privateCalls,1);
+ await assert.rejects(json("/core/tools/call",{body:JSON.stringify({name:"web_search",args:{query:"private data"}})}),/Private Brain/);assert.equal(coreCalls,1);
+});

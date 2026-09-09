@@ -96,7 +96,7 @@
   }
   function poll() {
     clearTimeout(timer); if (!bridge || editor || host()?.hidden) return;
-    timer = setTimeout(async () => { if (host()?.hidden || editor || busy) return poll(); try { await refresh(); if (current === "workflows" && tab.workflows === "runs") draw(); } catch { /* show next explicit operation error */ } poll(); }, 2500);
+    timer = setTimeout(async () => { if (host()?.hidden || editor || busy) return poll(); try { const before = JSON.stringify(state.runs); await refresh(); if (current === "workflows" && tab.workflows === "runs" && before !== JSON.stringify(state.runs)) draw(); } catch { /* show next explicit operation error */ } poll(); }, 2500);
   }
   async function action(name, key) {
     if (name === "tab") { editor = null; tab[current] = key; draw(); poll(); return; }
