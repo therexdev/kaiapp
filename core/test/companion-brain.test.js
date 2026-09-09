@@ -92,3 +92,9 @@ test("selected source errors trigger a new check even when indexed content did n
   hub.store.change(d => { d.sources[0].error = "Source returned HTTP 401."; }); assert.notEqual(hub.awareness.fingerprint(), old);
   await hub.awareness.tick(); await hub.awareness.tick(); assert.ok(hub.store.data.brain.insights.some(i => i.text.includes("HTTP 401")));
 });
+test("cancelled checks do not restart the same work on the next heartbeat", async t => {
+  const { hub } = fixture(t); hub.store.note({ title: "Launch", text: "Review the launch." }); hub.awareness.settings(settings());
+  hub.awareness.enqueue(); hub.awareness.enqueue("briefing"); hub.awareness.cancel(); await hub.awareness.tick();
+  assert.ok(hub.store.data.brain.jobs.every(j => j.status === "cancelled"));
+  hub.awareness.enqueue("reflection", true); await hub.awareness.tick(); assert.ok(hub.store.data.brain.jobs.some(j => j.status === "done"));
+});

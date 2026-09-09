@@ -19,7 +19,7 @@ class CompanionAwareness {
       Object.assign(a, { mode: input.mode, model: String(input.model || ""), intervalMinutes: Math.max(5, Math.min(1440, Number(input.intervalMinutes) || 20)), maxPerHour: Math.max(1, Math.min(30, Number(input.maxPerHour) || 6)), contextChars: Math.max(2000, Math.min(10000, Number(input.contextChars) || 10000)), events: input.events === true, sourceIds: [...new Set(input.sourceIds || [])].filter(s => d.sources.some(x => x.id === s)).slice(0, 100), includeNotes: input.includeNotes === true, includeGoals: input.includeGoals === true });
       // Scope changes invalidate queued contexts, including older retries.
       d.brain.jobs = d.brain.jobs.filter(j => !["queued", "running", "failed"].includes(j.status));
-      a.lastTick = 0; a.fingerprint = ""; return a;
+      a.lastTick = 0; a.fingerprint = ""; a.revision = (a.revision || 0) + 1; return a;
     });
   }
   customTask(input) {
@@ -33,7 +33,7 @@ class CompanionAwareness {
     });
   }
   selected() { const d = this.store.data, a = d.brain.awareness; return d.notes.filter(n => n.sourceId ? a.sourceIds.includes(n.sourceId) : a.includeNotes && !n.insightId); }
-  fingerprint(notes = this.selected()) { const d = this.store.data, a = d.brain.awareness; return digest(JSON.stringify([notes.map(n => [n.id, n.text, n.updatedAt]), a.includeGoals ? d.goals : [], d.sources.filter(s => a.sourceIds.includes(s.id)).map(s => [s.id, s.error]), a.customTasks, a.model, a.model ? this.localModel(a.model) : true, a.mode])); }
+  fingerprint(notes = this.selected()) { const d = this.store.data, a = d.brain.awareness; return digest(JSON.stringify([notes.map(n => [n.id, n.text, n.updatedAt]), a.includeGoals ? d.goals : [], d.sources.filter(s => a.sourceIds.includes(s.id)).map(s => [s.id, s.error]), a.customTasks, a.model, a.model ? this.localModel(a.model) : true, a.mode, a.revision || 0])); }
   enqueue(kind = "reflection", manual = false) {
     const d = this.store.data, a = d.brain.awareness;
     if (a.mode === "off") throw new CompanionError("Turn on Observe or Assist before running Awareness.");
@@ -41,7 +41,7 @@ class CompanionAwareness {
     const notes = this.selected(), fingerprint = this.fingerprint(notes), key = digest(kind + fingerprint + (kind === "briefing" ? new Date().toISOString().slice(0, 10) : ""));
     const existing = d.brain.jobs.find(j => j.key === key && ["queued", "running", "done"].includes(j.status));
     if (existing && (!manual || existing.status !== "done")) return copy(existing);
-    if (!manual) { const failed = d.brain.jobs.find(j => j.key === key && j.status === "failed"); if (failed) return copy(failed); }
+    if (!manual) { const stopped = d.brain.jobs.find(j => j.key === key && ["failed", "cancelled"].includes(j.status)); if (stopped) return copy(stopped); }
     if (d.brain.jobs.filter(j => ["queued", "running"].includes(j.status)).length >= 30) throw new CompanionError("Awareness's queue is full. Let it finish or clear queued tasks.");
     return this.store.change(next => {
       const j = { id: id(), key, kind, name: { reflection: "Review changes and goals", briefing: "Daily briefing", summary: "Build source summaries" }[kind], fingerprint, noteIds: notes.map(n => n.id), status: "queued", attempts: 0, createdAt: Date.now(), manual };
