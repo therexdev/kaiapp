@@ -66,6 +66,9 @@ test("cold producer refuses local signing and disables even previously configure
   assert.equal(f.rewards.status().running, false);
   assert.equal((await f.rewards.tick("manual")).last.outcome, "external-wallet");
   await assert.rejects(f.custody.configure({ mode: "external", address: f.wallet.address }), /already has a private key/);
+  f.nodeMgr._desiredRunning = true;
+  await assert.rejects(f.custody.key({ rotate: true, confirm: true }), /Stop the node/);
+  f.nodeMgr._desiredRunning = false;
   f.nodeMgr.status = async () => ({ docker: { ok: true }, isRunning: true });
   await assert.rejects(f.custody.key({ rotate: true, confirm: true }), /Stop the node/);
 });

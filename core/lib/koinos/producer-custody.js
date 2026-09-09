@@ -26,7 +26,7 @@ class ProducerCustody {
   async stopped() {
     if (this.rewards._busy) throw new Error("Wait for the current reward operation to finish.");
     const s = await this.nodeMgr.status(this.chain.network().id);
-    if (!s.docker?.ok || s.isRunning || s.op?.running) throw new Error("Stop the node and wait for it to finish before changing producer custody or keys. Docker must be available to verify it is stopped.");
+    if (!s.docker?.ok || s.isRunning || s.op?.running || this.nodeMgr._op?.running || this.nodeMgr._desiredRunning) throw new Error("Stop the node and wait for it to finish before changing producer custody or keys. Docker must be available to verify it is stopped.");
   }
   async configure({ mode, address }) {
     if (!["local", "external"].includes(mode)) throw new Error("Choose local or external producer custody.");
