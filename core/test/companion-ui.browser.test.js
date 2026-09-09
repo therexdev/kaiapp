@@ -32,7 +32,7 @@ test("companion UI: Brain CRUD, API setup, workflow approval/recovery and respon
  assert.equal(hub.store.data.brain.awareness.mode,"assist");
  await page.locator('.hub-rail').getByRole("button", {name:"Goals & tasks",exact:true}).click();
  await page.getByRole("button",{name:"Add task",exact:true}).click();
- await page.getByLabel("Task",{exact:true}).fill("Review the Test installer");
+ await page.locator("#bn-task-editor").getByLabel("Task",{exact:true}).fill("Review the Test installer");
  await page.getByRole("button",{name:"Save task",exact:true}).click();
  await page.getByRole("heading",{name:"Review the Test installer",exact:true}).waitFor();
  assert.equal(hub.store.data.brain.tasks.length,1);

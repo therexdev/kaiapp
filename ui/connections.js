@@ -1,9 +1,11 @@
 "use strict";
 (() => {
   const catalogData = window.KaiConnectionCatalog;
-  const featured = catalogData.items;
   const bundledLogos = new Set(["gmail","googlecalendar","googledrive","notion","slack","github","linear","outlook","microsoft_teams","googlesheets","googledocs","airtable","dropbox","trello","asana","hubspot","salesforce","shopify","discord","zoom","youtube","spotify","figma","clickup"]);
-  const authLabel = t => t.authSchemes?.some(a => /OAUTH/.test(a)) ? "Account sign-in" : t.authSchemes?.includes("NO_AUTH") || !t.authSchemes?.length ? "No account required" : "API credentials";
+  const popular = [...bundledLogos];
+  const rank = slug => popular.includes(slug) ? popular.indexOf(slug) : popular.length;
+  const featured = [...catalogData.items].sort((a, b) => rank(a.slug) - rank(b.slug) || a.name.localeCompare(b.name));
+  const authLabel = t => t.authSchemes?.some(a => /OAUTH/.test(a)) ? "Account sign-in" : t.authSchemes?.includes("NO_AUTH") ? "No account required" : t.authSchemes?.length ? "API credentials" : "Provider setup";
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   const btn = (label, action, value = "", primary = false) => `<button type="button" class="cn-button${primary ? " cn-primary" : ""}" data-cn="${action}" data-value="${esc(value)}">${esc(label)}</button>`;
   const check = (name, title, detail, checked, disabled = false) => `<label class="cn-permission"><input type="checkbox" name="${name}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""}><span><strong>${esc(title)}</strong><small>${esc(detail)}</small></span></label>`;
@@ -67,7 +69,7 @@
     function drawExplore(out) {
       out.innerHTML = `<div class="cn-hero"><div><span class="cn-kicker">YOUR WORLD, CONNECTED</span><h2>Bring your everyday apps to KAI.</h2><p>One connection. More useful conversations, a richer Brain, and routines that follow through.</p></div><div class="cn-route"><span class="cn-route-dot"></span>${esc(modeLabel())}${btn("Change", "setup")}</div></div>
         <div data-cn-readiness></div><div class="cn-searchbar"><span aria-hidden="true">⌕</span><input type="search" id="cn-search" aria-label="Search apps" placeholder="Search apps, tools, or what you want to do…" value="${esc(search)}">${btn("Refresh", "refresh")}</div>
-        <div class="cn-categories"><label class="cn-category-picker">Category<select id="cn-category"><option value="">All apps</option>${categories.map(c => `<option value="${esc(c.id)}" ${c.id === category ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></label><label class="cn-category-picker">Connection type<select id="cn-auth"><option value="">All types</option>${["Account sign-in", "API credentials", "No account required"].map(a => `<option ${a === auth ? "selected" : ""}>${a}</option>`).join("")}</select></label></div>
+        <div class="cn-categories"><label class="cn-category-picker">Category<select id="cn-category"><option value="">All apps</option>${categories.map(c => `<option value="${esc(c.id)}" ${c.id === category ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></label><label class="cn-category-picker">Connection type<select id="cn-auth"><option value="">All types</option>${["Account sign-in", "API credentials", "No account required", "Provider setup"].map(a => `<option ${a === auth ? "selected" : ""}>${a}</option>`).join("")}</select></label></div>
         <div class="cn-list-heading"><h3>Explore apps</h3><span id="cn-count"></span></div><div class="cn-app-grid" id="cn-apps"></div><div class="cn-more" id="cn-more"></div>
         <div class="cn-bottom-note">Sign in securely, then choose the actions and data KAI can use. ${btn("Connection settings", "setup")}</div>`;
       drawCards();
@@ -165,6 +167,7 @@
       if (name === "category") { category = value; draw(); return catalog(); }
       if (name === "more") return catalog(true);
       if (name === "refresh") {
+        logoFailures.clear();
         try { await refresh(); } finally { if (alive()) { updateReadiness(); if (drawer?.kind === "app") drawDrawer(); else if (section === "connected") draw(); } }
         if (alive() && section === "explore") await catalog(); return;
       }

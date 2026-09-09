@@ -72,9 +72,9 @@ class CompanionStore {
       if (old) d.goals[d.goals.indexOf(old)] = g; else d.goals.push(g); return g;
     });
   }
-  search(query, count = 6) {
+  search(query, count = 6, filter = () => true) {
     this.requireStorage(); const q = new Set(tokens(String(query).slice(0, 2000)));
-    return this.data.notes.map(n => {
+    return this.data.notes.filter(filter).map(n => {
       const words = new Set(tokens(n.title + " " + n.tags.join(" ") + " " + n.text));
       let score = [...q].reduce((s, w) => s + (words.has(w) ? 1 : 0), 0);
       if (q.size && !score && !n.pinned) return null;
@@ -118,7 +118,7 @@ class CompanionStore {
       if (kind === "sources") { d.notes = d.notes.filter(n => n.sourceId !== key); d.syncs = d.syncs.filter(s => s.sourceId !== key); }
       if (d.brain) {
         d.brain.changes = d.brain.changes.filter(c => !forgotten.has(c.noteId));
-        d.brain.summaries = d.brain.summaries.filter(s => !s.noteIds?.some(n => forgotten.has(n)));
+        d.brain.summaries = d.brain.summaries.filter(s => !(kind === "goals" && s.sourceId === "global") && !s.noteIds?.some(n => forgotten.has(n)));
         const insights = new Set(d.brain.insights.filter(s => s.noteIds?.some(n => forgotten.has(n)) || kind === "goals").map(s => s.id));
         const learned = new Set(d.notes.filter(n => insights.has(n.insightId)).map(n => n.id));
         d.notes = d.notes.filter(n => !learned.has(n.id));

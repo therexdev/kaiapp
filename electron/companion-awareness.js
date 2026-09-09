@@ -33,7 +33,7 @@ class CompanionAwareness {
     });
   }
   selected() { const d = this.store.data, a = d.brain.awareness; return d.notes.filter(n => n.sourceId ? a.sourceIds.includes(n.sourceId) : a.includeNotes && !n.insightId); }
-  fingerprint(notes = this.selected()) { const d = this.store.data, a = d.brain.awareness; return digest(JSON.stringify([notes.map(n => [n.id, n.text, n.updatedAt]), a.includeGoals ? d.goals : [], a.customTasks, a.model, a.mode])); }
+  fingerprint(notes = this.selected()) { const d = this.store.data, a = d.brain.awareness; return digest(JSON.stringify([notes.map(n => [n.id, n.text, n.updatedAt]), a.includeGoals ? d.goals : [], d.sources.filter(s => a.sourceIds.includes(s.id)).map(s => [s.id, s.error]), a.customTasks, a.model, a.model ? this.localModel(a.model) : true, a.mode])); }
   enqueue(kind = "reflection", manual = false) {
     const d = this.store.data, a = d.brain.awareness;
     if (a.mode === "off") throw new CompanionError("Turn on Observe or Assist before running Awareness.");

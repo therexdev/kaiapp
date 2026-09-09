@@ -39,7 +39,7 @@ class CompanionBrain {
   search(input) {
     const query = String(input.query || "").trim().toLowerCase(), ix = this.index();
     const topic = ix.topics.find(t => t.id === input.topicId);
-    return this.store.search(query, 100).filter(n => (!input.sourceId || (n.sourceId || "personal") === input.sourceId) && (!topic || topic.noteIds.includes(n.id)) && (!input.since || n.updatedAt >= Number(input.since))).map(n => ({ ...n, ...ix.noteMeta[n.id] }));
+    return this.store.search(query, 100, n => (!input.sourceId || (n.sourceId || "personal") === input.sourceId) && (!topic || topic.noteIds.includes(n.id)) && (!input.since || n.updatedAt >= Number(input.since))).map(n => ({ ...n, ...ix.noteMeta[n.id] }));
   }
   task(input) {
     return this.store.change(d => {

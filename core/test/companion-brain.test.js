@@ -86,3 +86,9 @@ test("conversation sources read only selected chats, and public sources stop at 
   const web = hub.sources.save({ kind: "web", name: "Website", url: "https://example.com/" }); privacy("local-only"); await assert.rejects(hub.sync(web.id), /Local-Only/); assert.equal(fetched, 0);
   privacy("local-first"); await assert.rejects(hub.sync(web.id)); assert.equal(fetched, 1, "private redirect never fetched");
 });
+test("selected source errors trigger a new check even when indexed content did not change", async t => {
+  const { hub } = fixture(t); hub.importText("Project", "Project tasks"); const sourceId = hub.store.data.sources[0].id;
+  hub.awareness.settings(settings({ model: "", includeNotes: false, sourceIds: [sourceId] })); await hub.awareness.tick(); const old = hub.awareness.fingerprint();
+  hub.store.change(d => { d.sources[0].error = "Source returned HTTP 401."; }); assert.notEqual(hub.awareness.fingerprint(), old);
+  await hub.awareness.tick(); await hub.awareness.tick(); assert.ok(hub.store.data.brain.insights.some(i => i.text.includes("HTTP 401")));
+});
