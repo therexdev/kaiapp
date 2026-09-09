@@ -85,9 +85,12 @@ class DesktopProviders {
     const selection = http.parseModel(body?.model);
     if (!this.entries[selection.provider]?.models.some(m => m.id === selection.model)) throw new http.ProviderError("That model is no longer configured. Choose a model in Settings.");
     return this.run(selection.provider, async (key, combined) => {
-      for await (const text of http.complete(this.fetch, selection.provider, key, { ...body, providerModel: selection.model }, combined)) {
+      let result;
+      const guardedFetch = (url, init) => { this.online(); combined.throwIfAborted(); return this.fetch(url, init); };
+      for await (const text of http.complete(guardedFetch, selection.provider, key, { ...body, providerModel: selection.model }, combined, value => { result = value; })) {
         this.online(); combined.throwIfAborted(); onDelta(text);
       }
+      this.online(); combined.throwIfAborted(); return result;
     }, signal);
   }
 }
@@ -124,7 +127,7 @@ function registerProviderIPC({ ipcMain, service, origin, getMainWindow, getMasco
     sender.on("destroyed", stop); sender.on("render-process-gone", stop); sender.on("did-start-navigation", navigate);
     jobs.set(key, controller);
     const emit = payload => { if (!sender.isDestroyed() && allowed(event) && event.senderFrame === frame) frame.send("providers:delta", { id, ...payload }); };
-    service.chat(body, content => emit({ content }), controller.signal).then(() => emit({ done: true }), error => emit({
+    service.chat(body, content => emit({ content }), controller.signal).then(result => emit({ done: true, ...result }), error => emit({
       error: error instanceof http.ProviderError ? error.message : error.name === "AbortError" ? "Stopped" : "The provider request failed.", aborted: error.name === "AbortError",
     })).finally(() => {
       jobs.delete(key); sender.removeListener("destroyed", stop); sender.removeListener("render-process-gone", stop); sender.removeListener("did-start-navigation", navigate);

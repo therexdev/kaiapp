@@ -90,7 +90,7 @@ test("Local activity catches quiet speech sooner, keeps the onset and bounds con
 
 function listening(options = {}) {
   const listener = new Listener({ transcribe: async () => ({ text: "" }), wakeRequest,
-    onCommand() {}, onState() {}, onError: assert.fail, ...options });
+    onCommand() {}, onState() {}, onError: assert.fail, turnPause: "quick", ...options });
   listener.active = true; listener.context = { sampleRate: 16000, close: async () => {} };
   listener.activity = new Activity(16000, { sensitivity: listener.sensitivity });
   for (let i = 0; i < 6; i++) listener.frame(new Float32Array(1600));
@@ -243,6 +243,9 @@ test("A stalled recognition cannot hold playback forever or toggle microphone ca
   for (let i = 0; i < 3; i++) listener.frame(new Float32Array(1600).fill(.03));
   assert.deepEqual(events, ["pause", "resume"], "Repeated candidates cannot re-pause this reply after timeout");
   complete({ text: "Actually, change the subject." }); await job;
+  assert.deepEqual(calls, [], "Wait while the user continues speaking during recognition");
+  let next; for (let i = 0; i < 5; i++) next = listener.frame(new Float32Array(1600)) || next;
+  complete({ text: "" }); await next;
   assert.deepEqual(calls, ["Actually, change the subject."], "A late confirmed interruption is still accepted");
 });
 

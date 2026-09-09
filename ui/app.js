@@ -1010,7 +1010,9 @@ async function send(replayText) {
     let servedModel = null;
     let lastPaint = 0;
     let tFirst = null;
-    for await (const { content, model, served } of sseDeltas(resp.body)) {
+    let replyWarning = "";
+    for await (const { content, model, served, warning } of sseDeltas(resp.body)) {
+      if (warning) replyWarning = warning;
       if (model) servedBy = model;
       if (served) servedModel = served;
       if (content) {
@@ -1027,6 +1029,10 @@ async function send(replayText) {
       }
     }
     bubble.innerHTML = mdToHtml(acc);
+    if (replyWarning) {
+      const note = document.createElement("div"); note.className = "route-tag"; note.setAttribute("role", "status");
+      note.textContent = replyWarning; bubble.appendChild(note);
+    }
     if (acc) attachMsgActions(bubble);
     $("messages").scrollTop = $("messages").scrollHeight;
     // §29 transparency: a Local-First answer that overflowed to the network
@@ -1099,7 +1105,7 @@ async function* sseDeltas(body) {
         if (data === "[DONE]") return;
         try {
           const j = JSON.parse(data);
-          yield { content: j.choices?.[0]?.delta?.content || "", model: j.model || null, served: j.servedModel || null };
+          yield { content: j.choices?.[0]?.delta?.content || "", model: j.model || null, served: j.servedModel || null, warning: j.warning };
         } catch {
           /* keep-alive or non-JSON frame */
         }

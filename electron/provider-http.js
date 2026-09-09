@@ -105,25 +105,79 @@ async function* events(body) {
     }
   } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
 }
-async function* complete(fetchImpl, id, key, body, signal) {
-  const input = messagesFor(id, body.messages);
-  const max = Math.max(id === "openai" ? 2048 : 256, Math.min(16384, Number(body.max_tokens) || (id === "openai" ? 8192 : 4096)));
+async function* attempt(fetchImpl, id, key, body, input, max, signal, buffered) {
+  signal.throwIfAborted();
   const wire = id === "openai" ? { model: modelId(body.providerModel), input: input.turns,
     ...(input.system ? { instructions: input.system } : {}), max_output_tokens: max, store: false, stream: true } :
     { model: modelId(body.providerModel), messages: input.turns, ...(input.system ? { system: input.system } : {}), max_tokens: max, stream: true };
   const r = await request(fetchImpl, id, key, id === "openai" ? "/responses" : "/messages", { method: "POST", signal, body: JSON.stringify(wire) });
-  let terminal = false, text = false;
+  let terminal = false, text = "", reason = "stop";
   for await (const e of events(r.body)) {
     signal.throwIfAborted();
     if (e.type === "error" || e.type === "response.failed") fail(provider(id).label + " could not finish the response. Check your account or try again.");
-    if (e.type === "response.incomplete" || (e.type === "message_delta" && e.delta?.stop_reason === "max_tokens")) fail("The reply reached its output limit. Ask for a shorter response.");
+    if (id === "openai" && e.type === "response.incomplete") {
+      if (e.response?.incomplete_details?.reason !== "max_output_tokens") fail("OpenAI could not complete this response. Try a different question.");
+      reason = "length"; terminal = true; break;
+    }
+    if (id === "anthropic" && e.type === "message_delta") {
+      if (e.delta?.stop_reason === "max_tokens") reason = "length";
+      if (e.delta?.stop_reason === "model_context_window_exceeded") reason = "context";
+    }
     const delta = id === "openai" ? (["response.output_text.delta", "response.refusal.delta"].includes(e.type) ? e.delta : "") :
       e.type === "content_block_delta" && e.delta?.type === "text_delta" ? e.delta.text :
       e.type === "content_block_start" && e.content_block?.type === "text" ? e.content_block.text : "";
-    if (typeof delta === "string" && delta) { text = true; yield delta; }
+    if (typeof delta === "string" && delta) {
+      text += delta;
+      if (text.length > 128000) fail("The provider returned too much text. Please narrow the request.");
+      if (!buffered) yield delta;
+    }
     if (e.type === "response.completed" || e.type === "message_stop") { terminal = true; break; }
   }
   if (!terminal) fail("The provider connection ended before the reply finished. Try again.");
-  if (!text) fail("The provider returned no text. Try a different model or question.");
+  signal.throwIfAborted();
+  return { text, reason };
+}
+async function* complete(fetchImpl, id, key, body, signal, onFinish = () => {}) {
+  let input = messagesFor(id, body.messages);
+  const buffered = body.stream === false, requested = Number(body.max_tokens);
+  const floor = id === "openai" ? (buffered ? 4096 : 2048) : (buffered ? 2048 : 256);
+  let max = Math.max(floor, Math.min(16384, Number.isFinite(requested) && requested > 0 ? Math.floor(requested) : (buffered ? floor : id === "openai" ? 8192 : 4096)));
+  let output = "";
+  // Only a confirmed token limit gets one recovery request. HTTP failures,
+  // dropped streams and refusals never retry or switch providers. Both calls
+  // share the original deadline, privacy guard and Stop signal.
+  for (let n = 0; n < 2; n++) {
+    const result = yield* attempt(fetchImpl, id, key, body, input, max, signal, buffered);
+    if (!buffered) output += result.text;
+    if (n > 0 && !buffered && output.trim() && !result.text.trim()) result.reason = "length";
+    if (result.reason === "stop") {
+      if (!(buffered ? result.text : output).trim()) fail("The provider returned no text. Try a different model or question.");
+      if (buffered) yield result.text;
+      onFinish({ finishReason: "stop" }); return;
+    }
+    if (n === 0 && result.reason === "length" && (max < 16384 || (!buffered && output.trim()))) {
+      // Text continuation can reuse the proven allowance, including older
+      // models with a 4096-token maximum. Empty reasoning/plans need more room.
+      if (buffered || !output.trim()) max = Math.min(16384, max * 2);
+      if (!buffered && output.trim()) {
+        // A new user turn works with models that reject assistant prefilling.
+        // This resumes text only; no tool or desktop action is replayed.
+        const continuation = [...body.messages,
+          { role: "assistant", content: output },
+          { role: "user", content: "Your answer was cut off at its output limit. Continue exactly where it stopped, completing any unfinished word or sentence. Do not repeat the previous text or add a preamble. Finish concisely. This requests only the rest of the answer, not any new action." }];
+        if (continuation.length > 200 || JSON.stringify(continuation).length > 12_000_000) result.reason = "context";
+        else input = messagesFor(id, continuation);
+      }
+      // In buffered planning, discard the incomplete JSON and regenerate the
+      // original request. No partial plan is ever released to the tool parser.
+      if (result.reason === "length") continue;
+    }
+    if (buffered) fail("KAI could not finish planning this request. Try one task at a time.");
+    if (!output.trim()) fail("The model used its output budget before answering. Try a simpler question or another model.");
+    onFinish({ finishReason: "length", warning: result.reason === "context" ?
+      "This conversation is full. The partial answer is kept here; start a new chat to continue." :
+      "This long answer is still incomplete. The text is kept here; ask KAI to continue." });
+    return;
+  }
 }
 module.exports = { PROVIDERS, ProviderError, provider, modelId, parseModel, listModels, complete, messagesFor };

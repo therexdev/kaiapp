@@ -504,12 +504,14 @@
     } catch (error) { failed(error); }
   }
   function interruptResponse(keepContext = true) {
+    voiceCommandEpoch++;
     if (keepContext && currentRequest) currentRequest.keepUser = true;
     chatAbort?.abort(); bridge?.cancelAction?.(); stopSpeech();
   }
   const wakeListener = new KaiWake.Listener({
     wakeRequest: api.wakeRequest,
     sensitivity: read("kai-mascot-sensitivity", "tv"),
+    turnPause: read("kai-mascot-turn-pause", "natural"),
     interruptWithWake: true,
     onLevel: (rms, threshold) => {
       $("mic-level").max = threshold ? threshold * 3 : 1;
@@ -529,9 +531,9 @@
     onInterrupt: () => speech.hold(true),
     onResume: () => speech.hold(false),
     onCommand: async text => {
-      const epoch = ++voiceCommandEpoch;
       if (!wakeEnabled || suspended) return;
       interruptResponse();
+      const epoch = voiceCommandEpoch;
       await activeTask; // Commit the interrupted turn before the next prompt.
       if (epoch !== voiceCommandEpoch || !wakeEnabled || suspended) return;
       if ($("question").value.trim()) {
@@ -547,12 +549,17 @@
     },
   });
   $("mic-sensitivity").value = ["tv", "balanced", "quiet"].includes(wakeListener.sensitivity) ? wakeListener.sensitivity : "tv";
+  $("turn-pause").value = wakeListener.turnPause;
   function listeningOptions() {
+    voiceCommandEpoch++;
     const sensitivity = $("mic-sensitivity").value;
     write("kai-mascot-sensitivity", sensitivity);
-    wakeListener.configure({ sensitivity, interruptWithWake: true });
+    const turnPause = $("turn-pause").value;
+    write("kai-mascot-turn-pause", turnPause);
+    wakeListener.configure({ sensitivity, turnPause, interruptWithWake: true });
   }
   $("mic-sensitivity").addEventListener("change", listeningOptions);
+  $("turn-pause").addEventListener("change", listeningOptions);
   $("voice-tone").value = voiceTone;
   const squeakUI = () => {
     $("voice-squeak-control").hidden = voiceTone !== "cute";
@@ -637,6 +644,7 @@
     if (!model && !folder && !destination && !website) {
       notice("Open the full app to choose a chat model so KAI can answer, then try again."); mood("error"); return;
     }
+    if (source !== "voice") wakeListener.cancelTurn();
     stopSpeech(); notice(""); toolActivity = null; busy = true; mood("thinking");
     const request = currentRequest = { keepUser: source === "voice" };
     if (voiceReplies) { ensureNatural(); warmSpeech(); }
@@ -696,7 +704,7 @@
           onObservation: value => { observations.push(value); request.keepUser = true; },
           askModel: async (messages, signal, options = {}) => {
             const response = await KaiProviders.chatFetch("/core/chat/completions", { method: "POST", headers: { "content-type": "application/json" }, signal,
-              body: JSON.stringify({ model, stream: false, max_tokens: 450, messages, ...(options.privateDesktop ? { kai_private_desktop: true } : {}) }) });
+              body: JSON.stringify({ model, stream: false, max_tokens: KaiProviders.isModel(model) ? 2048 : 450, messages, ...(options.privateDesktop ? { kai_private_desktop: true } : {}) }) });
             let output = ""; for await (const delta of api.completion(response)) output += delta.content; return output;
           },
         });
@@ -710,6 +718,7 @@
           messages: api.messagesFor(history, contextSize, phase.context) }),
       });
       for await (const delta of api.completion(response)) {
+        if (delta.warning) notice(delta.warning);
         if (delta.content) content += delta.content;
         enqueueSpeech(phrases.push(content), replyEpoch);
         if (delta.model === "koinos-network" || delta.model?.startsWith("koinos-network:")) served = "Answered on the Koinos Network";
@@ -804,7 +813,7 @@
   $("question").addEventListener("keydown", event => {
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); ask(); }
   });
-  $("stop").onclick = $("quick-stop").onclick = () => { interruptResponse(false); if (!busy) mood("idle"); };
+  $("stop").onclick = $("quick-stop").onclick = () => { wakeListener.cancelTurn(); interruptResponse(false); if (!busy) mood("idle"); };
   $("wake-toggle").onclick = toggleWake; $("quick-wake").onclick = toggleWake;
   $("voice-options").onclick = () => voiceOptions($("voice-options-panel").hidden);
   $("close-voice-options").onclick = () => voiceOptions(false);
@@ -879,7 +888,7 @@
   document.addEventListener("keydown", event => {
     if (event.key === "Escape") {
       if (voicePending || wakePhase === "capturing") stopWake();
-      else if (busy || speaking) { chatAbort?.abort(); bridge?.cancelAction?.(); stopSpeech(); }
+      else if (busy || speaking) { wakeListener.cancelTurn(); interruptResponse(false); }
       else if (!$("voice-options-panel").hidden) voiceOptions(false);
       else if (!$("mascot-menu").hidden) { $("mascot-menu").hidden = true; regions(); }
       else expand(false);

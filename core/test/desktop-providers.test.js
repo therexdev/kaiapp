@@ -26,6 +26,112 @@ function sse(events, split = false) {
   return new Response(new ReadableStream({ start(c) { if (split) for (const byte of bytes) c.enqueue(Uint8Array.of(byte)); else c.enqueue(bytes); c.close(); } }));
 }
 const turn = model => ({ model, stream: true, messages: [{ role: "system", content: "Be KAI." }, { role: "user", content: "Hello" }] });
+function reply(id, text, limited = false) {
+  return id === "openai" ? sse([{ type: "response.output_text.delta", delta: text }, limited ?
+    { type: "response.incomplete", response: { incomplete_details: { reason: "max_output_tokens" } } } : { type: "response.completed" }]) :
+    sse([{ type: "content_block_delta", delta: { type: "text_delta", text } },
+      { type: "message_delta", delta: { stop_reason: limited ? "max_tokens" : "end_turn" } }, { type: "message_stop" }]);
+}
+
+for (const id of ["anthropic", "openai"]) {
+  test(`${id}: short planning budget gets room and one clean retry, never releasing truncated JSON`, async t => {
+    const calls = [], chunks = [], model = id === "openai" ? "gpt-fixture" : "claude-fixture";
+    const plan = '{"tool":"app_open","args":{"view":"chat"}}';
+    const { service } = fixture(t, { fetchImpl: async (_url, init) => {
+      calls.push(JSON.parse(init.body)); assert.deepEqual(chunks, []);
+      return reply(id, calls.length === 1 ? '{"tool":"app_open","args":' : plan, calls.length === 1);
+    } }); service.save(id, { key, model });
+    const body = { ...turn(`desktop:${id}:${model}`), stream: false, max_tokens: 450 };
+    await service.chat(body, text => chunks.push(text));
+    assert.deepEqual(chunks, [plan]); assert.equal(calls.length, 2);
+    const cap = id === "openai" ? "max_output_tokens" : "max_tokens", messages = id === "openai" ? "input" : "messages";
+    assert.equal(calls[0][cap], id === "openai" ? 4096 : 2048);
+    assert.equal(calls[1][cap], calls[0][cap] * 2);
+    assert.deepEqual(calls[1][messages], calls[0][messages], "Restart the plan, never concatenate broken JSON");
+    assert.equal(body.max_tokens, 450, "Do not mutate the caller's request");
+  });
+  test(`${id}: a long streamed answer continues once in the same private conversation`, async t => {
+    const calls = [], chunks = [], model = id === "openai" ? "gpt-fixture" : "claude-fixture";
+    const { service } = fixture(t, { fetchImpl: async (url, init) => {
+      calls.push({ url, body: JSON.parse(init.body), signal: init.signal });
+      if (calls.length === 2) assert.equal(chunks.join(""), "The answer is ");
+      return reply(id, calls.length === 1 ? "The answer is " : "forty-two.", calls.length === 1);
+    } }); service.save(id, { key, model });
+    const result = await service.chat(turn(`desktop:${id}:${model}`), text => chunks.push(text));
+    assert.equal(chunks.join(""), "The answer is forty-two."); assert.equal(result.finishReason, "stop"); assert.equal(calls.length, 2);
+    assert.equal(calls[0].signal, calls[1].signal); assert.equal(calls[0].url, calls[1].url);
+    const turns = calls[1].body[id === "openai" ? "input" : "messages"];
+    assert.equal(turns.at(-2).role, "assistant"); assert.match(JSON.stringify(turns.at(-2)), /The answer is/);
+    assert.equal(turns.at(-1).role, "user"); assert.match(JSON.stringify(turns.at(-1)), /not any new action/);
+    if (id === "openai") assert.equal(calls[1].body.store, false);
+  });
+  test(`${id}: repeated limits stop at two calls, preserving partial replies and refusing partial plans`, async t => {
+    let calls = 0, content = ""; const model = id === "openai" ? "gpt-fixture" : "claude-fixture";
+    const { service } = fixture(t, { fetchImpl: async () => { calls++; return reply(id, "More text. ", true); } }); service.save(id, { key, model });
+    const result = await service.chat(turn(`desktop:${id}:${model}`), text => { content += text; });
+    assert.equal(calls, 2); assert.equal(content, "More text. More text. "); assert.equal(result.finishReason, "length"); assert.match(result.warning, /incomplete/);
+    content = ""; calls = 0;
+    await assert.rejects(service.chat({ ...turn(`desktop:${id}:${model}`), stream: false }, text => { content += text; }), /planning/);
+    assert.equal(content, ""); assert.equal(calls, 2);
+  });
+  test(`${id}: Stop prevents continuation and cancels a continuation already running`, async t => {
+    let calls = 0, started;
+    const model = id === "openai" ? "gpt-fixture" : "claude-fixture", controller = new AbortController();
+    const { service } = fixture(t, { fetchImpl: async (_url, { signal }) => {
+      calls++;
+      if (calls === 1) return reply(id, "First part. ", true);
+      started?.(); return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+    } }); service.save(id, { key, model });
+    await assert.rejects(service.chat(turn(`desktop:${id}:${model}`), () => controller.abort(), controller.signal), { name: "AbortError" });
+    assert.equal(calls, 1);
+    calls = 0; const stop = new AbortController(), ready = new Promise(r => { started = r; });
+    const job = service.chat(turn(`desktop:${id}:${model}`), () => {}, stop.signal);
+    const rejected = assert.rejects(job, { name: "AbortError" }); await ready; stop.abort(); await rejected;
+    assert.equal(calls, 2); assert.equal(service.active.size, 0);
+  });
+}
+test("Only a confirmed output limit recovers; safety stops and incomplete Anthropic streams do not", async t => {
+  let calls = 0, response;
+  const { service } = fixture(t, { fetchImpl: async () => { calls++; return response; } });
+  service.save("openai", { key, model: "gpt-fixture" }); service.save("anthropic", { key, model: "claude-fixture" });
+  response = sse([{ type: "response.incomplete", response: { incomplete_details: { reason: "content_filter" } } }]);
+  await assert.rejects(service.chat(turn("desktop:openai:gpt-fixture"), () => {}), /could not complete/); assert.equal(calls, 1);
+  response = sse([{ type: "message_delta", delta: { stop_reason: "max_tokens" } }]);
+  await assert.rejects(service.chat(turn("desktop:anthropic:claude-fixture"), () => {}), /ended before/); assert.equal(calls, 2);
+});
+test("Switching to Local-Only between a partial answer and its continuation blocks the next request immediately", async t => {
+  let mode = "local-first", calls = 0;
+  const { service } = fixture(t, { privacyMode: () => mode, fetchImpl: async () => { calls++; return reply("anthropic", "A partial answer. ", true); } });
+  service.save("anthropic", { key, model: "claude-fixture" });
+  await assert.rejects(service.chat(turn("desktop:anthropic:claude-fixture"), () => { mode = "local-only"; }), /Local-Only/);
+  assert.equal(calls, 1);
+});
+test("Empty continuations and a full history preserve an explicitly incomplete answer", async t => {
+  let calls = 0;
+  const { service } = fixture(t, { fetchImpl: async () => { calls++; return reply("anthropic", calls === 1 ? "Partial answer" : "", calls === 1); } });
+  service.save("anthropic", { key, model: "claude-fixture" });
+  const result = await service.chat(turn("desktop:anthropic:claude-fixture"), () => {});
+  assert.equal(calls, 2); assert.equal(result.finishReason, "length");
+  calls = 0;
+  const full = { ...turn("desktop:anthropic:claude-fixture"), messages: Array.from({ length: 200 }, (_, i) => ({ role: i % 2 ? "user" : "assistant", content: "Hello" })) };
+  const bounded = await service.chat(full, () => {});
+  assert.equal(calls, 1); assert.equal(bounded.finishReason, "length"); assert.match(bounded.warning, /conversation is full/);
+});
+test("Recovered planning still asks permission and runs an app mutation only once", async t => {
+  let requests = 0, approvals = 0, actions = 0;
+  const plan = JSON.stringify({ tool: "app_action", args: { action: "stop_earning", args: {} } });
+  const { service } = fixture(t, { fetchImpl: async () => { requests++;
+    return reply("anthropic", requests === 1 ? plan.slice(0, -8) : requests === 2 ? plan : '{"answer":true}', requests === 1);
+  } }); service.save("anthropic", { key, model: "claude-fixture" });
+  await require("../../ui/mascot-tools").run({ question: "Stop earning", signal: new AbortController().signal,
+    json: async (url, init) => {
+      if (url === "/core/tools") return { tools: [{ name: "app_action", sensitive: true, params: {} }] };
+      assert.equal(JSON.parse(init.body).confirmed, true); actions++; return { ok: true, result: "Earning stopped." };
+    }, confirm: async () => { approvals++; return true; },
+    askModel: async messages => { let text = ""; await service.chat({ model: "desktop:anthropic:claude-fixture", stream: false, max_tokens: 450, messages }, delta => { text += delta; }); return text; },
+  });
+  assert.equal(requests, 3); assert.equal(approvals, 1); assert.equal(actions, 1);
+});
 
 test("desktop provider keys survive encrypted restart; status and backups never contain plaintext", t => {
   const { service, params, dir } = fixture(t);

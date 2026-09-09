@@ -148,6 +148,7 @@ test("KAI UI: natural default, compact voice, follow-ups, barge-in context, hist
   assert.equal(fixture.state.transcriptions.length, 0, "Steady room noise must not start a transcription loop");
   const streamCount = await page.evaluate(() => window.__streams.length);
   assert.equal(await page.inputValue("#mic-sensitivity"), "tv");
+  assert.equal(await page.inputValue("#turn-pause"), "natural");
   assert.equal(await page.inputValue("#voice-tone"), "cute");
   assert.equal(await page.inputValue("#speech-start"), "quick");
   fixture.state.speechDelay = 900; fixture.state.speechSeconds = .6;
@@ -213,11 +214,24 @@ test("KAI UI: natural default, compact voice, follow-ups, barge-in context, hist
   await utterance("What should we eat on the trip?");
   await page.waitForFunction(() => document.querySelectorAll(".message.user").length === 5); await idle();
   assert.equal(fixture.state.requests.at(-1).messages.at(-1).content, "What should we eat on the trip?");
+  // Real continuous capture: speaking again while the first transcription is
+  // in flight produces one complete question, not two competing replies.
+  const beforeJoined = fixture.state.requests.length;
+  fixture.state.transcribeDelay = 1800;
+  const firstPart = page.waitForRequest(r => r.url().endsWith("/core/transcribe"));
+  await utterance("Can you tell me about"); await firstPart;
+  fixture.state.transcribeDelay = 0;
+  await utterance("the waterfront in Seattle?");
+  await page.waitForFunction(() => document.querySelectorAll(".message.user").length === 6); await idle();
+  assert.equal(fixture.state.requests.length, beforeJoined + 1);
+  assert.equal(fixture.state.requests.at(-1).messages.at(-1).content, "Can you tell me about the waterfront in Seattle?");
+  assert.equal(await page.evaluate(() => window.__streams.length), streamCount);
   await utterance("That's all.");
   await page.waitForFunction(() => document.querySelector("#mood-label").textContent.includes("Hey KAI"));
   const ambientBefore = fixture.state.requests.length, transcribedBefore = fixture.state.transcriptions.length;
+  const ambientRecognition = page.waitForResponse(r => r.url().endsWith("/core/transcribe"));
   await utterance("Private background conversation.");
-  await page.waitForTimeout(700);
+  await ambientRecognition;
   assert.ok(fixture.state.transcriptions.length > transcribedBefore); assert.equal(fixture.state.requests.length, ambientBefore);
   await utterance("Hey Kay, bring up my Pictures folder.");
   await page.waitForFunction(() => window.__folderRequests.length === 1); await idle();
@@ -248,6 +262,11 @@ test("KAI UI: natural default, compact voice, follow-ups, barge-in context, hist
   }));
   await page.click("#preview-voice"); await page.waitForFunction(() => !document.querySelector("#stop").hidden); await idle();
   await screenshot("kai-voice-options");
+  await page.selectOption("#turn-pause", "patient");
+  assert.equal(await page.evaluate(() => localStorage.getItem("kai-mascot-turn-pause")), "patient");
+  await page.locator("#turn-pause").scrollIntoViewIfNeeded();
+  assert.equal(await page.locator("#turn-pause").evaluate(el => getComputedStyle(el).width), await page.locator("#mic-sensitivity").evaluate(el => getComputedStyle(el).width));
+  await screenshot("kai-conversation-pauses");
   await page.selectOption("#voice-tone", "natural");
   assert.equal(await page.evaluate(() => localStorage.getItem("kai-mascot-voice-tone")), "natural");
   // Named OS voices remain an explicit choice; sentence streaming stays exact.

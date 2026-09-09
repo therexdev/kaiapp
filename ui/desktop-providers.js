@@ -45,7 +45,11 @@
       if (event.error) return error(event.error, event.aborted);
       if (event.content) controller.enqueue(encoder.encode("data: " + JSON.stringify({ model: body.model,
         servedModel: label(body.model), choices: [{ delta: { content: event.content } }] }) + "\n\n"));
-      if (event.done) { finished = true; cleanup(); controller.enqueue(encoder.encode("data: [DONE]\n\n")); controller.close(); }
+      if (event.done) {
+        finished = true; cleanup();
+        controller.enqueue(encoder.encode("data: " + JSON.stringify({ choices: [{ delta: {}, finish_reason: event.finishReason || "stop" }], warning: event.warning }) + "\n\n"));
+        controller.enqueue(encoder.encode("data: [DONE]\n\n")); controller.close();
+      }
     });
     signal?.addEventListener("abort", abort, { once: true });
     bridge.chat(id, body).then(result => { if (!result?.ok) error(result?.error || "Could not start the provider request.", result?.aborted); }, () => error("Desktop provider connection unavailable."));
@@ -61,7 +65,7 @@
       while ((at = buffer.indexOf("\n\n")) >= 0) {
         const frame = buffer.slice(0, at); buffer = buffer.slice(at + 2);
         const data = frame.slice(6);
-        if (data !== "[DONE]") content += JSON.parse(data).choices[0].delta.content;
+        if (data !== "[DONE]") content += JSON.parse(data).choices[0].delta.content || "";
       }
     }
     return Response.json({ model: body.model, choices: [{ message: { role: "assistant", content } }] });

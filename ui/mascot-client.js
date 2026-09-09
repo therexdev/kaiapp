@@ -48,7 +48,7 @@
       try { value = JSON.parse(data); } catch { throw new Error("The reply stream contained an unreadable message. Please try again."); }
       if (value.error) throw new Error(value.error.message || String(value.error));
       if (value.choices?.[0]?.finish_reason != null) finished = true;
-      return { content: value.choices?.[0]?.delta?.content || "", model: value.model, served: value.servedModel };
+      return { content: value.choices?.[0]?.delta?.content || "", model: value.model, served: value.servedModel, warning: value.warning };
     }
     try {
       for (;;) {

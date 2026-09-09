@@ -5,6 +5,7 @@
 })(typeof window !== "undefined" ? window : globalThis, function () {
   "use strict";
   const FOLLOW_UP_MS = 60000;
+  const TURN_PAUSES = Object.freeze({ quick: 500, natural: 900, patient: 1400 });
   const SENSITIVITY = Object.freeze({
     quiet: { level: .004, ratio: 1.8, voiceMs: 180 },
     balanced: { level: .012, ratio: 2.2, voiceMs: 240 },
@@ -41,7 +42,7 @@
       }
       this.reset(); return audio;
     }
-    push(frame, { adapt = true, voiceMs = this.profile.voiceMs } = {}) {
+    push(frame, { adapt = true, voiceMs = this.profile.voiceMs, silenceMs = 500 } = {}) {
       if (!frame.length) return null;
       const rms = Math.sqrt(frame.reduce((s, v) => s + v * v, 0) / frame.length);
       this.rms = rms;
@@ -79,13 +80,14 @@
       }
       this.frames.push(frame); this.length += frame.length;
       if (speech) { this.voiced += ms; this.silence = 0; } else this.silence += ms;
-      if (this.silence < 500 && this.length < this.rate * 20) return null;
+      if (this.silence < silenceMs && this.length < this.rate * 20) return null;
       return this.finish();
     }
   }
   class Listener {
-    constructor({ transcribe, wakeRequest, onCommand, onState, onError, onInterrupt = () => {}, onResume = () => {}, onEnd = () => {}, onLevel = () => {}, sensitivity = "tv", interruptWithWake = false, followUpMs = FOLLOW_UP_MS, interruptMs = 8000, transcribeMs = 30000 }) {
+    constructor({ transcribe, wakeRequest, onCommand, onState, onError, onInterrupt = () => {}, onResume = () => {}, onEnd = () => {}, onLevel = () => {}, sensitivity = "tv", turnPause = "natural", interruptWithWake = false, followUpMs = FOLLOW_UP_MS, interruptMs = 8000, transcribeMs = 30000 }) {
       Object.assign(this, { transcribe, wakeRequest, onCommand, onState, onError, onInterrupt, onResume, onEnd, onLevel, sensitivity, interruptWithWake, followUpMs, interruptMs, transcribeMs });
+      this.turnPause = Object.hasOwn(TURN_PAUSES, turnPause) ? turnPause : "natural";
       this.epoch = 0; this.active = false; this.paused = false; this.engaged = false;
       this.queue = []; this.output = []; this.responding = false; this.serial = 0; this.wakeSerial = null; this.playback = false; this.failures = 0; this.rejectedInterruptions = 0;
     }
@@ -134,12 +136,12 @@
       clearTimeout(this.timer);
       if (!this.engaged || !this.active) return;
       this.timer = setTimeout(() => {
-        if (this.responding || this.processing || this.activity?.frames.length) return this.armTimer();
+        if (this.responding || this.processing || this.pendingTurn || this.activity?.frames.length) return this.armTimer();
         this.endConversation();
       }, this.followUpMs);
       this.timer.unref?.();
     }
-    endConversation() { this.engaged = false; this.wakeSerial = null; clearTimeout(this.timer); this.state(); }
+    endConversation() { this.clearTurn(); this.engaged = false; this.wakeSerial = null; clearTimeout(this.timer); this.state(); }
     setResponding(value) {
       if (this.responding === value) return;
       this.responding = value;
@@ -153,9 +155,10 @@
       if (this.playback && !value) this.echoUntil = Date.now() + 1200;
       this.playback = !!value;
     }
-    configure({ sensitivity, interruptWithWake }) {
+    configure({ sensitivity, interruptWithWake, turnPause = this.turnPause }) {
       this.sensitivity = Object.hasOwn(SENSITIVITY, sensitivity) ? sensitivity : "tv";
       this.interruptWithWake = !!interruptWithWake;
+      this.turnPause = Object.hasOwn(TURN_PAUSES, turnPause) ? turnPause : "natural";
       // Discard candidates captured under the old setting, without reopening
       // the device or losing the active conversation.
       const wasPaused = this.paused;
@@ -188,8 +191,37 @@
     pause(value) {
       if (this.paused === value) return;
       this.paused = value;
-      this.activity?.reset(); this.segment = null; this.queue = [];
+      this.clearTurn(); this.activity?.reset(); this.segment = null; this.queue = [];
       this.abort?.abort(); this.releaseInterruption(); this.state();
+    }
+    clearTurn() { clearTimeout(this.turnTimer); this.pendingTurn = null; }
+    cancelTurn() { const wasPaused = this.paused; this.pause(true); this.pause(wasPaused); }
+    collect(command, item, epoch) {
+      if (!this.pendingTurn) {
+        this.pendingTurn = { text: "", serial: item.serial, epoch };
+        this.turnTimer = setTimeout(() => {
+          if (!this.pendingTurn || epoch !== this.epoch) return;
+          this.cancelTurn();
+          this.onError(new Error("That question was getting long. Please ask one part at a time."), { recoverable: true });
+        }, 45000);
+        this.turnTimer.unref?.();
+      }
+      const text = [this.pendingTurn.text, command].filter(Boolean).join(" ");
+      if (text.length > 12000) {
+        this.cancelTurn(); this.onError(new Error("Please ask a shorter question."), { recoverable: true }); return;
+      }
+      this.pendingTurn.text = text;
+    }
+    async deliverTurn(epoch = this.epoch) {
+      if (this.processing || this.delivering || !this.pendingTurn || this.queue.length || this.activity?.frames.length ||
+          !this.active || this.paused || epoch !== this.epoch) return;
+      const turn = this.pendingTurn;
+      this.clearTurn();
+      if (turn.epoch !== epoch) return;
+      this.delivering = true;
+      try { await this.onCommand(turn.text); this.releaseInterruption(turn.serial); }
+      catch (error) { if (epoch === this.epoch && !this.paused) this.onError(error, { recoverable: true }); }
+      finally { if (epoch === this.epoch) { this.delivering = false; this.state(); } }
     }
     frame(data, epoch = this.epoch) {
       if (!this.active || this.paused || epoch !== this.epoch) return;
@@ -201,7 +233,10 @@
       if (this.playback) this.segment.echo = this.echoText();
       // A single spoken "KAI" may be shorter than normal conversational speech.
       // It still has to pass the room's loudness threshold and name recognition.
-      const audio = this.activity.push(data, { adapt: !this.playback, voiceMs: this.segment.guarded ? 120 : this.activity.profile.voiceMs });
+      const audio = this.activity.push(data, { adapt: !this.playback, voiceMs: this.segment.guarded ? 120 : this.activity.profile.voiceMs,
+        // Name recognition stays quick during a reply. Outside a reply, a
+        // brief pause is part of the same question, not an instruction to send.
+        silenceMs: this.segment.guarded ? 500 : TURN_PAUSES[this.turnPause] });
       if (Date.now() - (this.levelAt || 0) >= 100) {
         this.levelAt = Date.now(); this.onLevel(this.activity.rms, this.activity.threshold);
       }
@@ -211,12 +246,16 @@
         this.state();
       }
       if (audio) return this.submit(audio, epoch);
-      if (!this.activity.frames.length) { this.releaseInterruption(this.segment?.serial, true); this.segment = null; this.state(); }
+      if (!this.activity.frames.length) {
+        this.releaseInterruption(this.segment?.serial, true); this.segment = null; this.state();
+        return this.deliverTurn(epoch);
+      }
     }
     flush() {
       if (!this.active || this.paused) return;
       const audio = this.activity.finish();
       if (audio) return this.submit(audio, this.epoch);
+      this.segment = null; return this.deliverTurn();
     }
     submit(audio, epoch) {
       const segment = this.segment || { armed: this.engaged, echo: "" };
@@ -224,8 +263,9 @@
       // Keep capturing while Whisper works; a delayed transcription must not
       // create a deaf interval. At most two waiting utterances bound memory.
       if (this.queue.length >= 2) {
-        const dropped = this.queue.shift(); this.releaseInterruption(dropped.serial, true);
+        this.cancelTurn();
         this.onError(new Error("I'm catching up. Please repeat the last question."), { recoverable: true });
+        return;
       }
       this.queue.push({ audio, serial: segment.serial ?? ++this.serial, ...segment });
       this.state(); return this.drain(epoch);
@@ -269,11 +309,13 @@
           if (wake) {
             this.wakeSerial = item.serial; this.engage();
             if (item.guarded) this.interruptedReply = item.replySerial;
-            if (item.guarded && !command) await this.onEnd(false);
+            if (item.guarded) await this.onEnd(false);
+            if (epoch !== this.epoch || this.paused || abort.signal.aborted) return;
           }
           if (!command) { this.releaseInterruption(item.serial, true); continue; }
           this.engage();
           if (/^(?:stop(?: talking)?|wait(?: a second)?|hold on)[.!?]*$/i.test(command)) {
+            this.clearTurn();
             this.onEnd(false); this.releaseInterruption(item.serial); continue;
           }
           if (/^(?:stop listening|turn (?:the )?microphone off)[.!?]*$/i.test(command)) {
@@ -282,13 +324,13 @@
           if (/^(?:that['’]?s all(?: kai)?|thanks kai|thank you kai|go to sleep)[.!?]*$/i.test(command)) {
             this.endConversation(); this.onEnd(false); this.releaseInterruption(item.serial); continue;
           }
-          await this.onCommand(command);
+          this.collect(command, item, epoch);
           this.releaseInterruption(item.serial);
           if (epoch !== this.epoch) return;
         }
       } catch (error) {
         if (epoch === this.epoch && (!this.abort?.signal.aborted || error.code === "VOICE_TIMEOUT")) {
-          this.queue = []; this.activity?.reset(); this.segment = null; this.releaseInterruption();
+          this.clearTurn(); this.queue = []; this.activity?.reset(); this.segment = null; this.releaseInterruption();
           if (++this.failures >= 3) { await this.stop(); this.onError(new Error("Voice input keeps failing. The microphone is off. Try the mic again or type your question.")); }
           else this.onError(error, { recoverable: true });
         }
@@ -297,11 +339,12 @@
           this.processing = false; this.abort = null;
           this.state();
           if (this.queue.length && !this.paused) this.drain(epoch);
+          else await this.deliverTurn(epoch);
         }
       }
     }
     async stop() {
-      this.epoch++; this.active = false; this.processing = false; this.paused = false;
+      this.epoch++; this.clearTurn(); this.active = false; this.processing = false; this.delivering = false; this.paused = false;
       this.engaged = false; this.wakeSerial = null; this.responding = false; this.playback = false; this.interruptBlocked = false; this.segment = null; this.queue = []; this.output = [];
       clearTimeout(this.timer); this.abort?.abort(); this.abort = null;
       this.capture?.disconnect(); this.source?.disconnect();
@@ -313,5 +356,5 @@
       await context?.close().catch(() => {});
     }
   }
-  return { Activity, Listener, isEcho };
+  return { Activity, Listener, isEcho, TURN_PAUSES };
 });

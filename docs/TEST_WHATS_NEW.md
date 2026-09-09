@@ -1,3 +1,12 @@
+### More natural conversations and fewer provider cut-offs
+
+- **Room to finish your question.** In **Voice & listening → Conversation pauses**, Natural allows a short thinking pause, Quick sends sooner, and Patient gives you more time. Natural is the default. Words spoken while KAI is still recognizing your question stay together in one request. This uses the existing local listener; no extra download is needed.
+- **Interruptions still need “KAI.”** Recognizing the name stops the old reply, even if you are still finishing your new question. Ordinary dialogue during a reply cannot interrupt it. Stop and hiding KAI cancel pending input and reply audio. Microphone Off and listening-setting changes discard unfinished input.
+- **Fix for frequent “output limit” errors.** Private Anthropic/OpenAI action planning has a larger allowance. If a plan hits that limit, KAI makes one attempt with more room before any action runs. Incomplete plans cannot reach the tool runner, and existing approvals still apply.
+- **Long answers can finish.** A confirmed output limit can continue the answer once with the same provider. Recovery uses the original Stop button and deadline. If the answer is still too long, KAI keeps the partial text and explains how to continue, instead of cancelling its speech. A recovery request uses your provider account and may add usage; account errors and disconnected streams do not automatically retry or switch providers.
+
+Pocket's continuous audio, character effects and voice selection stay in place. Conversation pauses change how long KAI waits after you speak, not the voice's synthesis speed. This is pause handling, not speaker identification or a new semantic turn-detection model.
+
 ### Pocket voice setup, right where you need it
 
 - **A visible download button beside the voice selector.** Pocket setup now sits at the top of **Voice & listening**, with a clear blue **Download Pocket voices** button and progress. There is no need to scroll past the other voice settings.

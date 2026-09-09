@@ -36,7 +36,8 @@ test("desktop connections UI: settings, provider selection, chat/mascot streamin
         const timer = setInterval(() => {
           const chunk = text.slice(offset, offset + 8); offset += 8;
           for (const fn of listeners) fn({ id, content: chunk });
-          if (offset >= text.length) { clearInterval(timer); timers.delete(id); for (const fn of listeners) fn({ id, done: true }); }
+          if (offset >= text.length) { clearInterval(timer); timers.delete(id); for (const fn of listeners) fn({ id, done: true,
+            ...(body.stream !== false && window.__limitWarning ? { finishReason: "length", warning: "This long answer is still incomplete. Ask KAI to continue." } : {}) }); }
         }, 20);
         timers.set(id, timer); return { ok: true };
       },
@@ -72,6 +73,10 @@ test("desktop connections UI: settings, provider selection, chat/mascot streamin
   await page.waitForFunction(() => document.querySelector("#messages").textContent.includes("Answered by Anthropic") && document.querySelector("#btn-stop").hidden);
   assert.equal(coreChats.length, 0, "Provider prompts never reach the shared chat endpoint");
   assert.ok((await page.evaluate(() => window.__providerRequests.at(-1).messages)).some(m => m.role === "assistant" && m.content.includes("private provider reply")));
+  await page.evaluate(() => { window.__limitWarning = true; });
+  await page.fill("#input", "Give me a long answer."); await page.click("#btn-send");
+  await page.waitForFunction(() => document.querySelector("#messages").textContent.includes("This long answer is still incomplete") && document.querySelector("#btn-stop").hidden);
+  assert.match(await page.locator("#messages").textContent(), /Your private provider reply is streaming/);
   await page.reload();
   await page.waitForFunction(() => document.querySelector("#model-pick").value === "desktop:anthropic:claude-fixture");
   await page.click("#nav-settings"); await page.click("#provider-anthropic [data-provider-action=remove]");
@@ -88,8 +93,14 @@ test("desktop connections UI: settings, provider selection, chat/mascot streamin
   await mascot.waitForFunction(() => document.querySelector("#messages").textContent.includes("Your private provider reply") && document.querySelector("#stop").hidden);
   const plans = await mascot.evaluate(() => window.__providerRequests);
   assert.ok(plans.some(r => r.stream === false), "KAI planning uses the selected provider");
+  assert.ok(plans.filter(r => r.stream === false).every(r => r.max_tokens >= 2048), "Desktop plans no longer use the tiny local-model cap");
   assert.ok(plans.some(r => r.stream === true), "KAI's final answer streams through the provider");
   assert.ok(plans.every(r => r.model === "desktop:openai:gpt-fixture"));
+  await mascot.evaluate(() => { window.__limitWarning = true; });
+  await mascot.fill("#question", "Give me a long answer."); await mascot.press("#question", "Enter");
+  await mascot.waitForFunction(() => document.querySelector("#notice").textContent.includes("This long answer is still incomplete") && document.querySelector("#stop").hidden);
+  assert.notEqual(await mascot.locator("body").getAttribute("data-state"), "error");
+  assert.match(await mascot.locator("#messages").textContent(), /Your private provider reply is streaming/);
   assert.deepEqual(errors, []);
   const plain = await browser.newPage(); await plain.goto(base); await plain.click("#nav-settings");
   assert.equal(await plain.locator("#desktop-providers").isVisible(), false, "Browser users have no provider settings");

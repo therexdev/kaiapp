@@ -114,7 +114,7 @@ body.wake-on #status-pill>span:first-child{background:#8af0ba}
 .voice-options-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:14px;color:#ecfffa}
 .voice-options-heading strong{font-size:16px;font-weight:550;letter-spacing:-.4px}
 #voice-options-panel label{display:block;color:#9eb8c7;font-size:11px;margin-bottom:7px}
-#voice-choice,#voice-tone,#mic-sensitivity{width:100%;color:#e5f5fa;background:#0d1c2a;border:1px solid #8ccbdd35;border-radius:10px;padding:10px;font-size:12px}
+#voice-choice,#voice-tone,#mic-sensitivity,#turn-pause{width:100%;color:#e5f5fa;background:#0d1c2a;border:1px solid #8ccbdd35;border-radius:10px;padding:10px;font-size:12px}
 #voice-options-panel .tone-label{margin-top:12px}
 .mic-meter{display:flex;align-items:center;gap:10px;margin:10px 0;color:#b5cbd5;font-size:10px}
 #mic-level{flex:1;min-width:70px;height:12px}
@@ -168,7 +168,7 @@ h1{color:#17365f;letter-spacing:1.5px}h1 span{color:#5e789b}.chat-heading p{colo
 .chat-footer button{color:#6a85a9}.chat-footer button:hover,#read-aloud[aria-pressed=true]{color:#155eef}
 #notice{background:#fff8e9;border-color:#f0ddb7;color:#956623;border-radius:12px}
 #voice-options-panel{background:linear-gradient(150deg,#f5f9ff,#fff);border-color:#dce7f7}.voice-options-heading{color:#173a65}
-#voice-options-panel label{color:#5e7da5}#voice-choice,#voice-tone,#mic-sensitivity{color:#29517f;background:#fff;border-color:#ccdef6;border-radius:10px}
+#voice-options-panel label{color:#5e7da5}#voice-choice,#voice-tone,#mic-sensitivity,#turn-pause{color:#29517f;background:#fff;border-color:#ccdef6;border-radius:10px}
 #voice-options-panel p,.mic-meter{color:#5e789b}#voice-options-panel p.muted{color:#5e789b}.voice-option-actions button{background:#eaf3ff;color:#185fbd;border-color:#c6defb}
 #status-pill{background:#f8fbfff5;border:1px solid #cde0fb;color:#345b8d;box-shadow:0 3px 10px #1b47861b}
 #status-pill>span:first-child,.dock-dot{background:#1677ee;box-shadow:none}body.wake-on #status-pill>span:first-child{background:#168469}
