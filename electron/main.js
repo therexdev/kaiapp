@@ -183,6 +183,7 @@ async function start() {
 
   const { CompanionHub, registerCompanionIPC } = require("./companion-hub");
   const hub = new CompanionHub({ dataDir, safeStorage: require("electron").safeStorage,
+    account: core.account, openExternal: url => shell.openExternal(url),
     privacyMode: () => core.settings.get("network.privacyMode", "local-only"), models: () => core.models.aliases(), legacyMemory: core.gateway.memory,
     canUseModel: model => {
       if (typeof model !== "string") return false;

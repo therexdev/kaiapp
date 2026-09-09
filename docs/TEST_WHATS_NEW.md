@@ -1,4 +1,9 @@
-### Tidier Developer Tools
+### Easier app connections
+
+- **Explore your apps.** Search a catalog with platform logos, categories, and a guided browser sign-in. See your connected accounts and manage each one separately.
+- **Choose who manages the connection.** Use **KAI-managed** connections after the server administrator enables Composio, or save your own Composio project key. Both use the same catalog and sign-in flow.
+- **Choose what KAI can use.** Select actions, allow conversation access, and bring selected read-only data into Brain through ordinary input fields. Optional source refresh runs every 20 minutes while KAI is open. Actions that can make changes still require review.
+- **Keep account boundaries clear.** Switching methods keeps projects separate. Personal keys stay encrypted on the desktop; the shared key stays on the server. Custom APIs remain available in their own tab.
 
 ## Companion workspaces: Brain, Workflows and Connections
 
@@ -7,6 +12,8 @@
 - **Connections:** self-managed tokens/API keys, starter GitHub/Notion/Slack/Home Assistant operations, custom APIs, request testing and separate agent/background-read grants. Keys are encrypted in the desktop app; writes and model-requested calls ask for approval.
 - Includes a [setup guide](KAI_COMPANION_QUICKSTART.md) and [full companion feature inventory/roadmap](KAI_COMPANION_ROADMAP.md), distinguishing this implementation from future OpenHuman-inspired capabilities.
 
+
+### Tidier Developer Tools
 
 - **Aligned fields and actions.** Multi-agent, Playground and Pipelines now use consistent labels, field heights and spacing. Saved-team controls stay together, and forms stack cleanly in smaller windows.
 - **Compact agent cards.** Tool lists expand when needed, show the selected count, and keep checkboxes beside readable names. Role instructions stay in a normal text font; JSON editors keep their code formatting.

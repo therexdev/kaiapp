@@ -27,7 +27,7 @@ This is an original KAI implementation informed by product behavior and publishe
 | Triggers | Manual input, hourly, every six hours, daily, weekly | Local computer time; no webhook listener or integration event stream yet |
 | Durable runs | Saved workflow snapshot, input/output, per-step checkpoints, run history, cancel, paused approval and resume | Uncertain interrupted actions cannot auto-replay; inspect destination then start a new run |
 | Workflow suggestions | Ask KAI in agent mode to propose a disabled draft; describe a routine in the builder | User reviews and saves before running; draft tools cannot enable schedules |
-| Connections | Own-token GitHub, Notion, Slack, Home Assistant starter profiles, generic custom API | Self-managed tokens; no managed Composio subscription or OAuth broker |
+| Connections | Searchable Composio catalog, bundled platform logos, hosted sign-in, personal/server-managed keys, multiple accounts, selected actions, typed Brain collection, and custom APIs | Server service requires admin activation; real provider authorization requires a project key |
 | API capabilities | Bearer/header/no-auth, fixed operations, path placeholders, JSON request bodies, test results, edit/remove | HTTPS remote API; HTTP only for localhost; redirects refused; response caps |
 | Connection permissions | Enable/disable, expose to KAI, allow background GET, native one-time approvals for model calls/writes | GET background permission is a user grant; only configure actual read operations as GET |
 | Private agent tools | Brain search, goals, approved remembering, workflow draft proposal, configured API calls in agent chat and desktop KAI | After private observations, the planner cannot pass data to ordinary Core/web/MCP tools in the same turn |
@@ -104,10 +104,13 @@ Reference: [integrations](https://github.com/tinyhumansai/openhuman/blob/0a2aeb0
 
 | Capability to adopt | KAI value | Status / next work |
 | --- | --- | --- |
-| Self-managed service API credentials | User owns access and service billing | Implemented token/API-key path |
-| Self-managed OAuth client support | Connect services that require delegated OAuth access | Next: desktop authorization-code/PKCE flow, OS-encrypted refresh tokens, provider-specific scopes and revocation |
+| Self-managed service API credentials | User owns access and service billing | Implemented direct token/API-key path and personal Composio project key |
+| Searchable app catalog and guided connections | Make everyday integrations approachable | Implemented platform cards/logos, live search/categories, browser sign-in, account status and multi-account management |
+| Optional server-managed Composio | Offer the same experience without a user project key | Implemented authenticated KAI server service and encrypted admin setting; off until a key is configured |
+| Select actions and collect data | Control which connected information reaches Brain | Implemented action selection, typed fields, read-only source ingestion and optional recurring refresh |
+| Self-managed OAuth client support | Connect services that require delegated OAuth access | Composio-hosted OAuth implemented for personal and server-managed projects; direct provider-specific PKCE remains future work |
 | Google/Microsoft calendars and mail | Daily planning, correspondence, reminders | Existing email/CalDAV tools; next: richer native service adapters through the new connection framework |
-| GitHub, Notion, Slack | Read project context and perform approved actions | Starter REST profiles implemented; next: friendly typed forms and pagination adapters |
+| GitHub, Notion, Slack | Read project context and perform approved actions | Composio sign-in and typed action inputs now implemented, with custom REST profiles retained; next: incremental data pagination adapters |
 | MCP server library | Extend KAI with existing tool ecosystems | Existing KAI MCP retained; next: bring inventory into Connections and support encrypted HTTP auth |
 | Skill library | Reusable behavioral instructions for specialist tasks | Existing agent definitions retained; later: signed/versioned skill packages with inspectable permissions |
 | Messaging channels | Reach KAI from Telegram, Discord or other devices | Later: explicitly paired channels and per-channel identity/scope; no default message ingestion |
@@ -154,3 +157,9 @@ Reference: [integrations](https://github.com/tinyhumansai/openhuman/blob/0a2aeb0
 - Real service credentials must still be configured and tested in the installed app. Fixture tests verify the transport and permissions; they do not certify every user's token scopes, service account, local network, or model quality.
 
 See [KAI Companion Quick Start](KAI_COMPANION_QUICKSTART.md) for setup and concrete examples.
+
+## Connections follow-up — September 9, 2026
+
+The owner clarified that self-management includes using a personal Composio project key, alongside an optional server-managed project. This replaces the first release's custom API form as the default connection experience. The implementation is original KAI code against [Composio v3.1](https://docs.composio.dev/reference/api-reference/tools); OpenHuman's [Composio settings flow](https://github.com/tinyhumansai/openhuman/blob/df4aaf6610149ff0389e83fec04723ef67458994/app/src/components/settings/panels/ComposioPanel.tsx) was a behavioral reference. No GPL source was copied.
+
+Still future work: curated per-platform collection presets, cursor-based incremental data sync, provider scope change previews, project migration tools, and connection quota controls per KAI account. Existing source imports remain bounded snapshots; catalog/action pagination is implemented separately. Server and desktop contract tests use synthetic accounts; a real OAuth/provider authorization remains to be checked after the operator supplies a project key.

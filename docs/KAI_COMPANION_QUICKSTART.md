@@ -15,9 +15,24 @@ Turn off **Use Brain in replies** to pause automatic recall. Explicit Brain tool
 
 The memory map is an organized tree of categories and sources. It is not yet an automatically inferred relationship graph or an LLM-generated summary tree.
 
+## Connect an app
+
+1. Open **Connections → Connection settings** and choose **KAI-managed** or **My Composio key**. Managed mode requires KAI account sign-in and an enabled server; personal mode requires your project API key from [Composio settings](https://dashboard.composio.dev/).
+2. Open **Explore apps**. Search by app name, use the category selector, and choose a logo card. The full catalog loads from your selected Composio project; featured apps remain visible before setup.
+3. Click **Connect** and finish sign-in in your browser. Return to KAI; it checks for the new account for up to five minutes. **Open sign-in again** and **Check connection** are available if needed.
+4. In **Manage access**, name the account and choose actions. **Use in conversations** makes selected actions available to private/local KAI with approval. **Allow reviewed actions** enables actions that can change data or have no explicit read-only metadata.
+5. Enable **Allow Brain and workflow reads** to use selected read actions as data sources. Choose **Collect into Brain**, pick the data/action, and fill the fields (for example repository owner and name). Optional refresh runs every 20 minutes while KAI is open. A result is bounded to 200 KB, so use filters/limits for large accounts.
+6. **Connected** shows account status and selected actions. You can add several accounts from one app. Disconnecting removes that Composio connection and pauses its sources; previously collected Brain notes remain until you remove those sources.
+
+Composio hosts provider authentication; some services ask for provider API keys or extra fields instead of OAuth sign-in. Available apps/actions and permissions depend on the project and provider. Tools without explicit read-only metadata require review and cannot be used for background collection. KAI access selections are local grants, distinct from the provider's OAuth scopes selected during authorization. If an app requires a custom OAuth configuration, configure it in your Composio project first; KAI reuses an enabled configuration when available.
+
+Personal mode encrypts your Composio key in Electron and sends selected requests directly to Composio. Managed mode keeps the project key on the KAI server, which handles selected requests/results in transit. Composio stores provider credentials in either mode. Changing modes does not move accounts between projects. Source data stays local to this Brain and does not enter compute-worker APIs; Local-Only blocks connection traffic.
+
+Server setup is documented in [the KAI server guide](https://github.com/therexdev/kai/blob/claude/kai-production-website-fqx4pf/docs/CONNECTIONS.md). Real provider sign-in requires a valid key and your own authorization; it is not enabled automatically by installing Test.
+
 ## Connect your own API
 
-Open **Connections** and pick a starter profile. Paste your token in the password field. KAI encrypts it with the OS credential store. You can edit the operation list to match the permissions and endpoints you want.
+Open **Connections → Custom APIs** and pick a starter profile. Paste your token in the password field. KAI encrypts it with the OS credential store. You can edit the operation list to match the permissions and endpoints you want.
 
 | Profile | First request | Setup requirement |
 | --- | --- | --- |

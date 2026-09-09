@@ -6,17 +6,20 @@ const { CompanionWorkflows, TYPES } = require("./companion-workflows");
 const { trustedFrame } = require("./mascot");
 
 class CompanionHub {
-  constructor({ dataDir, safeStorage, privacyMode, models, runLocal, fetchImpl, canUseModel, legacyMemory }) {
+  constructor({ dataDir, safeStorage, privacyMode, models, runLocal, fetchImpl, canUseModel, legacyMemory, account, openExternal }) {
     this.store = new CompanionStore({ dataDir, safeStorage }); this.models = models; this.canUseModel = canUseModel; this.legacyMemory = legacyMemory;
     this.connections = new CompanionConnections({ store: this.store, privacyMode, fetchImpl });
+    const { CompanionComposio } = require("./companion-composio");
+    this.composio = new CompanionComposio({ store: this.store, privacyMode, account, fetchImpl, openExternal });
+    this.connections.composio = this.composio;
     this.workflows = new CompanionWorkflows({ store: this.store, connections: this.connections, runLocal, models });
     this.syncing = new Set(); this.timer = null;
   }
   status() {
     const s = this.store;
     if (s.locked || !s.available()) return { locked: true, available: s.available() };
-    const { connections, ...data } = s.data;
-    return { ...copy(data), available: true, locked: false, connections: this.connections.list(), templates: copy(TEMPLATES), models: this.models().filter(m => m.status === "ready"), stepTypes: TYPES, syncing: [...this.syncing] };
+    const { connections, composio, ...data } = s.data;
+    return { ...copy(data), available: true, locked: false, composio: this.composio.status(), connections: this.connections.list(), templates: copy(TEMPLATES), models: this.models().filter(m => m.status === "ready"), stepTypes: TYPES, syncing: [...this.syncing] };
   }
   source(input) {
     const request = this.connections.prepare(input.connectionId, input.operationId, input.variables || {});
@@ -94,12 +97,13 @@ class CompanionHub {
     throw new CompanionError("Unknown companion tool.");
   }
   start() {
+    if (this.store.data.connections.some(c => c.provider === "composio")) this.composio.refresh().catch(() => {});
     this.workflows.start(); this.timer = setInterval(() => {
       if (this.store.locked || !this.store.available()) return;
       for (const s of this.store.data.sources) if (s.autoSync && s.nextSync <= Date.now() && !this.syncing.has(s.id)) this.sync(s.id).catch(() => {});
     }, 30000); this.timer.unref?.();
   }
-  stop() { clearInterval(this.timer); this.workflows.stop(); this.connections.cancel(); }
+  stop() { clearInterval(this.timer); this.workflows.stop(); this.connections.cancel(); this.composio.cancel(); }
 }
 
 function registerCompanionIPC({ ipcMain, service, origin, getMainWindow, getMascotWindow, dialog }) {
@@ -141,6 +145,19 @@ function registerCompanionIPC({ ipcMain, service, origin, getMainWindow, getMasc
     if (action === "status") return service.status();
     service.store.requireStorage();
     switch (action) {
+      case "composioSettings": return service.composio.save(input, ctx.signal);
+      case "composioRefresh": return service.composio.refresh(ctx.signal);
+      case "composioCatalog": return service.composio.catalog(input, ctx.signal);
+      case "composioTools": return service.composio.tools(input, ctx.signal);
+      case "composioConnect": return service.composio.connect(input.slug, ctx.signal);
+      case "composioReopen": return service.composio.reopen(ctx.signal);
+      case "composioPermissions": return service.composio.permissions(input, ctx.signal);
+      case "composioDisconnect": {
+        const connection = service.connections.list().find(c => c.id === input.id);
+        if (!connection || !await ctx.confirm("Disconnect " + connection.name, { account: connection.name, app: connection.toolkit, effect: "Remove this Composio account connection and pause its Brain sources." })) throw new CompanionError("Connection kept.");
+        return service.composio.disconnect(input.id, ctx.signal);
+      }
+      case "composioLogo": return service.composio.logo(input.slug, ctx.signal);
       case "note": return service.store.note(input);
       case "goal": return service.store.goal(input);
       case "remove": return service.store.remove(input.kind, input.id);

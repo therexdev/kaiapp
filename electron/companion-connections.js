@@ -39,7 +39,7 @@ function operations(raw) {
 }
 class CompanionConnections {
   constructor({ store, privacyMode, fetchImpl = fetch }) { this.store = store; this.privacyMode = privacyMode; this.fetch = fetchImpl; this.active = new Set(); }
-  list() { return this.store.data.connections.map(({ secret, ...c }) => ({ ...copy(c), configured: c.auth === "none" || !!secret })); }
+  list() { return this.store.data.connections.filter(c => c.provider !== "composio" || this.composio?.current(c)).map(({ secret, binding, project, userId, ...c }) => ({ ...copy(c), configured: c.provider === "composio" ? c.status === "ACTIVE" : c.auth === "none" || !!secret })); }
   save(input) {
     const baseUrl = baseURL(input.baseUrl), ops = operations(input.operations);
     const headers = {};
@@ -53,6 +53,7 @@ class CompanionConnections {
     if (!/^(?:authorization|x-[a-z0-9-]+|api-key|apikey)$/i.test(headerName)) throw new CompanionError("Use Authorization, api-key, apikey, or an X-… secret header.");
     const saved = this.store.change(d => {
       const old = input.id ? d.connections.find(c => c.id === input.id) : null;
+      if (old?.provider === "composio") throw new CompanionError("Use this app's access settings to edit a Composio connection.");
       if (input.id && !old) throw new CompanionError("Connection no longer exists.");
       if (!old && d.connections.length >= 50) throw new CompanionError("Maximum 50 connections.");
       // Changing a destination never silently transfers the old credential.
@@ -63,11 +64,12 @@ class CompanionConnections {
       if (old) d.connections[d.connections.indexOf(old)] = c; else d.connections.push(c); return c.id;
     }); this.cancel(saved); return this.list().find(c => c.id === saved);
   }
-  remove(key) { this.cancel(key); this.store.change(d => { d.connections = d.connections.filter(c => c.id !== key); d.sources.forEach(s => { if (s.connectionId === key) { s.autoSync = false; s.error = "Connection removed"; } }); }); }
+  remove(key) { this.cancel(key); if (this.store.data.connections.find(c => c.id === key)?.provider === "composio") throw new CompanionError("Use Disconnect in Connected apps to remove this account."); this.store.change(d => { d.connections = d.connections.filter(c => c.id !== key); d.sources.forEach(s => { if (s.connectionId === key) { s.autoSync = false; s.error = "Connection removed"; } }); }); }
   prepare(connectionId, operationId, variables = {}, body = undefined) {
     this.store.requireStorage();
     const c = this.store.data.connections.find(c => c.id === connectionId);
     if (!c?.enabled) throw new CompanionError("Enable this connection first.");
+    if (c.provider === "composio") return this.composio.prepare(c, operationId, variables, body);
     const op = c.operations.find(o => o.id === operationId); if (!op) throw new CompanionError("Choose a saved API operation.");
     if (!variables || typeof variables !== "object" || Array.isArray(variables)) throw new CompanionError("Variables must be a JSON object.");
     const p = op.path.replace(/\{([a-zA-Z0-9_]+)\}/g, (_, k) => {
@@ -81,6 +83,7 @@ class CompanionConnections {
     return { connectionId, revision: c.revision, operationId, name: c.name + " · " + op.name, method: op.method, url: url.href, ...(payload !== undefined ? { body: payload } : {}) };
   }
   async execute(request, signal) {
+    if (request.provider === "composio") return this.composio.execute(request, signal);
     this.store.requireStorage();
     const c = this.store.data.connections.find(c => c.id === request.connectionId);
     if (!c?.enabled || c.revision !== request.revision) throw new CompanionError("Connection changed. Review and run the operation again.");
