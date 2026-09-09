@@ -1,3 +1,7 @@
+### KAI-managed connection fix
+
+- Fixed the desktop account-service wiring that incorrectly showed managed connections as disabled even when the server was enabled. Connections now shares the account server and sign-in service used by Settings. Existing server environment variables and personal Composio keys need no changes.
+
 ### Workflows with a visual flow builder
 
 - **A cleaner sidebar.** Brain, Workflows and Connections sit flush beside the main navigation, with compact left-aligned menus.

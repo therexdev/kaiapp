@@ -645,6 +645,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
 
   return {
     settings,
+    account,
     speech,
     state,
     hardware: hw,

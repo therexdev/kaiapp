@@ -165,6 +165,25 @@ test("account: Local-Only refuses the whole surface, in words", async () => {
   const core = await createCore({ dataDir: dir, port: 0, llamaBin: FAKE_BIN, onEvent: () => {} });
   const base = `http://127.0.0.1:${await core.start()}`;
   try {
+    // Electron passes core.account into Connections. Keep the desktop and
+    // HTTP account surfaces on the same service, including sign-in state.
+    assert.strictEqual(core.account, core.gateway.account);
+    const { CompanionComposio } = require("../../electron/companion-composio");
+    let checked = false;
+    const connections = new CompanionComposio({
+      account: core.account,
+      store: { data: { composio: { mode: "managed" } }, requireStorage() {} },
+      privacyMode: () => "local-first",
+      fetchImpl: async url => {
+        assert.strictEqual(url, core.gateway.account.origin() + "/connections/status");
+        checked = true;
+        return new Response(JSON.stringify({ available: true, protocol: 1, generation: "test" }));
+      },
+    });
+    const refreshed = await connections.refresh();
+    assert.strictEqual(checked, true, "desktop checks the configured account server");
+    assert.strictEqual(refreshed.status.managedAvailable, true);
+    assert.strictEqual(refreshed.status.signedIn, false);
     const r = await fetch(`${base}/core/account`);
     assert.strictEqual(r.status, 403);
     const j = await r.json();
