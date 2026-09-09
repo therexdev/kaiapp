@@ -87,6 +87,14 @@ async function main() {
     await mascot.fill("#question", "Hello KAI");
     await mascot.press("#question", "Enter");
     await mascot.waitForFunction(() => document.querySelector("#messages").textContent.includes("What are you working on today") && document.querySelector("#stop").hidden);
+    const recalled = await app.evaluate(() => globalThis.__providerFixture.state.requests.at(-1));
+    assert.equal(recalled.kai_private_desktop, true);
+    assert.ok(recalled.messages.some(m => m.role === "system" && m.content.includes("Native Brain recall fixture.")));
+    const brainFile = await app.evaluate(() => globalThis.__companionHub.store.file);
+    assert.equal(fs.readFileSync(brainFile, "utf8").includes("Native Brain recall fixture."), false);
+    assert.equal(await main.evaluate(async () => { try { await window.kaiCompanionBridge.manage("status"); return false; } catch { return true; } }), true, "Other Core documents cannot manage Brain");
+    assert.equal(await mascot.evaluate(() => typeof window.kaiCompanionBridge.manage), "undefined", "Mascot gets private tools without management access");
+    console.log("PASS: native Brain encryption, bounded recall, private routing and document restrictions.");
     await mascot.fill("#question", "Bring up my Pictures folder.");
     await mascot.press("#question", "Enter");
     await mascot.waitForFunction(() => document.querySelector("#messages").textContent.includes("left the folder closed") && document.querySelector("#stop").hidden);

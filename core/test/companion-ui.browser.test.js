@@ -25,10 +25,10 @@ test("companion UI: Brain CRUD, API setup, workflow approval/recovery and respon
   for(const view of ["brain","workflows","connections"]) {
    await page.click(`[data-view="${view}"]`);await page.locator(`#view-${view} .hub-content`).waitFor();
    const metrics=await page.locator(`#view-${view}`).evaluate(el=>({width:el.clientWidth,scroll:el.scrollWidth}));assert.ok(metrics.scroll<=metrics.width+2,view+" overflow at "+width+": "+JSON.stringify(metrics));
-   if(qa)await page.screenshot({path:path.join(qa,`companion-${view}-${width}.png`)});
+   if(qa)await page.screenshot({path:path.join(qa,`companion-${view}-${width}.png`),animations:"disabled"});
   }
   await page.click('[data-view="workflows"]');await page.getByRole("button",{name:"My workflows",exact:true}).click();await page.getByRole("button",{name:"New workflow",exact:true}).click();
-  const fields=await page.locator('.hub-step').first().evaluate(el=>({scroll:el.scrollWidth,width:el.clientWidth}));assert.ok(fields.scroll<=fields.width+2,"builder overflow "+width);if(qa)await page.screenshot({path:path.join(qa,`companion-builder-${width}.png`)});await page.getByRole("button",{name:"← Back",exact:true}).click();
+  const fields=await page.locator('.hub-step').first().evaluate(el=>({scroll:el.scrollWidth,width:el.clientWidth}));assert.ok(fields.scroll<=fields.width+2,"builder overflow "+width);if(qa)await page.screenshot({path:path.join(qa,`companion-builder-${width}.png`),animations:"disabled"});await page.getByRole("button",{name:"← Back",exact:true}).click();
  }
  await page.reload();await page.click('[data-view="brain"]');await page.getByText("KAI project",{exact:true}).waitFor();assert.deepEqual(errors,[]);
 });

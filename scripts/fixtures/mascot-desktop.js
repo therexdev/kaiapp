@@ -38,8 +38,21 @@ app.whenReady().then(async () => {
     getMainWindow: () => main, getMascotWindow: () => controller.getWindow() });
   globalThis.__providerService = providerService;
   globalThis.__providerFixture = fixture;
+  const { CompanionHub, registerCompanionIPC } = require("../../electron/companion-hub");
+  const hub = new CompanionHub({ dataDir: dir, safeStorage: require("electron").safeStorage,
+    privacyMode: () => "local-first", models: () => [{ alias: "tiny-live", status: "ready" }],
+    canUseModel: model => model === "tiny-live" || providerService.status().providers.some(p =>
+      p.configured && p.models.some(m => `desktop:${p.id}:${m.id}` === model)),
+    runLocal: async () => "Native workflow reply.", fetchImpl: async () => Response.json({ ready: true }),
+  });
+  hub.store.note({ title: "Hello KAI", text: "Native Brain recall fixture.", category: "preferences" });
+  const companionIPC = registerCompanionIPC({ ipcMain, service: hub, origin: fixture.origin,
+    getMainWindow: () => main, getMascotWindow: () => controller.getWindow(),
+    dialog: { showMessageBox: async (_win, options) => { globalThis.__folderApprovals.push(options); return { response: globalThis.__approveFolder ? 1 : 0 }; } },
+  });
+  globalThis.__companionHub = hub;
   globalThis.__kaiMain = main; globalThis.__kaiController = controller;
   await main.loadURL(fixture.origin + "/main-fixture");
-  app.on("before-quit", () => { providerIPC.dispose(); controller.dispose(); fixture.server.close(); fixture.server.closeAllConnections(); });
+  app.on("before-quit", () => { companionIPC.dispose(); providerIPC.dispose(); controller.dispose(); fixture.server.close(); fixture.server.closeAllConnections(); });
 });
 app.on("window-all-closed", () => app.quit());
