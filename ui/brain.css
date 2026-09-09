@@ -33,3 +33,4 @@
 
 /* The app already supplies the workspace heading; keep catalog controls compact. */
 .cn-hero{padding:22px 24px;margin-bottom:18px}.cn-hero h2{font-size:24px;margin:8px 0 10px}.cn-hero p{margin-bottom:0}.cn-kicker{display:none}.cn-category-picker{display:flex;flex-direction:column;align-items:stretch;gap:7px;min-width:150px}.cn-categories{margin-bottom:20px}.cn-hero .cn-route{flex-shrink:0}
+.bn-workspace button:not(.primary),.hub-card .hub-actions button:not(.primary),.hub-content>.hub-toolbar button:not(.primary){appearance:none;background:var(--bg-raised);color:var(--text);border:1px solid var(--border);box-shadow:none}.bn-workspace button:not(.primary):hover,.hub-card .hub-actions button:not(.primary):hover{border-color:var(--violet);color:var(--violet)}
