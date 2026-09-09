@@ -27,7 +27,9 @@ jobs:
           ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
       - name: Install Chromium
         run: |
-          npx playwright-core install --with-deps chromium
+          # ubuntu-latest already supplies Chromium runtime libraries (also used by CI).
+          # Avoid refreshing unrelated OS package mirrors just to install the pinned browser.
+          npx playwright-core install chromium
           echo "KAI_TEST_CHROMIUM=$(node -e 'process.stdout.write(require("playwright-core").chromium.executablePath())')" >> "$GITHUB_ENV"
       - run: npm test
         env:
