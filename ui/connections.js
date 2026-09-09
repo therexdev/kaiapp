@@ -1,42 +1,21 @@
 "use strict";
 (() => {
-  const featured = [
-    ["gmail", "Gmail", "Email", "Find messages and keep up with your inbox."],
-    ["googlecalendar", "Google Calendar", "Productivity", "Make room for what matters in your day."],
-    ["googledrive", "Google Drive", "Files", "Bring your documents and project files together."],
-    ["notion", "Notion", "Productivity", "Keep your notes, knowledge and projects close."],
-    ["slack", "Slack", "Communication", "Stay in the loop with your team's conversations."],
-    ["github", "GitHub", "Development", "Follow repositories, issues and pull requests."],
-    ["linear", "Linear", "Development", "Connect your team's issues and project plans."],
-    ["outlook", "Outlook", "Email", "Give KAI context from your Microsoft inbox."],
-    ["microsoft_teams", "Microsoft Teams", "Communication", "Work with your team's conversations."],
-    ["googlesheets", "Google Sheets", "Productivity", "Use the numbers and lists you work with."],
-    ["googledocs", "Google Docs", "Files", "Connect the documents behind your work."],
-    ["airtable", "Airtable", "Productivity", "Bring your bases and structured records to KAI."],
-    ["dropbox", "Dropbox", "Files", "Find the files that keep projects moving."],
-    ["trello", "Trello", "Productivity", "Keep track of boards, cards and next steps."],
-    ["asana", "Asana", "Productivity", "Follow tasks, milestones and team projects."],
-    ["hubspot", "HubSpot", "Business", "Stay close to your contacts and customer work."],
-    ["salesforce", "Salesforce", "Business", "Connect your customer records and pipeline."],
-    ["shopify", "Shopify", "Business", "Keep an eye on your store and products."],
-    ["discord", "Discord", "Communication", "Connect with the communities you belong to."],
-    ["zoom", "Zoom", "Communication", "Bring meetings into your everyday planning."],
-    ["youtube", "YouTube", "Media", "Find channels, videos and useful ideas."],
-    ["spotify", "Spotify", "Media", "Connect your music and playlists."],
-    ["figma", "Figma", "Development", "Keep design files close to your projects."],
-    ["clickup", "ClickUp", "Productivity", "Bring your tasks and workspaces into focus."],
-  ].map(([slug, name, category, description]) => ({ slug, name, categories: [category], description }));
+  const catalogData = window.KaiConnectionCatalog;
+  const featured = catalogData.items;
+  const bundledLogos = new Set(["gmail","googlecalendar","googledrive","notion","slack","github","linear","outlook","microsoft_teams","googlesheets","googledocs","airtable","dropbox","trello","asana","hubspot","salesforce","shopify","discord","zoom","youtube","spotify","figma","clickup"]);
+  const authLabel = t => t.authSchemes?.some(a => /OAUTH/.test(a)) ? "Account sign-in" : t.authSchemes?.includes("NO_AUTH") || !t.authSchemes?.length ? "No account required" : "API credentials";
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   const btn = (label, action, value = "", primary = false) => `<button type="button" class="cn-button${primary ? " cn-primary" : ""}" data-cn="${action}" data-value="${esc(value)}">${esc(label)}</button>`;
   const check = (name, title, detail, checked, disabled = false) => `<label class="cn-permission"><input type="checkbox" name="${name}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""}><span><strong>${esc(title)}</strong><small>${esc(detail)}</small></span></label>`;
   const field = (label, content) => `<label class="cn-field"><span>${esc(label)}</span>${content}</label>`;
-  const logos = new Map(featured.map(t => [t.slug, "assets/connections/" + t.slug + ".svg"]));
+  const logos = new Map(featured.filter(t => bundledLogos.has(t.slug)).map(t => [t.slug, "assets/connections/" + t.slug + ".svg"]));
   const logo = t => `<span class="cn-logo"><span>${esc(t.name?.slice(0, 1).toUpperCase() || "+")}</span><img alt="" data-cn-logo="${esc(t.slug)}" ${logos.has(t.slug) ? 'src="' + esc(logos.get(t.slug)) + '"' : ""}></span>`;
-  let epoch = 0, search = "", category = "", keyboard;
-  let categories = [...new Set(featured.map(t => t.categories[0]))].map(name => ({ id: name, name }));
+  let epoch = 0, search = "", category = "", auth = "", keyboard;
+  const logoJobs = new Set(), logoFailures = new Set();
+  const categories = catalogData.categories;
   function render(host, { state: initial, section, manage, navigate }) {
     keyboard?.abort(); keyboard = new AbortController();
-    const generation = ++epoch; let state = initial, items = [], nextCursor = null, realCatalog = false, loading = false, timer, drawer = null, queryId = 0, focusBeforeDrawer = null;
+    const generation = ++epoch; let state = initial, items = [], nextCursor = null, realCatalog = false, loading = false, timer, drawer = null, queryId = 0, pageSize = 72, matches = [], focusBeforeDrawer = null;
     const alive = () => generation === epoch && host.isConnected && host.getClientRects().length > 0;
     const status = () => state.composio || {};
     const ready = () => !status().blocked && (status().mode === "personal" ? status().personalConfigured : status().managedAvailable && status().signedIn);
@@ -70,9 +49,11 @@
       for (const img of host.querySelectorAll("img[data-cn-logo]")) { img.addEventListener("error", () => { img.hidden = true; }, { once: true }); if (!img.getAttribute("src")) img.hidden = true; }
     }
     async function loadLogos() {
-      if (!ready()) return; const queue = [...new Set(items.map(t => t.slug).filter(s => !logos.has(s)))];
+      if (status().blocked) return; const queue = [...new Set(items.map(t => t.slug).filter(s => !logos.has(s) && !logoJobs.has(s) && !logoFailures.has(s)))];
+      queue.forEach(s => logoJobs.add(s));
       await Promise.all(Array.from({ length: 3 }, async () => {
-        while (queue.length && alive()) { const key = queue.shift(); try { const src = await manage("composioLogo", { slug: key }); if (src?.startsWith("data:image/")) { logos.set(key, src); if (alive()) for (const img of host.querySelectorAll("img[data-cn-logo]")) if (img.dataset.cnLogo === key) { img.src = src; img.hidden = false; } } } catch { /* The named card remains usable without its logo. */ } }
+        while (queue.length && alive()) { const key = queue.shift(); try { const src = await manage("composioLogo", { slug: key }); if (src?.startsWith("data:image/")) { logos.set(key, src); if (alive()) for (const img of host.querySelectorAll("img[data-cn-logo]")) if (img.dataset.cnLogo === key) { img.src = src; img.hidden = false; } } else logoFailures.add(key); } catch { logoFailures.add(key); } finally { logoJobs.delete(key); } }
+        for (const key of queue) logoJobs.delete(key);
       }));
     }
     function draw() {
@@ -86,25 +67,24 @@
     function drawExplore(out) {
       out.innerHTML = `<div class="cn-hero"><div><span class="cn-kicker">YOUR WORLD, CONNECTED</span><h2>Bring your everyday apps to KAI.</h2><p>One connection. More useful conversations, a richer Brain, and routines that follow through.</p></div><div class="cn-route"><span class="cn-route-dot"></span>${esc(modeLabel())}${btn("Change", "setup")}</div></div>
         <div data-cn-readiness></div><div class="cn-searchbar"><span aria-hidden="true">⌕</span><input type="search" id="cn-search" aria-label="Search apps" placeholder="Search apps, tools, or what you want to do…" value="${esc(search)}">${btn("Refresh", "refresh")}</div>
-        <div class="cn-categories"><label class="cn-category-picker">Category<select id="cn-category"><option value="">All apps</option>${categories.map(c => `<option value="${esc(c.id)}" ${c.id === category ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></label></div>
+        <div class="cn-categories"><label class="cn-category-picker">Category<select id="cn-category"><option value="">All apps</option>${categories.map(c => `<option value="${esc(c.id)}" ${c.id === category ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></label><label class="cn-category-picker">Connection type<select id="cn-auth"><option value="">All types</option>${["Account sign-in", "API credentials", "No account required"].map(a => `<option ${a === auth ? "selected" : ""}>${a}</option>`).join("")}</select></label></div>
         <div class="cn-list-heading"><h3>Explore apps</h3><span id="cn-count"></span></div><div class="cn-app-grid" id="cn-apps"></div><div class="cn-more" id="cn-more"></div>
         <div class="cn-bottom-note">Sign in securely, then choose the actions and data KAI can use. ${btn("Connection settings", "setup")}</div>`;
       drawCards();
     }
     function drawCards() {
       const out = host.querySelector("#cn-apps"); if (!out) return;
-      const shown = realCatalog ? items : items.filter(t => !category || t.categories.includes(category));
-      host.querySelector("#cn-count").textContent = loading ? "Finding apps…" : realCatalog ? shown.length + " apps shown" : "Featured apps";
-      out.innerHTML = shown.map(t => { const active = connections().some(c => c.toolkit === t.slug && c.status === "ACTIVE"); return `<button type="button" class="cn-app-card" data-cn="app" data-value="${esc(t.slug)}">${logo(t)}<strong>${esc(t.name)}</strong><p>${esc(t.description)}</p><span class="cn-card-footer"><span>${esc(t.categories[0] || "App")}</span><b class="${active ? "cn-connected-label" : ""}">${active ? "Connected ✓" : "Connect ↗"}</b></span></button>`; }).join("") || `<div class="cn-empty"><h3>${loading ? "Looking for apps…" : "No apps match that search"}</h3><p>Try an app name or another category.</p></div>`;
+      const shown = items;
+      host.querySelector("#cn-count").textContent = `${shown.length} of ${matches.length.toLocaleString()} apps · ${featured.length.toLocaleString()} in catalog`;
+      out.innerHTML = shown.map(t => { const active = connections().some(c => c.toolkit === t.slug && c.status === "ACTIVE"); return `<button type="button" class="cn-app-card" data-cn="app" data-value="${esc(t.slug)}">${logo(t)}<strong>${esc(t.name)}</strong><span class="cn-auth-label">${esc(authLabel(t))}</span><span class="cn-card-footer"><b class="${active ? "cn-connected-label" : ""}">${active ? "Connected ✓" : "Connect ↗"}</b></span></button>`; }).join("") || `<div class="cn-empty"><h3>${loading ? "Looking for apps…" : "No apps match that search"}</h3><p>Try an app name or another category.</p></div>`;
       host.querySelector("#cn-more").innerHTML = nextCursor ? btn("Show more apps", "more") : ""; imageFallback(); void loadLogos();
     }
     async function catalog(append = false) {
-      const currentQuery = ++queryId; loading = true; drawCards();
-      try {
-        if (!ready()) { items = featured.filter(t => (t.name + " " + t.description).toLowerCase().includes(search.toLowerCase())); realCatalog = false; nextCursor = null; }
-        else { const r = await manage("composioCatalog", { search, cursor: append ? nextCursor : "", category }); if (!alive() || currentQuery !== queryId) return; items = append ? items.concat(r.items) : r.items; realCatalog = true; nextCursor = r.nextCursor; if (r.categories?.length) { categories = r.categories; if (!categories.some(c => c.id === category)) category = ""; const select = host.querySelector("#cn-category"); if (select) select.innerHTML = `<option value="">All apps</option>` + categories.map(c => `<option value="${esc(c.id)}" ${c.id === category ? "selected" : ""}>${esc(c.name)}</option>`).join(""); } }
-      } catch (e) { notice(e.message, true); }
-      finally { if (alive() && currentQuery === queryId) { loading = false; drawCards(); } }
+      if (!alive()) return;
+      pageSize = append ? pageSize + 72 : 72;
+      const terms = search.toLowerCase().trim().split(/\s+/).filter(Boolean);
+      matches = featured.filter(t => (!category || t.category === category) && (!auth || authLabel(t) === auth) && terms.every(q => (t.name + " " + t.slug + " " + t.description + " " + t.originalCategory).toLowerCase().includes(q)));
+      items = matches.slice(0, pageSize); nextCursor = matches.length > pageSize; realCatalog = true; loading = false; drawCards();
     }
     function drawConnected(out) {
       out.innerHTML = `<div class="cn-list-heading"><div><h2>Your connected apps</h2><p>Choose what KAI can use, and what belongs in your Brain.</p></div>${btn("Connect an app", "explore", "", true)}${btn("Refresh", "refresh")}</div><div class="cn-account-grid">${connections().map(c => {
@@ -128,7 +108,7 @@
       if (!drawer) return; const d = drawer;
       if (d.kind === "app") {
         const t = d.app, active = connections().filter(c => c.toolkit === t.slug && c.status === "ACTIVE");
-        openDrawer(t.name, `<div class="cn-connect-intro">${logo(t)}<h3>Connect ${esc(t.name)} to your world.</h3><p>${esc(t.description)}</p></div>${readinessHTML()}${ready() ? `<ol class="cn-connect-steps"><li>Sign in to ${esc(t.name)} in your browser.</li><li>Choose the account and permissions to share.</li><li>Return to KAI and choose what it can use.</li></ol><p class="cn-muted">${esc(modeLabel())} handles the connection through Composio. KAI receives access to the account you authorize.</p>${active.map(c => `<div class="cn-existing"><span>${esc(c.name)}</span>${btn("Manage", "access", c.id)}</div>`).join("")}${btn(active.length ? "Connect another account" : "Connect " + t.name, "connect", t.slug, true)}` : ""}`);
+        openDrawer(t.name, `<div class="cn-connect-intro">${logo(t)}<h3>Connect ${esc(t.name)} to your world.</h3><p>${esc(t.description)}</p><span class="cn-status">${esc(authLabel(t))} · ${t.toolCount || 0} actions</span></div>${readinessHTML()}${ready() ? `<ol class="cn-connect-steps"><li>${authLabel(t) === "Account sign-in" ? `Sign in to ${esc(t.name)} in your browser.` : authLabel(t) === "No account required" ? "Open the tool setup in your browser." : "Enter the credentials requested by the provider in your browser."}</li><li>Choose the account and permissions to share.</li><li>Return to KAI and choose what it can use.</li></ol><p class="cn-muted">${esc(modeLabel())} handles the connection through Composio. Available authentication methods depend on the provider and your Composio project. Some apps require administrator setup or provider credentials.</p>${active.map(c => `<div class="cn-existing"><span>${esc(c.name)}</span>${btn("Manage", "access", c.id)}</div>`).join("")}${btn(active.length ? "Connect another account" : "Connect " + t.name, "connect", t.slug, true)}` : ""}`);
       } else if (d.kind === "waiting") {
         openDrawer("Finish connecting", `<div class="cn-connect-intro"><div class="cn-wait-orb">↗</div><h3>Continue in your browser</h3><p>Sign in and approve the account you want to connect. KAI will check when you return.</p></div><div class="cn-setup-actions">${btn("Check connection", "check", "", true)}${btn("Open sign-in again", "reopen")}</div><p class="cn-muted">The check stops after five minutes. You can start again if the link expires.</p>`);
       } else if (d.kind === "access") {
@@ -230,6 +210,7 @@
     host.addEventListener("input", e => { if (e.target.id === "cn-search") { search = e.target.value; clearTimeout(searchTimer); searchTimer = setTimeout(() => catalog(), 300); } if (e.target.id === "cn-action-search") { clearTimeout(toolSearchTimer); toolSearchTimer = setTimeout(() => loadTools().catch(e => notice(e.message, true)), 300); } });
     host.addEventListener("change", e => {
       if (e.target.id === "cn-category") { category = e.target.value; void catalog(); }
+      if (e.target.id === "cn-auth") { auth = e.target.value; void catalog(); }
       if (e.target.name === "mode") host.querySelector(".cn-key-panel").hidden = e.target.value !== "personal";
       if (e.target.name === "allowWrite" && drawer?.kind === "access") { if (!e.target.checked) for (const t of [...drawer.known.values()].filter(t => !t.readOnly)) drawer.selected.delete(t.id); drawTools(); }
       if (e.target.dataset.cnTool && drawer?.kind === "access") { if (e.target.checked) drawer.selected.add(e.target.dataset.cnTool); else drawer.selected.delete(e.target.dataset.cnTool); host.querySelector("#cn-selected-count").textContent = drawer.selected.size + " selected"; }
@@ -251,12 +232,12 @@
         if (f.id === "cn-access") { await manage("composioPermissions", { id: drawer.connection.id, name: f.elements.name.value, allowAgent: f.elements.allowAgent.checked, allowWrite: f.elements.allowWrite.checked, allowSync: f.elements.allowSync.checked, tools: [...drawer.selected].map(id => ({ id, version: drawer.known.get(id)?.version || "latest" })) }); state = await manage("status"); drawer = null; if (alive()) navigate("connected"); }
         if (f.id === "cn-run-action") {
           const d = drawer, op = d.connection.operations.find(o => o.id === d.operation), variables = readArguments(f, op);
-          if (d.kind === "collect") { const source = d.source || await manage("source", { connectionId: d.connection.id, operationId: op.id, variables, name: f.elements.sourceName.value, autoSync: f.elements.autoSync.checked }); d.source = source; for (const el of f.querySelectorAll("input, select, textarea")) el.disabled = true; try { await manage("sync", { id: source.id }); notice("Added to Brain and synced. Find it under Brain → Sources & sync."); b.textContent = "Refresh this source"; } catch (error) { b.textContent = "Retry sync"; throw new Error("Source added to Brain, but its first sync failed: " + error.message); } }
+          if (d.kind === "collect") { const source = d.source || await manage("source", { connectionId: d.connection.id, operationId: op.id, variables, name: f.elements.sourceName.value, autoSync: f.elements.autoSync.checked }); d.source = source; for (const el of f.querySelectorAll("input, select, textarea")) el.disabled = true; try { await manage("sync", { id: source.id }); notice("Added to Brain and synced. Find it under Brain → Sources."); b.textContent = "Refresh this source"; } catch (error) { b.textContent = "Retry sync"; throw new Error("Source added to Brain, but its first sync failed: " + error.message); } }
           else { const result = await manage("request", { connectionId: d.connection.id, operationId: op.id, variables }); const out = host.querySelector("#cn-result"); out.hidden = false; out.textContent = result; notice("Action completed."); }
         }
       } catch (error) { notice(error.message, true); } finally { busy = false; b.disabled = false; }
     });
-    items = featured; draw();
+    matches = featured; items = featured.slice(0, pageSize); draw(); if (section === "explore") void catalog();
     void (async () => {
       let error;
       try { if (!status().blocked) await refresh(); } catch (e) { error = e; }

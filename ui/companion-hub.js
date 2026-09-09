@@ -10,9 +10,10 @@
   const select = (name, values, selected) => `<select name="${name}">${values.map(v => { const [key, label] = Array.isArray(v) ? v : [v, v]; return `<option value="${esc(key)}" ${key === selected ? "selected" : ""}>${esc(label)}</option>`; }).join("")}</select>`;
   const check = (name, label, value) => `<label class="hub-check"><input name="${name}" type="checkbox" ${value ? "checked" : ""}/><span>${label}</span></label>`;
   const empty = (title, detail) => `<div class="hub-empty"><strong>${title}</strong><p>${detail}</p></div>`;
-  let state, current = "brain", tab = { brain: "map", workflows: "saved", connections: "explore" }, timer, editor = null, busy = false;
+  let state, current = "brain", tab = { brain: "overview", workflows: "saved", connections: "explore" }, timer, editor = null, busy = false;
   const host = () => document.getElementById("view-" + current);
   const manage = (action, value) => client.checked(bridge.manage(action, value));
+  const childManage = async (action, input) => { const result = await manage(action, input); if (action === "status") state = result; return result; };
   const value = (form, name) => form.elements.namedItem(name)?.value || "";
   const bool = (form, name) => form.elements.namedItem(name)?.checked === true;
   const json = (form, name, fallback = {}) => { const s = value(form, name).trim(); try { return s ? JSON.parse(s) : fallback; } catch { throw new Error(`Enter valid JSON for ${name}.`); } };
@@ -20,36 +21,17 @@
   async function refresh() { state = await manage("status"); }
   function shell() {
     const titles = { brain: ["KAI Brain", "A memory of your world, built from what you choose to share."], workflows: ["Workflows", "Teach KAI a routine. Review the steps, then run it whenever you need."], connections: ["Connections", "Connect the apps you use and choose what KAI can do with them."] };
-    const tabs = { brain: [["map", "Memory map"], ["notes", "Notes"], ["goals", "Goals"], ["sources", "Sources & sync"]], workflows: [["saved", "My workflows"], ["runs", "Run history"]], connections: [["explore", "Explore apps"], ["connected", "Connected"], ["setup", "Connection settings"], ["apis", "Custom APIs"], ["tools", "Models & other tools"]] };
-    host().innerHTML = `<header class="hub-header"><div><div class="hub-eyebrow">KAI COMPANION</div><h1>${titles[current][0]}</h1><p>${titles[current][1]}</p></div><span class="hub-badge">On this computer</span></header><div class="hub-notice" role="status" aria-live="polite"></div><nav class="hub-tabs" aria-label="${current} sections">${tabs[current].map(([key, label]) => button(label, "tab", key, key === tab[current] ? "active" : "")).join("")}</nav><div class="hub-content"></div>`;
+    const tabs = { brain: [["overview", "Overview"], ["map", "Memory graph"], ["notes", "Memories"], ["goals", "Goals & tasks"], ["sources", "Sources"], ["sync", "Sync & changes"], ["awareness", "Awareness"], ["orchestration", "Orchestration"]], workflows: [["saved", "My workflows"], ["runs", "Run history"]], connections: [["explore", "Explore apps"], ["connected", "Connected"], ["setup", "Connection settings"], ["apis", "Custom APIs"], ["tools", "Models & other tools"]] };
+    host().innerHTML = `<header class="hub-header"><div><div class="hub-eyebrow">KAI COMPANION</div><h1>${titles[current][0]}</h1><p>${titles[current][1]}</p></div><span class="hub-badge">On this computer</span></header><div class="hub-notice" role="status" aria-live="polite"></div><div class="hub-shell"><nav class="hub-rail" aria-label="${current} sections"><div class="hub-rail-label">${titles[current][0]}</div>${tabs[current].map(([key, label]) => button(label, "tab", key, key === tab[current] ? "active" : "")).join("")}</nav><main class="hub-content"></main></div>`;
   }
   function draw() {
     shell(); const out = host().querySelector(".hub-content");
     if (!bridge) { out.innerHTML = empty("Open the installed KAI desktop app", "Brain, private API connections, and durable workflows are available in Koinos AI Test."); return; }
     if (state.locked) { out.innerHTML = empty("Your companion data is locked", "Unlock your original OS keychain and restart KAI. Your saved data will stay intact."); return; }
     if (editor) { out.innerHTML = editorHTML(); return; }
-    if (current === "brain") drawBrain(out);
+    if (current === "brain") window.KaiBrain.render(out, { state, section: tab.brain, manage: childManage, navigate: async key => { await refresh(); return action("tab", key); } });
     if (current === "workflows") drawWorkflows(out);
     if (current === "connections") drawConnections(out);
-  }
-  function drawBrain(out) {
-    if (["map", "notes"].includes(tab.brain)) {
-      out.innerHTML = `<div class="hub-toolbar"><div class="hub-search"><input id="brain-search" aria-label="Search Brain" placeholder="Search memories, people, projects…"/></div>${button("Add a note", "newNote", "", "primary")}${button("Import file", "import")}${button("Export Brain", "exportBrain")}</div><div class="hub-metrics"><div><b>${state.notes.length}</b><span>Memories</span></div><div><b>${state.goals.filter(g => g.status === "active").length}</b><span>Active goals</span></div><div><b>${state.sources.length}</b><span>Sources</span></div><label class="hub-check"><input id="brain-recall" type="checkbox" ${state.settings.recall ? "checked" : ""}/>Use Brain in replies</label></div><p class="hub-help">Relevant notes and active goals support replies with a local model or your private API model. Imported text is source material. Network worker models do not receive automatic Brain recall.</p><div id="brain-results"></div>`;
-      drawNotes("");
-    } else if (tab.brain === "goals") {
-      out.innerHTML = `<div class="hub-toolbar"><p>Tell KAI what matters and keep its attention on your priorities.</p>${button("Add a goal", "newGoal", "", "primary")}</div><div class="hub-goal-board">${["active", "paused", "done"].map(status => `<section><h3>${{ active: "In focus", paused: "On hold", done: "Completed" }[status]}</h3>${state.goals.filter(g => g.status === status).map(g => `<article class="hub-card"><span class="hub-badge">${g.priority === "high" ? "High priority" : "Goal"}</span><h3>${esc(g.title)}</h3><p>${esc(g.detail)}</p><div class="hub-actions">${button("Edit", "editGoal", g.id)}${status !== "done" ? button("Complete", "completeGoal", g.id) : ""}${button("Delete", "deleteGoal", g.id)}</div></article>`).join("") || `<p class="hub-help">No goals here yet.</p>`}</section>`).join("")}</div>`;
-    } else {
-      out.innerHTML = `<div class="hub-toolbar">${button("Import text file", "import", "", "primary")}${button("Add API source", "newSource")}${button("Import previous memories", "importLegacy")}</div><p class="hub-help">Choose TXT, Markdown, CSV, or JSON files up to 200 KB. API sources read a saved GET operation; optional sync runs every 20 minutes while KAI is open. Re-importing a file with the same name replaces its indexed content.</p><div class="hub-grid">${state.sources.map(s => `<article class="hub-card"><span class="hub-badge">${s.kind === "file" ? "Imported file" : "API source"}</span><h3>${esc(s.name)}</h3><p>${s.chunks || 0} indexed sections · Last sync ${date(s.lastSync)}</p>${s.error ? `<p class="error">${esc(s.error)}</p>` : ""}<div class="hub-actions">${s.kind === "connection" ? button(state.syncing.includes(s.id) ? "Syncing…" : "Sync now", "sync", s.id) + button(s.autoSync ? "Pause auto-sync" : "Enable auto-sync", "sourceToggle", s.id) : ""}${button("Remove source", "deleteSource", s.id)}</div></article>`).join("") || empty("Give KAI useful context", "Import your project notes or connect a source you want KAI to remember.")}</div><h2 class="hub-section-title">Recent sync activity</h2><div class="hub-history">${state.syncs.slice(0, 15).map(s => `<div><strong>${esc(s.name)}</strong><span>${esc(s.status)}${s.added ? " · " + s.added + " sections" : ""}</span><time>${date(s.at)}</time></div>`).join("") || `<p class="hub-help">Sync activity will appear here.</p>`}</div>`;
-    }
-  }
-  function drawNotes(query) {
-    const results = document.getElementById("brain-results"); if (!results) return;
-    const items = state.notes.filter(n => (n.title + " " + n.text + " " + n.tags.join(" ")).toLowerCase().includes(query.toLowerCase()));
-    const card = n => `<article class="hub-card hub-note"><div class="hub-card-top"><span class="hub-badge">${esc(n.category)}${n.pinned ? " · Pinned" : ""}</span><small>${esc(n.source || "You")}</small></div><h3>${esc(n.title)}</h3><p class="hub-note-excerpt">${esc(n.text.slice(0, 280))}${n.text.length > 280 ? "…" : ""}</p><div class="hub-tags">${n.tags.map(t => `<span>${esc(t)}</span>`).join("")}</div><div class="hub-actions">${button(n.sourceId ? "Read" : "Edit", "editNote", n.id)}${!n.sourceId ? button("Delete", "deleteNote", n.id) : ""}</div></article>`;
-    if (!items.length) { results.innerHTML = empty(query ? "No matching memories" : "Start with something KAI should know", query ? "Try a project name, person, or phrase." : "Add a preference, introduce a person, or import your project notes. You can edit or remove them at any time."); return; }
-    if (tab.brain === "map" && !query) {
-      results.innerHTML = `<div class="hub-tree"><div class="hub-tree-root"><span class="hub-orb"></span><div><b>Your world</b><small>Organized by category and source</small></div></div>${["preferences", "people", "projects", "notes", "sources"].filter(c => items.some(n => n.category === c)).map(c => `<details class="hub-tree-branch" open><summary>${esc(c[0].toUpperCase() + c.slice(1))}<span>${items.filter(n => n.category === c).length}</span></summary><div class="hub-grid">${items.filter(n => n.category === c).slice(0, 30).map(card).join("")}</div></details>`).join("")}</div>`;
-    } else results.innerHTML = `<div class="hub-grid">${items.slice(0, 100).map(card).join("")}</div>${items.length > 100 ? "<p>Showing the first 100 results. Narrow your search.</p>" : ""}`;
   }
   function drawWorkflows(out) {
     if (tab.workflows === "runs") {
@@ -60,7 +42,7 @@
   }
   function drawConnections(out) {
     if (["explore", "connected", "setup"].includes(tab.connections) && window.KaiConnections) {
-      window.KaiConnections.render(out, { state, section: tab.connections, manage,
+      window.KaiConnections.render(out, { state, section: tab.connections, manage: childManage,
         navigate: async section => { tab.connections = section; await refresh(); draw(); } }); return;
     }
     if (tab.connections === "tools") {
@@ -100,7 +82,7 @@
   }
   function poll() {
     clearTimeout(timer); if (!bridge || editor || host()?.hidden) return;
-    timer = setTimeout(async () => { if (host()?.hidden || editor || busy) return poll(); try { const before = JSON.stringify(state.runs); await refresh(); if (current === "workflows" && tab.workflows === "runs" && before !== JSON.stringify(state.runs)) draw(); } catch { /* show next explicit operation error */ } poll(); }, 2500);
+    timer = setTimeout(async () => { if (host()?.hidden || editor || busy) return poll(); try { const before = JSON.stringify([state.runs, state.brain, state.syncing]); await refresh(); if (before !== JSON.stringify([state.runs, state.brain, state.syncing]) && (current === "workflows" && tab.workflows === "runs" || current === "brain" && ["overview", "orchestration", "sync"].includes(tab.brain)) && !host().querySelector("form:focus-within, details[open]:focus-within")) draw(); } catch { /* show next explicit operation error */ } poll(); }, 2500);
   }
   async function action(name, key) {
     if (name === "tab") { editor = null; tab[current] = key; draw(); poll(); return; }
@@ -130,7 +112,6 @@
     try { await action(b.dataset.hubAction, b.dataset.id); } catch (error) { note(error.message, true); }
     finally { busy = false; b.disabled = false; }
   });
-  document.addEventListener("input", e => { if (e.target.id === "brain-search") drawNotes(e.target.value); });
   document.addEventListener("change", async e => {
     if (!e.target.closest(".companion-hub")) return;
     try {
@@ -156,7 +137,7 @@
       note(kind === "request" ? "Running the request…" : "Saving…");
       const result = await manage(kind, body); if (body?.secret) body.secret = "";
       if (kind === "request") { document.getElementById("connection-result").textContent = String(result); note("Request completed."); }
-      else { editor = null; if (kind === "run") tab.workflows = "runs"; await refresh(); draw(); note(kind === "run" ? "Workflow started." : "Saved."); poll(); }
+      else { editor = null; if (kind === "note") tab.brain = "notes"; if (kind === "run") tab.workflows = "runs"; await refresh(); draw(); note(kind === "run" ? "Workflow started." : "Saved."); poll(); }
     } catch (error) { note(error.message, true); }
     finally { busy = false; if (submit) submit.disabled = false; }
   });

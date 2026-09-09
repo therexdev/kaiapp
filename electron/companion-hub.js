@@ -6,20 +6,24 @@ const { CompanionWorkflows, TYPES } = require("./companion-workflows");
 const { trustedFrame } = require("./mascot");
 
 class CompanionHub {
-  constructor({ dataDir, safeStorage, privacyMode, models, runLocal, fetchImpl, canUseModel, legacyMemory, account, openExternal }) {
+  constructor({ dataDir, safeStorage, privacyMode, models, runLocal, fetchImpl, canUseModel, legacyMemory, account, openExternal, chats, lookup }) {
     this.store = new CompanionStore({ dataDir, safeStorage }); this.models = models; this.canUseModel = canUseModel; this.legacyMemory = legacyMemory;
     this.connections = new CompanionConnections({ store: this.store, privacyMode, fetchImpl });
     const { CompanionComposio } = require("./companion-composio");
     this.composio = new CompanionComposio({ store: this.store, privacyMode, account, fetchImpl, openExternal });
     this.connections.composio = this.composio;
     this.workflows = new CompanionWorkflows({ store: this.store, connections: this.connections, runLocal, models });
-    this.syncing = new Set(); this.timer = null;
+    const { CompanionBrain } = require("./companion-brain"), { CompanionSources } = require("./companion-sources"), { CompanionAwareness } = require("./companion-awareness");
+    this.brain = new CompanionBrain({ store: this.store });
+    this.sources = new CompanionSources({ store: this.store, chats, privacyMode, fetchImpl, lookup });
+    this.awareness = new CompanionAwareness({ store: this.store, models, runLocal, workflows: this.workflows });
+    this.syncing = new Set(); this.sourceControllers = new Map(); this.timer = null;
   }
   status() {
     const s = this.store;
     if (s.locked || !s.available()) return { locked: true, available: s.available() };
     const { connections, composio, ...data } = s.data;
-    return { ...copy(data), available: true, locked: false, composio: this.composio.status(), connections: this.connections.list(), templates: copy(TEMPLATES), models: this.models().filter(m => m.status === "ready"), stepTypes: TYPES, syncing: [...this.syncing] };
+    return { ...copy(data), brainIndex: this.brain.index(), awarenessRunning: this.awareness.active?.id || null, available: true, locked: false, composio: this.composio.status(), connections: this.connections.list(), templates: copy(TEMPLATES), models: this.models().filter(m => m.status === "ready"), stepTypes: TYPES, syncing: [...this.syncing] };
   }
   source(input) {
     const request = this.connections.prepare(input.connectionId, input.operationId, input.variables || {});
@@ -37,20 +41,21 @@ class CompanionHub {
     if (this.syncing.has(key)) throw new CompanionError("This source is already syncing.");
     if (this.syncing.size >= 2) throw new CompanionError("Two sources are already syncing. Try again when one finishes.");
     const s = copy(this.store.data.sources.find(s => s.id === key) || null);
-    if (!s || s.kind !== "connection") throw new CompanionError("Only connection sources can sync. Re-import a file to update it.");
+    if (!s || s.kind === "file") throw new CompanionError("Re-import a file to update it.");
     const c = this.store.data.connections.find(c => c.id === s.connectionId);
-    if (!c?.allowSync) throw new CompanionError("Enable background reads on this connection before syncing.");
-    this.syncing.add(key);
+    if (s.kind === "connection" && !c?.allowSync) throw new CompanionError("Enable background reads on this connection before syncing.");
+    const controller = new AbortController(); signal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+    this.sourceControllers.set(key, controller); this.syncing.add(key);
     try {
-      const result = await this.connections.execute(this.connections.prepare(s.connectionId, s.operationId, s.variables), signal);
+      const result = s.kind === "connection" ? await this.connections.execute(this.connections.prepare(s.connectionId, s.operationId, s.variables), signal) : await this.sources.read(s, signal);
       signal?.throwIfAborted(); if (!this.store.data.sources.some(x => x.id === key)) return;
       return this.store.ingest(key, result);
     } catch (e) {
       this.store.change(d => { const source = d.sources.find(x => x.id === key); if (source) { source.error = e instanceof CompanionError ? e.message : "Sync stopped."; d.syncs.unshift({ sourceId: key, name: source.name, at: Date.now(), status: "failed", error: source.error }); d.syncs = d.syncs.slice(0, 100); } });
       throw e;
     } finally {
-      this.syncing.delete(key);
-      this.store.change(d => { const source = d.sources.find(x => x.id === key); if (source) source.nextSync = Date.now() + 1200000; });
+      this.syncing.delete(key); this.sourceControllers.delete(key);
+      this.store.change(d => { const source = d.sources.find(x => x.id === key); if (source) source.nextSync = Date.now() + (source.intervalMinutes || 20) * 60000; });
     }
   }
   importText(name, content) {
@@ -98,12 +103,12 @@ class CompanionHub {
   }
   start() {
     if (this.store.data.connections.some(c => c.provider === "composio")) this.composio.refresh().catch(() => {});
-    this.workflows.start(); this.timer = setInterval(() => {
+    this.workflows.start(); this.awareness.start(); this.timer = setInterval(() => {
       if (this.store.locked || !this.store.available()) return;
       for (const s of this.store.data.sources) if (s.autoSync && s.nextSync <= Date.now() && !this.syncing.has(s.id)) this.sync(s.id).catch(() => {});
     }, 30000); this.timer.unref?.();
   }
-  stop() { clearInterval(this.timer); this.workflows.stop(); this.connections.cancel(); this.composio.cancel(); }
+  stop() { clearInterval(this.timer); for (const c of this.sourceControllers.values()) c.abort(); this.awareness.stop(); this.workflows.stop(); this.connections.cancel(); this.composio.cancel(); }
 }
 
 function registerCompanionIPC({ ipcMain, service, origin, getMainWindow, getMascotWindow, dialog }) {
@@ -160,7 +165,37 @@ function registerCompanionIPC({ ipcMain, service, origin, getMainWindow, getMasc
       case "composioLogo": return service.composio.logo(input.slug, ctx.signal);
       case "note": return service.store.note(input);
       case "goal": return service.store.goal(input);
-      case "remove": return service.store.remove(input.kind, input.id);
+      case "remove": service.awareness.cancel(); if (input.kind === "sources") service.sourceControllers.get(input.id)?.abort(); return service.store.remove(input.kind, input.id);
+      case "brainSearch": return service.brain.search(input);
+      case "brainTask": return service.brain.task(input);
+      case "removeBrainTask": return service.store.change(d => { d.brain.tasks = d.brain.tasks.filter(t => t.id !== input.id); });
+      case "brainCheckpoint": return service.brain.checkpoint(input.name);
+      case "brainClearHistory": return service.store.change(d => { d.brain.changes = []; d.brain.activity = []; d.brain.checkpoints = []; d.brain.readAt = Date.now(); });
+      case "brainReview": {
+        const insight = service.store.data.brain.insights.find(i => i.id === input.id);
+        if (!insight) throw new CompanionError("Insight no longer exists.");
+        if (input.decision !== "dismiss" && !await ctx.confirm(input.decision === "task" ? "Create a task" : "Remember this insight", { title: insight.title, text: insight.text })) throw new CompanionError("Insight kept for review.");
+        return service.brain.review(input);
+      }
+      case "awarenessSettings": return service.awareness.settings(input);
+      case "awarenessTask": return service.awareness.customTask(input);
+      case "awarenessRun": { const job = service.awareness.enqueue(input.kind || "reflection", true); void service.awareness.tick().catch(() => {}); return job; }
+      case "awarenessStop": return service.awareness.cancel(input.id);
+      case "awarenessRetry": return service.awareness.retry(input.id);
+      case "brainChats": return service.sources.chatList();
+      case "brainSource": {
+        let folder;
+        if (input.kind === "folder") {
+          const result = await dialog.showOpenDialog(ctx.window, { title: "Choose the text folder KAI may read", properties: ["openDirectory"] });
+          ctx.signal.throwIfAborted(); if (result.canceled || !result.filePaths[0]) return null; folder = result.filePaths[0];
+        }
+        return service.sources.save(input, folder);
+      }
+      case "exportBrainVault": {
+        const result = await dialog.showOpenDialog(ctx.window, { title: "Export a new plain Markdown Brain folder here", properties: ["openDirectory", "createDirectory"] });
+        ctx.signal.throwIfAborted(); if (result.canceled || !result.filePaths[0]) return null;
+        return service.brain.exportVault(result.filePaths[0]);
+      }
       case "recall": return service.store.change(d => { d.settings.recall = input.enabled === true; });
       case "importLegacy": {
         const memories = service.legacyMemory?.list() || [];
@@ -185,7 +220,7 @@ function registerCompanionIPC({ ipcMain, service, origin, getMainWindow, getMasc
       }
       case "source": return service.source(input);
       case "sync": return service.sync(input.id, ctx.signal);
-      case "sourceToggle": return service.store.change(d => { const s = d.sources.find(s => s.id === input.id); if (!s || s.kind !== "connection") throw new CompanionError("Source unavailable."); if (input.enabled && !d.connections.find(c => c.id === s.connectionId)?.allowSync) throw new CompanionError("Enable background reads for this connection first."); s.autoSync = input.enabled === true; s.nextSync = Date.now() + 1200000; });
+      case "sourceToggle": return service.store.change(d => { const s = d.sources.find(s => s.id === input.id); if (!s || s.kind === "file") throw new CompanionError("Source unavailable."); if (s.kind === "connection" && input.enabled && !d.connections.find(c => c.id === s.connectionId)?.allowSync) throw new CompanionError("Enable background reads for this connection first."); s.autoSync = input.enabled === true; s.nextSync = Date.now() + (s.intervalMinutes || 20) * 60000; });
       case "workflow": return service.workflows.save(input);
       case "removeWorkflow": return service.workflows.remove(input.id);
       case "run": return service.workflows.begin(input.id, input.input);

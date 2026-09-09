@@ -1,3 +1,5 @@
+See the [expanded Brain and Awareness guide](KAI_BRAIN_AWARENESS.md) for the new sidebar, source types, background checks and Markdown vault.
+
 # KAI Brain, Workflows and Connections — Test guide
 
 This update adds three entries near the top of KAI's sidebar. It uses the same Koinos AI Test profile and node. Quit the running app from its tray before installing an update; then reopen Test.
@@ -6,7 +8,7 @@ This update adds three entries near the top of KAI's sidebar. It uses the same K
 
 1. Open **Brain → Add a note**. Add a useful fact, preference, project, or person. Give it a clear title and optional tags. Pin only the facts that should stay prominent.
 2. Open **Goals → Add a goal**. Record what matters, why it matters, and the next steps. High-priority active goals come first in KAI's reply context.
-3. Use **Sources & sync → Import text file** for a TXT, Markdown, CSV or JSON file up to 200 KB. Re-importing the same file name updates that source. Use distinct names for unrelated files.
+3. Use **Sources → Import text file** for a TXT, Markdown, CSV or JSON file up to 200 KB. Re-importing the same file name updates that source. Use distinct names for unrelated files.
 4. **Import previous memories** brings KAI's existing remembered facts into a separate Brain source. It does not remove the old memory store.
 5. Ask a question about your note using a local model or your configured OpenAI/Anthropic model. Relevant Brain notes and active goals help the final answer. In Agent mode or desktop KAI, KAI can also search Brain explicitly and ask to remember new facts.
 6. Use **Export Brain** to save a Markdown snapshot. Exports include your notes/source content and goals, not connection tokens. The exported file is readable text; store it where you want your personal material to live.
@@ -61,7 +63,7 @@ The two optional connection grants are separate:
 - **Let KAI use these operations:** exposes the saved operations to the desktop companion and main chat's Agent mode. KAI asks before each call, including reads.
 - **Allow background GET requests:** permits selected sources/workflow read steps to run without a new prompt. Only configure genuinely read-only operations with GET. Writes still pause for approval.
 
-For a Brain source, enable background reads, then open **Brain → Sources & sync → Add API source**. Select the connection, its GET operation, and path variables. Sync now or opt into the 20-minute schedule. The source stores the returned text/JSON locally; this version does not follow pagination automatically.
+For a Brain source, enable background reads, then open **Brain → Sources → Add API source**. Select the connection, its GET operation, and path variables. Sync now or opt into the 20-minute schedule. The source stores the returned text/JSON locally; this version does not follow pagination automatically.
 
 Local-Only privacy blocks these API requests. Change to Local-First in **Local API → Privacy** when you want to use online connections. API tokens are never forwarded to the inference provider or earning workers. Changing the API destination requires entering the token again.
 

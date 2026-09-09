@@ -1,3 +1,15 @@
+### A connected Brain, with Awareness
+
+- **The same 1,516-app catalog in both connection modes.** Search the full list immediately, filter eight stable categories or authentication types, and browse compact logo cards. Category changes no longer repeat or grow the menu.
+- **Sidebar navigation.** Brain, Workflows and Connections now use a left rail like Koinos Node.
+- **A richer Brain.** Explore source/topic relationships, search by source/topic/date, maintain goals and tasks, and compare memory changes with their original text.
+- **More sources.** Select local text folders, KAI conversations, public websites, RSS/Atom feeds and GitHub repositories, alongside your connected app reads. Each source has its own refresh control.
+- **Awareness.** Choose Off, Observe or Assist, select what KAI can read, add custom background checks and use an installed local model for summaries, briefings and reviewable suggestions.
+- **Visible background work.** Inspect the queue, results, retry/stop controls and activity; start reviewed workflows for follow-through.
+- **Portable knowledge.** Export a new Markdown/Obsidian folder with linked sources, topics and memories.
+
+Read the [Brain and Awareness guide](KAI_BRAIN_AWARENESS.md) and [OpenHuman feature coverage](OPENHUMAN_BRAIN_COVERAGE.md). The full app catalog includes OAuth, API credentials and other connection types; provider/project setup still applies. This update needs no new server environment variables.
+
 ### Connect without a settings loop
 
 - **App cards keep the chosen app open.** Connect checks the current server status and explains whether KAI sign-in, a personal key, or a privacy change is needed.

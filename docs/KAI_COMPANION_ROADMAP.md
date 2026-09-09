@@ -1,5 +1,7 @@
 # KAI companion: OpenHuman review and implementation roadmap
 
+**Latest coverage:** [Brain, Awareness and the unified catalog](OPENHUMAN_BRAIN_COVERAGE.md) supersede the initial implementation status below. The tables below retain the original product inventory for traceability.
+
 Reviewed September 9, 2026. KAI baseline: `02efdb8` on `test` (Test 0.54.2-test.44.1).
 Reference snapshot: [OpenHuman `0a2aeb00`](https://github.com/tinyhumansai/openhuman/tree/0a2aeb00c8413b824e3ffdb16da6bdd83e0dda39). Also reviewed the 18 screenshots supplied with this request and [TinyHumans](https://tinyhumans.ai/).
 

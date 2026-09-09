@@ -21,6 +21,7 @@ class CompanionStore {
         if (saved.version !== 1 || !["notes", "goals", "sources", "connections", "workflows", "runs", "syncs"].every(k => Array.isArray(saved[k]))) throw new Error("Invalid store");
         this.data = saved;
       }
+      this.data.brain ||= { summaries: [], insights: [], tasks: [], jobs: [], activity: [], changes: [], readAt: 0, checkpoints: [], awareness: { mode: "off", intervalMinutes: 20, events: true, model: "", sourceIds: [], includeNotes: false, includeGoals: false, autoLearn: false, maxPerHour: 6, contextChars: 10000, lastTick: 0, failures: 0, customTasks: [] } };
     } catch { this.locked = true; }
   }
   available() { return this.storage.isEncryptionAvailable() && this.storage.getSelectedStorageBackend?.() !== "basic_text"; }
@@ -29,6 +30,17 @@ class CompanionStore {
   }
   change(fn) {
     this.requireStorage(); const next = copy(this.data); const result = fn(next);
+    // Keep a bounded, encrypted change ledger. It is data for review, never instructions.
+    if (next.brain && !this.suppressHistory) {
+      const before = new Map(this.data.notes.map(n => [n.id, n]));
+      const after = new Map(next.notes.map(n => [n.id, n]));
+      for (const key of new Set([...before.keys(), ...after.keys()])) {
+        const a = before.get(key), b = after.get(key);
+        if (JSON.stringify(a) === JSON.stringify(b)) continue;
+        next.brain.changes.unshift({ id: id(), noteId: key, sourceId: b?.sourceId || a?.sourceId || null, at: Date.now(), kind: !a ? "added" : !b ? "removed" : "modified", title: b?.title || a.title, before: a || null, after: b || null });
+      }
+      next.brain.changes = next.brain.changes.slice(0, 200);
+    }
     if (Buffer.byteLength(JSON.stringify(next)) > 24 * 1024 * 1024) throw new CompanionError("Companion storage is full. Export and remove older source material or runs.");
     fs.mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
     const tmp = this.file + "." + id() + ".tmp";
@@ -85,8 +97,13 @@ class CompanionStore {
       const chunks = content.match(/[\s\S]{1,3000}/g) || [];
       const remaining = d.notes.filter(n => n.sourceId !== sourceId);
       if (remaining.length + chunks.length > 3000) throw new CompanionError("Brain is full. Remove older sources before syncing.");
-      d.notes = remaining.concat(chunks.map((chunk, i) => ({ id: sourceId + ":" + i, sourceId, title: s.name + (chunks.length > 1 ? ` · ${i + 1}` : ""), text: chunk,
-        category: "sources", tags: [s.name.toLowerCase().slice(0, 40)], source: s.name, pinned: false, createdAt: Date.now(), updatedAt: Date.now() })));
+      const previous = new Map(d.notes.filter(n => n.sourceId === sourceId).map(n => [n.id, n]));
+      d.notes = remaining.concat(chunks.map((chunk, i) => {
+        const key = sourceId + ":" + i, old = previous.get(key);
+        if (old?.text === chunk) return old;
+        return { id: key, sourceId, title: s.name + (chunks.length > 1 ? ` · ${i + 1}` : ""), text: chunk,
+          category: "sources", tags: [s.name.toLowerCase().slice(0, 40)], source: s.name, pinned: old?.pinned || false, createdAt: old?.createdAt || Date.now(), updatedAt: Date.now() };
+      }));
       s.hash = hash; s.lastSync = Date.now(); s.error = null; s.chunks = chunks.length;
       d.syncs.unshift({ sourceId, name: s.name, at: Date.now(), added: chunks.length, status: "synced" }); d.syncs = d.syncs.slice(0, 100);
       return { added: chunks.length, unchanged: false };
@@ -94,7 +111,25 @@ class CompanionStore {
   }
   remove(kind, key) {
     if (!["notes", "goals", "sources"].includes(kind)) throw new CompanionError("Unknown Brain item.");
-    this.change(d => { d[kind] = d[kind].filter(x => x.id !== key); if (kind === "sources") { d.notes = d.notes.filter(n => n.sourceId !== key); d.syncs = d.syncs.filter(s => s.sourceId !== key); } });
+    this.suppressHistory = true;
+    try { this.change(d => {
+      const forgotten = new Set(d.notes.filter(n => kind === "sources" ? n.sourceId === key : kind === "notes" && n.id === key).map(n => n.id));
+      d[kind] = d[kind].filter(x => x.id !== key);
+      if (kind === "sources") { d.notes = d.notes.filter(n => n.sourceId !== key); d.syncs = d.syncs.filter(s => s.sourceId !== key); }
+      if (d.brain) {
+        d.brain.changes = d.brain.changes.filter(c => !forgotten.has(c.noteId));
+        d.brain.summaries = d.brain.summaries.filter(s => !s.noteIds?.some(n => forgotten.has(n)));
+        const insights = new Set(d.brain.insights.filter(s => s.noteIds?.some(n => forgotten.has(n)) || kind === "goals").map(s => s.id));
+        const learned = new Set(d.notes.filter(n => insights.has(n.insightId)).map(n => n.id));
+        d.notes = d.notes.filter(n => !learned.has(n.id));
+        d.brain.changes = d.brain.changes.filter(c => !learned.has(c.noteId));
+        if (kind === "goals" || d.brain.briefing?.noteIds.some(n => forgotten.has(n))) delete d.brain.briefing;
+        d.brain.insights = d.brain.insights.filter(s => !insights.has(s.id));
+        d.brain.tasks = d.brain.tasks.filter(t => !insights.has(t.insightId));
+        d.brain.jobs = d.brain.jobs.filter(j => kind !== "goals" && !j.noteIds?.some(n => forgotten.has(n) || learned.has(n)) && !(kind === "sources" && j.sourceId === key));
+        if (kind === "sources") d.brain.awareness.sourceIds = d.brain.awareness.sourceIds.filter(s => s !== key);
+      }
+    }); } finally { this.suppressHistory = false; }
   }
   markdown() {
     this.requireStorage();

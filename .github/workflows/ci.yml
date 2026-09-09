@@ -26,6 +26,15 @@ jobs:
         continue-on-error: true
       - name: Run tests
         run: npm test
+        env:
+          KAI_MASCOT_QA_DIR: companion-qa
+      - name: Save companion visual checks
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: companion-visual-checks
+          path: companion-qa/*
+          if-no-files-found: ignore
 
   build-windows:
     # Installer builds are heavy: run on release tags (published to a GitHub
