@@ -66,6 +66,18 @@
    */
   function toolCheckboxes(host, cls, checked = []) {
     host.innerHTML = "";
+    const picker = document.createElement("details");
+    picker.className = "dev-tool-picker";
+    const summary = document.createElement("summary");
+    const choices = document.createElement("div");
+    choices.className = "dev-tool-choices";
+    const syncCount = () => {
+      const count = choices.querySelectorAll('input[type="checkbox"]:checked').length;
+      summary.textContent = `Tools · ${count} selected`;
+    };
+    choices.addEventListener("change", syncCount);
+    picker.append(summary, choices);
+    host.appendChild(picker);
     const BUILT_IN = "Built-in";
     const groups = new Map(); // group heading -> tools
     for (const t of toolCache || []) {
@@ -110,6 +122,7 @@
           const turnOn = !boxes.every((b) => b.checked);
           for (const b of boxes) b.checked = turnOn;
           sync();
+          syncCount();
         });
         group.addEventListener("change", sync);
         head.append(name, all);
@@ -127,12 +140,16 @@
         box.dataset.tool = t.name;
         box.checked = checked.includes(t.name);
         label.appendChild(box);
-        label.appendChild(document.createTextNode(` ${t.label || t.name}${t.sensitive ? " ⚠" : ""}`));
+        const caption = document.createElement("span");
+        caption.textContent = `${t.label || t.name}${t.sensitive ? " ⚠" : ""}`;
+        label.appendChild(caption);
         group.appendChild(label);
       }
       if (group._sync) group._sync();
-      host.appendChild(group);
+      choices.appendChild(group);
     }
+    syncCount();
+    if (!groups.size) choices.textContent = "No tools available.";
   }
 
   // ================== Multi-agent builder ==================
@@ -151,11 +168,15 @@
     const card = document.createElement("div");
     card.className = "agent-card";
     const row = document.createElement("div");
-    row.className = "form-row";
+    row.className = "form-row dev-agent-head";
+    const nameField = document.createElement("label");
+    nameField.className = "dev-field";
+    nameField.appendChild(document.createTextNode("Agent name"));
     const name = document.createElement("input");
     name.className = "ag-name";
     name.placeholder = "Name (e.g. Researcher)";
     name.value = a.name || "";
+    nameField.appendChild(name);
     const human = document.createElement("label");
     human.className = "check";
     const humanBox = document.createElement("input");
@@ -163,28 +184,32 @@
     humanBox.className = "ag-human";
     humanBox.checked = a.human === true;
     human.appendChild(humanBox);
-    human.appendChild(document.createTextNode(" human (asks you)"));
+    human.appendChild(document.createTextNode("Human (asks you)"));
     const rm = document.createElement("button");
     rm.className = "linklike ag-remove";
-    rm.textContent = "remove";
+    rm.textContent = "Remove";
     rm.addEventListener("click", () => card.remove());
-    row.append(name, human, rm);
+    row.append(nameField, human, rm);
+    const promptField = document.createElement("label");
+    promptField.className = "dev-field";
+    promptField.appendChild(document.createTextNode("Role instructions"));
     const prompt = document.createElement("textarea");
     prompt.className = "ag-prompt";
     prompt.rows = 2;
     prompt.placeholder = "Role instructions (system prompt)";
     prompt.value = a.systemPrompt || "";
+    promptField.appendChild(prompt);
     const tools = document.createElement("div");
     tools.className = "form-row ag-tools";
     toolCheckboxes(tools, "ag-tool", a.tools || []);
     // A human agent holds no tools — the engine enforces it; the form says it.
     const syncHuman = () => {
       tools.hidden = humanBox.checked;
-      prompt.hidden = humanBox.checked;
+      promptField.hidden = humanBox.checked;
     };
     humanBox.addEventListener("change", syncHuman);
     syncHuman();
-    card.append(row, prompt, tools);
+    card.append(row, promptField, tools);
     $("ag-list").appendChild(card);
   }
 

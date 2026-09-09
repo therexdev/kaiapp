@@ -59,6 +59,22 @@ test("developer tools view: nav reveal, tabs, a pipeline run, and a playground c
     assert.ok(Array.isArray(agSpec.agents) && agSpec.agents.length >= 2, "the example group spec is valid as shipped");
     assert.ok((await page.$$("#ag-list .agent-card")).length >= 2, "the builder shows the example's agent cards");
 
+    // The API form skin used to give selects an entire row and checkboxes
+    // a text input's minimum width. Check the real layout with the sidebar.
+    for (const width of [1280, 960, 720]) {
+      await page.setViewportSize({ width, height: 900 });
+      for (const tab of ["agents", "playground", "pipelines", "bench"]) {
+        await page.click(`.subtab[data-tab="${tab}"]`);
+        const overflow = await page.$eval("#view-devtools", el => el.scrollWidth - el.clientWidth);
+        assert.ok(overflow <= 1, `${tab} fits the ${width}px window`);
+        if (process.env.KAI_MASCOT_QA_DIR) {
+          fs.mkdirSync(process.env.KAI_MASCOT_QA_DIR, { recursive: true });
+          await page.screenshot({ path: path.join(process.env.KAI_MASCOT_QA_DIR, `developer-${tab}-${width}.png`) });
+        }
+      }
+    }
+    await page.setViewportSize({ width: 1280, height: 900 });
+
     // ---- Pipelines tab: the simple track still runs end-to-end ----
     await page.click('.subtab[data-tab="pipelines"]');
     await page.waitForSelector("#devtab-pipelines:not([hidden])");
@@ -231,13 +247,18 @@ test("tool picker groups by server and shows readable names, not internal ids", 
     await page.waitForSelector("#nav-devtools:not([hidden])");
     await page.click("#nav-devtools");
     await page.waitForSelector("#view-devtools:not([hidden])");
-    await page.waitForSelector(".tool-group");
+    await page.waitForSelector(".dev-tool-picker > summary");
 
     // Nothing a person reads carries the internal id.
     // Scoped to the FIRST agent card. The example team ships two agents and
     // each carries its own independent picker, so an unscoped selector sees
     // every group twice and the assertions read as duplicates.
     const CARD = ".agent-card:nth-of-type(1)";
+    assert.strictEqual(await page.$eval(`${CARD} .dev-tool-picker`, el => el.open), false);
+    await page.click(`${CARD} .dev-tool-picker > summary`);
+    await page.waitForSelector(`${CARD} .tool-group`);
+    const checkboxWidth = await page.$eval(`${CARD} .ag-tool`, el => el.getBoundingClientRect().width);
+    assert.ok(checkboxWidth <= 20, "a checkbox must not inherit the text input's 120px minimum");
     const shown = await page.$$eval(`${CARD} .ag-tools .check`, (els) => els.map((e) => e.textContent.trim()));
     assert.ok(shown.length > 0, "the picker rendered tools");
     assert.ok(!shown.some((t) => t.includes(SRV_ID)), `no label should contain the server id, got ${JSON.stringify(shown.slice(0, 3))}`);
@@ -257,6 +278,7 @@ test("tool picker groups by server and shows readable names, not internal ids", 
     await page.click(`${group} .tool-group-all`);
     const checked = await page.$$eval(`${group} .ag-tool:checked`, (els) => els.map((e) => e.dataset.tool));
     assert.strictEqual(checked.length, 9, "every tool in the group turned on");
+    assert.match(await page.textContent(`${CARD} summary`), /10 selected/);
     assert.ok(checked.every((n) => n.startsWith(`mcp:${SRV_ID}:`)), "values are still the registry ids");
     assert.strictEqual(
       await page.$eval(`${group} .tool-group-all`, (el) => el.textContent.trim()), "None",
@@ -270,6 +292,7 @@ test("tool picker groups by server and shows readable names, not internal ids", 
     assert.strictEqual(
       await page.$$eval(`${group} .ag-tool:checked`, (els) => els.length), 0,
       "clicking again turns the group back off");
+    assert.match(await page.textContent(`${CARD} summary`), /1 selected/);
   } finally {
     await browser.close();
     await core.stop();

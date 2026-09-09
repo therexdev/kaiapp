@@ -1,3 +1,9 @@
+### Tidier Developer Tools
+
+- **Aligned fields and actions.** Multi-agent, Playground and Pipelines now use consistent labels, field heights and spacing. Saved-team controls stay together, and forms stack cleanly in smaller windows.
+- **Compact agent cards.** Tool lists expand when needed, show the selected count, and keep checkboxes beside readable names. Role instructions stay in a normal text font; JSON editors keep their code formatting.
+- **Clearer JSON controls.** Builder updates sit beside each JSON editor, with a reminder that saving and running use the JSON. Existing team definitions and execution behavior stay the same.
+
 ### More natural conversations and fewer provider cut-offs
 
 - **Room to finish your question.** In **Voice & listening → Conversation pauses**, Natural allows a short thinking pause, Quick sends sooner, and Patient gives you more time. Natural is the default. Words spoken while KAI is still recognizing your question stay together in one request. This uses the existing local listener; no extra download is needed.
