@@ -106,7 +106,7 @@ async function refresh() {
   // off whatever screen they were on mid-keystroke. The Koinos node in
   // particular needs no model at all.
   const route = state.ready || desktopReady || state.routed ? state.view : "onboarding";
-  showView(route, { navOnly: state.ready || desktopReady });
+  showView(route, { navOnly: true });
   if (!state.ready && entry) renderOnboarding(entry);
 
   const busy = models.download || models.ensure?.state === "working";
@@ -472,6 +472,20 @@ function setStatus(kind, text) {
 
 // ---------- views ----------
 
+function expandNavGroup(selected) {
+  for (const header of document.querySelectorAll("#nav .nav-group-label")) {
+    const open = header === selected;
+    header.setAttribute("aria-expanded", String(open));
+    const items = document.getElementById(header.getAttribute("aria-controls"));
+    items.inert = !open;
+    items.setAttribute("aria-hidden", String(!open));
+  }
+}
+
+for (const header of document.querySelectorAll("#nav .nav-group-label")) {
+  header.addEventListener("click", () => expandNavGroup(header));
+}
+
 function showView(name, { navOnly = false } = {}) {
   // All seven koinos-* entries share one physical view (the embedded node
   // app); the highlight still follows the entry itself. Mapped HERE because
@@ -490,6 +504,10 @@ function showView(name, { navOnly = false } = {}) {
     code: ["Koinos Code", "Build something you want to exist."], devtools: ["Developer tools", "Everything you need to get hands-on."],
     koinos: ["Koinos Node", "Your wallet. Your node. Your contribution."], onboarding: ["Welcome to Koinos AI", "Let’s get you ready."]
   };
+  const selectedNav = document.querySelector(`#nav [data-view="${phys}"]`);
+  if (selectedNav && (!navOnly || !selectedNav.classList.contains("active"))) {
+    expandNavGroup(selectedNav.closest(".nav-group").querySelector(".nav-group-label"));
+  }
   const heading = headings[phys] || ["Koinos AI", "Think. Build. Grow."];
   $("workspace-title").textContent = heading[0];
   $("workspace-caption").textContent = heading[1];

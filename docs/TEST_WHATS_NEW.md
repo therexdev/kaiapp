@@ -1,3 +1,9 @@
+### Clearer navigation and node status
+
+- Sidebar menu groups now expand one at a time. Open Workspace, Your toolkit or Contribute to reveal its options; the previous group retracts.
+- Quick sync clearly shows that the node is stopped for a snapshot restore. Start/stop controls stay unavailable during the restore, and saved key registration no longer implies active block production.
+- Dashboard status uses one colored dot, including an amber state for quick sync.
+
 ### Agent Network private service preview
 
 - Agents content scrolls within its workspace while the app navigation stays in place.

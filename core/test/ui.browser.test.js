@@ -1,4 +1,5 @@
 "use strict";
+const { navClick } = require("./ui-nav");
 
 /*
  * Full product loop in a real Chromium via playwright-core: onboarding
@@ -111,7 +112,7 @@ test("onboarding -> download -> streaming chat -> key lockdown (real browser)", 
     );
 
     // API view: create a key -> /v1 locks down; UI chat lane stays open.
-    await page.click('.nav-item[data-view="api"]');
+    await navClick(page, '.nav-item[data-view="api"]');
     await page.click("#btn-new-key");
     await page.waitForSelector("#new-key-reveal:not([hidden])");
     const secret = (await page.textContent("#new-key-value")).trim();
@@ -122,7 +123,7 @@ test("onboarding -> download -> streaming chat -> key lockdown (real browser)", 
     const allowed = await fetch(`${base}/v1/models`, { headers: { authorization: `Bearer ${secret}` } });
     assert.equal(allowed.status, 200);
 
-    await page.click('.nav-item[data-view="chat"]');
+    await navClick(page, '.nav-item[data-view="chat"]');
     await page.fill("#input", "still works?");
     await page.click("#btn-send");
     await page.waitForFunction(

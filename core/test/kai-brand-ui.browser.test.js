@@ -1,4 +1,5 @@
 "use strict";
+const { navClick } = require("./ui-nav");
 const { test } = require("node:test"), assert = require("node:assert/strict");
 const fs = require("fs"), os = require("os"), path = require("path");
 const CHROMIUM = process.env.KAI_TEST_CHROMIUM || "/opt/pw-browsers/chromium";
@@ -38,6 +39,24 @@ test("KAI workspace: artwork, welcome drafts, all navigation and narrow-window h
   }));
   assert.deepEqual(texture, { width: 1024, height: 1536 }, "The real Core serves the bundled texture");
   await shot(page, "chat-home");
+  // Only one menu group is exposed, including to keyboard navigation.
+  for (const group of ["toolkit", "contribute", "workspace"]) {
+    await page.click("#nav-group-" + group);
+    assert.equal(await page.locator('#nav .nav-group-label[aria-expanded="true"]').count(), 1);
+    assert.equal(await page.locator("#nav-items-" + group).evaluate(el => el.inert), false);
+    for (const other of ["workspace", "toolkit", "contribute"].filter(v => v !== group)) {
+      assert.equal(await page.locator("#nav-items-" + other).evaluate(el => el.inert), true);
+    }
+  }
+  await page.focus("#nav-group-toolkit"); await page.keyboard.press("Enter");
+  await page.locator('#nav-group-toolkit[aria-expanded="true"]').waitFor();
+  await page.evaluate(() => showView("chat"));
+  assert.equal(await page.getAttribute("#nav-group-workspace", "aria-expanded"), "true", "programmatic navigation reveals its group");
+  await page.click("#nav-group-contribute");
+  await page.evaluate(() => showView("chat", { navOnly: true }));
+  assert.equal(await page.getAttribute("#nav-group-contribute", "aria-expanded"), "true", "background refresh does not reopen the old group");
+  await navClick(page, '[data-view="chat"]');
+
   await page.click('[data-chat-prompt*="turn an idea"]');
   assert.match(await page.inputValue("#input"), /turn an idea/);
   assert.equal(await page.locator(".msg.user").count(), 0, "Welcome cards create editable drafts, not automatic requests");
@@ -46,12 +65,12 @@ test("KAI workspace: artwork, welcome drafts, all navigation and narrow-window h
   await page.fill("#input", "Hello from the new workspace."); await page.click("#btn-send");
   await page.waitForFunction(() => document.querySelector(".msg.assistant")?.textContent.includes("Hello from fake llama") && document.getElementById("btn-stop").hidden);
   await shot(page, "chat-reply");
-  await page.click("#nav-settings");
+  await navClick(page, "#nav-settings");
   for (const id of ["btn-dev-toggle", "btn-code-toggle"]) {
     if (await page.getAttribute("#" + id, "aria-checked") !== "true") await page.click("#" + id);
   }
   for (const view of ["models", "docs", "compare", "tools", "tasks", "api", "earn", "network", "settings", "code", "devtools"]) {
-    await page.click(`[data-view="${view}"]`);
+    await navClick(page, `[data-view="${view}"]`);
     await page.waitForSelector(`#view-${view}:not([hidden])`);
     await shot(page, view);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `${view} fits the window`);
@@ -74,14 +93,38 @@ test("KAI workspace: artwork, welcome drafts, all navigation and narrow-window h
       Object.hasOwn(fixture, channel) ? { ok: true, data: fixture[channel] } : { ok: false, error: "Unavailable in visual fixture" }) });
   });
   await page.route("**/core/koinos", route => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ enabled: true, chainReadsAllowed: true }) }));
-  await page.click("#nav-settings");
-  await page.waitForSelector("#nav-koinos:not([hidden])"); await page.click("#nav-koinos");
+  await navClick(page, "#nav-settings");
+  await page.waitForSelector("#nav-koinos:not([hidden])", { state: "attached" }); await navClick(page, "#nav-koinos");
   const frame = page.frameLocator("#koinos-frame");
   await frame.locator("#d-status-text").filter({ hasText: "Running" }).waitFor();
   await shot(page, "node-dashboard");
+  assert.equal(await frame.locator("#d-status-text").innerText(), "Running", "the status label has no second dot");
+  const snapshot = { docker: { ok: true }, isRunning: false, runningCount: 0, services: [], autoRecover: true,
+    op: { name: "quick-sync", running: true, progress: { stage: "download", pct: 2.8, doneBytes: 1800000000, totalBytes: 64800000000 }, tail: ["Downloading chain backup"] } };
+  fixture["node:status"] = snapshot;
+  fixture["producer:status"] = { address: "fixture", matches: true, filePublicKey: "fixture-key" };
+  fixture["producer:balances"] = { vhp: "100000000" };
+  fixture["dashboard:summary"].node = snapshot;
+  await frame.locator("#view-dashboard").evaluate(() => refreshDashboard());
+  assert.equal(await frame.locator("#d-status-text").innerText(), "Quick syncing");
+  assert.equal(await frame.locator("#d-dot").getAttribute("class"), "dot amber");
+  assert.equal(await frame.locator("#d-toggle").isDisabled(), true);
+  await shot(page, "node-quick-sync-dashboard");
+  await page.click('[data-knode="koinos-node"]');
+  await frame.locator("#n-run-pill").filter({ hasText: "stopped · quick syncing" }).waitFor();
+  assert.match(await frame.locator("#n-reg-hint").innerText(), /paused for quick sync/);
+  assert.equal(await frame.locator("#n-start").isDisabled(), true);
+  assert.equal(await frame.locator("#n-autorecover").isChecked(), true);
+  await shot(page, "node-quick-sync");
+  snapshot.op.running = false; snapshot.op.code = 0;
+  await frame.locator("#view-node").evaluate(() => refreshNode());
+  assert.equal(await frame.locator("#n-run-pill").innerText(), "stopped");
+  assert.equal(await frame.locator("#n-start").isEnabled(), true);
+  assert.match(await frame.locator("#n-reg-hint").innerText(), /no blocks are being produced/);
+
   await page.click('[data-knode="koinos-wallet"]');
   await frame.locator("#view-wallet.active").waitFor(); await shot(page, "wallet");
-  await page.click('[data-view="chat"]'); await page.setViewportSize({ width: 820, height: 700 });
+  await navClick(page, '[data-view="chat"]'); await page.setViewportSize({ width: 820, height: 700 });
   await page.click("#history-toggle");
   assert.equal(await page.locator("#chats-pane").isVisible(), true);
   await page.click("#btn-new-chat");

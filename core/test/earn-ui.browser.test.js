@@ -1,4 +1,5 @@
 "use strict";
+const { navClick } = require("./ui-nav");
 
 /*
  * The Earn tab's wallet forms in a real Chromium: create (typed, confirmed),
@@ -42,7 +43,7 @@ test("earn wallet UI: create -> lock -> unlock -> restore -> unlock (real browse
     const page = await browser.newPage();
     await page.goto(base);
     await page.waitForSelector("#view-chat:not([hidden])");
-    await page.click('.nav-item[data-view="earn"]');
+    await navClick(page, '.nav-item[data-view="earn"]');
     await page.waitForSelector("#earn-setup:not([hidden])");
 
     // Create: typed keystrokes, both fields, mismatch first (guard works),
@@ -121,7 +122,7 @@ test("wallet card: receive address shown, sends demand a password and a second c
     const page = await browser.newPage();
     await page.goto(base);
     await page.waitForSelector("#view-chat:not([hidden])");
-    await page.click('.nav-item[data-view="earn"]');
+    await navClick(page, '.nav-item[data-view="earn"]');
     await page.waitForSelector("#earn-ready:not([hidden])");
 
     // Receive: the card carries this wallet's real address.
@@ -176,7 +177,7 @@ test("account card: signed-out state renders, and Local-Only privacy is explaine
     await page.waitForSelector("#view-chat:not([hidden])");
     // The account card moved out of Earn and into Settings (v0.41.0) — it is
     // about who you are, not about earning.
-    await page.click('[data-view="settings"]');
+    await navClick(page, '[data-view="settings"]');
     await page.waitForSelector("#view-settings:not([hidden])");
     // Default privacy is Local-Only: the card must say so, in words, instead
     // of showing a broken sign-in button.
@@ -243,16 +244,16 @@ test("koinos node: one sidebar entry, seven screens on a rail, Dashboard first",
     await page.waitForSelector("#view-chat:not([hidden])");
 
     // The switch moved to Settings along with everything else optional.
-    await page.click('[data-view="settings"]');
+    await navClick(page, '[data-view="settings"]');
     await page.waitForSelector("#view-settings:not([hidden])");
     assert.strictEqual(await page.$eval("#nav-koinos", (el) => el.hidden), true, "hidden while off");
     await page.click("#btn-koinos-toggle");
-    await page.waitForSelector("#nav-koinos:not([hidden])");
+    await page.waitForSelector("#nav-koinos:not([hidden])", { state: "attached" });
 
     // Exactly one entry — not seven.
     assert.strictEqual(await page.$$eval(".nav-item.koinos-nav", (e) => e.length), 1);
 
-    await page.click("#nav-koinos");
+    await navClick(page, "#nav-koinos");
     await page.waitForSelector("#view-koinos:not([hidden])");
     const rail = await page.$$eval("#kn-rail [data-knode]", (els) =>
       els.map((e) => ({ v: e.dataset.knode, label: e.textContent.trim(), on: e.classList.contains("on") }))
@@ -273,7 +274,7 @@ test("koinos node: one sidebar entry, seven screens on a rail, Dashboard first",
     );
 
     // Switching the node off must not strand anyone on a view that is gone.
-    await page.click('[data-view="settings"]');
+    await navClick(page, '[data-view="settings"]');
     await page.click("#btn-koinos-toggle");
     await page.waitForFunction(() => document.getElementById("nav-koinos").hidden);
   } finally {

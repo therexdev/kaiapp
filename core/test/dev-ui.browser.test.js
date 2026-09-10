@@ -1,4 +1,5 @@
 "use strict";
+const { navClick } = require("./ui-nav");
 
 /*
  * The Developer Tools VIEW (task #64) in a real Chromium: the switch in
@@ -45,14 +46,14 @@ test("developer tools view: nav reveal, tabs, a pipeline run, and a playground c
 
     // The switch lives in Settings (v0.41.0 — it used to be buried at the
     // bottom of Local API); the CONTENT lives in its own view.
-    await page.click('[data-view="settings"]');
+    await navClick(page, '[data-view="settings"]');
     await page.waitForSelector("#view-settings:not([hidden])");
     assert.strictEqual(await page.$eval("#nav-devtools", (el) => el.hidden), true, "sidebar item hidden while the switch is off");
     await page.click("#btn-dev-toggle");
-    await page.waitForSelector("#nav-devtools:not([hidden])");
+    await page.waitForSelector("#nav-devtools:not([hidden])", { state: "attached" });
 
     // Open the view: Multi-agent tab is active, prefilled with a VALID spec.
-    await page.click("#nav-devtools");
+    await navClick(page, "#nav-devtools");
     await page.waitForSelector("#view-devtools:not([hidden])");
     await page.waitForFunction(() => document.getElementById("ag-json").value.trim().length > 0);
     const agSpec = JSON.parse(await page.$eval("#ag-json", (el) => el.value));
@@ -108,7 +109,7 @@ test("developer tools view: nav reveal, tabs, a pipeline run, and a playground c
     assert.match(first, /hello from the person/, "the typed words became Ana's turn");
 
     // The switch closes the whole area again.
-    await page.click('[data-view="settings"]'); // the gear, not Local API (v0.41.0)
+    await navClick(page, '[data-view="settings"]'); // the gear, not Local API (v0.41.0)
     await page.click("#btn-dev-toggle");
     await page.waitForSelector('#btn-dev-toggle[aria-checked="false"]');
     assert.strictEqual(await page.$eval("#nav-devtools", (el) => el.hidden), true);
@@ -146,19 +147,19 @@ test("sidebar: switches live in Settings, and what they reveal survives a reload
 
     // Network is an icon now, not a sidebar row.
     assert.strictEqual(await page.$$eval('.nav-item[data-view="network"]', (e) => e.length), 0);
-    await page.click('[data-view="network"]');
+    await navClick(page, '[data-view="network"]');
     await page.waitForSelector("#view-network:not([hidden])");
 
     // Both switches are in one findable place.
-    await page.click('[data-view="settings"]');
+    await navClick(page, '[data-view="settings"]');
     await page.waitForSelector("#view-settings:not([hidden])");
     for (const id of ["#btn-dev-toggle", "#btn-code-toggle", "#btn-koinos-toggle", "#account-signedout"]) {
       assert.ok(await page.$(id), `${id} moved into Settings`);
     }
     await page.click("#btn-dev-toggle");
     await page.click("#btn-code-toggle");
-    await page.waitForSelector("#nav-devtools:not([hidden])");
-    await page.waitForSelector("#nav-code:not([hidden])");
+    await page.waitForSelector("#nav-devtools:not([hidden])", { state: "attached" });
+    await page.waitForSelector("#nav-code:not([hidden])", { state: "attached" });
 
     // THE BUG: reload and look at the sidebar without going anywhere first.
     await page.reload();
@@ -177,7 +178,7 @@ test("sidebar: switches live in Settings, and what they reveal survives a reload
      * Squeeze the window so Settings certainly overflows, then scroll it.
      */
     await page.setViewportSize({ width: 1000, height: 420 });
-    await page.click('[data-view="settings"]');
+    await navClick(page, '[data-view="settings"]');
     await page.waitForSelector("#view-settings:not([hidden])");
     const before = await page.$eval("#sidebar", (el) => el.getBoundingClientRect().top);
     await page.$eval("#view-settings", (el) => { el.scrollTop = el.scrollHeight; });
@@ -242,10 +243,10 @@ test("tool picker groups by server and shows readable names, not internal ids", 
     });
     await page.goto(base);
     await page.waitForSelector("#view-chat:not([hidden])");
-    await page.click('[data-view="settings"]');
+    await navClick(page, '[data-view="settings"]');
     await page.click("#btn-dev-toggle");
-    await page.waitForSelector("#nav-devtools:not([hidden])");
-    await page.click("#nav-devtools");
+    await page.waitForSelector("#nav-devtools:not([hidden])", { state: "attached" });
+    await navClick(page, "#nav-devtools");
     await page.waitForSelector("#view-devtools:not([hidden])");
     await page.waitForSelector(".dev-tool-picker > summary");
 

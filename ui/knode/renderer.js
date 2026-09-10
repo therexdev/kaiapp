@@ -207,7 +207,7 @@ function renderDashboardView() {
     <div class="card status-card">
       <div class="row spread">
         <div>
-          <div class="status-line"><span class="dot" id="d-dot"></span><span id="d-status-text">Loading…</span></div>
+          <div class="status-line"><span class="dot" id="d-dot" aria-hidden="true"></span><span id="d-status-text">Loading…</span></div>
           <div class="muted small" id="d-status-sub"></div>
         </div>
         <button id="d-toggle" class="btn primary" data-action="">…</button>
@@ -245,15 +245,23 @@ function patchDashboardView() {
   }
   const symbol = d.network.tokenSymbol;
   const running = !!(d.node && d.node.isRunning);
+  const quickSync = d.node?.op?.running && d.node.op.name === "quick-sync";
   const dockerOk = d.node && d.node.docker && d.node.docker.ok;
 
   const dot = $("#d-dot");
   const text = $("#d-status-text");
   const sub = $("#d-status-sub");
   const toggle = $("#d-toggle");
-  dot.className = "dot " + (running ? "green" : "red");
-  if (running) {
-    text.textContent = "● Running";
+  dot.className = "dot " + (quickSync ? "amber" : running ? "green" : "red");
+  if (quickSync) {
+    text.textContent = "Quick syncing";
+    text.className = "status-text warn-text";
+    sub.textContent = `${running ? "Stopping node" : "Node stopped"} · ${quickSyncStage(d.node.op)} · ${d.network.label}`;
+    toggle.textContent = "Quick sync in progress";
+    toggle.className = "btn";
+    toggle.dataset.action = "";
+  } else if (running) {
+    text.textContent = "Running";
     text.className = "status-text good-text";
     const op = d.node.op;
     sub.textContent = op && op.running ? `${op.name} in progress…` : `${d.node.runningCount} services · ${d.network.label}`;
@@ -261,25 +269,25 @@ function patchDashboardView() {
     toggle.className = "btn danger";
     toggle.dataset.action = "stop";
   } else if (!dockerOk) {
-    text.textContent = "● Offline";
+    text.textContent = "Offline";
     text.className = "status-text bad-text";
     sub.textContent = "Docker not ready — finish setup on the Node tab";
     toggle.textContent = "Set up node";
     toggle.className = "btn";
     toggle.dataset.action = "setup";
   } else {
-    text.textContent = "● Offline";
+    text.textContent = "Offline";
     text.className = "status-text bad-text";
     sub.textContent = `Node stopped · ${d.network.label}`;
     toggle.textContent = "Start node";
     toggle.className = "btn primary";
     toggle.dataset.action = "start";
   }
-  toggle.disabled = false;
+  toggle.disabled = !!quickSync;
 
   const syncEl = $("#d-sync");
   const sync = d.sync;
-  if (running && sync && !sync.local?.error) {
+  if (!quickSync && running && sync && !sync.local?.error) {
     const pct = sync.progressPct != null ? sync.progressPct : sync.inSync ? 100 : 0;
     syncEl.innerHTML = `<div class="row spread" style="margin-top:12px">
       <span>${sync.inSync ? '<span class="pill good">in sync</span>' : '<span class="pill warn">syncing</span>'}</span>
@@ -1078,7 +1086,7 @@ function renderNodeView() {
         <div id="n-sync" class="stack"></div>
         <label class="row small" style="gap:8px;margin-top:10px;cursor:pointer">
           <input type="checkbox" id="n-autorecover" checked>
-          <span>Keep my node running automatically <span class="muted">— the app restarts it for you if it ever stops.</span></span>
+          <span>Recover after an unexpected stop <span class="muted">— manual stops and quick sync keep the node stopped.</span></span>
         </label>
         <div style="margin-top:10px"><table id="n-services"><tbody></tbody></table></div>
       </div>
@@ -1416,6 +1424,16 @@ function busyDelegate(el, label) {
   el.innerHTML = `<span class="spin"></span> ${esc(label)}`;
 }
 
+function quickSyncStage(op) {
+  const labels = {
+    starting: "Preparing snapshot restore", stopping: "Stopping node",
+    download: "Downloading snapshot", verify: "Verifying checksum",
+    inspect: "Inspecting archive", extract: "Extracting chain data",
+    install: "Installing chain data", cleanup: "Cleaning up", done: "Restore complete",
+  };
+  return labels[op?.progress?.stage] || "Restoring chain data";
+}
+
 function patchNodeView() {
   if (!$("#n-docker")) return;
   const n = S.node;
@@ -1431,17 +1449,17 @@ function patchNodeView() {
   // operation progress
   const opEl = $("#n-op");
   const op = n?.op;
-  if (op?.running && op.name === "quick-sync") {
+  const quickSync = op?.running && op.name === "quick-sync";
+  for (const id of ["#n-start", "#n-stop", "#n-quicksync"]) {
+    const button = $(id);
+    if (button) button.disabled = !!quickSync;
+  }
+  if (quickSync) {
     const p = op.progress ?? {};
-    const stageLabels = {
-      starting: "Starting…", stopping: "Stopping node", download: "Downloading snapshot",
-      verify: "Verifying checksum", inspect: "Inspecting archive", extract: "Extracting chain data",
-      install: "Installing", cleanup: "Cleaning up", done: "Done",
-    };
     const pctText = p.pct != null ? ` — ${p.pct.toFixed(1)}%` : "";
     const bytesText = p.doneBytes != null ? ` (${fmtBytes(p.doneBytes)} / ${fmtBytes(p.totalBytes)})` : "";
     opEl.innerHTML = `<div class="banner info">
-      <div class="row spread"><span><span class="spin"></span> <b>Quick sync:</b> ${esc(stageLabels[p.stage] ?? p.stage ?? "working")}${pctText}${bytesText}</span>
+      <div class="row spread"><span><span class="spin"></span> <b>Quick sync:</b> ${esc(quickSyncStage(op))}${pctText}${bytesText}</span>
       <button id="n-qs-cancel" class="btn ghost" style="padding:4px 10px">Cancel</button></div>
       ${p.pct != null ? `<div class="progress" style="margin-top:8px"><div style="width:${Math.min(100, p.pct).toFixed(1)}%"></div></div>` : ""}
       <span class="mono small">${op.tail.slice(-2).map(esc).join("<br>")}</span></div>`;
@@ -1461,8 +1479,8 @@ function patchNodeView() {
   // run pill + services
   const pill = $("#n-run-pill");
   if (pill) {
-    pill.className = "pill " + (n?.isRunning ? "good" : "warn");
-    pill.textContent = n?.isRunning ? `running (${n.runningCount} services)` : "stopped";
+    pill.className = "pill " + (!quickSync && n?.isRunning ? "good" : "warn");
+    pill.textContent = quickSync ? (n?.isRunning ? "stopping for quick sync" : "stopped · quick syncing") : n?.isRunning ? `running (${n.runningCount} services)` : "stopped";
   }
 
   // friendly, jargon-free health line + auto-recover toggle state
@@ -1472,7 +1490,9 @@ function patchNodeView() {
   if (healthEl) {
     const h = n?.health;
     const recovered = h?.recoveries ? ` <span class="muted small">(recovered ${h.recoveries}× recently)</span>` : "";
-    if (h?.needsRepair) {
+    if (quickSync) {
+      healthEl.innerHTML = `<div class="banner info">${n?.isRunning ? "The node is stopping for a snapshot restore." : "The node is stopped while quick sync restores the chain data. Block production is paused."} Automatic recovery will not restart it during quick sync. Start the node after the restore finishes.</div>`;
+    } else if (h?.needsRepair) {
       // Corrupted block data — a restart can't fix it. Offer the one-click rebuild.
       healthEl.innerHTML = `<div class="banner bad">
         <b>Your node's block data got corrupted.</b> Restarting won't fix it — it needs to be rebuilt from a verified snapshot. Your wallet, keys and settings are safe, and it takes a few minutes.
@@ -1484,7 +1504,7 @@ function patchNodeView() {
     } else if (h?.recovering) {
       healthEl.innerHTML = `<div class="banner info"><span class="spin"></span> Getting your node back up — this takes a minute. You don't need to do anything.</div>`;
     } else if (h?.memorySaver) {
-      healthEl.innerHTML = `<div class="banner warn">Running in memory-saver mode to stay stable on this PC — your node is up and earning.${recovered}</div>`;
+      healthEl.innerHTML = `<div class="banner warn">Running in memory-saver mode to stay stable on this PC — your node services are running.${recovered}</div>`;
     } else if (h && h.ok === false) {
       healthEl.innerHTML = `<div class="banner warn">Your node needs attention — the app is taking care of it.</div>`;
     } else if (h) {
@@ -1508,7 +1528,9 @@ function patchNodeView() {
   const syncEl = $("#n-sync");
   if (syncEl) {
     const sync = n?.sync;
-    if (!n?.isRunning) {
+    if (quickSync) {
+      syncEl.innerHTML = `<span class="muted">${esc(quickSyncStage(op))}. Live chain sync resumes when you start the node after the restore.</span>`;
+    } else if (!n?.isRunning) {
       syncEl.innerHTML = `<span class="muted">Start the node to sync the chain.</span>`;
     } else if (!sync || sync.local?.error) {
       syncEl.innerHTML = `<span class="muted">Waiting for local RPC… (services may still be starting)</span>`;
@@ -1545,7 +1567,7 @@ function patchNodeView() {
           ? "Checking your VHP… no need to unlock — it's read from your public address."
           : `Burn some ${sym()} in the Burn tab — VHP is your block-producing stake.`,
       ],
-      [st(n?.isRunning), "Node running", "Start the node above."],
+      [quickSync ? "pending" : st(n?.isRunning), quickSync ? (n?.isRunning ? "Node stopping for quick sync" : "Node stopped for quick sync") : "Node running", quickSync ? "Wait for the restore to finish, then start the node." : "Start the node above."],
       [st(!!p?.filePublicKey), "Signing key generated", "Generated automatically by the node on first start."],
       [st(!!p?.matches), "Signing key registered on chain", "Register it with the button below (needs unlocked wallet + mana)."],
     ];
@@ -1564,7 +1586,7 @@ function patchNodeView() {
     if (p?.mode === "external") {
       regHint.textContent = p.matches ? "External producer registration verified. The node holds only its hot production key." : p.verificationError || "Use External signing above to register this hot key with your separate wallet.";
     } else if (p?.matches) {
-      regHint.textContent = "✅ Registered — your node signs blocks with this key. Rewards arrive at your wallet address.";
+      regHint.textContent = "Signing key registered on chain.";
     } else if (p?.registeredPublicKey && p?.filePublicKey && !p.matches) {
       regHint.textContent = "⚠️ A different key is registered on chain for this address. Register the current node key to replace it.";
     } else if (!p?.filePublicKey) {
@@ -1573,6 +1595,9 @@ function patchNodeView() {
       regHint.textContent = "Unlock your wallet to register.";
     } else {
       regHint.textContent = "";
+    }
+    if (p?.matches) {
+      regHint.textContent += quickSync ? " Block production is paused for quick sync." : !n?.isRunning ? " The node is stopped; no blocks are being produced here." : " Production also requires an in-sync node with block production enabled.";
     }
   }
 }
