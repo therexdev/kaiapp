@@ -2,6 +2,8 @@
 
 **Next priority — September 10, 2026:** [Connected companion implementation plan](KAI_CONNECTED_COMPANION_PLAN.md). Make main chat and desktop KAI the shared entry point for Brain, connected app actions, research and saved workflows. The first end-to-end gates are a Google Calendar appointment, running a named workflow, and researching a cited Google Doc saved to Drive. This is planned work, not a claim that those journeys already work reliably.
 
+**Connector expansion:** [Major connector audit and instant workflows](KAI_CONNECTOR_ACTION_AUDIT.md) defines the additional release actions: folders/Sheets, messaging, email, knowledge/project tools and Microsoft files, composed directly from chat.
+
 **Latest coverage:** [Brain, Awareness and the unified catalog](OPENHUMAN_BRAIN_COVERAGE.md) supersede the initial implementation status below. The tables below retain the original product inventory for traceability.
 
 Reviewed September 9, 2026. KAI baseline: `02efdb8` on `test` (Test 0.54.2-test.44.1).

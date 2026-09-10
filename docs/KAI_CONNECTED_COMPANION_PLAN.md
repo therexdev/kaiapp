@@ -3,11 +3,13 @@
 Status: proposed implementation sequence; documentation only. September 10, 2026.
 Audited Test commit: `6839c1546bc99b54ab8fdf878a9bae7a22a42eab` (Test 0.54.2-test.60.1).
 
+**Expanded release scope:** [Major connector audit and instant workflows](KAI_CONNECTOR_ACTION_AUDIT.md) adds Sheets/folders, messaging and bounded productivity profiles to this milestone. Its additional release gates are required alongside the original three journeys below.
+
 ## Product goal
 
 Main chat and desktop KAI become the everyday entry point for Brain, connected apps, research and workflows. A user describes an outcome; KAI retrieves relevant context, finds permitted capabilities, resolves missing details, performs reviewed actions and returns verifiable results. The workspaces remain places to inspect, configure and edit that work.
 
-The next milestone is complete only when the three owner examples below work from both typed main chat and spoken desktop KAI. Users should not need to understand Agent mode, Composio action names, JSON schemas or workflow IDs.
+The next milestone is complete only when the three owner examples below and the additional connector-audit release gates work from both typed main chat and spoken desktop KAI. Users should not need to understand Agent mode, Composio action names, JSON schemas or workflow IDs.
 
 ## What is already connected, and what is missing
 
@@ -99,10 +101,11 @@ Semantic embeddings, rich PDF/DOCX ingestion, editable entity graphs, vault roun
 2. **P1a — Google Calendar.** Verify actual project tool metadata/scopes; implement account/calendar/date resolution and normalized event receipts. Gate: the calendar journey succeeds on a deliberately configured test account, with no duplicate event after timeout/retry or stale approval. Clean up created test objects only with authorization.
 3. **P1b — Saved workflows from chat.** Expose bounded lifecycle tools and live run cards; preserve builder revisions and approvals. Gate: manual run, missing input, duplicate name, draft review, Stop, restart and partial-failure scenarios succeed from both surfaces.
 4. **P1c — Research to Google Docs/Drive.** Add isolated research, evidence assembly, typed document operations and staged recovery. Gate: the Omaha directory is factual and linked, saved to the chosen account/folder, and retries never silently recreate a partially completed document.
-5. **P2 — Continuity.** Add approved destination/time-zone preferences, per-conversation scope, follow-up object references and goal-linked open work. Gate: “move that”, “update the document” and “use my usual calendar” resolve accurately across conversation reloads without mixing accounts or projects.
-6. **P3 — Awareness follow-through.** Surface deduplicated relevant suggestions with reasons, quiet hours, dismissal and links to evidence/runs. Gate: a suggestion can become a reviewed action without granting unattended writes or making unsupported completion claims.
+5. **P1d — Instant workflows and connector profiles.** Implement the [connector audit](KAI_CONNECTOR_ACTION_AUDIT.md): dependent folder/Sheet creation, messaging with recipient resolution, combined file-plus-message runs and bounded Gmail/Teams/Notion/GitHub/Todoist/OneDrive/Excel profiles. Reuse the shared action service and engine; validate all additional release gates before calling the expanded milestone complete. P1d follows P1c and precedes P2/P3.
+6. **P2 — Continuity.** Add approved destination/time-zone preferences, per-conversation scope, follow-up object references and goal-linked open work. Gate: “move that”, “update the document” and “use my usual calendar” resolve accurately across conversation reloads without mixing accounts or projects.
+7. **P3 — Awareness follow-through.** Surface deduplicated relevant suggestions with reasons, quiet hours, dismissal and links to evidence/runs. Gate: a suggestion can become a reviewed action without granting unattended writes or making unsupported completion claims.
 
-P0 through P1c are the next release objective; land and verify each stage in Test, then demonstrate all three together before calling the milestone complete. P2/P3 extend the same architecture after the core journeys are dependable. Validate focused service and IPC contracts, both real UI paths and packaged Test behavior; fixture success must be reported separately from real provider-account validation. No production calendar events, documents or messages should be created merely to validate this plan.
+P0 through P1d are the next release objective; land and verify each stage in Test, then demonstrate the original three journeys and the additional connector gates together before calling the milestone complete. P2/P3 extend the same architecture after the core journeys are dependable. Validate focused service and IPC contracts, both real UI paths and packaged Test behavior; fixture success must be reported separately from real provider-account validation. No production calendar events, documents or messages should be created merely to validate this plan.
 
 ## Source map
 
