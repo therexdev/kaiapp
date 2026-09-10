@@ -938,7 +938,7 @@ async function send(replayText) {
     return;
   }
 
-  if (answerMode !== "chat") {
+  if (answerMode !== "chat" || (!replayText && window.kaiCompanionBridge?.session)) {
     // Research / Agent phase: gather first (multi-round, tool calls), then
     // the final answer streams through the normal path below. The gathered
     // context is a TRANSIENT turn — same rule as the 🌐 flow.
@@ -946,15 +946,18 @@ async function send(replayText) {
     status.className = "web-status";
     bubble.before(status);
     try {
+      if (!state.chatId) await saveCurrentChat();
+      const actionHost = document.createElement("div"); bubble.before(actionHost);
+      const connectedJSON = window.KaiCompanionClient?.toolJSON(chatModel, async (url, options) => {
+        const response = await fetch(url, { ...options, signal: state.abort.signal }); return response.json();
+      }, state.abort.signal, { question: text, conversationId: state.chatId || "main-new", host: actionHost });
       const rt = KaiAgents.makeRuntime({
         askModelOnce,
         confirmTool,
-        json: window.KaiCompanionClient?.toolJSON(chatModel, async (url, options) => {
-          const response = await fetch(url, { ...options, signal: state.abort.signal }); return response.json();
-        }, state.abort.signal),
+        json: connectedJSON,
         setStatus: (t) => { status.textContent = t; },
       });
-      const phase = answerMode === "research" ? await rt.deepResearch(text, chatModel) : await rt.runAgent(text, chatModel);
+      const phase = answerMode === "research" ? await rt.deepResearch(text, chatModel) : await rt.runAgent(text, chatModel, state.history.slice(-5, -1).map(m => m.role + ": " + m.content).join("\n"));
       if (phase) {
         webCitations = phase.citations?.length ? phase.citations : null;
         status.textContent = phase.trace || "";

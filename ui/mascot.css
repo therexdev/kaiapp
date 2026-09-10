@@ -220,3 +220,10 @@ body.computer-active #quick-stop { color: #c43e22; }
 .pocket-actions button{min-height:36px;padding:9px 12px;border-radius:9px;background:#146ced;color:#fff;font-size:12px;font-weight:650}
 .pocket-actions button:hover:not(:disabled){background:#095bce}
 #pocket-controls[data-ready=true] #setup-pocket{background:#fff;color:#285d9c;border:1px solid #bbd3f2;font-weight:500;order:2}
+
+/* Stable, text-only action receipts below the conversation. */
+.kai-action-results { margin: 8px 0; border: 1px solid #a8bddd66; border-radius: 10px; padding: 10px 12px; max-width: 100%; font-size: 13px; overflow-wrap: anywhere; }
+.kai-action-results summary { cursor: pointer; font-weight: 600; text-align: left; }
+.kai-action-results > div { padding: 8px 0; border-top: 1px solid #a8bddd44; }
+.kai-action-results p { margin: 4px 0; font-size: 12px; line-height: 1.4; }
+.kai-action-results a { display: inline-block; margin: 4px 12px 0 0; }

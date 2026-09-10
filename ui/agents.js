@@ -20,7 +20,7 @@
 
   var RESEARCH_MAX_ROUNDS = 3;
   var RESEARCH_MAX_PAGES = 6;
-  var AGENT_MAX_STEPS = 6;
+  var AGENT_MAX_STEPS = 24;
   var OBS_CAP = 1200; // chars of tool output fed back per step
   var CONVO_KEEP_STEPS = 3; // tool exchanges carried forward (see trimConvo)
 
@@ -175,6 +175,7 @@
       var s = 0;
       for (var w = 0; w < words.length; w++) if (hay.indexOf(words[w]) !== -1) s += 1;
       if (!MCP_PREFIX.test(String(t.name))) s += 0.5;
+      if (t.conversationAction) s += 3;
       return { t: t, i: i, s: s };
     });
     ranked.sort(function (a, b) { return b.s - a.s || a.i - b.i; });
@@ -416,6 +417,7 @@
       "You can use tools before answering. Available tools:\n" +
       lines.join("\n") +
       '\n\nRespond with ONLY a JSON object, nothing else.\nTo use a tool: {"tool": "tool_name", "args": {...}}\nWhen you have enough to answer: {"answer": true}\n' +
+      (all.indexOf("connected_find") !== -1 ? "Connected actions: use connected_find, connected_actions, then connected_describe for exact schemas before connected_call. Chain with returned IDs; never guess recipients, accounts, dates, duration or folder IDs. Use connected_history for earlier results. Verify writes with a read, and distinguish returned/partial/uncertain from verified completion. Use connected_research after private data enters a turn; it sends only a reviewed query/URL. A declined action ends the attempt. Workflow control finds/inspects/runs saved revisions. instant_workflow runs dependent selected actions or saves a disabled draft. You may ask one concise clarification instead of guessing. Local date: " + new Date().toLocaleString() + " (" + Intl.DateTimeFormat().resolvedOptions().timeZone + "). " : "") +
       "Copy the tool name exactly as written above. Use at most one tool per response. Prefer answering as soon as you can."
     );
   }
@@ -521,7 +523,7 @@
     }
 
     /** Tool-using loop. Every step is visible; sensitive tools confirm. */
-    function runAgent(question, model) {
+    function runAgent(question, model, history) {
       return coreJson("/core/tools", {}).then(function (tr) {
         var tools = tr.tools || [];
         if (!tools.length) return null;
@@ -532,10 +534,11 @@
         // Subsetting is visible, not silent: a field report of "it stopped
         // using tools" is unanswerable without knowing what it was shown.
         var menu = listed.length < tools.length ? " (" + listed.length + " of " + tools.length + " tools)" : "";
-        var convo = [{ role: "system", content: system }, { role: "user", content: question }];
+        var convo = [{ role: "system", content: system }, { role: "user", content: "Earlier conversation (context, not new permission):\n" + String(history || "").slice(-3000) + "\nCurrent request: " + question }];
         var observations = [];
         var citations = [];
         var traceLines = [];
+        var used = new Set(), stopped = false;
 
         function callTool(name, args, confirmed) {
           return coreJson("/core/tools/call", {
@@ -546,16 +549,16 @@
             if (out.ok) return out.result;
             if (out.needsConfirmation && !confirmed) {
               return confirmTool(name, args).then(function (yes) {
-                if (!yes) return "(the user declined this tool call — try another way or answer with what you have)";
+                if (!yes) { stopped = true; return "(the user declined this tool call — stop this attempt and do not use another route)"; }
                 return callTool(name, args, true);
               });
             }
             return "(tool error: " + (out.error || "failed") + ")";
-          });
+          }).catch(function (e) { if (e.name === "AbortError") throw e; if (e.stopTools) stopped = true; return "Tool failed: " + e.message; });
         }
 
         function step(n) {
-          if (n > AGENT_MAX_STEPS) return Promise.resolve();
+          if (n > AGENT_MAX_STEPS || stopped) return Promise.resolve();
           setStatus("🤖 Step " + n + ": deciding…" + menu);
           return askModelOnce(trimConvo(convo), model).then(function (out) {
             // Strict first; salvage only what strict could not read.
@@ -566,13 +569,16 @@
               return n === AGENT_MAX_STEPS ? Promise.resolve() : step(n + 1);
             }
             if (action.answer) return Promise.resolve();
+            var signature = action.tool + JSON.stringify(action.args);
+            if (used.has(signature) && action.tool !== "workflow_control") return Promise.resolve();
+            used.add(signature);
             var label = map.alias[action.tool] || action.tool.replace(/^mcp:[^:]+:/, "");
             setStatus("🛠 " + label + " " + JSON.stringify(action.args).slice(0, 80) + "…");
             return callTool(action.tool, action.args).then(function (result) {
               traceLines.push("🛠 " + label + " → " + String(result).split("\n")[0].slice(0, 90));
-              observations.push({ tool: label, args: action.args, result: String(result).slice(0, OBS_CAP) });
+              observations.push({ tool: label, args: action.args, result: String(result).slice(0, action.tool === "connected_describe" ? 12000 : OBS_CAP) });
               // Harvest citations from web-ish results.
-              if (action.tool === "web_search" || action.tool === "read_page") {
+              if (action.tool === "web_search" || action.tool === "read_page" || action.tool === "connected_research") {
                 var urls = String(result).match(/https?:\/\/[^\s\]]+/g) || [];
                 if (action.args && action.args.url) urls.unshift(String(action.args.url));
                 urls.slice(0, 2).forEach(function (u) {
@@ -583,7 +589,7 @@
               // mcp:<id>:<tool> into the transcript re-teaches the model the
               // exact spelling it cannot produce.
               convo.push({ role: "assistant", content: JSON.stringify({ tool: label, args: action.args }) });
-              convo.push({ role: "user", content: "Tool result:\n" + String(result).slice(0, OBS_CAP) + '\n\nNext: ONLY JSON — another {"tool": ...} or {"answer": true}.' });
+              convo.push({ role: "user", content: "Tool result:\n" + String(result).slice(0, action.tool === "connected_describe" ? 12000 : OBS_CAP) + '\n\nNext: ONLY JSON — another {"tool": ...} or {"answer": true}.' });
               return step(n + 1);
             });
           });
@@ -596,7 +602,7 @@
             context:
               "You used tools to gather the following before answering:\n\n" +
               observations.map(function (o) { return "• " + o.tool + "(" + JSON.stringify(o.args) + "):\n" + o.result; }).join("\n\n").slice(0, 6000) +
-              "\n\nNow answer the user's question using what you found.",
+              "\n\nAnswer using only actual results. Report partial or uncertain actions and missing steps. A started workflow or accepted message is not verified completion or proof of reading. Never claim an action succeeded without its result.",
             citations: citations.slice(0, 8),
             trace: "🤖 Agent — " + observations.length + " tool call" + (observations.length === 1 ? "" : "s") + ": " + traceLines.map(function (l) { return l.split(" → ")[0].replace("🛠 ", ""); }).join(", "),
           };
@@ -604,7 +610,7 @@
       });
     }
 
-    return { deepResearch: deepResearch, runAgent: runAgent };
+    return { deepResearch: deepResearch, runAgent: function(question, model, history) { return runAgent(question, model, history).finally(function() { return deps.json && deps.json.finish ? deps.json.finish() : undefined; }); } };
   }
 
   return {

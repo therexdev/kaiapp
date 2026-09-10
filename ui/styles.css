@@ -1289,3 +1289,10 @@ button.primary:hover:not(:disabled){box-shadow:0 5px 13px #155eef2b;filter:brigh
 .cn-category-picker{display:flex;align-items:center;gap:12px;color:#617590;font-size:13px}.cn-category-picker select{width:auto!important;min-width:180px;max-width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:10px;background:#fff;color:#29466e}
 
 .cn-readiness{display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding:16px 18px;margin-bottom:18px;border:1px solid #d5e2f3;border-radius:12px;background:#f0f6ff;color:#29456b}.cn-readiness>div{flex:1 1 240px;min-width:0}.cn-readiness strong{font-size:13px}.cn-readiness p{font-size:12px;line-height:1.6;margin:5px 0 0;overflow-wrap:anywhere}.cn-readiness .cn-button{flex:none}
+
+/* Stable, text-only action receipts below the conversation. */
+.kai-action-results { margin: 8px 0; border: 1px solid #a8bddd66; border-radius: 10px; padding: 10px 12px; max-width: 100%; font-size: 13px; overflow-wrap: anywhere; }
+.kai-action-results summary { cursor: pointer; font-weight: 600; text-align: left; }
+.kai-action-results > div { padding: 8px 0; border-top: 1px solid #a8bddd44; }
+.kai-action-results p { margin: 4px 0; font-size: 12px; line-height: 1.4; }
+.kai-action-results a { display: inline-block; margin: 4px 12px 0 0; }

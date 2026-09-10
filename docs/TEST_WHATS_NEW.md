@@ -1,3 +1,15 @@
+### Connected chat and instant workflows
+
+- Main Chat and desktop KAI can discover connected accounts, inspect selected action inputs, and chain app actions using returned file/message IDs. Ask for a folder and spreadsheet, a document, an appointment, or a message. Each external call still uses exact native review.
+- Ask KAI to find, inspect, run, check, stop or resume a saved workflow. Unreviewed drafts must first be saved in the builder; running a workflow does not enable a schedule.
+- One-time action chains can run from chat and be saved as disabled workflow drafts. The tool loop now allows up to 24 steps.
+- Action receipts appear in chat and under Connections → Connected apps. Partial and uncertain outcomes remain visible after restart; uncertain writes cannot auto-retry. Inspect the destination before acknowledging an uncertain receipt.
+- Manage access now includes guidance and action-search shortcuts for Google Calendar/Docs/Sheets/Drive, Discord Bot, Slack, Gmail, Teams, Notion, GitHub issues, Todoist and OneDrive/Excel.
+- Public research can continue after a private Brain lookup through a desktop-only tool that reviews the exact public query or URL. Private observations still cannot flow into ordinary Core/MCP tools.
+- Your accounts must have the required selected actions and **Use in conversations** enabled. Provider scopes and actual account compatibility still need testing in your installation. Discord messages use the bot/app identity. No new hosting environment variables are needed.
+
+See [connected chat setup and testing](KAI_CONNECTED_CHAT.md).
+
 ### External producer wallets
 
 - Koinos Node now supports a watch-only producer address separate from the KAI earning wallet. Generate/copy/rotate the hot block key, verify registration on-chain, and prepare externally signed registration, burn and transfer transactions. Automatic funds operations are disabled in external mode. See [setup and offline signing](EXTERNAL_PRODUCER.md).

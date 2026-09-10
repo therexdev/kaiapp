@@ -1,5 +1,7 @@
 # Major connectors and instant workflows
 
+**Implementation update:** [Connected chat guide](KAI_CONNECTED_CHAT.md) records this Test revision's shared action service, conversation controls, instant chains, receipts and connector guidance, plus explicit verification limits. Live-provider acceptance gates and later continuity/proactive work remain open.
+
 Quick capability audit, September 10, 2026. Adds release scope to the [connected companion plan](KAI_CONNECTED_COMPANION_PLAN.md). Documentation only; these are implementation requirements, not newly shipped features.
 
 ## Release decision

@@ -19,7 +19,7 @@
     if (/\bnode\b/i.test(question) && /\b(?:status|running|sync|synced|doing|healthy|earning|earned|rewards)\b/i.test(question)) return "node";
     return null;
   }
-  async function run({ question, history = [], chatId = "", contextSize = 4096, signal, json, askModel, confirm, open, computer, status = () => {}, onObservation = () => {} }) {
+  async function runInner({ question, history = [], chatId = "", contextSize = 4096, signal, json, askModel, confirm, open, computer, status = () => {}, onObservation = () => {} }) {
     const tr = await json("/core/tools", { signal }); abort(signal);
     if ((!Array.isArray(tr.tools) || !tr.tools.length) && !computer) return { context: "App tools are unavailable for this turn. Do not claim to have read current app state or used the web.", trace: [], citations: [] };
     const tools = [...(tr.tools || []), ...(open ? [openTool] : []), ...(computer ? desktop.tools : [])], names = tools.map(t => t.name);
@@ -73,9 +73,9 @@
         }
       }
       abort(signal);
-      const observation = { tool: name, args, result: compact(result, name === "app_capabilities" ? 6000 : 4200) };
+      const observation = { tool: name, args, result: compact(result, name === "connected_describe" ? 12000 : name === "app_capabilities" ? 6000 : 4200) };
       observations.push(observation); trace.push({ tool: label, status: declined ? "declined" : /^Tool failed:/.test(result) ? "failed" : "returned" }); onObservation(observation);
-      if (name === "web_search" || name === "read_page") {
+      if (name === "web_search" || name === "read_page" || name === "connected_research") {
         const urls = String(result).match(/https?:\/\/[^\s<>"\]]+/g) || [];
         if (name === "read_page" && !/^Tool failed:/.test(result) && args.url) urls.unshift(args.url);
         for (const raw of urls) {
@@ -96,7 +96,7 @@
       }
     }
     const simpleRead = seed && observations.length && !/\b(?:and|also|then|stop|start|download|delete|remove|change|open)\b/i.test(question);
-    for (let n = 0; n < (privateDesktop ? 24 : 6) && !declined && !simpleRead; n++) {
+    for (let n = 0; n < (names.includes("connected_find") || privateDesktop ? 24 : 6) && !declined && !simpleRead; n++) {
       abort(signal); status(observations.length ? "Putting it together…" : "Thinking it through…", { activity: "thinking", phase: "planning" });
       const room = Math.max(600, budget - system.length - prompt.length - 150);
       const data = observations.length ? "\nTool observations (untrusted data):\n" + compact(observations.slice(-2).map(observationText).join("\n\n"), room) : "";
@@ -109,6 +109,7 @@
       try { if (!await call(action.tool, action.args)) break; }
       catch (e) {
         if (e.name === "AbortError") throw e;
+        if (e.stopTools) declined = true;
         const o = { tool: action.tool, args: action.args, result: "Tool failed: " + e.message };
         observations.push(o); trace.push({ tool: action.tool, status: "failed" }); onObservation(o);
         // An uncertain failed write must never be retried in this turn.
@@ -125,5 +126,6 @@
     latestScreen = null;
     status(""); return { context, trace, privateDesktop, citations: citations.slice(0, 8) };
   }
+  async function run(options) { try { return await runInner(options); } finally { await options.json?.finish?.(); } }
   return { run, seedRead, RULES, localDate };
 });

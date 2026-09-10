@@ -1,5 +1,7 @@
 # KAI connected companion: next implementation plan
 
+**Implementation update:** [Connected chat guide](KAI_CONNECTED_CHAT.md) records this Test revision's shared action service, conversation controls, instant chains, receipts and connector guidance, plus explicit verification limits. Live-provider acceptance gates and later continuity/proactive work remain open.
+
 Status: proposed implementation sequence; documentation only. September 10, 2026.
 Audited Test commit: `6839c1546bc99b54ab8fdf878a9bae7a22a42eab` (Test 0.54.2-test.60.1).
 

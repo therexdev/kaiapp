@@ -19,6 +19,7 @@ class CompanionHub {
     this.brain = new CompanionBrain({ store: this.store });
     this.sources = new CompanionSources({ store: this.store, chats, privacyMode, fetchImpl, lookup });
     this.awareness = new CompanionAwareness({ store: this.store, models, runLocal, workflows: this.workflows });
+    this.actions = new (require("./conversation-actions").ConversationActions)({ hub: this, privacyMode, fetchImpl, lookup });
     this.syncing = new Set(); this.sourceControllers = new Map(); this.timer = null;
   }
   status() {
@@ -72,7 +73,7 @@ class CompanionHub {
   }
   toolList(model) {
     if (!this.canUseModel(model) || this.store.locked || !this.store.available()) return [];
-    const tools = [
+    const tools = [...this.actions.tools(),
       { name: "brain_search", description: "Search private Brain notes, people, projects, preferences, and imported sources.", params: { query: "what to find" } },
       { name: "brain_remember", description: "Ask the user to approve a fact for persistent Brain memory.", params: { text: "fact to remember", title: "short title", category: "notes | preferences | people | projects" } },
       { name: "brain_goals", description: "Read the user's active goals from Brain.", params: {} },
@@ -83,8 +84,9 @@ class CompanionHub {
     });
     return tools.map(t => ({ ...t, egress: false, sensitive: false, privateCompanion: true, label: t.name }));
   }
-  async tool(name, args, model, confirm, signal) {
+  async tool(name, args, model, confirm, signal, session) {
     if (!this.toolList(model).some(t => t.name === name)) throw new CompanionError("This private tool is unavailable for the selected model.");
+    if (this.actions.tools().some(t => t.name === name)) return this.actions.tool(session?.owner, session?.id, name, args, model, confirm, signal);
     if (name === "brain_search") return this.store.search(String(args.query || ""), 6).map(n => ({ title: n.title, text: n.text.slice(0, 1500), source: n.source }));
     if (name === "brain_goals") return this.store.data.goals.filter(g => g.status === "active");
     if (name === "brain_remember") {
@@ -112,11 +114,11 @@ class CompanionHub {
       for (const s of this.store.data.sources) if (s.autoSync && s.nextSync <= Date.now() && !this.syncing.has(s.id)) this.sync(s.id).catch(() => {});
     }, 30000); this.timer.unref?.();
   }
-  stop() { clearInterval(this.timer); for (const c of this.sourceControllers.values()) c.abort(); this.awareness.stop(); this.workflowEvents.stop(); this.workflowAssistant.stop(); this.workflows.stop(); this.connections.cancel(); this.composio.cancel(); }
+  stop() { this.actions.stop(); clearInterval(this.timer); for (const c of this.sourceControllers.values()) c.abort(); this.awareness.stop(); this.workflowEvents.stop(); this.workflowAssistant.stop(); this.workflows.stop(); this.connections.cancel(); this.composio.cancel(); }
 }
 
 function registerCompanionIPC({ ipcMain, service, origin, getMainWindow, getMascotWindow, dialog }) {
-  const handles = [], jobs = new Map(); let approvalPending = false;
+  const handles = [], jobs = new Map(), sessions = new Map(); let approvalPending = false;
   const windowFor = (event, management = false) => {
     for (const [window, route] of [[getMainWindow(), "/"], ...(!management ? [[getMascotWindow(), "/mascot.html"]] : [])])
       if (trustedFrame(event, window, origin) && new URL(event.senderFrame.url).pathname === route) return window;
@@ -148,12 +150,40 @@ function registerCompanionIPC({ ipcMain, service, origin, getMainWindow, getMasc
     return { eligible, context: eligible ? service.store.context(String(query || "")) : "" };
   });
   handle("companion:tools", false, (_ctx, model) => service.toolList(model));
-  handle("companion:tool", false, (ctx, name, args, model) => service.tool(name, args || {}, model, ctx.confirm, ctx.signal));
-  handle("companion:cancel", false, ctx => { for (const job of jobs.values()) if (job.sender === ctx.event.sender) job.controller.abort(); return true; });
+  handle("companion:tool", false, (ctx, name, args, model, sessionId) => service.tool(name, args || {}, model, ctx.confirm, ctx.signal, { owner: ctx.event.sender.id, id: sessionId }));
+  handle("companion:activity", false, (_ctx, model, conversationId) => {
+    if (!service.canUseModel(model)) throw new CompanionError("Choose a local or private desktop model.");
+    service.store.requireStorage();
+    return (service.store.data.conversations || []).filter(t => t.conversationId === conversationId).slice(0, 10).map(t => service.actions.view(t.id));
+  });
+  handle("companion:session", false, (ctx, operation, input = {}) => {
+    const owner = ctx.event.sender.id;
+    if (operation === "begin") {
+      sessions.get(owner)?.();
+      const sender = ctx.event.sender, window = ctx.window;
+      const stop = () => { service.actions.stop(owner); cleanup(); };
+      const navigate = (_e, _url, _inPlace, main) => { if (main) stop(); };
+      const cleanup = () => { sender.removeListener("destroyed", stop); sender.removeListener("render-process-gone", stop); sender.removeListener("did-start-navigation", navigate); window.removeListener("hide", stop); sessions.delete(owner); };
+      const result = service.actions.begin(owner, input.model, input);
+      sender.on("destroyed", stop); sender.on("render-process-gone", stop); sender.on("did-start-navigation", navigate); window.on("hide", stop); sessions.set(owner, cleanup);
+      return result;
+    }
+    if (operation === "finish") { const result = service.actions.finish(owner, input.id, input.cancel === true); sessions.get(owner)?.(); return result; }
+    service.actions.authorize(owner, input.id, input.model);
+    if (operation === "status") return service.actions.view(input.id);
+    throw new CompanionError("Unknown conversation operation.");
+  });
+  handle("companion:cancel", false, ctx => { service.actions.stop(ctx.event.sender.id); for (const job of jobs.values()) if (job.sender === ctx.event.sender) job.controller.abort(); return true; });
   handle("companion:manage", true, async (ctx, action, input = {}) => {
     if (action === "status") return service.status();
     service.store.requireStorage();
     switch (action) {
+      case "conversationReview": {
+        const t = service.store.data.conversations?.find(t => t.id === input.turnId), a = t?.actions.find(a => a.id === input.id);
+        if (!a || a.status !== "uncertain") throw new CompanionError("Choose an uncertain action.");
+        if (!await ctx.confirm("Acknowledge the inspected outcome", { action: a.name, receiptId: a.id, note: "Only continue if you inspected the provider for this action. This records your review; it does not verify success or run the action again." })) throw new CompanionError("Receipt kept uncertain.");
+        return service.actions.patch(t.id, a.id, { status: "reviewed", message: "User inspected the destination. Outcome is user-reviewed, not automatically verified." });
+      }
       case "composioSettings": return service.composio.save(input, ctx.signal);
       case "composioRefresh": return service.composio.refresh(ctx.signal);
       case "composioCatalog": return service.composio.catalog(input, ctx.signal);
@@ -262,6 +292,6 @@ function registerCompanionIPC({ ipcMain, service, origin, getMainWindow, getMasc
       default: throw new CompanionError("Unknown companion action.");
     }
   });
-  return { dispose() { service.stop(); for (const job of jobs.values()) job.controller.abort(); for (const h of handles) ipcMain.removeHandler(h); } };
+  return { dispose() { for (const clean of [...sessions.values()]) clean(); service.stop(); for (const job of jobs.values()) job.controller.abort(); for (const h of handles) ipcMain.removeHandler(h); } };
 }
 module.exports = { CompanionHub, registerCompanionIPC };

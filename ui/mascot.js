@@ -687,7 +687,8 @@
           "Opening folders is available in the installed KAI desktop companion.";
       } else {
         const contextSize = aliases.find(a => a.alias === model)?.contextSize || 4096;
-        phase = await KaiMascotTools.run({ question: text, history, chatId, contextSize, signal: chatAbort.signal, json: window.KaiCompanionClient?.toolJSON(model, toolJson, chatAbort.signal) || toolJson, open,
+        if (!chatId) await saveChat();
+        phase = await KaiMascotTools.run({ question: text, history, chatId, contextSize, signal: chatAbort.signal, json: window.KaiCompanionClient?.toolJSON(model, toolJson, chatAbort.signal, { question: text, conversationId: chatId || "mascot-new", host: trace.parentElement }) || toolJson, open,
           computer: computerAvailable ? { begin: () => bridge.computerBegin({ task: text, model }), call: (token, name, args) => bridge.computerCall(token, name, args) } : null,
           confirm: async (name, args) => {
             // Pause capture while a human reviews a mutation. Background audio
@@ -708,7 +709,7 @@
           onObservation: value => { observations.push(value); request.keepUser = true; },
           askModel: async (messages, signal, options = {}) => {
             const response = await KaiProviders.chatFetch("/core/chat/completions", { method: "POST", headers: { "content-type": "application/json" }, signal,
-              body: JSON.stringify({ model, stream: false, max_tokens: KaiProviders.isModel(model) ? 2048 : 450, messages, ...(options.privateDesktop ? { kai_private_desktop: true } : {}) }) });
+              body: JSON.stringify({ model, stream: false, max_tokens: KaiProviders.isModel(model) ? 4096 : 900, messages, ...(options.privateDesktop ? { kai_private_desktop: true } : {}) }) });
             let output = ""; for await (const delta of api.completion(response)) output += delta.content; return output;
           },
         });

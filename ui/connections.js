@@ -93,6 +93,14 @@
         const t = featured.find(t => t.slug === c.toolkit) || { slug: c.toolkit, name: c.toolkit };
         return `<article class="cn-account-card"><div class="cn-account-top">${logo(t)}<span class="cn-status ${c.status === "ACTIVE" ? "active" : ""}">${esc(c.status === "ACTIVE" ? "Connected" : c.status === "EXPIRED" ? "Reconnect needed" : c.status.toLowerCase())}</span></div><h3>${esc(t.name)}</h3><p class="cn-account-name">${esc(c.name)}</p><div class="cn-account-detail">${c.operations.length} selected actions · ${c.allowSync ? "Brain sync available" : "Sync off"}</div><div class="cn-account-actions">${btn(c.status === "ACTIVE" ? "Manage access" : "Reconnect", c.status === "ACTIVE" ? "access" : "connect", c.status === "ACTIVE" ? c.id : c.toolkit, true)}${c.status === "ACTIVE" && c.operations.some(o => o.readOnly) ? btn("Collect into Brain", "collect", c.id) : ""}${btn("Disconnect", "disconnect", c.id)}</div></article>`;
       }).join("") || `<div class="cn-empty"><h3>A little more connected.</h3><p>Add an app you use every day. KAI will help you choose what to bring along.</p>${btn("Explore apps", "explore", "", true)}</div>`}</div>`;
+      drawActivity(out);
+    }
+    function drawActivity(out) {
+      const turns = (state.conversations || []).filter(t => t.actions?.length).slice(0, 12);
+      if (!turns.length) return;
+      const section = document.createElement("section"); section.className = "cn-recent-actions";
+      section.innerHTML = `<h2>Recent chat actions</h2><p>Results stay here if a conversation stops or KAI restarts.</p>${turns.map(t => `<details class="kai-action-results"><summary>${esc(t.question)}</summary>${t.actions.map(a => `<div><strong>${esc(a.name)}</strong><p>${esc(a.runId ? state.runs.find(r => r.id === a.runId)?.status || a.status : a.status)}</p><p>${esc(a.message || "")}</p><small>Receipt ${esc(a.id)}</small>${a.status === "uncertain" ? btn("I inspected the destination", "reviewReceipt", t.id + ":" + a.id) : ""}<details><summary>Result details</summary><pre>${esc(JSON.stringify(a.data ?? a.ids ?? {}, null, 2))}</pre></details></div>`).join("")}</details>`).join("")}`;
+      out.append(section);
     }
     function drawSetup(out) {
       const s = status();
@@ -119,7 +127,7 @@
           ${check("allowAgent", "Use in conversations", "KAI asks before using an action from this account.", c.allowAgent || !c.operations.length)}
           ${check("allowWrite", "Allow reviewed actions", "Changes and actions without verified read-only behavior always ask for approval.", c.allowWrite)}
           ${check("allowSync", "Allow Brain and workflow reads", "Only selected, verified read actions can run in the background.", c.allowSync)}
-          <div class="cn-actions-heading"><h3>Choose actions for KAI</h3><span id="cn-selected-count"></span></div><input type="search" id="cn-action-search" aria-label="Search app actions" placeholder="Search actions and data…"><div class="cn-tool-list" id="cn-tool-list"></div><div id="cn-tool-more"></div>
+          ${window.KaiConnectionProfiles?.[c.toolkit] ? `<div class="cn-profile"><h3>${esc(window.KaiConnectionProfiles[c.toolkit].name)}</h3><p>${esc(window.KaiConnectionProfiles[c.toolkit].guidance)}</p><div class="cn-account-actions">${window.KaiConnectionProfiles[c.toolkit].searches.map(q => btn(q, "profileSearch", q)).join("")}</div><p>Choose the actions you need below, then Save access. These shortcuts do not grant permissions.</p></div>` : ""}<div class="cn-actions-heading"><h3>Choose actions for KAI</h3><span id="cn-selected-count"></span></div><input type="search" id="cn-action-search" aria-label="Search app actions" placeholder="Search actions and data…"><div class="cn-tool-list" id="cn-tool-list"></div><div id="cn-tool-more"></div>
           <div class="cn-sticky-actions"><button class="cn-button cn-primary" type="submit">Save access</button>${c.operations.length ? btn("Try an action", "try", c.id) : ""}${c.operations.some(o => o.readOnly) ? btn("Collect into Brain", "collect", c.id) : ""}</div></form>`); drawTools();
       } else if (d.kind === "collect" || d.kind === "try") {
         const c = d.connection, ops = c.operations.filter(o => d.kind !== "collect" || o.readOnly);
@@ -190,6 +198,8 @@
       if (name === "reopen") return manage("composioReopen");
       if (name === "check") return checkConnection();
       if (name === "access") { const c = connections().find(c => c.id === value); if (!c) return; drawer = { kind: "access", connection: c, tools: c.operations, selected: new Set(c.operations.map(o => o.id)), known: new Map(c.operations.map(o => [o.id, o])), initial: true }; drawDrawer(); await loadTools(); return; }
+      if (name === "reviewReceipt") { const [turnId, id] = value.split(":"); await manage("conversationReview", { turnId, id }); state = await manage("status"); draw(); return; }
+      if (name === "profileSearch") { host.querySelector("#cn-action-search").value = value; return loadTools(); }
       if (name === "moreTools") return loadTools(true);
       if (name === "collect" || name === "try") { const c = connections().find(c => c.id === value); if (!c) return; if (name === "collect" && !c.allowSync) throw new Error("Enable Brain and workflow reads in Manage access first."); drawer = { kind: name, connection: c }; drawDrawer(); return; }
       if (name === "disconnect") { await manage("composioDisconnect", { id: value }); await refresh(); drawer = null; draw(); return; }
