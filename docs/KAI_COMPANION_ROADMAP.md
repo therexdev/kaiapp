@@ -1,5 +1,7 @@
 # KAI companion: OpenHuman review and implementation roadmap
 
+**Next priority — September 10, 2026:** [Connected companion implementation plan](KAI_CONNECTED_COMPANION_PLAN.md). Make main chat and desktop KAI the shared entry point for Brain, connected app actions, research and saved workflows. The first end-to-end gates are a Google Calendar appointment, running a named workflow, and researching a cited Google Doc saved to Drive. This is planned work, not a claim that those journeys already work reliably.
+
 **Latest coverage:** [Brain, Awareness and the unified catalog](OPENHUMAN_BRAIN_COVERAGE.md) supersede the initial implementation status below. The tables below retain the original product inventory for traceability.
 
 Reviewed September 9, 2026. KAI baseline: `02efdb8` on `test` (Test 0.54.2-test.44.1).
@@ -124,6 +126,8 @@ Reference: [integrations](https://github.com/tinyhumansai/openhuman/blob/0a2aeb0
 | Public agent marketplace/confidential compute | Later network roadmap; not a prerequisite for useful personal companion features |
 
 ## Recommended delivery order
+
+**Superseded for next-work priority:** follow the [connected companion delivery sequence](KAI_CONNECTED_COMPANION_PLAN.md#delivery-sequence-and-gates): shared conversation actions, Google Calendar, chat workflow control, research-to-Docs/Drive, then continuity and Awareness follow-through. The original sequence below is retained as historical context; some of its formerly future features are already delivered.
 
 1. **Current Test: usable foundations.** Brain CRUD, goals, text/API sources, sync, encrypted storage, visible workflows, durable runs, connection operations, companion retrieval and private tool use.
 2. **Companion quality.** Friendly connection setup forms, more service adapters, richer file support, selected project scopes, per-thread todos, notification badges, read-only background reflection, and evidence-backed summaries. Success criterion: KAI can give a reliable daily project brief and remember corrections without the user repeating context.
