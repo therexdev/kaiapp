@@ -146,10 +146,11 @@ test("main and mascot runtimes retain the attended bridge through an eight-actio
       session:async(op, input)=>checked(()=>{if(op==="begin"){session=f.hub.actions.begin(12,input.model,input);return session;}if(op==="status")return f.hub.actions.view(input.id);if(op==="finish"){finished++;return f.hub.actions.finish(12,input.id);}}),
       tool:async(n,a,m,s)=>checked(()=>f.hub.tool(n,a,m,async()=>true,new AbortController().signal,{owner:12,id:s})),cancel:async()=>({ok:true}) };
     const window={kaiCompanionBridge:bridge};vm.runInNewContext(fs.readFileSync(path.join(__dirname,"../../ui/companion-client.js"),"utf8"),{window,DOMException,setInterval,clearInterval});
-    const json=window.KaiCompanionClient.toolJSON("local",async()=>({tools:[]}),new AbortController().signal,{question:"Make eight objects",conversationId:"runtime-"+surface});
+    const question="Make eight objects in my Google Drive";
+    const json=window.KaiCompanionClient.toolJSON("local",async()=>({tools:[]}),new AbortController().signal,{question,conversationId:"runtime-"+surface});
     const ask=async()=> { const n=plans++; return JSON.stringify(n>=16 ? {answer:true} : n%2 ? {tool:"connected_history",args:{}} : {tool:"connected_call",args:{connectionId:f.c.id,operationId:"create",body:{name:"item-"+n}}}); };
     if(surface==="main")await Agents.makeRuntime({json,askModelOnce:ask}).runAgent("Make eight objects","local");
-    else await Mascot.run({question:"Make eight objects",json,askModel:ask,contextSize:16000});
+    else await Mascot.run({question,json,askModel:ask,contextSize:16000});
     assert.equal(f.count(),8);assert.equal(finished,1);assert.equal(f.hub.actions.turn(session.id).status,"finished");
   }
 });

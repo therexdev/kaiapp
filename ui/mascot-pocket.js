@@ -98,7 +98,11 @@
       if (!samples.length) return;
       if (!started) {
         buffered.push(samples); bufferedSamples += samples.length;
-        if (bufferedSamples < 24000 * .2 && !ended) return;
+        // A 200 ms head start was too small on busy machines: local model
+        // generation or a just-finished connected workflow could briefly
+        // starve inference and make the opening sound chopped before it caught
+        // up. Keep streaming, but begin with enough audio to absorb that jitter.
+        if (bufferedSamples < 24000 * .6 && !ended) return;
         started = true; const joined = new Float32Array(bufferedSamples); let at = 0;
         for (const p of buffered) { joined.set(p, at); at += p.length; } buffered = []; samples = joined;
       }

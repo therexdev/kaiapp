@@ -186,6 +186,47 @@ test("Explicit connected requests reject unrelated Brain routing and never inven
   assert.doesNotMatch(result.trace.map(x => x.tool).join(" "), /brain_goals/);
 });
 
+test("Research then put results in a Google Sheet stays in the connected workflow", async () => {
+  const question = "Can you look up some dentists in Omaha, Nebraska and put them in a Google sheet for me?";
+  const calls = [], outputs = [
+    JSON.stringify({ tool: "connected_research", args: { operation: "search", query: "dentists in Omaha Nebraska" } }),
+    JSON.stringify({ tool: "connected_actions", args: { connectionId: "sheets", query: "create spreadsheet rows" } }),
+    JSON.stringify({ tool: "connected_describe", args: { connectionId: "sheets", operationId: "create_sheet" } }),
+    JSON.stringify({ tool: "connected_call", args: { connectionId: "sheets", operationId: "create_sheet", arguments: { title: "Omaha Dentists", rows: [["Name"], ["Dundee Dental"]] } } }),
+    JSON.stringify({ answer: true }),
+  ];
+  const tools = ["connected_find", "connected_actions", "connected_describe", "connected_call", "connected_research", "brain_goals", "web_search"].map(name => ({ name, description: name, params: {}, conversationAction: name.startsWith("connected_") }));
+  const result = await run({ question, contextSize: 4096,
+    json: async (path, options) => {
+      if (path === "/core/tools") return { tools };
+      const call = JSON.parse(options.body); calls.push(call);
+      if (call.name === "connected_find") return { ok: true, result: JSON.stringify({ accounts: [{ id: "sheets", name: "Google Sheets", useInChat: true, selectedActions: 1, enabled: true }] }) };
+      if (call.name === "connected_research") return { ok: true, result: JSON.stringify({ results: [{ name: "Dundee Dental", url: "https://dentist.example/dundee" }] }) };
+      if (call.name === "connected_actions") return { ok: true, result: JSON.stringify([{ id: "create_sheet", name: "Create spreadsheet", readOnly: false }]) };
+      if (call.name === "connected_describe") return { ok: true, result: JSON.stringify({ action: { id: "create_sheet", schema: { properties: { title: { type: "string" }, rows: { type: "array" } } } } }) };
+      return { ok: true, result: JSON.stringify({ status: "returned", data: { id: "sheet-1", title: "Omaha Dentists" }, links: ["https://docs.google.com/spreadsheets/d/sheet-1"] }) };
+    },
+    askModel: async messages => {
+      assert.match(messages[0].content, /use connected_research/i);
+      assert.doesNotMatch(messages[0].content, /brain_goals|web_search:/i);
+      return outputs.shift();
+    },
+  });
+  assert.deepEqual(calls.map(c => c.name), ["connected_find", "connected_research", "connected_actions", "connected_describe", "connected_call"]);
+  assert.equal(result.connectedIncomplete, false);
+  assert.match(result.context, /sheet-1/);
+});
+
+test("Ordinary requests do not inherit the connected planner's long loop", async () => {
+  let plans = 0;
+  const tools = [{ name: "connected_find", description: "connected_find", params: {}, conversationAction: true }, { name: "web_search", description: "web_search", params: {} }];
+  await run({ question: "Tell me something interesting", contextSize: 4096,
+    json: async path => path === "/core/tools" ? { tools } : { ok: true, result: "unused" },
+    askModel: async () => { plans++; return JSON.stringify({ tool: "web_search", args: { query: "topic-" + plans } }); },
+  });
+  assert.equal(plans, 6);
+});
+
 test("Declined tools and cancelled approvals never mutate or retry, even with model-supplied confirmed", async () => {
   const f = fixture();
   const r = runtime(f, { question: "Stop earning", confirm: async () => false, askModel: async () => JSON.stringify({ tool: "app_action", args: { action: "stop_earning", args: {}, confirmed: true } }) });

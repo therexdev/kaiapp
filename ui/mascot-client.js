@@ -14,7 +14,7 @@
   function connectedRequest(text) {
     const value = String(text || "");
     const destination = /\b(?:google\s+(?:drive|calendar|docs?|sheets?)|gmail|outlook|one\s*drive|dropbox|slack|notion|connected\s+(?:app|account)|(?:my|the)\s+calendar)\b/i;
-    const action = /\b(?:add|book|create|delete|edit|find|list|make|message|move|open|read|rename|schedule|send|show|update|upload)\b/i;
+    const action = /\b(?:add|book|create|delete|edit|export|find|list|look\s+up|make|message|move|open|organize|populate|put|read|rename|research|save|schedule|send|show|update|upload|write)\b/i;
     return destination.test(value) && action.test(value);
   }
   function privateModel(aliases, current = "") {

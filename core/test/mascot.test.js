@@ -35,6 +35,7 @@ test("Connected-app requests leave network inference before private account tool
   const models = [{ alias: "koinos-network", status: "ready" }, { alias: "local", label: "Local", status: "ready" }, { alias: "desktop:openai:gpt", status: "ready" }];
   assert.equal(connectedRequest("Create a folder called KAI on my Google Drive"), true);
   assert.equal(connectedRequest("Add an appointment to my calendar"), true);
+  assert.equal(connectedRequest("Can you look up some dentists in Omaha, Nebraska and put them in a Google sheet for me?"), true);
   assert.equal(connectedRequest("What is Google Drive?"), false);
   assert.equal(privateModel(models, "koinos-network"), "desktop:openai:gpt");
   assert.equal(privateModel(models, "local"), "local");
