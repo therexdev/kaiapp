@@ -1,3 +1,11 @@
+### Security and reliability sweep
+
+- Hardened remote API access, local browser access, desktop window permissions, wallet files and public web requests.
+- Fixed truncated or incorrectly typed Agent Network results, lingering network requests after Stop, stalled MCP responses, and download failures that could crash the app.
+- Local-Only earnings status stays offline while earning is stopped. Email requires encrypted delivery; calendar connections and event text have stronger validation.
+- Updated vulnerable dependencies and added security regression checks to the Test release workflow. Scheduler authorization and request-handling fixes are included in the repository and require a separate server deployment.
+- See the [audit findings, validation and remaining coverage](SECURITY_SWEEP_2026-09-10.md).
+
 ### Clearer navigation and node status
 
 - Sidebar menu groups now expand one at a time. Open Workspace, Your toolkit or Contribute to reveal its options; the previous group retracts.

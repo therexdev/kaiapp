@@ -69,6 +69,14 @@ function parseVevents(ics) {
 function icsStamp(d) {
   return new Date(d).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
 }
+function icsText(value) {
+  return String(value).slice(0, 200).replace(/\\/g, "\\\\").replace(/\r\n|\r|\n/g, "\\n").replace(/,/g, "\\,").replace(/;/g, "\\;");
+}
+function validateCalendarUrl(raw) {
+  let destination; try { destination = new URL(raw); } catch { throw new Error("a calendar URL is required"); }
+  if (!["https:", "http:"].includes(destination.protocol) || destination.username || destination.password || destination.search || destination.hash) throw new Error("Use a calendar collection URL without credentials, query or fragment");
+  if (destination.protocol === "http:" && !["127.0.0.1", "[::1]", "localhost"].includes(destination.hostname)) throw new Error("Use HTTPS to protect remote calendar credentials");
+}
 
 class CalendarService {
   constructor({ dataDir, safeStorage = null, onEvent }) {
@@ -78,7 +86,7 @@ class CalendarService {
   }
 
   _encrypted() {
-    return Boolean(this.safeStorage?.isEncryptionAvailable?.());
+    return Boolean(this.safeStorage?.isEncryptionAvailable?.()) && this.safeStorage.getSelectedStorageBackend?.() !== "basic_text";
   }
 
   saveConfig(cfg) {
@@ -87,7 +95,7 @@ class CalendarService {
       user: String(cfg.user || "").trim(),
       pass: String(cfg.pass || ""),
     };
-    if (!/^https?:\/\//.test(clean.url)) throw new Error("a calendar URL is required");
+    validateCalendarUrl(clean.url);
     if (!clean.user || !clean.pass) throw new Error("username and password are required");
     const payload = JSON.stringify(clean);
     fs.mkdirSync(path.dirname(this.file), { recursive: true });
@@ -130,6 +138,7 @@ class CalendarService {
   }
 
   _auth(cfg) {
+    validateCalendarUrl(cfg.url); // Also protect credentials in configurations saved by older versions.
     return "Basic " + Buffer.from(`${cfg.user}:${cfg.pass}`).toString("base64");
   }
 
@@ -152,6 +161,7 @@ class CalendarService {
       headers: { authorization: this._auth(cfg), "content-type": "application/xml; charset=utf-8", depth: "1" },
       body,
       signal: AbortSignal.timeout(15000),
+      redirect: "error",
     });
     if (resp.status === 401) throw new Error("Calendar login failed — check username/password");
     if (!resp.ok) throw new Error(`Calendar server answered HTTP ${resp.status} — is the URL a calendar collection?`);
@@ -176,6 +186,7 @@ class CalendarService {
     const start = new Date(startIso);
     if (Number.isNaN(start.getTime())) throw new Error("a valid start time is required");
     const end = endIso ? new Date(endIso) : new Date(start.getTime() + 3600000);
+    if (Number.isNaN(end.getTime()) || end <= start) throw new Error("Event end must be a valid time after its start");
     const uid = `${crypto.randomBytes(8).toString("hex")}@koinos-ai`;
     const ics = [
       "BEGIN:VCALENDAR",
@@ -186,8 +197,8 @@ class CalendarService {
       `DTSTAMP:${icsStamp(new Date())}`,
       `DTSTART:${icsStamp(start)}`,
       `DTEND:${icsStamp(end)}`,
-      `SUMMARY:${String(summary || "Event").slice(0, 200).replace(/[\n,]/g, " ")}`,
-      ...(location ? [`LOCATION:${String(location).slice(0, 200).replace(/[\n,]/g, " ")}`] : []),
+      `SUMMARY:${icsText(summary || "Event")}`,
+      ...(location ? [`LOCATION:${icsText(location)}`] : []),
       "END:VEVENT",
       "END:VCALENDAR",
       "",
@@ -197,6 +208,7 @@ class CalendarService {
       headers: { authorization: this._auth(cfg), "content-type": "text/calendar; charset=utf-8" },
       body: ics,
       signal: AbortSignal.timeout(15000),
+      redirect: "error",
     });
     if (!resp.ok && resp.status !== 201 && resp.status !== 204) {
       throw new Error(`Calendar server refused the event (HTTP ${resp.status})`);

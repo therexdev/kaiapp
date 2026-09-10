@@ -135,6 +135,8 @@ class Scheduler {
     this._dispatchSeq = 0; // distinguishes re-dispatches of the same job
     this.leaseMs = leaseMs ?? PENDING_LEASE_MS;
     this._consumers = new Map(); // consume jobId -> resolve(output) (§46.5 relay)
+    this._consumeSeen = new Map(); // signed request hashes within their validity window
+    this._consumerAddresses = new Set(); // serialize capacity checks for each wallet
     this.dataDir = dataDir || path.join(process.cwd(), "scheduler-data");
     this.operatorSecret = operatorSecret || null;
     this.onEvent = onEvent || (() => {});
@@ -391,24 +393,36 @@ class Scheduler {
   }
 
   _json(res, status, body) {
+    if (res.destroyed || res.writableEnded) return;
     const data = JSON.stringify(body);
     res.writeHead(status, { "content-type": "application/json" });
     res.end(data);
   }
 
   async _body(req) {
-    const chunks = [];
-    for await (const c of req) chunks.push(c);
+    const chunks = []; let bytes = 0;
+    for await (const c of req) { bytes += c.length; if (bytes > 10 * 1024 * 1024) throw Object.assign(new Error("Request body too large"), { statusCode: 413 }); chunks.push(c); }
     try {
-      return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+      const body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+      if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error();
+      return body;
     } catch {
-      return {};
+      throw Object.assign(new Error("Request must be a JSON object"), { statusCode: 400 });
     }
   }
 
   _auth(req) {
     const token = new URL(req.url, "http://x").searchParams.get("token");
-    return token && this.workers.has(token) ? { token, ...this.workers.get(token) } : null;
+    const worker = token && this.workers.get(token);
+    if (!worker) return null;
+    worker.lastSeen = Date.now();
+    return { token, ...worker };
+  }
+
+  _operatorAuthed(req) {
+    if (!this.operatorSecret) return false;
+    const digest = value => crypto.createHash("sha256").update(String(value || "")).digest();
+    return crypto.timingSafeEqual(digest(req.headers["x-operator-secret"]), digest(this.operatorSecret));
   }
 
   /** Real client origin behind the website's proxy chain. x-forwarded-for
@@ -511,6 +525,10 @@ class Scheduler {
       const b = await this._body(req);
       const job = this.pending.get(b.jobId);
       if (!job) return this._json(res, 404, { ok: false, error: "unknown job" });
+      if (job.worker !== w.address) return this._json(res, 403, { ok: false, error: "job belongs to another worker" });
+      if ([b.usage?.prompt_tokens ?? 0, b.usage?.completion_tokens ?? 0].some(v => !Number.isSafeInteger(v) || v < 0 || v > 2e6)) {
+        return this._json(res, 400, { ok: false, error: "usage must contain bounded nonnegative integer token counts" });
+      }
 
       // §17: the receipt is a signature over sha256(jobId | output).
       const hash = crypto.createHash("sha256").update(`${b.jobId}|${b.output ?? ""}`).digest();
@@ -581,7 +599,7 @@ class Scheduler {
           error: { message: "Koinos Network requests are signed by your earning account — update the app and unlock your wallet", type: "invalid_request_error" },
         });
       }
-      if (Math.abs(Date.now() - Number(b.ts)) > CONSUME_SIG_WINDOW_MS) {
+      if (!Number.isSafeInteger(Number(b.ts)) || Math.abs(Date.now() - Number(b.ts)) > CONSUME_SIG_WINDOW_MS) {
         return this._json(res, 401, { error: { message: "stale request signature — check this machine's clock", type: "invalid_request_error" } });
       }
       const consumeHash = crypto
@@ -600,6 +618,11 @@ class Scheduler {
       // §20: payment authorization BEFORE execution. Free allowance, then
       // deposited KAI credits, then current-epoch earnings must cover the CU.
       await this._syncDeposits(b.address);
+      const replayKey = consumeHash.toString("hex");
+      for (const [key, expires] of this._consumeSeen) if (expires < Date.now()) this._consumeSeen.delete(key);
+      if (this._consumeSeen.has(replayKey)) return this._json(res, 409, { error: { message: "This signed request was already submitted", type: "invalid_request_error" } });
+      if (this._consumeSeen.size >= 10000) return this._json(res, 429, { error: { message: "Request capacity reached; retry shortly", type: "rate_limit_error" } });
+      if (this._consumerAddresses.has(b.address)) return this._json(res, 409, { error: { message: "An earlier request for this wallet is still running", type: "invalid_request_error" } });
       const clientIp = this._clientIp(req);
       const cap = this._consumeCapacity(b.address, clientIp);
       if (cap.freeTokensLeft <= 0 && cap.balanceMicro <= 0n && cap.earningsLeftSat <= 0n) {
@@ -626,14 +649,21 @@ class Scheduler {
           },
         });
       }
+      this._consumeSeen.set(replayKey, Number(b.ts) + CONSUME_SIG_WINDOW_MS);
+      this._consumerAddresses.add(b.address);
       const job = this.enqueue({ type: "chat", cu: 1, messages: b.messages, model: this.jobModel });
       const result = await new Promise((resolve) => {
-        this._consumers.set(job.id, resolve);
-        const t = setTimeout(() => {
+        const finish = output => {
+          clearTimeout(timer); res.removeListener("close", disconnected);
           this._consumers.delete(job.id);
-          resolve(null);
-        }, 90000);
-        t.unref?.();
+          this._consumerAddresses.delete(b.address);
+          if (output === null) { this.queue = this.queue.filter(j => j.id !== job.id); this.pending.delete(job.id); }
+          resolve(output);
+        };
+        const disconnected = () => finish(null);
+        const timer = setTimeout(disconnected, 90000); timer.unref?.();
+        this._consumers.set(job.id, finish);
+        res.once("close", disconnected);
       });
       if (result === null) {
         return this._json(res, 504, { error: { message: "no provider answered in time", type: "server_error" } });
@@ -676,7 +706,7 @@ class Scheduler {
     }
 
     if (url.pathname === "/operator/revoke" && req.method === "POST") {
-      if (this.operatorSecret && req.headers["x-operator-secret"] !== this.operatorSecret) {
+      if (!this._operatorAuthed(req)) {
         return this._json(res, 401, { ok: false, error: "operator secret required" });
       }
       const b = await this._body(req);
@@ -692,7 +722,7 @@ class Scheduler {
     }
 
     if (url.pathname === "/operator/unrevoke" && req.method === "POST") {
-      if (this.operatorSecret && req.headers["x-operator-secret"] !== this.operatorSecret) {
+      if (!this._operatorAuthed(req)) {
         return this._json(res, 401, { ok: false, error: "operator secret required" });
       }
       const b = await this._body(req);
@@ -702,7 +732,7 @@ class Scheduler {
     }
 
     if (url.pathname === "/operator/enqueue" && req.method === "POST") {
-      if (this.operatorSecret && req.headers["x-operator-secret"] !== this.operatorSecret) {
+      if (!this._operatorAuthed(req)) {
         return this._json(res, 401, { ok: false, error: "operator secret required" });
       }
       const b = await this._body(req);
@@ -710,7 +740,7 @@ class Scheduler {
     }
 
     if (url.pathname === "/epoch/close" && req.method === "POST") {
-      if (this.operatorSecret && req.headers["x-operator-secret"] !== this.operatorSecret) {
+      if (!this._operatorAuthed(req)) {
         return this._json(res, 401, { ok: false, error: "operator secret required" });
       }
       const summary = this.closeEpoch();
@@ -726,7 +756,7 @@ class Scheduler {
     }
 
     if (url.pathname === "/operator/epochs" && req.method === "GET") {
-      if (this.operatorSecret && req.headers["x-operator-secret"] !== this.operatorSecret) {
+      if (!this._operatorAuthed(req)) {
         return this._json(res, 401, { ok: false, error: "operator secret required" });
       }
       const out = [];
@@ -863,7 +893,7 @@ class Scheduler {
 
     // Operator retry lane: settle (or re-settle) a stored epoch — idempotent.
     if (url.pathname === "/operator/settle" && req.method === "POST") {
-      if (this.operatorSecret && req.headers["x-operator-secret"] !== this.operatorSecret) {
+      if (!this._operatorAuthed(req)) {
         return this._json(res, 401, { ok: false, error: "operator secret required" });
       }
       const b = await this._body(req);
@@ -1151,7 +1181,7 @@ class Scheduler {
     this.server = http.createServer((req, res) =>
       this.handle(req, res).catch((e) => {
         try {
-          this._json(res, 500, { ok: false, error: String(e.message) });
+          this._json(res, e.statusCode || 500, { ok: false, error: String(e.message) });
         } catch {
           /* response already gone */
         }

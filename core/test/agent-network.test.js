@@ -82,3 +82,16 @@ test("funding finality requires successful canonical inclusion below LIB", async
  assert.equal((await client.finality("tx")).confidence, "included"); lib = "5"; assert.equal((await client.finality("tx")).confidence, "irreversible");
  block = "other"; assert.equal((await client.finality("tx")).confidence, "submitted"); block = "canonical"; reverted = true; await assert.rejects(client.finality("tx"), /reverted/);
 });
+
+test("service deliveries retain structured values and text beyond the preview limit", async t => {
+  for (const input of ["x".repeat(20000), { title: "Complete result", count: 2 }, [1, 2, 3], true, 42]) {
+    const { network: n } = fixture(t);
+    const schema = typeof input === "string" ? { type: "string", maxLength: 32000 } : Array.isArray(input) ? { type: "array", items: { type: "integer" } } : typeof input === "object" ? { type: "object", properties: { title: { type: "string" }, count: { type: "integer" } }, required: ["title", "count"] } : { type: typeof input === "number" ? "integer" : "boolean" };
+    const card = await n.save({ template: "echo", input_schema: schema, output_schema: schema });
+    const id = await n.quote(card, input);
+    await pump([n], () => n.store.data.jobs.find(j => j.id === id && j.role === "buyer").status === "quoted");
+    await n.submit(id);
+    await pump([n], () => n.store.data.jobs.find(j => j.id === id && j.role === "buyer").status === "delivered");
+    assert.deepEqual(n.store.data.jobs.find(j => j.id === id && j.role === "buyer").output, input);
+  }
+});

@@ -3,6 +3,8 @@
 const fs = require("fs");
 const fsp = require("fs/promises");
 const crypto = require("crypto");
+const { Transform } = require("node:stream");
+const { pipeline } = require("node:stream/promises");
 
 /**
  * Shared hash-verified download (spec §27): resumable via Range + a .part
@@ -47,7 +49,16 @@ async function downloadFile(url, dest, { sha256, sizeBytes, onProgress, signal, 
   const resumed = resp.status === 206;
   if (!resp.ok && resp.status !== 206) {
     clearTimeout(idleTimer);
+    await resp.body?.cancel().catch(() => {});
     throw new Error(`Download failed: HTTP ${resp.status}`);
+  }
+  if (resumed) {
+    const range = /^bytes (\d+)-(\d+)\/(\d+|\*)$/.exec(resp.headers.get("content-range") || "");
+    if (!range || Number(range[1]) !== from || Number(range[2]) < from) {
+      clearTimeout(idleTimer);
+      await resp.body?.cancel().catch(() => {});
+      throw new Error("Download returned an invalid resume range — retry the download");
+    }
   }
   // A server that ignores Range restarts the file — start the .part over.
   // Async, like every discard here: a half-downloaded model is gigabytes, and
@@ -62,19 +73,22 @@ async function downloadFile(url, dest, { sha256, sizeBytes, onProgress, signal, 
   const out = fs.createWriteStream(part, { flags: resumed ? "a" : "w" });
   let done = from;
   try {
-    for await (const chunk of resp.body) {
-      armIdle();
-      out.write(chunk);
-      done += chunk.length;
-      if (onProgress) onProgress({ done, total, pct: total ? Math.floor((done / total) * 100) : null });
-    }
+    // pipeline handles disk errors and backpressure. Unchecked write() calls
+    // used to buffer whole models and could crash Core on ENOSPC/EACCES.
+    await pipeline(resp.body, new Transform({ transform(chunk, _encoding, callback) {
+      try {
+        armIdle(); done += chunk.length;
+        if (sizeBytes && done > sizeBytes) throw new Error("Download exceeds the expected file size");
+        if (onProgress) onProgress({ done, total, pct: total ? Math.floor((done / total) * 100) : null });
+        callback(null, chunk);
+      } catch (e) { callback(e); }
+    } }), out, { signal: combined });
   } catch (e) {
     out.destroy();
     throw idle.signal.aborted && !signal?.aborted ? stalled() : e;
   } finally {
     clearTimeout(idleTimer);
   }
-  await new Promise((resolve, reject) => out.end((e) => (e ? reject(e) : resolve())));
 
   const hash = crypto.createHash("sha256");
   await new Promise((resolve, reject) => {

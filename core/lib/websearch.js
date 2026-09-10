@@ -20,6 +20,7 @@ const MAX_RESULTS = 5;
 const MAX_REDIRECTS = 5;
 const FETCH_TIMEOUT_MS = 9000;
 const PAGE_CAP_CHARS = 6000;
+const PAGE_MAX_BYTES = 2 * 1024 * 1024;
 
 /** Decode HTML entities the two sources actually emit. */
 function unescapeHtml(s) {
@@ -150,17 +151,14 @@ function isPublicHttpUrl(raw) {
  * points somewhere private. Throws with the reason, so refusals are legible
  * in a trace rather than looking like a network failure.
  *
- * Residual gap, stated plainly: between this lookup and the socket's own, the
- * record could change (classic DNS rebinding). Closing that needs the request
- * pinned to the address checked here, which means owning the connection —
- * worth doing if this surface ever widens, and out of proportion to a local
- * assistant fetching an article today.
+ * Return the checked addresses so the page request can pin its socket to
+ * this lookup. A second DNS lookup would reintroduce DNS rebinding.
  */
 async function assertPublicTarget(raw, { lookup = dns.lookup } = {}) {
   if (!isPublicHttpUrl(raw)) throw new Error("only public http(s) URLs can be fetched");
   let host = new URL(String(raw)).hostname.toLowerCase();
   if (host.startsWith("[") && host.endsWith("]")) host = host.slice(1, -1);
-  if (net.isIP(host)) return; // a literal was already judged on its own merits
+  if (net.isIP(host)) return [{ address: host, family: net.isIP(host) }];
 
   let answers;
   try {
@@ -174,6 +172,53 @@ async function assertPublicTarget(raw, { lookup = dns.lookup } = {}) {
       throw new Error(`refusing ${host}: it resolves to a private address`);
     }
   }
+  return answers.map(a => ({ address: a.address, family: net.isIP(a.address) }));
+}
+
+function publicPageRequest(target, { signal, headers, addresses, requestImpl, method = "GET", body: payload } = {}) {
+  const url = new URL(target), { Readable } = require("node:stream");
+  const request = requestImpl || require(url.protocol === "https:" ? "node:https" : "node:http").request;
+  return new Promise((resolve, reject) => {
+    const req = request(url, { signal, headers, method, agent: false,
+      lookup: (_hostname, options, callback) => options.all ? callback(null, addresses) : callback(null, addresses[0].address, addresses[0].family),
+    }, res => {
+      try {
+        let body = res;
+        const encoding = String(res.headers["content-encoding"] || "identity").toLowerCase();
+        if (encoding !== "identity") {
+          const z = require("node:zlib");
+          const decoders = new Map([["gzip", z.createGunzip], ["deflate", z.createInflate], ["br", z.createBrotliDecompress]]);
+          const decoder = decoders.get(encoding);
+          if (!decoder) { res.destroy(); reject(new Error("Unsupported page encoding")); return; }
+          body = decoder();
+          require("node:stream/promises").pipeline(res, body).catch(e => body.destroy(e));
+        }
+        resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode,
+          headers: new Headers(Object.entries(res.headers).filter(([,v]) => v !== undefined).map(([k,v]) => [k, Array.isArray(v) ? v.join(", ") : v])), body: Readable.toWeb(body) });
+      } catch (e) { res.destroy(); reject(e); }
+    });
+    req.on("error", reject); req.end(payload);
+  });
+}
+
+async function pageText(response) {
+  if (Number(response.headers.get("content-length")) > PAGE_MAX_BYTES) {
+    await response.body?.cancel().catch(() => {});
+    throw new Error("Page exceeds the 2 MB limit");
+  }
+  // Injected fixtures may provide text() only; live requests always stream.
+  if (!response.body) {
+    const text = await response.text();
+    if (Buffer.byteLength(text) > PAGE_MAX_BYTES) throw new Error("Page exceeds the 2 MB limit");
+    return text;
+  }
+  let bytes = 0, text = ""; const decoder = new TextDecoder();
+  for await (const chunk of response.body) {
+    bytes += chunk.length;
+    if (bytes > PAGE_MAX_BYTES) throw new Error("Page exceeds the 2 MB limit");
+    text += decoder.decode(chunk, { stream: true });
+  }
+  return text + decoder.decode();
 }
 
 /** DuckDuckGo HTML results — anchors carry a /l/?uddg=<encoded> redirect. */
@@ -252,11 +297,12 @@ async function fetchPage(url, { fetchImpl = fetch, timeoutMs = FETCH_TIMEOUT_MS,
   let target = String(url);
   let r;
   for (let hop = 0; ; hop++) {
-    await assertPublicTarget(target, { lookup });
-    r = await fetchImpl(target, {
+    const addresses = await assertPublicTarget(target, { lookup });
+    r = await (fetchImpl === fetch ? publicPageRequest : fetchImpl)(target, {
       signal: AbortSignal.timeout(timeoutMs),
       headers: { "user-agent": "Mozilla/5.0 (KoinosAI local assistant)", accept: "text/html,text/plain" },
       redirect: "manual",
+      addresses,
     });
     if (![301, 302, 303, 307, 308].includes(r.status)) break;
     const location = r.headers.get("location");
@@ -265,10 +311,10 @@ async function fetchPage(url, { fetchImpl = fetch, timeoutMs = FETCH_TIMEOUT_MS,
     if (hop >= MAX_REDIRECTS) throw new Error("too many redirects");
     target = new URL(location, target).toString();
   }
-  if (!r.ok) throw new Error(`fetch failed: http ${r.status}`);
+  if (!r.ok) { await r.body?.cancel().catch(() => {}); throw new Error(`fetch failed: http ${r.status}`); }
   const ctype = String(r.headers.get("content-type") || "");
-  if (!/text\/html|text\/plain|application\/xhtml/.test(ctype)) throw new Error("not a text page");
-  let html = await r.text();
+  if (!/text\/html|text\/plain|application\/xhtml/.test(ctype)) { await r.body?.cancel().catch(() => {}); throw new Error("not a text page"); }
+  let html = await pageText(r);
   const title = stripTags((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || "").slice(0, 200);
   // Readability-lite: drop non-content blocks wholesale, then tags.
   html = html
@@ -285,4 +331,4 @@ async function fetchPage(url, { fetchImpl = fetch, timeoutMs = FETCH_TIMEOUT_MS,
   return { title, url: target, text };
 }
 
-module.exports = { searchWeb, fetchPage, isPublicHttpUrl, isPrivateAddress, assertPublicTarget, parseDdgHtml };
+module.exports = { searchWeb, fetchPage, isPublicHttpUrl, isPrivateAddress, assertPublicTarget, parseDdgHtml, publicPageRequest };

@@ -39,7 +39,7 @@ class EmailService {
   }
 
   _encrypted() {
-    return Boolean(this.safeStorage?.isEncryptionAvailable?.());
+    return Boolean(this.safeStorage?.isEncryptionAvailable?.()) && this.safeStorage.getSelectedStorageBackend?.() !== "basic_text";
   }
 
   saveConfig(cfg) {
@@ -189,6 +189,10 @@ class EmailService {
       host: cfg.smtpHost || cfg.imapHost.replace(/^imap\./, "smtp."),
       port: cfg.smtpPort,
       secure: cfg.smtpPort === 465,
+      requireTLS: cfg.smtpPort !== 465,
+      connectionTimeout: 15000,
+      greetingTimeout: 15000,
+      socketTimeout: 30000,
       auth: { user: cfg.email, pass: cfg.pass },
     });
     const info = await transport.sendMail({

@@ -127,12 +127,13 @@
     "koilib": "^9.3.0",
     "kokoro-js": "1.2.1",
     "mailparser": "^3.9.17",
-    "nodemailer": "^9.0.5",
+    "nodemailer": "^9.1.1",
     "onnxruntime-web": "1.22.0-dev.20250409-89f8206ba4",
     "quickjs-emscripten": "0.32.0",
     "sherpa-onnx-node": "1.13.7"
   },
   "overrides": {
-    "protobufjs": "7.4.0"
+    "protobufjs": "7.6.6",
+    "sharp": "0.35.4"
   }
 }

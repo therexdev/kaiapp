@@ -302,7 +302,7 @@ test("caldav: REPORT parses server events; PUT creates one", async () => {
 
   const created = await cal.create({ summary: "Call, with Bob", startIso: "2026-08-25T15:00:00Z" });
   assert.strictEqual(puts.length, 1);
-  assert.match(puts[0].body, /SUMMARY:Call {2}with Bob/);
+  assert.ok(puts[0].body.includes("SUMMARY:Call\\, with Bob"));
   assert.match(puts[0].body, /DTSTART:20260825T150000Z/);
   assert.ok(created.uid.endsWith("@koinos-ai"));
   srv.close();

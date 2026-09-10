@@ -1,6 +1,17 @@
 "use strict";
 const P = require("./protocol"), { clone } = require("./store"), { JobRuntime, packageDefinition, template } = require("./runtime"), { Transport } = require("./transport");
 const TERMINAL = ["accepted", "cancelled", "failed", "rejected"];
+function serviceOutput(run, schema) {
+  const items = run.output;
+  if (!Array.isArray(items)) { P.validateSchema(schema, run.previous); return run.previous; }
+  // The workflow preview is deliberately truncated. Delivery must preserve
+  // the complete, bounded result and the type promised in the service card.
+  const unwrap = item => item && Object.hasOwn(item, "json") && Object.hasOwn(item, "text") && Object.keys(item).every(k => ["json", "text"].includes(k)) ? item.json : item;
+  const candidates = schema.type === "string" ? [items.map(v => v.text ?? JSON.stringify(v)).join("\n\n")] :
+    [...(items.length === 1 ? [unwrap(items[0]), items[0]] : []), ...(schema.type === "array" ? [items.map(unwrap)] : [])];
+  for (const output of candidates) { try { P.validateSchema(schema, output); return output; } catch (e) { if (!(e instanceof P.AgentError)) throw e; } }
+  P.fail("INVALID_INPUT", "Service result does not match its declared output schema.");
+}
 class AgentNetwork {
   constructor({ store, models = () => [], runLocal, privacyMode, transport }) {
     this.store = store; this.models = models; this.domain = P.PRIVATE; this.transport = transport || new Transport({ privacyMode });
@@ -209,7 +220,7 @@ class AgentNetwork {
       const r = j.workflow.runs.find(r => r.id === j.runId); if (!r) continue;
       if (Date.now() >= j.deadline && ["running", "waiting", "interrupted"].includes(r.status)) { this.runtime.cancel(j.id); this.store.change(d => { const x = d.jobs.find(x => x.id === j.id && x.role === "host"); x.status = "failed"; x.error = "Service time limit reached."; }); }
       else if (r.status === "completed") {
-        try { const output = r.previous; P.validateSchema(j.card.output_schema, output); if (Buffer.byteLength(P.canonical(output)) > j.card.limits.output_bytes) P.fail("SIZE_LIMIT", "Service output limit reached."); const salt = P.random(), resultHash = P.hash({ output, salt });
+        try { const output = serviceOutput(r, j.card.output_schema); if (Buffer.byteLength(P.canonical(output)) > j.card.limits.output_bytes) P.fail("SIZE_LIMIT", "Service output limit reached."); const salt = P.random(), resultHash = P.hash({ output, salt });
           await this.send(j.buyer, j.reply_key, j.reply_endpoints, { type: "delivery", job_id: j.id, quote_hash: P.hash(j.quote), output, salt, result_hash: resultHash });
           this.store.change(d => { const x = d.jobs.find(x => x.id === j.id && x.role === "host"); x.status = "delivered"; x.output = output; x.resultHash = resultHash; }); this.activity("delivered", j.id, j.name); continue;
         } catch (e) { this.store.change(d => { const x = d.jobs.find(x => x.id === j.id && x.role === "host"); x.status = "failed"; x.error = e.message; }); }
@@ -244,6 +255,6 @@ class AgentNetwork {
     } finally { this.busy = false; }
   }
   start() { if (this.timer || !this.store.data.enabled) return; this.timer = setInterval(() => void this.tick().catch(e => { try { this.store.change(d => { d.lastError = e.message; }); } catch {} }), 2500); this.timer.unref?.(); }
-  stop() { clearInterval(this.timer); this.timer = null; this.runtime.stop(); }
+  stop() { clearInterval(this.timer); this.timer = null; this.runtime.stop(); this.transport.stop?.(); }
 }
 module.exports = { AgentNetwork, TERMINAL };

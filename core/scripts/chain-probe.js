@@ -106,8 +106,8 @@ async function rpc(url, method, params = {}) {
       account: utils.decodeBase58("149YvYQfj4MNaFecd7Rm3Z2rK6y2fkPYXz").toString("base64url"),
     });
     console.log(`OPERATOR rc(mana)=${rc.result?.rc ?? "0"} ${rc.error ? "err=" + rc.error : ""}`);
-    const tkoin = new Contract({ id: "1FaSvLjQJsCJKq5ybmGsMMQs8RQYyVv8ju", abi: utils.tokenAbi, provider });
-    const bal = (await tkoin.functions.balanceOf({ owner: "149YvYQfj4MNaFecd7Rm3Z2rK6y2fkPYXz" })).result;
+    const tkoin = new Contract({ id: "1FaSvLjQJsCJKq5ybmGsMMQs8RQYyVv8ju", abi: require("../lib/abi/token-abi.json"), provider });
+    const bal = (await tkoin.functions.balance_of({ owner: "149YvYQfj4MNaFecd7Rm3Z2rK6y2fkPYXz" })).result;
     console.log(`OPERATOR tKOIN balance=${bal?.value ?? "0"}`);
   } catch (e) {
     console.log(`KAI CONTRACT read failed — ${String(e.message || e).slice(0, 140)}`);

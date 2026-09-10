@@ -31,6 +31,8 @@ jobs:
           # Avoid refreshing unrelated OS package mirrors just to install the pinned browser.
           npx playwright-core install chromium
           echo "KAI_TEST_CHROMIUM=$(node -e 'process.stdout.write(require("playwright-core").chromium.executablePath())')" >> "$GITHUB_ENV"
+      - name: Audit application dependencies
+        run: npm audit --audit-level=high
       - run: npm test
         env:
           KAI_MASCOT_QA_DIR: mascot-qa
@@ -43,6 +45,7 @@ jobs:
         working-directory: contracts/agent-network
         run: |
           npm ci --ignore-scripts
+          npm audit --audit-level=high
           npm test
           npm run build
       - name: Save Agent Network contract prototype

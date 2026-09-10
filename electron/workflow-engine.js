@@ -3,7 +3,7 @@ const crypto = require("crypto");
 const { CompanionError, copy, id, text } = require("./companion-store");
 const Model = require("../ui/workflow-model");
 const V = require("./workflow-values"), { next } = require("./workflow-schedules");
-const { assertPublicTarget } = require("../core/lib/websearch");
+const { assertPublicTarget, publicPageRequest } = require("../core/lib/websearch");
 const WAIT = Symbol("waiting"), live = r => ["running", "waiting", "interrupted"].includes(r.status);
 const hash = value => crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");
 function loopRegion(graph, loop) {
@@ -280,10 +280,10 @@ function createClass(Base) { return class GraphWorkflows extends Base {
   }
   async http(request, signal) {
     if (this.privacyMode() === "local-only") throw new CompanionError("Local-Only blocks online workflow requests.");
-    await assertPublicTarget(request.url, { lookup: this.lookup }); signal.throwIfAborted();
+    const addresses = await assertPublicTarget(request.url, { lookup: this.lookup }); signal.throwIfAborted();
     const controller = new AbortController(), both = AbortSignal.any([signal, controller.signal, AbortSignal.timeout(30000)]), timer = setInterval(() => { if (this.privacyMode() === "local-only") controller.abort(); }, 200); timer.unref?.();
     try {
-      const response = await this.fetch(request.url, { method: request.method, headers: { "content-type": "application/json", ...request.headers }, ...(request.method !== "GET" ? { body: V.string(request.body) } : {}), redirect: "error", signal: both });
+      const response = await (this.fetch === fetch ? publicPageRequest : this.fetch)(request.url, { method: request.method, headers: { "content-type": "application/json", ...request.headers }, ...(request.method !== "GET" ? { body: V.string(request.body) } : {}), redirect: "error", signal: both, addresses });
       if (!response.ok) { await response.body?.cancel(); throw new CompanionError("HTTP request returned " + response.status + "."); }
       const chunks = []; let size = 0; for await (const chunk of response.body || []) { both.throwIfAborted(); if ((size += chunk.length) > 150000) { controller.abort(); throw new CompanionError("HTTP response exceeds 150 KB."); } chunks.push(chunk); }
       both.throwIfAborted(); return { ...V.envelope(Buffer.concat(chunks).toString("utf8")), status: response.status };

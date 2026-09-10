@@ -11,7 +11,11 @@
   "devDependencies": {
     "@koinos/sdk-as": "1.0.0",
     "micromatch": "4.0.8",
-    "protobufjs": "7.4.0",
-    "yaml": "2.8.1"
+    "protobufjs": "7.6.6",
+    "yaml": "2.9.0"
+  },
+  "overrides": {
+    "protobufjs": "7.6.6",
+    "npm": "11.19.1"
   }
 }

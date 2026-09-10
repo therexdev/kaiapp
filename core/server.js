@@ -124,6 +124,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
   // Cached 30s; only fetched while something asks (the Earn tab polls status).
   let earningsCache = { at: 0, data: null };
   const fetchEarnings = async () => {
+    if (!worker?.running && settings.get("network.privacyMode", "local-only") === "local-only") return null;
     const url = settings.get("earn.schedulerUrl", DEFAULT_SCHEDULER_URL);
     const address = wallet.address;
     if (!url || !address) return null;
@@ -726,6 +727,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
       return p;
     },
     async stop() {
+      this.remote?.stop();
       speech.close();
       if (this._policyTimer) clearInterval(this._policyTimer);
       producerReporter.stop();

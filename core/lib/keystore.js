@@ -38,14 +38,6 @@ function encryptKeystore({ privateKeyHex, address, password }) {
     version: VERSION,
     address,
     createdAt: new Date().toISOString(),
-    // Support hint, not a secret: password length (code points) plus a tiny
-    // salted fingerprint, so "Incorrect password" can say WHAT differs
-    // (length vs a character) instead of leaving the user guessing. A 2-byte
-    // fingerprint is deliberately useless for cracking.
-    pwHint: {
-      len: [...String(password)].length,
-      fp: crypto.createHash("sha256").update(`kai-pw-hint|${salt.toString("hex")}|${password}`).digest("hex").slice(0, 4),
-    },
     crypto: {
       kdf: "scrypt",
       kdfparams: { ...SCRYPT, salt: salt.toString("hex") },
@@ -58,12 +50,17 @@ function encryptKeystore({ privateKeyHex, address, password }) {
 }
 
 function decryptKeystore(keystore, password) {
-  if (!keystore || keystore.type !== KEYSTORE_TYPE) {
+  if (!keystore || keystore.type !== KEYSTORE_TYPE || keystore.version !== VERSION) {
     throw new Error("Not a valid keystore file");
   }
   const c = keystore.crypto;
-  if (c.kdf !== "scrypt" || c.cipher !== "aes-256-gcm") {
-    throw new Error(`Unsupported keystore format (${c.kdf}/${c.cipher})`);
+  // Version 1 has one fixed KDF profile. Validate before allocating memory
+  // or deriving a key; an edited file must not control scrypt's work factor.
+  const hex = (v, bytes) => typeof v === "string" && new RegExp(`^[0-9a-f]{${bytes * 2}}$`, "i").test(v);
+  if (!c || c.kdf !== "scrypt" || c.cipher !== "aes-256-gcm" ||
+      !c.kdfparams || Object.entries(SCRYPT).some(([k, v]) => c.kdfparams[k] !== v) ||
+      !hex(c.kdfparams.salt, 32) || !hex(c.cipherparams?.iv, 12) || !hex(c.mac, 16) || !hex(c.ciphertext, 32)) {
+    throw new Error("Invalid or unsupported keystore format");
   }
   const key = deriveKey(password, Buffer.from(c.kdfparams.salt, "hex"), c.kdfparams);
   const decipher = crypto.createDecipheriv(

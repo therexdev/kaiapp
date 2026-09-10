@@ -64,7 +64,7 @@ test("wallet: restore from WIF replaces a lost-password keystore, same address",
   );
 });
 
-test("wallet: unicode-equivalent and padded passwords open; refusals say what differs", () => {
+test("wallet: unicode-equivalent and padded passwords open; refusals do not disclose password hints", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-w-"));
   const w = new WalletService(dir);
   // é typed composed (U+00E9) at save…
@@ -76,10 +76,10 @@ test("wallet: unicode-equivalent and padded passwords open; refusals say what di
   assert.equal(w.unlock("café volt 42 ").address, address, "trailing space forgiven at unlock");
   w.lock();
 
-  // Wrong length: the error says so, with counts.
-  assert.throws(() => w.unlock("café volt 4"), / you typed 11 characters, but this wallet's password has 12/);
-  // Right length, wrong character: the error says that instead.
-  assert.throws(() => w.unlock("café volt 43"), /same length as the saved password/);
+  for (const wrong of ["café volt 4", "café volt 43"]) {
+    assert.throws(() => w.unlock(wrong), error => /Incorrect password/.test(error.message) && !/characters|same length/.test(error.message));
+  }
+  assert.equal(Object.hasOwn(w.readKeystore(), "pwHint"), false);
 });
 
 test("wallet session: survives a 'restart', refuses wrong secrets and swapped files, ends on lock", async () => {
@@ -514,7 +514,7 @@ test("closed epochs settle on-chain and /balance serves KAI + pending receipts",
     },
     kaiBalance: async () => "800000000", // 8 KAI in satoshis
   };
-  const sched = new Scheduler({ dataDir: path.join(dir, "sched"), epoch: 7, settlement });
+  const sched = new Scheduler({ dataDir: path.join(dir, "sched"), epoch: 7, settlement, operatorSecret: "test-operator" });
   const port = await sched.listen();
   try {
     // Receipts in the open epoch show up as pending before any settlement.
@@ -534,7 +534,7 @@ test("closed epochs settle on-chain and /balance serves KAI + pending receipts",
     const again = await (
       await fetch(`http://127.0.0.1:${port}/operator/settle`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", "x-operator-secret": "test-operator" },
         body: JSON.stringify({ epoch: 7 }),
       })
     ).json();

@@ -2,31 +2,32 @@
 
 const fs = require("fs");
 const path = require("path");
+const reserved = k => ["__proto__", "constructor", "prototype"].includes(k);
 
-// Minimal JSON-file store with atomic writes. Ported unchanged from
-// Koinos-Node (electron/lib/store.js) per the V1 plan's reuse map.
+// Minimal JSON-file store with atomic, private writes.
 class JsonStore {
   constructor(filePath, defaults = {}) {
     this.filePath = filePath;
-    this.data = { ...defaults };
+    this.data = structuredClone(defaults);
     try {
       const raw = fs.readFileSync(filePath, "utf8");
-      this.data = deepMerge({ ...defaults }, JSON.parse(raw));
+      this.data = deepMerge(structuredClone(defaults), JSON.parse(raw));
     } catch {
       // Missing or corrupt file: start from defaults.
     }
   }
 
   get(key, fallback) {
-    const v = key.split(".").reduce((o, k) => (o == null ? o : o[k]), this.data);
+    const v = key.split(".").reduce((o, k) => (o == null || reserved(k) || !Object.hasOwn(o, k) ? undefined : o[k]), this.data);
     return v === undefined ? fallback : v;
   }
 
   set(key, value) {
     const parts = key.split(".");
+    if (parts.some(p => !p || reserved(p))) throw new Error("Invalid settings path");
     let obj = this.data;
     for (const part of parts.slice(0, -1)) {
-      if (typeof obj[part] !== "object" || obj[part] === null) obj[part] = {};
+      if (!Object.hasOwn(obj, part) || typeof obj[part] !== "object" || obj[part] === null) obj[part] = {};
       obj = obj[part];
     }
     obj[parts[parts.length - 1]] = value;
@@ -39,14 +40,17 @@ class JsonStore {
 
   save() {
     fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
-    const tmp = `${this.filePath}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2));
-    fs.renameSync(tmp, this.filePath);
+    const tmp = `${this.filePath}.${require("node:crypto").randomBytes(8).toString("hex")}.tmp`;
+    try {
+      fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2), { mode: 0o600, flag: "wx" });
+      fs.renameSync(tmp, this.filePath);
+    } finally { fs.rmSync(tmp, { force: true }); }
   }
 }
 
 function deepMerge(base, extra) {
   for (const [k, v] of Object.entries(extra || {})) {
+    if (reserved(k)) continue;
     if (
       v &&
       typeof v === "object" &&

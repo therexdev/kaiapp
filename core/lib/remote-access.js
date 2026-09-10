@@ -23,6 +23,7 @@
 "use strict";
 
 const crypto = require("node:crypto");
+const { setTimeout: delay } = require("node:timers/promises");
 
 const POLLERS = 3; // concurrent held polls = concurrent remote requests served
 const POLL_TIMEOUT_MS = 35_000; // relay holds ~25s; margin for slow links
@@ -96,12 +97,16 @@ class RemoteAccess {
   }
 
   async _hello() {
+    const abort = this._abort;
+    if (!this._on || !abort) return;
     const r = await fetch(`${this.relayUrl}/relay/hello`, {
       method: "POST",
       headers: { authorization: `Bearer ${this._token()}` },
-      signal: AbortSignal.any([this._abort.signal, AbortSignal.timeout(10_000)]),
+      signal: AbortSignal.any([abort.signal, AbortSignal.timeout(10_000)]),
+      redirect: "error",
     });
     const j = await r.json();
+    if (!this._on || this._abort !== abort) return;
     if (!r.ok || !j.ok) throw new Error(j.error || `relay answered ${r.status}`);
     this._base = j.base;
     this._tunnelId = j.tunnelId;
@@ -118,15 +123,18 @@ class RemoteAccess {
         const r = await fetch(`${this.relayUrl}/relay/poll`, {
           headers: { authorization: `Bearer ${this._token()}` },
           signal: AbortSignal.any([abort.signal, AbortSignal.timeout(POLL_TIMEOUT_MS)]),
+          redirect: "error",
         });
+        if (!this._on || this._abort !== abort) break;
         if (r.status === 200) {
           const { job } = await r.json();
+          if (!this._on || this._abort !== abort) break;
           this._backoff = BACKOFF_MIN_MS;
           if (!this._base) this._hello().catch(() => {});
           this._setState("connected");
-          // Answer WITHOUT blocking this poller — a long streamed answer
-          // must not make the device deaf to the next question.
-          if (job) this._handle(job, abort).catch(() => {});
+          // Each poller owns one request until its stream ends. The three
+          // pollers serve concurrently without an unbounded background queue.
+          if (job) await this._handle(job, abort).catch(() => {});
           continue;
         }
         if (r.status === 204) {
@@ -138,28 +146,36 @@ class RemoteAccess {
       } catch (e) {
         if (!this._on || this._abort !== abort) break;
         if (this._state !== "connecting") this._setState("offline");
-        await new Promise((res) => setTimeout(res, this._backoff));
+        await delay(this._backoff, undefined, { signal: abort.signal }).catch(() => {});
         this._backoff = Math.min(this._backoff * 2, BACKOFF_MAX_MS);
       }
     }
   }
 
   async _handle(job, abort) {
+    if (!job || typeof job.reqId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(job.reqId) || abort.signal.aborted) return;
     const respondUrl = `${this.relayUrl}/relay/respond/${job.reqId}`;
     let localRes;
     try {
       // Belt and braces: the relay only forwards /v1/*, and we only replay
       // /v1/* — a compromised hop still cannot reach /core or the UI.
-      if (!/^\/v1\/[A-Za-z0-9_/.-]*$/.test(String(job.path)) || !["GET", "POST"].includes(job.method)) {
+      const base = new URL(this.localBase());
+      const target = typeof job.path === "string" ? new URL(job.path, base) : null;
+      if (!target || !/^\/v1\/[A-Za-z0-9_/-]+$/.test(job.path) || target.origin !== base.origin || target.pathname !== job.path || !["GET", "POST"].includes(job.method)) {
         throw new Error("refused: only the /v1 API crosses remote access");
       }
-      const headers = {};
+      if (!this.keys.required()) throw new Error("Create an API key first — remote access requires an API key");
+      // This flag only narrows access. The gateway must require a key even
+      // if the last key is revoked between this check and the local fetch.
+      const headers = { "x-kai-remote-access": "1" };
       for (const k of ["authorization", "content-type", "accept"]) if (job.headers?.[k]) headers[k] = String(job.headers[k]);
-      localRes = await fetch(this.localBase() + job.path, {
+      if (String(job.body || "").length > 14 * 1024 * 1024) throw new Error("Remote request body too large");
+      localRes = await fetch(target, {
         method: job.method,
         headers,
         body: job.method === "GET" ? undefined : Buffer.from(String(job.body || ""), "base64"),
         signal: AbortSignal.any([abort.signal, AbortSignal.timeout(230_000)]),
+        redirect: "error",
       });
     } catch (e) {
       const msg = JSON.stringify({ error: { message: String(e.message || e), type: "relay_device_error" } });
@@ -167,7 +183,8 @@ class RemoteAccess {
         method: "POST",
         headers: { authorization: `Bearer ${this._token()}`, "x-kai-status": "502", "x-kai-headers": Buffer.from('{"content-type":"application/json"}').toString("base64") },
         body: msg,
-        signal: AbortSignal.timeout(15_000),
+        signal: AbortSignal.any([abort.signal, AbortSignal.timeout(15_000)]),
+        redirect: "error",
       }).catch(() => {});
       return;
     }
@@ -183,6 +200,7 @@ class RemoteAccess {
       body: localRes.body, // streamed through — SSE arrives chunk by chunk
       duplex: "half",
       signal: AbortSignal.any([abort.signal, AbortSignal.timeout(240_000)]),
+      redirect: "error",
     }).catch(() => {});
     this.onEvent({ type: "remote:served", path: job.path });
   }

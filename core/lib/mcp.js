@@ -23,6 +23,7 @@ const { spawn } = require("child_process");
 
 const PROTOCOL_VERSION = "2025-03-26";
 const RPC_TIMEOUT_MS = 30000;
+const MAX_RPC_BYTES = 2 * 1024 * 1024;
 /*
  * The FIRST connect to an npm-based server has to download the package
  * before the server process says a word, which on a cold machine routinely
@@ -60,28 +61,39 @@ class McpConnection {
       headers,
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs),
+      redirect: "error",
     });
     const sid = resp.headers.get("mcp-session-id");
     if (sid) this._sessionId = sid;
-    if (notification) return null; // 202 expected, body irrelevant
-    if (!resp.ok) throw new Error(`MCP server answered HTTP ${resp.status}`);
+    if (notification) { await resp.body?.cancel(); return null; }
+    if (!resp.ok) { await resp.body?.cancel(); throw new Error(`MCP server answered HTTP ${resp.status}`); }
     const ctype = String(resp.headers.get("content-type") || "");
     let msg;
+    let buffered = "", bytes = 0; const decoder = new TextDecoder();
     if (ctype.includes("text/event-stream")) {
-      // One-shot SSE: read until the event carrying our response id.
-      const text = await resp.text();
-      for (const chunk of text.split("\n\n")) {
-        const data = chunk.split("\n").filter((l) => l.startsWith("data:")).map((l) => l.slice(5).trim()).join("");
-        if (!data) continue;
-        try {
-          const j = JSON.parse(data);
-          if (j.id === body.id) { msg = j; break; }
-        } catch { /* keep scanning */ }
+      // Servers may keep SSE open after the answer. Consume complete events
+      // incrementally and release the stream as soon as our response arrives.
+      const parseEvent = frame => {
+        const data = frame.split(/\r?\n/).filter(l => l.startsWith("data:")).map(l => l.slice(5).replace(/^ /, "")).join("\n");
+        try { const value = JSON.parse(data); if (value.id === body.id) return value; } catch { /* notification/noise */ }
+      };
+      for await (const chunk of resp.body) {
+        if ((bytes += chunk.length) > MAX_RPC_BYTES) throw new Error("MCP response exceeds 2 MB");
+        buffered += decoder.decode(chunk, { stream: true });
+        let boundary;
+        while ((boundary = /\r?\n\r?\n/.exec(buffered))) {
+          const frame = buffered.slice(0, boundary.index); buffered = buffered.slice(boundary.index + boundary[0].length);
+          msg = parseEvent(frame); if (msg) break;
+        }
+        if (msg) break;
       }
+      if (!msg) msg = parseEvent(buffered + decoder.decode());
       if (!msg) throw new Error("MCP server SSE stream ended without a response");
     } else {
-      msg = await resp.json();
+      for await (const chunk of resp.body) { if ((bytes += chunk.length) > MAX_RPC_BYTES) throw new Error("MCP response exceeds 2 MB"); buffered += decoder.decode(chunk, { stream: true }); }
+      msg = JSON.parse(buffered + decoder.decode());
     }
+    if (!msg || msg.id !== body.id) throw new Error("MCP response ID does not match the request");
     if (msg.error) throw new Error(`MCP error: ${msg.error.message || JSON.stringify(msg.error)}`);
     return msg.result;
   }
@@ -98,8 +110,14 @@ class McpConnection {
       env: this.config.env || process.env,
       ...(this.config.shell ? { shell: true } : {}),
     });
+    const decoder = new (require("node:string_decoder").StringDecoder)("utf8");
     this._child.stdout.on("data", (d) => {
-      this._buf += d.toString();
+      this._buf += decoder.write(d);
+      if (Buffer.byteLength(this._buf) > MAX_RPC_BYTES) {
+        this._buf = "";
+        for (const p of this._pending.values()) { clearTimeout(p.timer); p.reject(new Error("MCP response exceeds 2 MB")); }
+        this._pending.clear(); this.close(); return;
+      }
       let idx;
       while ((idx = this._buf.indexOf("\n")) >= 0) {
         const line = this._buf.slice(0, idx).trim();
@@ -120,13 +138,13 @@ class McpConnection {
     });
     this._child.stderr.on("data", () => {}); // servers log freely; not our problem
     this._child.on("exit", (code) => {
-      for (const [, p] of this._pending) p.reject(new Error(`MCP server exited (${code})`));
+      for (const [, p] of this._pending) { clearTimeout(p.timer); p.reject(new Error(`MCP server exited (${code})`)); }
       this._pending.clear();
       this._child = null;
       this.onEvent({ type: "mcp:exited", server: this.config.name, code });
     });
     this._child.on("error", (e) => {
-      for (const [, p] of this._pending) p.reject(new Error(`MCP server failed to start: ${e.message}`));
+      for (const [, p] of this._pending) { clearTimeout(p.timer); p.reject(new Error(`MCP server failed to start: ${e.message}`)); }
       this._pending.clear();
     });
   }

@@ -199,7 +199,7 @@ class Gateway {
   }
 
   _authed(req, res) {
-    if (!this.keys.required()) return true; // no keys yet: local free access
+    if (!this.keys.required() && !req.headers["x-kai-remote-access"]) return true; // local free access only
     const m = /^Bearer\s+(.+)$/i.exec(String(req.headers.authorization || ""));
     const info = m ? this.keys.verify(m[1].trim()) : null;
     if (info) {
@@ -279,7 +279,20 @@ class Gateway {
   }
 
   async _route(req, res) {
-    const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+    res.setHeader("x-content-type-options", "nosniff");
+    res.setHeader("x-frame-options", "SAMEORIGIN");
+    res.setHeader("content-security-policy", "frame-ancestors 'self'");
+    // A same-origin browser GET can omit Origin after DNS rebinding. Only
+    // local Host authorities may reach this loopback server (including UI).
+    const hosts = new Set([`127.0.0.1:${this.port}`, `localhost:${this.port}`, `[::1]:${this.port}`]);
+    if (this.port === 80) for (const h of ["127.0.0.1", "localhost", "[::1]"]) hosts.add(h);
+    if (!hosts.has(String(req.headers.host || "").toLowerCase())) {
+      return this._json(res, 403, { error: { message: "Refused: use the local API host and port.", code: "invalid_host" } });
+    }
+    let url;
+    try { url = new URL(req.url, `http://127.0.0.1:${this.port}`); }
+    catch { return this._json(res, 400, { error: { message: "Invalid request URL" } }); }
+    if (url.origin !== new URL(`http://127.0.0.1:${this.port}`).origin) return this._json(res, 400, { error: { message: "Use a local request path" } });
     const path = url.pathname;
 
     // The control plane is for this app only. /v1/* is deliberately left open

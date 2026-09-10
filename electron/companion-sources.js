@@ -1,7 +1,7 @@
 "use strict";
 const fs = require("fs"), path = require("path");
 const { CompanionError, copy, id, text } = require("./companion-store");
-const { assertPublicTarget } = require("../core/lib/websearch");
+const { assertPublicTarget, publicPageRequest } = require("../core/lib/websearch");
 const MAX = 200000;
 const plain = s => String(s).replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ").replace(/<[^>]*>/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/\s+/g, " ").trim();
 class CompanionSources {
@@ -79,8 +79,8 @@ class CompanionSources {
     let target = url;
     const online = () => { signal?.throwIfAborted(); if (this.privacyMode() === "local-only") throw new CompanionError("Local-Only pauses online sources. Local folders and conversations still work."); };
     for (let hop = 0; hop <= 4; hop++) {
-      online(); await assertPublicTarget(target, { lookup: this.lookup }); online();
-      const r = await this.fetch(target, { redirect: "manual", headers: { accept: "text/html,application/json,application/rss+xml,application/atom+xml,text/plain", "user-agent": "KAI-Brain" }, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000) });
+      online(); const addresses = await assertPublicTarget(target, { lookup: this.lookup }); online();
+      const r = await (this.fetch === fetch ? publicPageRequest : this.fetch)(target, { redirect: "manual", headers: { accept: "text/html,application/json,application/rss+xml,application/atom+xml,text/plain", "user-agent": "KAI-Brain" }, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000), addresses });
       if ([301, 302, 303, 307, 308].includes(r.status)) { await r.body?.cancel(); const location = r.headers.get("location"); if (!location) throw new CompanionError("The source redirected without a destination."); target = new URL(location, target).toString(); if (!target.startsWith("https://")) throw new CompanionError("Source redirects must use HTTPS."); continue; }
       if (!r.ok) { await r.body?.cancel(); throw new CompanionError(`Source returned HTTP ${r.status}. Check the URL and try again.`); }
       const type = r.headers.get("content-type") || ""; if (!/text\/|json|xml/.test(type)) { await r.body?.cancel(); throw new CompanionError("Choose a text page or feed."); }

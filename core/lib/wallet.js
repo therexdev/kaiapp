@@ -21,6 +21,22 @@ class WalletService {
     this.keystorePath = path.join(walletDir, "wallet.json");
     this._signer = null;
     this._ethAddress = null;
+    // Old hints offered a cheap SHA-256 password prefilter, bypassing most
+    // of scrypt's cost. Remove metadata without changing encrypted key bytes.
+    const ks = this.readKeystore();
+    if (ks && Object.hasOwn(ks, "pwHint")) {
+      delete ks.pwHint;
+      this._writeKeystore(ks);
+    }
+  }
+
+  _writeKeystore(keystore) {
+    fs.mkdirSync(this.walletDir, { recursive: true, mode: 0o700 });
+    const tmp = `${this.keystorePath}.${crypto.randomBytes(8).toString("hex")}.tmp`;
+    try {
+      fs.writeFileSync(tmp, JSON.stringify(keystore, null, 2), { mode: 0o600, flag: "wx" });
+      fs.renameSync(tmp, this.keystorePath);
+    } finally { fs.rmSync(tmp, { force: true }); }
   }
 
   readKeystore() {
@@ -92,7 +108,7 @@ class WalletService {
       const ks = this.readKeystore();
       if (ks && ks.ethAddress !== this._ethAddress) {
         ks.ethAddress = this._ethAddress;
-        fs.writeFileSync(this.keystorePath, JSON.stringify(ks, null, 2), { mode: 0o600 });
+        this._writeKeystore(ks);
       }
     } catch {
       /* funding is optional; never let it break unlocking */
@@ -127,10 +143,7 @@ class WalletService {
       password,
     });
     keystore.compressed = signer.compressed !== false;
-    fs.mkdirSync(this.walletDir, { recursive: true });
-    const tmp = `${this.keystorePath}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(keystore, null, 2), { mode: 0o600 });
-    fs.renameSync(tmp, this.keystorePath);
+    this._writeKeystore(keystore);
     // Prove the file we just wrote reopens with this password before reporting
     // success — "saved but won't unlock later" must be impossible, not rare.
     if (decryptKeystore(this.readKeystore(), password) !== signer.getPrivateKey("hex")) {
@@ -225,19 +238,10 @@ class WalletService {
         if (!/Incorrect password/.test(String(e.message))) throw e;
       }
     }
-    // Name the exact file that refused, and say WHAT differs: a wrong length
-    // is a missing/extra character; a right length is a changed one.
+    // Identify the wallet without revealing password length or character hints.
     const ks = this.readKeystore();
-    let detail = "";
-    if (ks?.pwHint?.len != null) {
-      const typedLen = [...typed].length;
-      detail =
-        typedLen !== ks.pwHint.len
-          ? ` — you typed ${typedLen} characters, but this wallet's password has ${ks.pwHint.len}`
-          : " — same length as the saved password, so one character differs (check Caps Lock and keyboard layout)";
-    }
     throw new Error(
-      `Incorrect password for wallet ${ks?.address ?? "?"} (file created ${ks?.createdAt ?? "?"})${detail}`,
+      `Incorrect password for wallet ${ks?.address ?? "?"} (file created ${ks?.createdAt ?? "?"}). Check Caps Lock and keyboard layout.`,
       { cause: lastErr }
     );
   }

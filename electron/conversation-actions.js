@@ -1,7 +1,7 @@
 "use strict";
 const crypto = require("crypto");
 const { CompanionError, copy, id, text } = require("./companion-store");
-const { searchWeb, fetchPage } = require("../core/lib/websearch");
+const { searchWeb, fetchPage, publicPageRequest } = require("../core/lib/websearch");
 const Profiles = require("../ui/connection-profiles");
 const digest = value => crypto.createHash("sha256").update(JSON.stringify(canonical(value) ?? null)).digest("hex");
 function canonical(v) { if (Array.isArray(v)) return v.map(canonical); if (v && typeof v === "object") return Object.fromEntries(Object.keys(v).sort().map(k => [k, canonical(v[k])])); return v; }
@@ -186,7 +186,7 @@ class ConversationActions {
     signal.throwIfAborted(); if (this.privacyMode() === "local-only") throw new CompanionError("Local-Only blocks public research.");
     const controller = new AbortController(), both = AbortSignal.any([signal, controller.signal]);
     const timer = setInterval(() => { if (this.privacyMode() === "local-only") controller.abort(); }, 100); timer.unref?.();
-    const fetchImpl = async (url, init = {}) => { both.throwIfAborted(); const r = await this.fetch(url, { ...init, signal: AbortSignal.any([both, ...(init.signal ? [init.signal] : [])]) }); if (Number(r.headers.get("content-length")) > 1000000) throw new CompanionError("Page too large."); const chunks = []; let size = 0; for await (const chunk of r.body || []) { both.throwIfAborted(); size += chunk.length; if (size > 1000000) throw new CompanionError("Page too large."); chunks.push(chunk); } return new Response(Buffer.concat(chunks), { status: r.status, headers: r.headers }); };
+    const fetchImpl = async (url, init = {}) => { both.throwIfAborted(); const r = await (this.fetch === fetch && init.addresses ? publicPageRequest : this.fetch)(url, { ...init, signal: AbortSignal.any([both, ...(init.signal ? [init.signal] : [])]) }); if (Number(r.headers.get("content-length")) > 1000000) { await r.body?.cancel(); throw new CompanionError("Page too large."); } const chunks = []; let size = 0; for await (const chunk of r.body || []) { both.throwIfAborted(); size += chunk.length; if (size > 1000000) throw new CompanionError("Page too large."); chunks.push(chunk); } return new Response(Buffer.concat(chunks), { status: r.status, headers: r.headers }); };
     try { const result = args.operation === "search" ? await searchWeb(payload.query, { fetchImpl }) : await fetchPage(payload.url, { fetchImpl, lookup: this.lookup }); both.throwIfAborted(); return { ...result, retrievedAt: new Date().toISOString() }; } finally { clearInterval(timer); }
   }
   async tool(owner, key, name, args, model, confirm, signal) {

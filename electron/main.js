@@ -116,7 +116,12 @@ async function start() {
 
   // Native file picker for model import — the sandboxed renderer can't
   // learn a file's real path any other way.
-  ipcMain.handle("dialog:pick-gguf", async () => {
+  const { trustedMainDocument, protectNavigation } = require("./window-security");
+  const origin = `http://127.0.0.1:${port}`;
+  const requireMain = event => { if (!trustedMainDocument(event, win, origin)) throw new Error("Desktop window access denied"); };
+  protectNavigation(win.webContents, origin, url => shell.openExternal(url));
+  ipcMain.handle("dialog:pick-gguf", async (event) => {
+    requireMain(event);
     const r = await dialog.showOpenDialog(win, {
       title: "Choose a GGUF model file",
       filters: [{ name: "GGUF models", extensions: ["gguf"] }],
@@ -129,6 +134,7 @@ async function start() {
   // only honest way to choose one — window.prompt() does not exist in
   // Electron, which is why the old flow died silently (field report).
   ipcMain.handle("dialog:pick-folder", async (_e, title) => {
+    requireMain(_e);
     const r = await dialog.showOpenDialog(win, {
       title: typeof title === "string" && title ? title : "Choose a folder",
       properties: ["openDirectory"],
@@ -136,13 +142,13 @@ async function start() {
     return r.canceled ? null : r.filePaths[0];
   });
 
-  ipcMain.on("win:minimize", () => win?.minimize());
-  ipcMain.on("win:toggle-maximize", () => {
-    if (!win) return;
+  ipcMain.on("win:minimize", event => { if (trustedMainDocument(event, win, origin)) win.minimize(); });
+  ipcMain.on("win:toggle-maximize", event => {
+    if (!trustedMainDocument(event, win, origin)) return;
     if (win.isMaximized()) win.unmaximize();
     else win.maximize();
   });
-  ipcMain.on("win:close", () => win?.close());
+  ipcMain.on("win:close", event => { if (trustedMainDocument(event, win, origin)) win.close(); });
   const sendMax = () => win?.webContents.send("win:maximize-changed", win.isMaximized());
   win.on("maximize", sendMax);
   win.on("unmaximize", sendMax);
@@ -311,11 +317,12 @@ async function start() {
 
   // Settings reads and writes this; in a plain browser the bridge is absent
   // and the section stays hidden, which is correct — there is no tray there.
-  ipcMain.handle("shell:window-prefs", () => ({
+  ipcMain.handle("shell:window-prefs", event => { requireMain(event); return {
     trayAvailable: !!tray,
     closeToTray: closeHidesWindow(),
-  }));
+  }; });
   ipcMain.handle("shell:set-close-to-tray", (_e, on) => {
+    requireMain(_e);
     winState.set("closeToTray", !!on && !!tray);
     return { trayAvailable: !!tray, closeToTray: closeHidesWindow() };
   });

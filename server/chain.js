@@ -46,7 +46,7 @@ class ChainClient {
     if (this.signer) this.signer.provider = this.provider;
     this.koin = new Contract({
       id: koinContract || TESTNET.koinContract,
-      abi: utils.tokenAbi,
+      abi: require("../core/lib/abi/token-abi.json"),
       provider: this.provider,
       signer: this.signer ?? undefined,
     });
@@ -70,7 +70,7 @@ class ChainClient {
   }
 
   async balanceOf(address) {
-    const { result } = await this.koin.functions.balanceOf({ owner: address });
+    const { result } = await this.koin.functions.balance_of({ owner: address });
     return BigInt(result?.value ?? 0);
   }
 

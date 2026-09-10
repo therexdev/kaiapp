@@ -158,9 +158,6 @@
     }
   },
   "types": {
-    "options": {
-      "syntax": "proto3"
-    },
     "nested": {
       "network": {
         "nested": {

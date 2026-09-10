@@ -62,6 +62,7 @@ test("websearch: SSRF guard — loopback, private ranges, IPv6, non-http all ref
 });
 
 test("websearch: fetchPage extracts readable text, strips chrome, caps size, refuses private urls", async () => {
+  const lookup = async () => [{ address: "93.184.216.34", family: 4 }];
   const page = `<html><head><title>My Doc</title><style>.x{}</style></head>
     <body><nav>MENU</nav><script>evil()</script><p>Real content here.</p><footer>foot</footer></body></html>`;
   const fetchImpl = async () => ({
@@ -69,18 +70,18 @@ test("websearch: fetchPage extracts readable text, strips chrome, caps size, ref
     headers: { get: () => "text/html; charset=utf-8" },
     text: async () => page,
   });
-  const out = await fetchPage("https://example.com/doc", { fetchImpl });
+  const out = await fetchPage("https://example.com/doc", { fetchImpl, lookup });
   assert.strictEqual(out.title, "My Doc");
   assert.ok(out.text.includes("Real content here."));
   assert.ok(!out.text.includes("MENU") && !out.text.includes("evil()") && !out.text.includes("foot"), "nav/script/footer stripped");
 
   const big = async () => ({ ok: true, headers: { get: () => "text/html" }, text: async () => "<p>" + "a".repeat(50000) + "</p>" });
-  const capped = await fetchPage("https://example.com/big", { fetchImpl: big, maxChars: 500 });
+  const capped = await fetchPage("https://example.com/big", { fetchImpl: big, maxChars: 500, lookup });
   assert.ok(capped.text.length <= 500, "extraction is capped");
 
   await assert.rejects(() => fetchPage("http://127.0.0.1/core/keys", { fetchImpl }), /public http/);
   await assert.rejects(
-    () => fetchPage("https://example.com/bin", { fetchImpl: async () => ({ ok: true, headers: { get: () => "application/octet-stream" }, text: async () => "x" }) }),
+    () => fetchPage("https://example.com/bin", { lookup, fetchImpl: async () => ({ ok: true, headers: { get: () => "application/octet-stream" }, text: async () => "x" }) }),
     /not a text page/
   );
 });
