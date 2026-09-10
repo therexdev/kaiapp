@@ -48,7 +48,8 @@ test("connected chat: main Chat and desktop KAI execute a long chain and render 
     await page.waitForFunction(()=>document.body.textContent.includes("message was accepted."));
     assert.equal(sent.length,base+3); assert.ok(planning>6,"the requested chain exceeds the old six-step limit");
     await page.locator(".kai-action-results summary").first().click();
-    assert.equal(await page.locator('.kai-action-results a[href^="https://example.com/result/"]').count(),3);
+    const links = await page.locator('.kai-action-results a[href^="https://example.com/result/"]').evaluateAll(nodes => nodes.map(n => n.href));
+    assert.deepEqual([...new Set(links)].sort(), [1,2,3].map(n => "https://example.com/result/" + (base+n)).sort());
     for (const width of i?[660,460]:[1280,720]) { await page.setViewportSize({width,height:900}); const box=await page.locator(".kai-action-results").evaluate(el=>({w:el.clientWidth,s:el.scrollWidth}));assert.ok(box.s<=box.w+2,"receipt overflow"); if(process.env.KAI_MASCOT_QA_DIR){fs.mkdirSync(process.env.KAI_MASCOT_QA_DIR,{recursive:true});await page.screenshot({path:path.join(process.env.KAI_MASCOT_QA_DIR,`connected-${i}-${width}.png`)});} }
     assert.deepEqual(errors,[]); await page.close();
   }
