@@ -1041,27 +1041,32 @@ function renderNodeView() {
       </div>
     </div>
     <p class="lead">Runs the official Koinos microservices with Docker. First start downloads images and syncs the chain — this can take a while.</p>
-    <div class="card">
+    <div class="card producer-custody">
       <h2>Producer wallet custody</h2>
       <p class="hint">Your KAI earning wallet stays separate from an external producer. Stop the node before changing custody or rotating its hot key.</p>
       <label class="field"><span>Wallet mode</span><select id="pc-mode"><option value="local" ${custody.mode !== "external" ? "selected" : ""}>Local earning wallet (hot wallet)</option><option value="external" ${custody.mode === "external" ? "selected" : ""}>External/cold producer wallet</option></select></label>
-      <label class="field"><span>Watch-only producer address</span><input id="pc-address" placeholder="Public Koinos address only — never a private key" value="${esc(custody.addresses?.[net().id] || "")}"></label>
-      <div class="row"><button id="pc-save" class="btn">Save custody mode</button><button id="pc-key" class="btn">Generate hot key</button><button id="pc-rotate" class="btn">Rotate hot key…</button><button id="pc-verify" class="btn">Verify registration</button></div>
-      <label class="field"><span>Hot block-production public key</span><input id="pc-public" readonly aria-label="Block-production public key"></label>
-      <button id="pc-copy" class="btn ghost">Copy public key</button><p id="pc-result" class="hint" role="status"></p>
-      <details><summary>External signing: registration, burns and transfers</summary>
+      <label class="field"><span>Watch-only producer address</span><input type="text" id="pc-address" placeholder="Public Koinos address only — never a private key" value="${esc(custody.addresses?.[net().id] || "")}"></label>
+      <div class="row custody-actions"><button id="pc-save" class="btn">Save custody mode</button><button id="pc-key" class="btn">Generate hot key</button><button id="pc-rotate" class="btn">Rotate hot key…</button><button id="pc-verify" class="btn">Verify registration</button></div>
+      <div class="custody-key-row">
+        <label class="field"><span>Hot block-production public key</span><input type="text" id="pc-public" class="mono" readonly aria-label="Block-production public key" placeholder="Generate a hot key to view its public key"></label>
+        <button id="pc-copy" class="btn ghost">Copy public key</button>
+      </div>
+      <p id="pc-result" class="hint" role="status"></p>
+      <details class="custody-signing"><summary>External signing: registration, burns and transfers</summary>
+        <div class="custody-signing-content">
         <button id="pc-guide" class="btn ghost">Open signing and backup guide</button>
         <p class="hint">Prepare a transaction here, then sign it on a separate machine with the offline signing helper documented in docs/EXTERNAL_PRODUCER.md. Never import the producer WIF here. Drafts expire after 15 minutes. Automatic funds operations are disabled in external mode.</p>
         <label class="field"><span>Operation</span><select id="pc-action"><option value="register">Register hot public key</option><option value="burn">Burn KOIN to this producer's VHP</option><option value="transfer">Transfer tokens</option></select></label>
-        <label class="field"><span>Amount (burn/transfer)</span><input id="pc-amount" inputmode="decimal" placeholder="0.00"></label>
+        <label class="field"><span>Amount (burn/transfer)</span><input type="text" id="pc-amount" inputmode="decimal" placeholder="0.00"></label>
         <label class="field"><span>Token (transfer)</span><select id="pc-token"><option value="koin">KOIN</option><option value="vhp">VHP</option></select></label>
-        <label class="field"><span>Recipient (transfer)</span><input id="pc-to" placeholder="Koinos address"></label>
+        <label class="field"><span>Recipient (transfer)</span><input type="text" id="pc-to" placeholder="Koinos address"></label>
         <button id="pc-prepare" class="btn">Prepare unsigned transaction</button>
         <label class="field"><span>Unsigned transaction — copy to a JSON file</span><textarea id="pc-unsigned" rows="7" readonly></textarea></label>
         <button id="pc-copy-draft" class="btn ghost">Copy unsigned JSON</button>
         <label class="field"><span>Signed transaction JSON returned by your external signer</span><textarea id="pc-signed" rows="7" placeholder="Paste signed transaction JSON only"></textarea></label>
         <label class="field"><span><input type="checkbox" id="pc-confirm" style="width:auto"> I reviewed the actual operations, recipient, amount and network on my signing machine.</span></label>
         <button id="pc-broadcast" class="btn primary">Broadcast signed transaction</button>
+        </div>
       </details>
     </div>
     <div id="n-docker"></div>

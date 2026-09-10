@@ -20,3 +20,19 @@ pre.logs{background:#102441;color:#dcecff;border-color:#284362;border-radius:12p
 
 .banner.warn{background:#fff8e8;color:#855e16;border-color:#eed9a9}.banner.bad{background:#fff0f2;color:#ab3446;border-color:#edc3ca}.banner.info{background:#edf5ff;color:#3265a1;border-color:#ccdef7}
 .wif-box{color:#855e16;background:#fff9ec;border-color:#e7cf9b}.tile .t-value{color:#235591}
+
+/* Producer custody uses the same calm fields and spacing as the node settings. */
+.producer-custody .custody-actions{gap:10px;margin:4px 0 20px}
+.producer-custody .custody-key-row{display:flex;align-items:flex-end;gap:10px}
+.producer-custody .custody-key-row .field{flex:1;min-width:0;margin:0}
+.producer-custody .custody-key-row .btn{flex:none;min-height:42px}
+.producer-custody input[readonly]{color:var(--muted);background:var(--bg-2)}
+.producer-custody #pc-result:empty{display:none}
+.producer-custody #pc-result{margin:12px 0 0;overflow-wrap:anywhere}
+.producer-custody .custody-signing{margin-top:20px;border-top:1px solid var(--border);padding-top:16px}
+.producer-custody .custody-signing summary{cursor:pointer;color:var(--text);line-height:1.5}
+.producer-custody .custody-signing-content{display:grid;gap:14px;padding-top:16px;min-width:0}
+.producer-custody .custody-signing-content .field,.producer-custody .custody-signing-content .hint{margin:0}
+.producer-custody .custody-signing-content>.btn{justify-self:start}
+.producer-custody textarea{resize:vertical;font-family:var(--mono);line-height:1.5}
+@media(max-width:600px){.producer-custody .custody-key-row{align-items:stretch;flex-direction:column}.producer-custody .custody-key-row .btn{align-self:flex-start}.producer-custody .custody-actions .btn{flex:1 1 150px}}

@@ -1,3 +1,7 @@
+### Cleaner producer wallet controls
+
+- Producer address and public-key fields now match the node settings, with rounded borders and room to read their values. The Copy button sits beside the public key, actions wrap on smaller windows, and external signing has clearer spacing.
+
 ### Connected chat and instant workflows
 
 - Main Chat and desktop KAI can discover connected accounts, inspect selected action inputs, and chain app actions using returned file/message IDs. Ask for a folder and spreadsheet, a document, an appointment, or a message. Each external call still uses exact native review.
