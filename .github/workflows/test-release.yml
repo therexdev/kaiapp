@@ -39,6 +39,22 @@ jobs:
           KAI_SCHEDULER_URL: http://127.0.0.1:9/scheduler
           KAI_RELAY_URL: http://127.0.0.1:9
           KAI_FEEDBACK_URL: http://127.0.0.1:9/feedback
+      - name: Verify Agent Network contract prototype
+        working-directory: contracts/agent-network
+        run: |
+          npm ci --ignore-scripts
+          npm test
+          npm run build
+      - name: Save Agent Network contract prototype
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-network-contract-prototype
+          path: |
+            contracts/agent-network/build/release/*.wasm
+            contracts/agent-network/build/*.wasm
+            core/lib/agent-network/contract-abi.json
+            docs/agent-network/*
+          if-no-files-found: error
       - name: Verify natural voice inference
         run: node scripts/verify-neural-voice.js
         env:

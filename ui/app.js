@@ -482,7 +482,7 @@ function showView(name, { navOnly = false } = {}) {
     docs: ["Documents", "From a first thought to the final draft."],
     compare: ["Compare models", "One question. A few different perspectives."],
     models: ["Model library", "Find the right mind for the job."],
-    brain: ["Brain", "Your world, remembered."], workflows: ["Workflows", "Give your routines to KAI."], connections: ["Connections", "Your accounts, your control."],
+    agents: ["Agents", "Build a service. Connect with other agents."], brain: ["Brain", "Your world, remembered."], workflows: ["Workflows", "Give your routines to KAI."], connections: ["Connections", "Your accounts, your control."],
     tasks: ["Tasks", "Put your ideas in motion."], tools: ["Tools", "Give your AI a few more abilities."],
     api: ["Local API", "Your models, connected to your workflow."],
     earn: ["Earn KAI", "Let your compute contribute."],
@@ -611,6 +611,7 @@ function activateView(name) {
   if (name === "models") renderModels();
   if (name === "compare") renderCompare();
   if (name === "tasks") renderTasks();
+  if (name === "agents") window.KaiAgentNetwork?.render();
   if (["brain", "workflows", "connections"].includes(name)) window.KaiCompanionHub?.render(name);
   if (name === "network") renderNetwork();
   if (name === "settings") renderSettings();

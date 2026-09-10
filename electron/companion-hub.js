@@ -20,6 +20,8 @@ class CompanionHub {
     this.sources = new CompanionSources({ store: this.store, chats, privacyMode, fetchImpl, lookup });
     this.awareness = new CompanionAwareness({ store: this.store, models, runLocal, workflows: this.workflows });
     this.actions = new (require("./conversation-actions").ConversationActions)({ hub: this, privacyMode, fetchImpl, lookup });
+    this.agentNetwork = new (require("../core/lib/agent-network/network").AgentNetwork)({ store: new (require("../core/lib/agent-network/store").Store)(path.join(dataDir, "agent-network.json"), safeStorage), models, runLocal, privacyMode });
+    this.agentNetwork.start();
     this.syncing = new Set(); this.sourceControllers = new Map(); this.timer = null;
   }
   status() {
@@ -114,7 +116,8 @@ class CompanionHub {
       for (const s of this.store.data.sources) if (s.autoSync && s.nextSync <= Date.now() && !this.syncing.has(s.id)) this.sync(s.id).catch(() => {});
     }, 30000); this.timer.unref?.();
   }
-  stop() { this.actions.stop(); clearInterval(this.timer); for (const c of this.sourceControllers.values()) c.abort(); this.awareness.stop(); this.workflowEvents.stop(); this.workflowAssistant.stop(); this.workflows.stop(); this.connections.cancel(); this.composio.cancel(); }
+  stop() {
+    this.agentNetwork?.stop(); this.actions.stop(); clearInterval(this.timer); for (const c of this.sourceControllers.values()) c.abort(); this.awareness.stop(); this.workflowEvents.stop(); this.workflowAssistant.stop(); this.workflows.stop(); this.connections.cancel(); this.composio.cancel(); }
 }
 
 function registerCompanionIPC({ ipcMain, service, origin, getMainWindow, getMascotWindow, dialog }) {
@@ -178,6 +181,44 @@ function registerCompanionIPC({ ipcMain, service, origin, getMainWindow, getMasc
     if (action === "status") return service.status();
     service.store.requireStorage();
     switch (action) {
+      case "agentNetworkStatus": return service.agentNetwork.status();
+      case "agentNetworkSettings": {
+        if (input.enabled && !await ctx.confirm("Enable Agent Network", { relays: input.endpoints || [], scope: "Separate private service identity. Hosted jobs use only their reviewed workflow and local model. Publishing makes the service card public. No paid transactions are enabled." })) throw new CompanionError("Agent Network stays off.");
+        return service.agentNetwork.settings(input);
+      }
+      case "agentNetworkSave": {
+        const definition = input.workflowId ? service.store.data.workflows.find(w => w.id === input.workflowId && !w.draft) : input.definition;
+        if (input.workflowId && !definition) throw new CompanionError("Review and save the workflow first.");
+        return service.agentNetwork.save({ ...input, ...(definition ? { definition } : {}) });
+      }
+      case "agentNetworkAccepting": {
+        const agent = service.agentNetwork.store.data.agents.find(a => a.id === input.id);
+        if (input.enabled && !await ctx.confirm("Accept service jobs on this desktop", { agent: agent?.card.payload.name, limits: agent?.card.payload.limits, scope: "Untrusted callers may submit selected input. This service has no access to your Brain, accounts, wallet, or desktop. Local model and machine resources are used while KAI is open." })) throw new CompanionError("Host stays paused.");
+        return service.agentNetwork.accepting(input.id, input.enabled);
+      }
+      case "agentNetworkPublish": {
+        const agent = service.agentNetwork.store.data.agents.find(a => a.id === input.id);
+        if (!await ctx.confirm("Publish this agent service", agent?.card.payload || {})) throw new CompanionError("Publication cancelled.");
+        return service.agentNetwork.publish(input.id);
+      }
+      case "agentNetworkRetire": return service.agentNetwork.retire(input.id);
+      case "agentNetworkDiscover": return service.agentNetwork.discover(input.query || "");
+      case "agentNetworkImport": return service.agentNetwork.importCard(require("../core/lib/agent-network/protocol").parse(input.text, 200000));
+      case "agentNetworkQuote": {
+        const card = service.agentNetwork.store.data.cards.find(c => c.payload.agent_id === input.id) || service.agentNetwork.store.data.agents.find(a => a.id === input.id)?.card;
+        if (!card) throw new CompanionError("Choose a saved service card.");
+        return service.agentNetwork.quote(card, input.input);
+      }
+      case "agentNetworkSubmit": {
+        const job = service.agentNetwork.store.data.jobs.find(j => j.id === input.id && j.role === "buyer");
+        if (!await ctx.confirm("Send this input to the agent host", { service: job?.name, input: job?.input, quote: job?.quote?.payload, privacy: "The selected operator can read and process this input. No KAI payment is made for this free service." })) throw new CompanionError("Input was not sent.");
+        return service.agentNetwork.submit(input.id);
+      }
+      case "agentNetworkJob": {
+        if (input.action === "remove" && !await ctx.confirm("Remove this finished local job", { id: input.id, role: input.role, detail: "Its input and result will be deleted from this installation. Save any result you need first." })) throw new CompanionError("Job kept.");
+        return service.agentNetwork.jobAction(input.id, input.action, input.role);
+      }
+      case "agentNetworkRefresh": await service.agentNetwork.tick(); return service.agentNetwork.status();
       case "conversationReview": {
         const t = service.store.data.conversations?.find(t => t.id === input.turnId), a = t?.actions.find(a => a.id === input.id);
         if (!a || a.status !== "uncertain") throw new CompanionError("Choose an uncertain action.");
