@@ -139,7 +139,15 @@ test("Explicit connected requests discover enabled accounts and correct a small 
       const call = JSON.parse(options.body); calls.push(call);
       if (call.name === "connected_find") return { ok: true, result: JSON.stringify({ accounts: [{ id: "drive", name: "Google Drive", useInChat: true, selectedActions: 1, enabled: true }] }) };
       if (call.name === "connected_actions") return { ok: true, result: JSON.stringify([{ id: "create_folder", name: "Create folder", readOnly: false }]) };
-      if (call.name === "connected_describe") return { ok: true, result: JSON.stringify({ action: { id: "create_folder", schema: { properties: { name: { type: "string" } } } }) };
+      if (call.name === "connected_describe") return {
+        ok: true,
+        result: JSON.stringify({
+          action: {
+            id: "create_folder",
+            schema: { properties: { name: { type: "string" } } },
+          },
+        }),
+      };
       return { ok: true, result: JSON.stringify({ status: "returned", data: { id: "folder-1", name: "Mike" } }) };
     },
     askModel: async messages => { assert.match(messages[0].content, /attended access through the connected_/i); return outputs.shift(); },
