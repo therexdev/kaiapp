@@ -271,20 +271,28 @@ test("the shared snapshot builder reads the node's log and stamps the app versio
   assert.equal(p.nodeValueUsd, null);
 });
 
-test("no block-producer activity is null — never a zeroed card", async () => {
-  const snap = createProducerSnapshot({ call: async () => "starting up", appVersion: "1" });
-  assert.equal(await snap(), null);
+test("no block-producer log activity carries the real service state, not a stopped-node guess", async () => {
+  const snap = createProducerSnapshot({
+    call: async (method) => method === "node:logs"
+      ? "starting up"
+      : { isRunning: true, services: [{ service: "block_producer", state: "running" }], sync: { inSync: true } },
+    appVersion: "1",
+  });
+  assert.deepEqual(await snap(), { producingVhp: null, networkVhp: null, nodeState: "running" });
 });
 
 test("the log service asked for is the one the standalone node app writes", async () => {
   let asked = null;
   const snap = createProducerSnapshot({
-    call: async (_m, args) => { asked = args; return ""; },
+    call: async (method, args) => {
+      if (method === "node:logs") asked = args;
+      return method === "node:status" ? { isRunning: false, services: [] } : "";
+    },
     appVersion: "1",
   });
   await snap();
   assert.equal(asked.service, "block_producer");
-  assert.ok(asked.tail >= 60, "enough lines to hold a full estimate/producing pair");
+  assert.equal(asked.tail, 1000, "use the bounded maximum so noisy logs do not create false alarms");
 });
 
 /* ---------------------------------------------------------------------------

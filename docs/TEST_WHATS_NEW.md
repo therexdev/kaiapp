@@ -1,3 +1,8 @@
+### Smoother GPU earning and accurate producer status
+
+- Automated network probes now prefer one resident model per earning session, avoiding background model unload/reload cycles every few minutes. User-selected network models remain available.
+- Block-producer checks inspect the actual node service when recent log output has no VHP estimate. A temporary or noisy log gap no longer claims the node may have stopped, while stopped, syncing and recovering states remain distinct.
+
 ### Security and reliability sweep
 
 - Hardened remote API access, local browser access, desktop window permissions, wallet files and public web requests.

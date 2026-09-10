@@ -17,12 +17,15 @@ const { Worker } = require("../lib/worker");
 
 test("worker advertises only catalog models — custom imports and dev builds stay private", async () => {
   let advertised = null;
+  let capabilities = null;
   const srv = http.createServer((req, res) => {
     if (req.url.startsWith("/worker/register")) {
       let raw = "";
       req.on("data", (c) => (raw += c));
       req.on("end", () => {
-        advertised = JSON.parse(raw).models;
+        const body = JSON.parse(raw);
+        advertised = body.models;
+        capabilities = body.capabilities;
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({ ok: true, token: "wt_test" }));
       });
@@ -54,6 +57,7 @@ test("worker advertises only catalog models — custom imports and dev builds st
     });
     await worker._register();
     assert.deepStrictEqual(advertised, ["koinos-fast", "koinos-balanced"], "only ready catalog classes are advertised");
+    assert.equal(capabilities.preferredModel, "koinos-fast", "the scheduler receives one stable model for background probes");
   } finally {
     srv.closeAllConnections?.();
     srv.close();
@@ -105,7 +109,7 @@ test("a big GPU makes a machine eligible for classes its system RAM alone would 
       onEvent: (e) => { seen[e.type] = e; },
     });
     await worker._register();
-    return { advertised: advertised.slice().sort(), gate: worker.modelGate, seen };
+    return { advertised: advertised.slice().sort(), gate: worker.modelGate, seen, preferred: worker.preferredModel };
   };
 
   try {
@@ -116,6 +120,7 @@ test("a big GPU makes a machine eligible for classes its system RAM alone would 
     // The SAME 16 GB of RAM, plus a 48 GB card. The weights live on the card.
     const withGpu = await run({ ramBytes: 16e9, gpus: [{ name: "NVIDIA A40", vramMb: 49140 }] });
     assert.deepStrictEqual(withGpu.advertised, ["gemma3-27b", "koinos-fast", "qwen25-32b"]);
+    assert.equal(withGpu.preferred, "koinos-fast", "one stable background-probe model is chosen without hiding other classes");
 
     // The refusal names BOTH numbers, so "why is my model not offered?" has an
     // answer that matches the machine the person is looking at.

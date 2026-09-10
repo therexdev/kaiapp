@@ -160,7 +160,7 @@ class ProducerReporter {
      * machine with no Koinos node would POST forever about the node it does
      * not have.
      */
-    if (!producer) {
+    if (!producer || (producer.producingVhp == null && producer.networkVhp == null)) {
       if (!this.reported) return { sent: false, reason: "no producer" };
       const ok = await this._post(null);
       if (ok) {

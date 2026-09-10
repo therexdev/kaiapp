@@ -30,9 +30,33 @@ function createProducerSnapshot({ call, appVersion }) {
    */
   return async () => {
     const { parseProducerLog, summarize, stakeGap } = require("./producer-share");
-    const text = await call("node:logs", { service: "block_producer", tail: 60 });
+    // A 60-line Docker tail is not 60 producer lines: compose prefixes,
+    // reconnect chatter and host-pressure warnings can push the periodic VHP
+    // pair out of it. Use the bounded manager maximum so a transiently noisy
+    // node does not look stopped merely because the parser saw the wrong
+    // slice of an otherwise healthy log.
+    const text = await call("node:logs", { service: "block_producer", tail: 1000 });
     const parsed = parseProducerLog(typeof text === "string" ? text : text?.logs || "");
-    if (!parsed) return null;
+    if (!parsed) {
+      // Log absence alone cannot answer whether the process is alive. Probe
+      // the service state and return a diagnostic-only shape; callers do not
+      // publish it as producer data, but the desktop can now give a precise,
+      // non-alarming explanation and retry on its normal cadence.
+      try {
+        const ns = await call("node:status", {});
+        const services = Array.isArray(ns?.services) ? ns.services : [];
+        const producer = services.find((s) => /block[_-]producer/i.test(`${s?.service || ""} ${s?.name || ""}`));
+        const producerRunning = producer && /running|up/i.test(`${producer.state || ""} ${producer.status || ""}`);
+        const syncing = ns?.sync && (ns.sync.inSync === false || Number(ns.sync.behind || ns.sync.blocksBehind || 0) > 0);
+        return {
+          producingVhp: null,
+          networkVhp: null,
+          nodeState: !ns?.isRunning ? "stopped" : syncing ? "syncing" : producerRunning ? "running" : "producer-stopped",
+        };
+      } catch {
+        return null;
+      }
+    }
 
     /*
      * The rest comes from dashboard:summary — the SAME call the desktop

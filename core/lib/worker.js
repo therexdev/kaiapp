@@ -110,9 +110,22 @@ class Worker {
     try {
       const p = await this.producer();
       if (!p || (p.producingVhp == null && p.networkVhp == null)) {
-        // Overwhelmingly the ordinary case: the node is not running, or is
-        // running but not producing yet. Say so rather than showing nothing.
-        this.producerNote = "No block-producer activity found in the node's log — the Koinos node may be stopped, still syncing, or not producing.";
+        // A missing estimate is not itself a stopped producer. Docker log
+        // tails can rotate past the once-a-minute VHP pair or briefly answer
+        // empty under host pressure. The snapshot probes the actual service
+        // state so the UI can distinguish that harmless gap from a stopped
+        // service instead of turning one parser miss into a red alarm.
+        if (p?.nodeState === "running") {
+          this.producerNote = "The block producer is running, but its latest VHP estimate was not present in the recent log. This does not mean block production stopped; KAI will check again automatically.";
+        } else if (p?.nodeState === "syncing") {
+          this.producerNote = "The Koinos node is running and still syncing. Block production will be checked again after it catches up.";
+        } else if (p?.nodeState === "producer-stopped") {
+          this.producerNote = "The Koinos node is running, but its block-producer service is not running. KAI's node recovery will retry it automatically.";
+        } else if (p?.nodeState === "stopped") {
+          this.producerNote = "The Koinos node is stopped. Start it to resume block production.";
+        } else {
+          this.producerNote = "No recent block-producer estimate is available yet. KAI will check the node again automatically.";
+        }
         this.producerLast = null;
         return null;
       }
@@ -233,6 +246,24 @@ class Worker {
         : [];
       this.ramGb = ramGb == null ? null : Math.round(ramGb);
       const ready = this.modelGate.filter((g) => g.advertised).map((g) => g.alias);
+      /*
+       * One runtime slot can truthfully HOLD only one model at a time. Keep
+       * advertising every downloaded class (paid requests may ask for any of
+       * them), but tell the scheduler which one its automatic probes should
+       * prefer. Without this hint the fair seed rotation deliberately picks a
+       * different class every time: on a GPU desktop that means unloading and
+       * reloading several GB of weights every few minutes, which field logs
+       * showed as repeated model-warming/runtime:switching and brief UI stalls.
+       *
+       * Stable for this Worker session. Prefer a model already resident when
+       * Earn starts; otherwise use the first servable catalog entry. A real
+       * consumer request may still switch models, but background health probes
+       * no longer manufacture switches of their own.
+       */
+      if (!ready.includes(this.preferredModel)) {
+        const resident = this.runtime?.activeAlias;
+        this.preferredModel = ready.includes(resident) ? resident : (ready[0] || null);
+      }
       // Every downloaded model is too big for this machine: say so instead
       // of silently earning nothing (the empty advertisement is correct —
       // this machine has nothing it can serve the network comfortably).
@@ -283,7 +314,11 @@ class Worker {
           // RAM rides along so the scheduler can apply the same fit rule
           // server-side — the honest-client filter alone can't bind stale
           // or modified clients.
-          capabilities: { ...(this.hardware?.capabilities ?? {}), ...(ramGb ? { ramGb: Math.round(ramGb) } : {}) },
+          capabilities: {
+            ...(this.hardware?.capabilities ?? {}),
+            ...(ramGb ? { ramGb: Math.round(ramGb) } : {}),
+            ...(this.preferredModel ? { preferredModel: this.preferredModel } : {}),
+          },
           models: ready,
           // §7.4 anti-Sybil signal #3 (SHADOW): many wallets on one device —
           // or one device image cloned across a fleet — collide here.

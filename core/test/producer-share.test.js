@@ -204,8 +204,17 @@ test("an absent producer always comes with a reason", async () => {
 
   const noNode = new Worker({ ...base, producer: async () => null });
   await noNode._producerSnapshot();
-  assert.match(noNode.status().producerNote, /stopped, still syncing, or not producing/i);
+  assert.match(noNode.status().producerNote, /No recent block-producer estimate/i);
   assert.equal(noNode.status().producer, null);
+
+  const running = new Worker({ ...base, producer: async () => ({ producingVhp: null, networkVhp: null, nodeState: "running" }) });
+  await running._producerSnapshot();
+  assert.match(running.status().producerNote, /block producer is running/i);
+  assert.match(running.status().producerNote, /does not mean block production stopped/i);
+
+  const stopped = new Worker({ ...base, producer: async () => ({ producingVhp: null, networkVhp: null, nodeState: "producer-stopped" }) });
+  await stopped._producerSnapshot();
+  assert.match(stopped.status().producerNote, /block-producer service is not running/i);
 
   const unreadable = new Worker({ ...base, producer: async () => { throw new Error("docker: command not found"); } });
   await unreadable._producerSnapshot();
