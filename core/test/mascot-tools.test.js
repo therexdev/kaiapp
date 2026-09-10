@@ -156,6 +156,36 @@ test("Explicit connected requests discover enabled accounts and correct a small 
   assert.match(result.context, /folder-1/);
 });
 
+test("Explicit connected requests reject unrelated Brain routing and never invent completion", async () => {
+  const calls = [], outputs = [
+    JSON.stringify({ tool: "brain_goals", args: { operation: "list" } }),
+    JSON.stringify({ tool: "connected_actions", args: { connectionId: "drive", query: "create folder" } }),
+    JSON.stringify({ answer: true }),
+    JSON.stringify({ answer: true }),
+    JSON.stringify({ answer: true }),
+    JSON.stringify({ answer: true }),
+    JSON.stringify({ answer: true }),
+  ];
+  const tools = ["connected_find", "connected_actions", "connected_describe", "connected_call", "brain_goals"].map(name => ({ name, description: name, params: {}, conversationAction: true }));
+  const result = await run({ question: "Make a folder on my Google Drive called Dentist", contextSize: 4096,
+    json: async (path, options) => {
+      if (path === "/core/tools") return { tools };
+      const call = JSON.parse(options.body); calls.push(call);
+      if (call.name === "connected_find") return { ok: true, result: JSON.stringify({ accounts: [{ id: "drive", name: "Google Drive", useInChat: true, selectedActions: 1, enabled: true }] }) };
+      if (call.name === "connected_actions") return { ok: true, result: JSON.stringify([{ id: "create_folder", name: "Create folder", readOnly: false }]) };
+      throw new Error("No unrelated tool should execute");
+    },
+    askModel: async messages => {
+      assert.doesNotMatch(messages[0].content, /brain_goals/);
+      return outputs.shift();
+    },
+  });
+  assert.deepEqual(calls.map(c => c.name), ["connected_find", "connected_actions"]);
+  assert.equal(result.connectedIncomplete, true);
+  assert.match(result.context, /DID NOT RUN/);
+  assert.doesNotMatch(result.trace.map(x => x.tool).join(" "), /brain_goals/);
+});
+
 test("Declined tools and cancelled approvals never mutate or retry, even with model-supplied confirmed", async () => {
   const f = fixture();
   const r = runtime(f, { question: "Stop earning", confirm: async () => false, askModel: async () => JSON.stringify({ tool: "app_action", args: { action: "stop_earning", args: {}, confirmed: true } }) });

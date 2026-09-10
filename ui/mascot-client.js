@@ -20,7 +20,12 @@
   function privateModel(aliases, current = "") {
     const usable = (aliases || []).filter(a => a.status === "ready" && !String(a.alias || "").startsWith("koinos-network"));
     if (usable.some(a => a.alias === current)) return current;
-    return usable.find(a => !a.dev && !String(a.alias).startsWith("desktop:"))?.alias ||
+    // Connected actions need dependable structured planning. When a network
+    // selection must be replaced for privacy, prefer an explicitly configured
+    // private provider over silently dropping to the smallest local model.
+    // An already selected local model remains selected above.
+    return usable.find(a => !a.dev && String(a.alias).startsWith("desktop:"))?.alias ||
+      usable.find(a => !a.dev && !String(a.alias).startsWith("desktop:"))?.alias ||
       usable.find(a => !a.dev)?.alias || usable[0]?.alias || "";
   }
   function messagesFor(history, contextSize = 4096, context = "") {

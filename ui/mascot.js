@@ -735,20 +735,24 @@
         toolActivity = null;
         trace.textContent = phase.trace.map(t => t.tool + " · " + t.status).join(" → ");
         mood("thinking");
-        const response = await KaiProviders.chatFetch("/core/chat/completions", {
-        method: "POST", headers: { "content-type": "application/json" }, signal: chatAbort.signal,
-        body: JSON.stringify({ model, stream: true, ...(phase.privateDesktop ? { kai_private_desktop: true } : {}),
-          messages: api.messagesFor(history, contextSize, phase.context) }),
-      });
-      for await (const delta of api.completion(response)) {
-        if (delta.warning) notice(delta.warning);
-        if (delta.content) content += delta.content;
-        enqueueSpeech(phrases.push(content), replyEpoch);
-        if (delta.model === "koinos-network" || delta.model?.startsWith("koinos-network:")) served = "Answered on the Koinos Network";
-        if (delta.served) served = "Answered by " + delta.served;
-        const now = performance.now();
-        if (now - lastPaint > 90) { reply.content.innerHTML = mdToHtml(content); lastPaint = now; scroll(); }
-      }
+        if (phase.connectedIncomplete) {
+          content = "I found your connected account, but the requested action did not run, so nothing was created or changed. Please choose a stronger local model or a private OpenAI or Anthropic model and try again.";
+        } else {
+          const response = await KaiProviders.chatFetch("/core/chat/completions", {
+            method: "POST", headers: { "content-type": "application/json" }, signal: chatAbort.signal,
+            body: JSON.stringify({ model, stream: true, ...(phase.privateDesktop ? { kai_private_desktop: true } : {}),
+              messages: api.messagesFor(history, contextSize, phase.context) }),
+          });
+          for await (const delta of api.completion(response)) {
+            if (delta.warning) notice(delta.warning);
+            if (delta.content) content += delta.content;
+            enqueueSpeech(phrases.push(content), replyEpoch);
+            if (delta.model === "koinos-network" || delta.model?.startsWith("koinos-network:")) served = "Answered on the Koinos Network";
+            if (delta.served) served = "Answered by " + delta.served;
+            const now = performance.now();
+            if (now - lastPaint > 90) { reply.content.innerHTML = mdToHtml(content); lastPaint = now; scroll(); }
+          }
+        }
       }
       if (!content.trim()) throw new Error("The model returned an empty reply. Try another model or rephrase your question.");
       completed = true;
