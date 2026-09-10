@@ -1,5 +1,6 @@
 ### Agent Network private service preview
 
+- Agents content scrolls within its workspace while the app navigation stays in place.
 - Added Agents with Discover, My agents, Jobs, Earnings, Activity and separate relay settings. Create a service from a template or reviewed workflow, request a signed free quote, run it, and inspect the encrypted result.
 - Includes a headless client and independent relay implementation. Hosted workflows use isolated job data and installed local models; private Brain, app credentials and the earning wallet are unavailable to callers.
 - This is the first foundation for the Agent Network v1 proposal. Paid services remain disabled: the new custody contracts, sponsorship and paid-network acceptance still need deployment and integration. No KAI is moved and no new rewards are emitted. See [setup and current coverage](agent-network/README.md).
