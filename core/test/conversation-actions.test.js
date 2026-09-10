@@ -147,7 +147,7 @@ test("main and mascot runtimes retain the attended bridge through an eight-actio
       tool:async(n,a,m,s)=>checked(()=>f.hub.tool(n,a,m,async()=>true,new AbortController().signal,{owner:12,id:s})),cancel:async()=>({ok:true}) };
     const window={kaiCompanionBridge:bridge};vm.runInNewContext(fs.readFileSync(path.join(__dirname,"../../ui/companion-client.js"),"utf8"),{window,DOMException,setInterval,clearInterval});
     const json=window.KaiCompanionClient.toolJSON("local",async()=>({tools:[]}),new AbortController().signal,{question:"Make eight objects",conversationId:"runtime-"+surface});
-    const ask=async()=> JSON.stringify(plans++<8 ? {tool:"connected_call",args:{connectionId:f.c.id,operationId:"create",body:{name:"item-"+plans}}}:{answer:true});
+    const ask=async()=> { const n=plans++; return JSON.stringify(n>=16 ? {answer:true} : n%2 ? {tool:"connected_history",args:{}} : {tool:"connected_call",args:{connectionId:f.c.id,operationId:"create",body:{name:"item-"+n}}}); };
     if(surface==="main")await Agents.makeRuntime({json,askModelOnce:ask}).runAgent("Make eight objects","local");
     else await Mascot.run({question:"Make eight objects",json,askModel:ask,contextSize:16000});
     assert.equal(f.count(),8);assert.equal(finished,1);assert.equal(f.hub.actions.turn(session.id).status,"finished");
@@ -163,4 +163,10 @@ test("attended session is revoked on hide and cannot be resumed by a different f
   const s=await handlers.get("companion:session")(event,"begin",{model:"local",question:"Create",conversationId:"ui"});assert.equal(s.ok,true);
   await assert.rejects(handlers.get("companion:session")({...event,senderFrame:{url:wc.mainFrame.url}},"begin",{model:"local",question:"bad"}),/denied/);
   win.emit("hide");const r=await handlers.get("companion:tool")(event,"connected_call",{connectionId:f.c.id,operationId:"create"},"local",s.result.id);assert.equal(r.ok,false);assert.equal(f.count(),0);
+});
+
+test("retention caps keep old uncertain receipts so a later request cannot silently repeat them", async t => {
+  const f=fixture(t);f.hub.store.change(d=>{d.conversations=[...Array.from({length:99},(_,i)=>({id:"ordinary-"+i,conversationId:"other",question:"old",model:"local",at:Date.now(),status:"finished",actions:[],plans:[]})),{id:"uncertain-old",conversationId:"other",question:"create",model:"local",at:1,status:"interrupted",actions:[{id:"lost",status:"uncertain",write:true}],plans:[]},...d.conversations];});
+  f.hub.actions.begin(21,"local",{question:"New request",conversationId:"new"});
+  assert.ok(f.hub.store.data.conversations.some(t=>t.id==="uncertain-old"));assert.equal(f.hub.store.data.conversations.length,100);
 });

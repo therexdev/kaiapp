@@ -39,7 +39,7 @@
       if (privateDesktop && !name.startsWith("computer_")) throw new Error("Finish this private desktop task before using app or web tools. Screen data cannot be sent through those tools.");
       if (name === "app_action" && args.action === "delete_chat" && chatId && args.args?.id === chatId) throw new Error("Open the full app to delete the current conversation.");
       const key = name + JSON.stringify(args);
-      if (used.has(key) && name !== "computer_look") return false; // never repeat a mutation or a declined call
+      if (used.has(key) && name !== "computer_look" && !tools.find(t => t.name === name && t.conversationAction && t.name !== "instant_workflow")) return false; // never repeat a mutation or a declined call
       used.add(key);
       const label = tools.find(t => t.name === name)?.label || name;
       status(name === "web_search" ? "Searching the web…" : name === "read_page" ? "Reading a web page…" : name === "app_read" ? "Checking " + args.subject + "…" : "Using " + label + "…",

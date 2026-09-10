@@ -96,7 +96,7 @@
       drawActivity(out);
     }
     function drawActivity(out) {
-      const turns = (state.conversations || []).filter(t => t.actions?.length).slice(0, 12);
+      const turns = (state.conversations || []).filter(t => t.actions?.length).sort((a,b) => Number(b.actions.some(x => x.status === "uncertain")) - Number(a.actions.some(x => x.status === "uncertain")) || b.at - a.at).slice(0, 12);
       if (!turns.length) return;
       const section = document.createElement("section"); section.className = "cn-recent-actions";
       section.innerHTML = `<h2>Recent chat actions</h2><p>Results stay here if a conversation stops or KAI restarts.</p>${turns.map(t => `<details class="kai-action-results"><summary>${esc(t.question)}</summary>${t.actions.map(a => `<div><strong>${esc(a.name)}</strong><p>${esc(a.runId ? state.runs.find(r => r.id === a.runId)?.status || a.status : a.status)}</p><p>${esc(a.message || "")}</p><small>Receipt ${esc(a.id)}</small>${a.status === "uncertain" ? btn("I inspected the destination", "reviewReceipt", t.id + ":" + a.id) : ""}<details><summary>Result details</summary><pre>${esc(JSON.stringify(a.data ?? a.ids ?? {}, null, 2))}</pre></details></div>`).join("")}</details>`).join("")}`;

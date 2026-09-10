@@ -63,8 +63,11 @@ class ConversationActions {
     // One attended turn per window; beginning a new turn invalidates the old one.
     for (const [k, value] of this.owners) if (value.owner === owner) this.finish(owner, k);
     this.store.change(d => {
-      d.conversations ||= []; d.conversations = d.conversations.filter(t => t.status === "active" || t.actions.some(a => a.status === "uncertain") || t.at > Date.now() - 30 * 86400000).slice(0, 99);
-      if (d.conversations.filter(t => t.actions.some(a => a.status === "uncertain")).length >= 90) throw new CompanionError("Review uncertain actions in Connections before starting more work.");
+      d.conversations ||= [];
+      const retained = d.conversations.filter(t => t.status === "active" || t.actions.some(a => ["uncertain", "dispatching"].includes(a.status)));
+      if (retained.length >= 90) throw new CompanionError("Review uncertain actions in Connections before starting more work.");
+      const ordinary = d.conversations.filter(t => !retained.includes(t) && t.at > Date.now() - 30 * 86400000).slice(0, 99 - retained.length);
+      d.conversations = [...retained, ...ordinary].sort((a,b) => b.at - a.at);
       d.conversations.unshift({ id: key, conversationId, question, model, at: Date.now(), status: "active", actions: [], plans: [] });
     });
     this.owners.set(key, { owner, model, controller: new AbortController() }); return { id: key, ...this.view(key) };

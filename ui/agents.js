@@ -570,7 +570,7 @@
             }
             if (action.answer) return Promise.resolve();
             var signature = action.tool + JSON.stringify(action.args);
-            if (used.has(signature) && action.tool !== "workflow_control") return Promise.resolve();
+            if (used.has(signature) && !tools.find(function(t) { return t.name === action.tool && t.conversationAction && t.name !== "instant_workflow"; })) return Promise.resolve();
             used.add(signature);
             var label = map.alias[action.tool] || action.tool.replace(/^mcp:[^:]+:/, "");
             setStatus("🛠 " + label + " " + JSON.stringify(action.args).slice(0, 80) + "…");

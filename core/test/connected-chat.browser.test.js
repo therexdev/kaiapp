@@ -43,7 +43,8 @@ test("connected chat: main Chat and desktop KAI execute a long chain and render 
     await page.goto(origin+route);
     if (i) { await page.waitForFunction(()=>document.querySelector("#model").value); await page.click("#toggle-chat"); await page.fill("#question","Create a folder and spreadsheet, then message the link to the verified person."); await page.locator("#question").press("Enter"); }
     else { await page.waitForFunction(()=>document.querySelector("#model-pick").value); await page.fill("#input","Create a folder and spreadsheet, then message the link to the verified person."); await page.click("#btn-send"); }
-    await page.waitForFunction(()=>[...document.querySelectorAll(".kai-action-results summary")].some(x=>x.textContent.includes("3")));
+    try { await page.waitForFunction(()=>[...document.querySelectorAll(".kai-action-results summary")].some(x=>x.textContent.includes("3"))); }
+    catch (e) { console.error(JSON.stringify({ surface:i, planning, sent:sent.slice(base), errors, text:await page.locator("body").innerText() })); throw e; }
     await page.waitForFunction(()=>document.body.textContent.includes("message was accepted."));
     assert.equal(sent.length,base+3); assert.ok(planning>6,"the requested chain exceeds the old six-step limit");
     await page.locator(".kai-action-results summary").first().click();
