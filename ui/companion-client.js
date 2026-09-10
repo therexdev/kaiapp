@@ -62,8 +62,10 @@
         const call = JSON.parse(options.body);
         if (privateTools.some(t => t.name === call.name)) {
           privateUsed = true;
+          context.onPrivateTool?.(true, call.name);
           try { const result = await checked(bridge.tool(call.name, call.args, model, session?.id)); signal?.throwIfAborted(); await refresh(); return { ok: true, result: typeof result === "string" ? result : JSON.stringify(result) }; }
           catch (e) { await refresh(); signal?.throwIfAborted(); if (/declined|uncertain|already stopped/.test(e.message)) { const error = new Error(e.message); error.stopTools = true; throw error; } throw e; }
+          finally { context.onPrivateTool?.(false, call.name); }
         }
         // Once private observations enter the planner, it cannot forward them
         // to a web/MCP/Core tool. Further private connection calls ask natively.

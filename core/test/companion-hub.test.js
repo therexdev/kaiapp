@@ -55,3 +55,10 @@ test("private tool observations cannot be forwarded through ordinary web or Core
  await json("/core/tools/call",{body:JSON.stringify({name:"brain_search",args:{query:"KAI"}})});assert.equal(privateCalls,1);
  await assert.rejects(json("/core/tools/call",{body:JSON.stringify({name:"web_search",args:{query:"private data"}})}),/Private Brain/);assert.equal(coreCalls,1);
 });
+test("renderer brackets private tools so voice and listening cannot overlap native review", async () => {
+ const vm=require("vm"),events=[];const window={kaiCompanionBridge:{tools:async()=>({ok:true,result:[{name:"brain_search"}]}),tool:async()=>({ok:true,result:"private data"}),cancel:async()=>({ok:true})}};
+ vm.runInNewContext(fs.readFileSync(path.join(__dirname,"../../ui/companion-client.js"),"utf8"),{window,DOMException});
+ const json=window.KaiCompanionClient.toolJSON("local",async url=>url==="/core/tools"?{tools:[]}:{ok:true},new AbortController().signal,{onPrivateTool:(active,name)=>events.push([active,name])});
+ await json("/core/tools");await json("/core/tools/call",{body:JSON.stringify({name:"brain_search",args:{query:"KAI"}})});
+ assert.deepEqual(events,[[true,"brain_search"],[false,"brain_search"]]);
+});

@@ -11,6 +11,18 @@
     return [requested, saved, active].find(v => ready.some(a => a.alias === v)) ||
       ready.find(a => !a.dev)?.alias || ready[0]?.alias || "";
   }
+  function connectedRequest(text) {
+    const value = String(text || "");
+    const destination = /\b(?:google\s+(?:drive|calendar|docs?|sheets?)|gmail|outlook|one\s*drive|dropbox|slack|notion|connected\s+(?:app|account)|(?:my|the)\s+calendar)\b/i;
+    const action = /\b(?:add|book|create|delete|edit|find|list|make|message|move|open|read|rename|schedule|send|show|update|upload)\b/i;
+    return destination.test(value) && action.test(value);
+  }
+  function privateModel(aliases, current = "") {
+    const usable = (aliases || []).filter(a => a.status === "ready" && !String(a.alias || "").startsWith("koinos-network"));
+    if (usable.some(a => a.alias === current)) return current;
+    return usable.find(a => !a.dev && !String(a.alias).startsWith("desktop:"))?.alias ||
+      usable.find(a => !a.dev)?.alias || usable[0]?.alias || "";
+  }
   function messagesFor(history, contextSize = 4096, context = "") {
     const limit = Math.max(1000, Math.floor((contextSize - 1300) * 3));
     const kept = [];
@@ -187,5 +199,5 @@
       return result.filter(Boolean);
     }
   }
-  return { PERSONA, chooseModel, messagesFor, completion, speechText, folderRequest, wakeRequest, SpeechPhrases };
+  return { PERSONA, chooseModel, connectedRequest, privateModel, messagesFor, completion, speechText, folderRequest, wakeRequest, SpeechPhrases };
 });

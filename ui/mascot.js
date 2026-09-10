@@ -641,18 +641,29 @@
     $("read-aloud").querySelector("span").textContent = voiceReplies ? name + " voice on" : "Voice replies off";
   }
   async function send({ source = "typed" } = {}) {
-    const text = $("question").value.trim(), model = $("model").value;
+    const text = $("question").value.trim(); let model = $("model").value, routingNotice = "";
     const folder = api.folderRequest(text), destination = folder ? null : KaiAppNavigation.request(text);
     const website = !folder && !destination ? KaiComputerTools.websiteRequest(text) : null;
     if (!text || busy || voicePending) return;
+    if (api.connectedRequest(text) && model.startsWith("koinos-network")) {
+      const next = api.privateModel(aliases, model);
+      if (!next) {
+        notice("Calendar and connected-app requests need an installed local model or your private OpenAI/Anthropic connection. Connect one or install a model, then try again. Your Google account setting is not the cause.");
+        mood("error"); return;
+      }
+      model = next; $("model").value = model; write("kai-mascot-model", model);
+      const label = aliases.find(a => a.alias === model)?.label || model;
+      routingNotice = "Using " + label + " privately for this connected-app request.";
+      $("connection").textContent = model.startsWith("desktop:") ? "Private desktop connection · " + KaiProviders.label(model) : "Connected to your running app";
+    }
     if (!model && !folder && !destination && !website) {
       notice("Open the full app to choose a chat model so KAI can answer, then try again."); mood("error"); return;
     }
     if (source !== "voice") wakeListener.cancelTurn();
-    stopSpeech(); notice(""); toolActivity = null; busy = true; mood("thinking");
+    stopSpeech(); notice(routingNotice); toolActivity = null; busy = true; mood("thinking");
     const request = currentRequest = { keepUser: source === "voice" };
     if (voiceReplies) { ensureNatural(); warmSpeech(); }
-    const phrases = new api.SpeechPhrases(), replyEpoch = speechEpoch;
+    const phrases = new api.SpeechPhrases(); let replyEpoch = speechEpoch;
     $("question").value = "";
     history.push({ role: "user", content: text });
     const userBubble = message("user", text), reply = message("assistant");
@@ -688,8 +699,15 @@
       } else {
         const contextSize = aliases.find(a => a.alias === model)?.contextSize || 4096;
         if (!chatId) await saveChat();
-        phase = await KaiMascotTools.run({ question: text, history, chatId, contextSize, signal: chatAbort.signal, json: window.KaiCompanionClient?.toolJSON(model, toolJson, chatAbort.signal, { question: text, conversationId: chatId || "mascot-new", host: trace.parentElement }) || toolJson, open,
-          computer: computerAvailable ? { begin: () => bridge.computerBegin({ task: text, model }), call: (token, name, args) => bridge.computerCall(token, name, args) } : null,
+        phase = await KaiMascotTools.run({ question: text, history, chatId, contextSize, signal: chatAbort.signal, json: window.KaiCompanionClient?.toolJSON(model, toolJson, chatAbort.signal, { question: text, conversationId: chatId || "mascot-new", host: trace.parentElement,
+          onPrivateTool: active => {
+            approvalPending = active;
+            if (active) { stopSpeech(); replyEpoch = speechEpoch; wakeListener.pause(true); }
+            else if (wakeEnabled && !suspended) wakeListener.pause(false);
+            controls();
+          },
+        }) || toolJson, open,
+          computer: computerAvailable && !model.startsWith("koinos-network") ? { begin: () => bridge.computerBegin({ task: text, model }), call: (token, name, args) => bridge.computerCall(token, name, args) } : null,
           confirm: async (name, args) => {
             // Pause capture while a human reviews a mutation. Background audio
             // is never an approval, and Off/Stop/hide invalidate a late click.

@@ -1,7 +1,7 @@
 "use strict";
 const { test } = require("node:test"), assert = require("node:assert/strict");
 const { fitBounds, trustedFrame } = require("../../electron/mascot");
-const { chooseModel, messagesFor, completion, speechText } = require("../../ui/mascot-client");
+const { chooseModel, connectedRequest, privateModel, messagesFor, completion, speechText } = require("../../ui/mascot-client");
 
 test("KAI stays on the usable desktop across expansion, removed screens and negative monitor coordinates", () => {
   const area = { x: -1920, y: 0, width: 1920, height: 1040 };
@@ -29,6 +29,16 @@ test("KAI reuses a ready model and only selects the network when explicitly requ
   assert.equal(chooseModel(models, "ready", "missing", "old"), "ready");
   assert.equal(chooseModel([], null, null, "koinos-network"), "");
   assert.equal(chooseModel(models, "ready", "koinos-network:small", null), "koinos-network:small");
+});
+
+test("Connected-app requests leave network inference before private account tools run", () => {
+  const models = [{ alias: "koinos-network", status: "ready" }, { alias: "local", label: "Local", status: "ready" }, { alias: "desktop:openai:gpt", status: "ready" }];
+  assert.equal(connectedRequest("Create a folder called KAI on my Google Drive"), true);
+  assert.equal(connectedRequest("Add an appointment to my calendar"), true);
+  assert.equal(connectedRequest("What is Google Drive?"), false);
+  assert.equal(privateModel(models, "koinos-network"), "local");
+  assert.equal(privateModel(models, "desktop:openai:gpt"), "desktop:openai:gpt");
+  assert.equal(privateModel([{ alias: "koinos-network", status: "ready" }], "koinos-network"), "");
 });
 
 test("Long conversations retain recent complete turns without losing the current question", () => {

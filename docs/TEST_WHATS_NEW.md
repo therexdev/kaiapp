@@ -1,3 +1,10 @@
+### Reliable connected actions and voice approvals
+
+- Calendar, Google Drive and other explicit connected-app requests now leave Koinos Network inference and use an available local/private desktop model before any account data is read. If none is available, KAI explains the required model instead of falling into desktop observation and showing a misleading error.
+- Compact and expanded KAI use the same connected-action path. Keeping the text box open is no longer relevant.
+- Voice playback and listening stop cleanly while private tools and native approvals are active, preventing Pocket KAI audio from overlapping an approval or the following reply.
+- Connected accounts still need **Use in conversations** and the required actions enabled under Connections → Connected apps → Manage access. Every external call retains its exact one-time native approval.
+
 ### Smoother GPU earning and accurate producer status
 
 - Automated network probes now prefer one resident model per earning session, avoiding background model unload/reload cycles every few minutes. User-selected network models remain available.
