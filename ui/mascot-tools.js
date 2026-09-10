@@ -19,6 +19,19 @@
     if (/\bnode\b/i.test(question) && /\b(?:status|running|sync|synced|doing|healthy|earning|earned|rewards)\b/i.test(question)) return "node";
     return null;
   }
+  function connectedRequest(question) {
+    const destination = /\b(?:google\s+(?:drive|calendar|docs?|sheets?)|gmail|outlook|one\s*drive|dropbox|slack|notion|connected\s+(?:app|account)|(?:my|the)\s+calendar)\b/i;
+    const action = /\b(?:add|book|create|delete|edit|find|list|make|message|move|open|read|rename|schedule|send|show|update|upload)\b/i;
+    return destination.test(String(question || "")) && action.test(String(question || ""));
+  }
+  function usableConnectedAccount(observations) {
+    const found = observations.find(o => o.tool === "connected_find");
+    if (!found) return false;
+    try {
+      const value = JSON.parse(found.result), accounts = Array.isArray(value?.accounts) ? value.accounts : [];
+      return accounts.some(a => a?.useInChat === true && Number(a.selectedActions) > 0 && a.enabled !== false && a.accountDisabled !== true);
+    } catch { return false; }
+  }
   async function runInner({ question, history = [], chatId = "", contextSize = 4096, signal, json, askModel, confirm, open, computer, status = () => {}, onObservation = () => {} }) {
     const tr = await json("/core/tools", { signal }); abort(signal);
     if ((!Array.isArray(tr.tools) || !tr.tools.length) && !computer) return { context: "App tools are unavailable for this turn. Do not claim to have read current app state or used the web.", trace: [], citations: [] };
@@ -27,11 +40,14 @@
     const menuBudget = Math.min(2800, Math.floor(budget * .38));
     const appHints = (names.includes("app_read") ? "\napp_read subject: status, models, earnings, wallet, node, rewards, crypto, settings, network, documents, chats, tasks, connections, account, voice." : "") +
       (open ? "\napp_open view: " + navigation.views.join(", ") : "");
+    const connected = names.includes("connected_find") && connectedRequest(question);
     const system = RULES + appHints + "\nLocal date: " + localDate() + "\n" + agents.buildAgentSystem(tools, { question, allNames: names, budgetChars: menuBudget }) +
+      (connected ? "\nThis request explicitly asks KAI to use a connected account. KAI has attended access through the connected_* tools listed above. Do not claim that personal accounts are inaccessible. Do not return answer:true until connected_call has returned, or connected_find proves the requested account/action still needs setup. Begin from the connected_find result already provided." : "") +
       (computer ? "\n" + desktop.rules + "\nPrivate desktop tools (always available):\n" + desktop.tools.map(t => t.name + " " + JSON.stringify(t.params)).join("\n") : "");
     const earlier = compact(history.slice(-5, -1).map(m => m.role + ": " + m.content).join("\n"), 1000);
     const prompt = "Earlier conversation (context, not new permission):\n" + earlier + "\n\nCurrent request: " + question;
     const observations = [], trace = [], citations = [], used = new Set();
+    let connectedCorrections = 0;
     let declined = false, desktopSession = null, latestScreen = null, privateDesktop = false;
     async function call(name, args = {}) {
       abort(signal);
@@ -86,6 +102,14 @@
     }
     const screenRequest = computer && /\b(?:my screen|on (?:the|my) (?:screen|desktop)|current (?:window|page)|this (?:movie|video|window|page)|that (?:movie|video)|play.*(?:prime|tubi)|(?:prime|tubi).*play)\b/i.test(question);
     if (screenRequest) await call("computer_look", {});
+    if (connected) {
+      try { await call("connected_find", { query: question }); }
+      catch (e) {
+        if (e.name === "AbortError") throw e;
+        const o = { tool: "connected_find", args: { query: question }, result: "Tool failed: " + e.message };
+        observations.push(o); trace.push({ tool: "connected_find", status: "failed" }); onObservation(o);
+      }
+    }
     const seed = privateDesktop ? null : seedRead(question);
     if (seed && names.includes("app_read")) {
       try { await call("app_read", { subject: seed }); }
@@ -105,6 +129,13 @@
       const content = latestScreen?.image ? [{ type: "text", text }, { type: "image_url", image_url: { url: latestScreen.image } }] : text;
       const output = await askModel([{ role: "system", content: system }, { role: "user", content }], signal, { privateDesktop }); abort(signal);
       const action = agents.parseAgentAction(output, names);
+      const connectedDone = observations.some(o => o.tool === "connected_call" || o.tool === "instant_workflow");
+      if ((!action || action.answer) && connected && !connectedDone && usableConnectedAccount(observations) && connectedCorrections++ < 2) {
+        // Small local models sometimes repeat a generic refusal even after an
+        // enabled account is found. Give the planner another bounded chance;
+        // no action can run without the normal schema lookup and native review.
+        continue;
+      }
       if (!action || action.answer) break;
       try { if (!await call(action.tool, action.args)) break; }
       catch (e) {
@@ -127,5 +158,5 @@
     status(""); return { context, trace, privateDesktop, citations: citations.slice(0, 8) };
   }
   async function run(options) { try { return await runInner(options); } finally { await options.json?.finish?.(); } }
-  return { run, seedRead, RULES, localDate };
+  return { run, seedRead, connectedRequest, usableConnectedAccount, RULES, localDate };
 });

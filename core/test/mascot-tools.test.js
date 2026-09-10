@@ -124,6 +124,30 @@ test("Companion shares web and connected tools, cites real URLs and asks for mis
   assert.match(offline.context, /Web tools are disabled/); assert.match(offline.context, /never invent a forecast/);
 });
 
+test("Explicit connected requests discover enabled accounts and correct a small model's generic refusal", async () => {
+  const calls = [], outputs = [
+    JSON.stringify({ answer: true }),
+    JSON.stringify({ tool: "connected_actions", args: { connectionId: "drive", query: "create folder" } }),
+    JSON.stringify({ tool: "connected_describe", args: { connectionId: "drive", operationId: "create_folder" } }),
+    JSON.stringify({ tool: "connected_call", args: { connectionId: "drive", operationId: "create_folder", arguments: { name: "Mike" } } }),
+    JSON.stringify({ answer: true }),
+  ];
+  const tools = ["connected_find", "connected_actions", "connected_describe", "connected_call"].map(name => ({ name, description: name, params: {}, conversationAction: true }));
+  const result = await run({ question: "Create a folder called Mike on my Google Drive", contextSize: 4096,
+    json: async (path, options) => {
+      if (path === "/core/tools") return { tools };
+      const call = JSON.parse(options.body); calls.push(call);
+      if (call.name === "connected_find") return { ok: true, result: JSON.stringify({ accounts: [{ id: "drive", name: "Google Drive", useInChat: true, selectedActions: 1, enabled: true }] }) };
+      if (call.name === "connected_actions") return { ok: true, result: JSON.stringify([{ id: "create_folder", name: "Create folder", readOnly: false }]) };
+      if (call.name === "connected_describe") return { ok: true, result: JSON.stringify({ action: { id: "create_folder", schema: { properties: { name: { type: "string" } } } }) };
+      return { ok: true, result: JSON.stringify({ status: "returned", data: { id: "folder-1", name: "Mike" } }) };
+    },
+    askModel: async messages => { assert.match(messages[0].content, /attended access through the connected_/i); return outputs.shift(); },
+  });
+  assert.deepEqual(calls.map(c => c.name), ["connected_find", "connected_actions", "connected_describe", "connected_call"]);
+  assert.match(result.context, /folder-1/);
+});
+
 test("Declined tools and cancelled approvals never mutate or retry, even with model-supplied confirmed", async () => {
   const f = fixture();
   const r = runtime(f, { question: "Stop earning", confirm: async () => false, askModel: async () => JSON.stringify({ tool: "app_action", args: { action: "stop_earning", args: {}, confirmed: true } }) });

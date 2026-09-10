@@ -1,5 +1,6 @@
 ### Reliable connected actions and voice approvals
 
+- Explicit Drive, Calendar and other connected-app requests now begin with actual account discovery. Small local models get a bounded corrective planning pass instead of falling back to a generic “I do not have access” reply after an enabled account was found.
 - Calendar, Google Drive and other explicit connected-app requests now leave Koinos Network inference and use an available local/private desktop model before any account data is read. If none is available, KAI explains the required model instead of falling into desktop observation and showing a misleading error.
 - Compact and expanded KAI use the same connected-action path. Keeping the text box open is no longer relevant.
 - Voice playback and listening stop cleanly while private tools and native approvals are active, preventing Pocket KAI audio from overlapping an approval or the following reply.
