@@ -108,6 +108,13 @@ test("desktop connections UI: settings, provider selection, chat/mascot streamin
   await mascot.selectOption("#model", "desktop:openai:gpt-fixture");
   await mascot.fill("#question", "Tell me a short story."); await mascot.press("#question", "Enter");
   await mascot.waitForFunction(() => document.querySelector("#messages").textContent.includes("Your private provider reply") && document.querySelector("#stop").hidden);
+  const conversation = await mascot.evaluate(() => window.__providerRequests);
+  assert.equal(conversation.length, 1, "Ordinary conversation needs one provider completion");
+  assert.equal(conversation[0].stream, true, "Ordinary conversation skips tool planning");
+  assert.equal(conversation[0].model, "desktop:openai:gpt-fixture");
+  await mascot.evaluate(() => { window.__providerRequests.length = 0; });
+  await mascot.fill("#question", "Search the web for a synthetic fixture."); await mascot.press("#question", "Enter");
+  await mascot.waitForFunction(() => window.__providerRequests.some(r => r.stream === true) && document.querySelector("#stop").hidden);
   const plans = await mascot.evaluate(() => window.__providerRequests);
   assert.ok(plans.some(r => r.stream === false), "KAI planning uses the selected provider");
   assert.ok(plans.filter(r => r.stream === false).every(r => r.max_tokens >= 2048), "Desktop plans no longer use the tiny local-model cap");
