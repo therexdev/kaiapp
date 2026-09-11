@@ -112,12 +112,14 @@
       yes.disabled = no.disabled = true;
       card.classList.add("answered");
       head.textContent += approved ? " — approved" : " — denied";
+      // The run can finish over SSE before this approval request returns.
+      // Mark it running first so a late acknowledgement cannot replace done.
+      status("running…");
       await fetch("/core/code/approve", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ approvalId: t.approvalId, approved }),
       }).catch(() => {});
-      status("running…");
     };
     yes.addEventListener("click", () => answer(true));
     no.addEventListener("click", () => answer(false));

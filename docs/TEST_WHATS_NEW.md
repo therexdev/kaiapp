@@ -1,3 +1,8 @@
+### Release checks and code completion
+
+- Koinos Code keeps its completed status when an approval acknowledgement arrives after the answer. A delayed-response browser regression now checks the full approval, file write and final answer.
+- Test publication now requires macOS app tests and the explicit MCP Agent-mode replay, in addition to the existing Linux and Windows checks. The native drag check respects macOS pointer hit testing.
+
 ### Faster chat and local recall
 
 - Main Chat and desktop KAI now share intent routing. A personal-memory question such as “What is my daughters name?” bypasses the tool planner, web search, memory writes and connected-account sessions, including when the globe is enabled. Ordinary conversation also answers directly.

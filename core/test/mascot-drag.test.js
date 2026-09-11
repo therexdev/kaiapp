@@ -62,7 +62,9 @@ function nativeFixture(t, saved) {
 test("Native drag samples release position, remembers the edge, preserves expansion and cancels cleanly", async t => {
   const f = nativeFixture(t); await f.controller.launch();
   const win = f.controller.getWindow(); f.emit("regions", [{ x: 10, y: 10, width: 150, height: 200 }]);
-  f.emit("drag-start"); assert.equal(f.pose().pose, "carried"); assert.deepEqual(win.shapes.at(-1), []);
+  f.emit("drag-start"); assert.equal(f.pose().pose, "carried");
+  if (process.platform === "darwin") assert.equal(win.shapes.length, 0, "macOS uses pointer hit testing instead of unsupported window shaping");
+  else assert.deepEqual(win.shapes.at(-1), [], "dragging clears the native hit regions");
   f.move({ x: -800, y: -30 }); f.emit("drag-end"); // No timer tick: mouseup itself samples the last position.
   assert.equal(f.pose().pose, "perched"); assert.equal(f.pose().landed, true);
   assert.equal(win.bounds.y + win.bounds.height, -40); assert.equal(f.stored().perched, true);

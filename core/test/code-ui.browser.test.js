@@ -122,8 +122,26 @@ test("code panel: run -> diff card -> approve -> file written -> answer bubble",
     assert.match(diff, /\+ hi from the panel/);
     assert.strictEqual(fs.existsSync(path.join(project, "greet.txt")), false, "nothing written before approval");
 
+    // Hold the HTTP acknowledgement until the real SSE stream has finished.
+    // A late approval response must not replace the final status with running.
+    await page.route("**/core/code/approve", async (route) => {
+      const response = await route.fetch();
+      await page.waitForFunction(
+        () => [...document.querySelectorAll("#kc-trace .pg-msg")].some(el => /Created greet\.txt\./.test(el.textContent)),
+        null,
+        { timeout: RUN_WAIT }
+      );
+      await route.fulfill({ response });
+    });
+    const approvalFinished = page.waitForEvent("requestfinished", {
+      predicate: request => request.url().endsWith("/core/code/approve"),
+      timeout: RUN_WAIT,
+    });
     await page.click(".kc-approval button.primary");
-    await page.waitForFunction(() => document.getElementById("kc-status").textContent.includes("done"), { timeout: RUN_WAIT });
+    await approvalFinished;
+    // Let the fetch continuation and the next paint finish before inspecting it.
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    assert.match(await page.textContent("#kc-status"), /^done/, "a late approval acknowledgement preserves completion");
     assert.strictEqual(fs.readFileSync(path.join(project, "greet.txt"), "utf8"), "hi from the panel\n");
     const bubbles = await page.$$eval("#kc-trace .pg-msg", (els) => els.map((e) => e.textContent));
     assert.ok(
@@ -135,6 +153,7 @@ test("code panel: run -> diff card -> approve -> file written -> answer bubble",
     // workspace instead of a one-shot command. It carries both turns.
     await page.waitForFunction(
       () => document.querySelectorAll("#kc-sessions .kc-item").length > 0,
+      null,
       { timeout: UI_WAIT }
     );
     const session = await page.$eval("#kc-sessions .kc-item", (el) => el.textContent);
@@ -209,6 +228,7 @@ test("plan mode: reads, proposes, changes nothing — then the approved plan doe
     // A plan card arrives, and NOTHING has been written.
     await page.waitForFunction(
       () => document.getElementById("kc-status").textContent.includes("plan ready"),
+      null,
       { timeout: RUN_WAIT }
     );
     const planText = await page.$eval(".kc-approval .pg-msg", (el) => el.textContent);
@@ -225,6 +245,7 @@ test("plan mode: reads, proposes, changes nothing — then the approved plan doe
     await page.click(".kc-approval:not(.answered) button.primary");
     await page.waitForFunction(
       () => document.getElementById("kc-status").textContent.includes("done"),
+      null,
       { timeout: UI_WAIT }
     );
     assert.strictEqual(fs.readFileSync(path.join(project, "app.js"), "utf8"), "console.log(2);\n");
@@ -309,7 +330,7 @@ test("clone destination opens the native folder window, and the model box drives
     await page.waitForSelector("#kc-chat:not([hidden])");
 
     // --- the model box: "App default" plus every model actually installed.
-    await page.waitForFunction(() => document.querySelectorAll("#kc-model option").length > 1, { timeout: UI_WAIT });
+    await page.waitForFunction(() => document.querySelectorAll("#kc-model option").length > 1, null, { timeout: UI_WAIT });
     const options = await page.$$eval("#kc-model option", (els) => els.map((e) => ({ v: e.value, t: e.textContent })));
     assert.strictEqual(options[0].v, "", "the first choice follows the app");
     assert.match(options[0].t, /App default/);
@@ -319,7 +340,7 @@ test("clone destination opens the native folder window, and the model box drives
     // Choosing one PINS it to the project — it survives a reload, because a
     // model choice you have to re-make every time is not a choice.
     await page.selectOption("#kc-model", installed.v);
-    await page.waitForFunction(() => document.getElementById("kc-status").textContent.includes("using"), { timeout: RUN_WAIT });
+    await page.waitForFunction(() => document.getElementById("kc-status").textContent.includes("using"), null, { timeout: RUN_WAIT });
     const stored = await page.evaluate(async () => (await (await fetch("/core/code/projects")).json()).projects[0].model);
     assert.strictEqual(stored, installed.v);
 
@@ -327,7 +348,7 @@ test("clone destination opens the native folder window, and the model box drives
     fs.writeFileSync(record, "");
     await page.fill("#kc-task", "say hello");
     await page.click("#btn-kc-run");
-    await page.waitForFunction(() => /done|budget|step/.test(document.getElementById("kc-status").textContent), { timeout: RUN_WAIT });
+    await page.waitForFunction(() => /done|budget|step/.test(document.getElementById("kc-status").textContent), null, { timeout: RUN_WAIT });
     const asked = fs
       .readFileSync(record, "utf8")
       .split("\n")
