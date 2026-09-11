@@ -123,6 +123,9 @@ async function main() {
   const trace = [];
   const statuses = [];
   const rt = KaiAgents.makeRuntime({
+    // This replay exercises explicit Agent mode, just like the UI selector.
+    // Ordinary Chat now intentionally skips planning for conversational input.
+    mode: "agent",
     askModelOnce: makeScriptedModel(trace),
     setStatus: (t) => statuses.push(t),
     confirmTool: () => Promise.resolve(true),

@@ -41,6 +41,8 @@ jobs:
           KAI_SCHEDULER_URL: http://127.0.0.1:9/scheduler
           KAI_RELAY_URL: http://127.0.0.1:9
           KAI_FEEDBACK_URL: http://127.0.0.1:9/feedback
+      - name: Replay MCP Agent mode
+        run: node core/scripts/verify-agent-loop.js
       - name: Verify Agent Network contract prototype
         working-directory: contracts/agent-network
         run: |
