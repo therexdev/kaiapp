@@ -19,8 +19,10 @@ class CompanionStore {
         this.requireStorage();
         const saved = JSON.parse(this.storage.decryptString(Buffer.from(JSON.parse(fs.readFileSync(this.file, "utf8")).encrypted, "base64")));
         if (saved.version !== 1 || !["notes", "goals", "sources", "connections", "workflows", "runs", "syncs"].every(k => Array.isArray(saved[k]))) throw new Error("Invalid store");
-        this.data = saved;
+      this.data = saved;
       }
+      this.data.settings ||= { recall: true };
+      this.data.settings.approvalGrants = Array.isArray(this.data.settings.approvalGrants) ? this.data.settings.approvalGrants : [];
       this.data.brain ||= { summaries: [], insights: [], tasks: [], jobs: [], activity: [], changes: [], readAt: 0, checkpoints: [], awareness: { mode: "off", intervalMinutes: 20, events: true, model: "", sourceIds: [], includeNotes: false, includeGoals: false, autoLearn: false, maxPerHour: 6, contextChars: 10000, lastTick: 0, failures: 0, customTasks: [] } };
     } catch { this.locked = true; }
   }

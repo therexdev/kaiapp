@@ -5,10 +5,10 @@
  * CSP is connect-src 'self', so all egress happens here, behind the §7
  * privacy gate in the gateway — Local-Only mode never reaches this module).
  *
- * Keyless by design: DuckDuckGo's HTML endpoint is the primary source and
- * Wikipedia's opensearch API the fallback, so search works out of the box
- * with no account and no API key to leak. Both are plain HTTPS GETs of the
- * user's QUERY only — never chat history.
+ * Keyless by design: DuckDuckGo's HTML endpoint is primary, Bing's compact
+ * RSS search is the independent full-web fallback, and Wikipedia opensearch
+ * is the final narrow fallback. All are plain HTTPS GETs of the user's QUERY
+ * only — never chat history.
  *
  * fetchImpl is injectable so tests run with zero real egress.
  */
@@ -21,8 +21,13 @@ const MAX_REDIRECTS = 5;
 const FETCH_TIMEOUT_MS = 9000;
 const PAGE_CAP_CHARS = 6000;
 const PAGE_MAX_BYTES = 2 * 1024 * 1024;
+const BROWSER_HEADERS = {
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+  accept: "text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5",
+  "accept-language": "en-US,en;q=0.8",
+};
 
-/** Decode HTML entities the two sources actually emit. */
+/** Decode HTML entities the search providers actually emit. */
 function unescapeHtml(s) {
   return String(s)
     .replace(/&#x27;/g, "'")
@@ -247,7 +252,22 @@ function parseDdgHtml(html) {
   return out;
 }
 
-async function searchWeb(q, { fetchImpl = fetch, timeoutMs = FETCH_TIMEOUT_MS, ddgUrl, wikiUrl } = {}) {
+/** Bing's keyless RSS endpoint is deliberately simple and is a useful
+ * independent fallback when a search provider blocks an automated client. */
+function parseBingRss(xml) {
+  const out = [];
+  const itemRe = /<item\b[^>]*>([\s\S]*?)<\/item>/gi;
+  let item;
+  while ((item = itemRe.exec(String(xml))) !== null && out.length < MAX_RESULTS) {
+    const field = name => stripTags((item[1].match(new RegExp(`<${name}[^>]*>([\\s\\S]*?)<\\/${name}>`, "i")) || [])[1] || "");
+    const url = field("link");
+    if (!isPublicHttpUrl(url)) continue;
+    out.push({ title: field("title").slice(0, 120), url: url.slice(0, 500), snippet: field("description").slice(0, 300) });
+  }
+  return out;
+}
+
+async function searchWeb(q, { fetchImpl = fetch, timeoutMs = FETCH_TIMEOUT_MS, ddgUrl, bingUrl, wikiUrl } = {}) {
   const query = String(q || "").trim().slice(0, 400);
   if (!query) return { results: [], source: "none" };
   // Primary: DuckDuckGo HTML (keyless, full-web).
@@ -255,11 +275,23 @@ async function searchWeb(q, { fetchImpl = fetch, timeoutMs = FETCH_TIMEOUT_MS, d
     const u = (ddgUrl || "https://html.duckduckgo.com/html/") + "?q=" + encodeURIComponent(query);
     const r = await fetchImpl(u, {
       signal: AbortSignal.timeout(timeoutMs),
-      headers: { "user-agent": "Mozilla/5.0 (KoinosAI local assistant)", accept: "text/html" },
+      headers: BROWSER_HEADERS,
     });
     if (r.ok) {
       const results = parseDdgHtml(await r.text());
       if (results.length) return { results, source: "duckduckgo" };
+    }
+  } catch {
+    /* fall through to another full-web provider */
+  }
+  // Independent keyless full-web fallback. Unlike the previous Wikipedia-only
+  // fallback, this still works for businesses, products and recent pages.
+  try {
+    const u = (bingUrl || "https://www.bing.com/search") + "?format=rss&q=" + encodeURIComponent(query);
+    const r = await fetchImpl(u, { signal: AbortSignal.timeout(timeoutMs), headers: BROWSER_HEADERS });
+    if (r.ok) {
+      const results = parseBingRss(await r.text());
+      if (results.length) return { results, source: "bing" };
     }
   } catch {
     /* fall through to wikipedia */
@@ -300,7 +332,7 @@ async function fetchPage(url, { fetchImpl = fetch, timeoutMs = FETCH_TIMEOUT_MS,
     const addresses = await assertPublicTarget(target, { lookup });
     r = await (fetchImpl === fetch ? publicPageRequest : fetchImpl)(target, {
       signal: AbortSignal.timeout(timeoutMs),
-      headers: { "user-agent": "Mozilla/5.0 (KoinosAI local assistant)", accept: "text/html,text/plain" },
+      headers: BROWSER_HEADERS,
       redirect: "manual",
       addresses,
     });
@@ -326,9 +358,16 @@ async function fetchPage(url, { fetchImpl = fetch, timeoutMs = FETCH_TIMEOUT_MS,
     .replace(/<aside[\s\S]*?<\/aside>/gi, " ");
   const text = stripTags(html).slice(0, maxChars);
   if (!text) throw new Error("no readable text");
+  const probe = (title + " " + text.slice(0, 1600)).toLowerCase();
+  if (text.length < 2500 && [
+    "verify you are human", "are you a robot", "access denied", "request blocked",
+    "enable javascript and cookies", "unusual traffic", "cf-chl-", "captcha",
+  ].some(marker => probe.includes(marker))) {
+    throw new Error("site blocked automated reading; search for another source");
+  }
   // The URL that was actually read, not the one that was asked for — a caller
   // citing a source should cite where the words came from.
   return { title, url: target, text };
 }
 
-module.exports = { searchWeb, fetchPage, isPublicHttpUrl, isPrivateAddress, assertPublicTarget, parseDdgHtml, publicPageRequest };
+module.exports = { searchWeb, fetchPage, isPublicHttpUrl, isPrivateAddress, assertPublicTarget, parseDdgHtml, parseBingRss, publicPageRequest };

@@ -3,7 +3,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert");
 
-const { searchWeb, fetchPage, isPublicHttpUrl, parseDdgHtml } = require("../lib/websearch");
+const { searchWeb, fetchPage, isPublicHttpUrl, parseDdgHtml, parseBingRss } = require("../lib/websearch");
 
 /*
  * Web search runs Core-side behind the §7 privacy gate. These tests use an
@@ -32,9 +32,19 @@ test("websearch: DDG parser extracts titles, decodes redirect URLs, drops privat
   assert.ok(results[0].snippet.includes("free-to-use"), "snippets ride along");
 });
 
-test("websearch: falls back to Wikipedia when DDG is down; returns unreachable when both are", async () => {
-  const wikiFetch = async (url) => {
+test("websearch: falls back to Bing full-web search, then Wikipedia", async () => {
+  const rss = `<?xml version="1.0"?><rss><channel><item><title>Omaha Dentists</title><link>https://example.com/dentists</link><description>Local practices and addresses.</description></item><item><title>Private</title><link>http://127.0.0.1/secret</link></item></channel></rss>`;
+  assert.deepEqual(parseBingRss(rss), [{ title: "Omaha Dentists", url: "https://example.com/dentists", snippet: "Local practices and addresses." }]);
+  const bingFetch = async (url) => {
     if (url.includes("duckduckgo")) throw new Error("down");
+    if (url.includes("bing.com")) return { ok: true, text: async () => rss };
+    throw new Error("Wikipedia should not be needed");
+  };
+  const fullWeb = await searchWeb("dentists omaha", { fetchImpl: bingFetch });
+  assert.strictEqual(fullWeb.source, "bing");
+
+  const wikiFetch = async (url) => {
+    if (url.includes("duckduckgo") || url.includes("bing.com")) throw new Error("down");
     return {
       ok: true,
       json: async () => ["koinos", ["Koinos"], ["A blockchain framework."], ["https://en.wikipedia.org/wiki/Koinos"]],
@@ -61,7 +71,7 @@ test("websearch: SSRF guard — loopback, private ranges, IPv6, non-http all ref
   assert.strictEqual(isPublicHttpUrl("https://koinos.io/x"), true);
 });
 
-test("websearch: fetchPage extracts readable text, strips chrome, caps size, refuses private urls", async () => {
+test("websearch: fetchPage extracts readable text, detects block pages, caps size, refuses private urls", async () => {
   const lookup = async () => [{ address: "93.184.216.34", family: 4 }];
   const page = `<html><head><title>My Doc</title><style>.x{}</style></head>
     <body><nav>MENU</nav><script>evil()</script><p>Real content here.</p><footer>foot</footer></body></html>`;
@@ -78,6 +88,8 @@ test("websearch: fetchPage extracts readable text, strips chrome, caps size, ref
   const big = async () => ({ ok: true, headers: { get: () => "text/html" }, text: async () => "<p>" + "a".repeat(50000) + "</p>" });
   const capped = await fetchPage("https://example.com/big", { fetchImpl: big, maxChars: 500, lookup });
   assert.ok(capped.text.length <= 500, "extraction is capped");
+
+  await assert.rejects(() => fetchPage("https://example.com/challenge", { lookup, fetchImpl: async () => ({ ok: true, headers: { get: () => "text/html" }, text: async () => "<title>Access denied</title><p>Verify you are human to continue.</p>" }) }), /blocked automated reading/);
 
   await assert.rejects(() => fetchPage("http://127.0.0.1/core/keys", { fetchImpl }), /public http/);
   await assert.rejects(

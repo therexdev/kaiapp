@@ -104,11 +104,13 @@
     }
     function drawSetup(out) {
       const s = status();
+      const grants = Array.isArray(state.settings?.approvalGrants) ? state.settings.approvalGrants : [];
       out.innerHTML = `<div class="cn-setup-intro"><h2>How would you like to connect?</h2><p>Both options open the same app catalog and secure sign-in flow.</p></div><div data-cn-readiness></div><form id="cn-settings"><div class="cn-mode-grid">
         <label class="cn-mode-card"><input type="radio" name="mode" value="managed" ${s.mode !== "personal" ? "checked" : ""}><span class="cn-mode-icon">K</span><strong>KAI-managed</strong><p>Use the Composio service configured by your KAI server. No Composio key to enter.</p><small id="cn-managed-status"></small></label>
         <label class="cn-mode-card"><input type="radio" name="mode" value="personal" ${s.mode === "personal" ? "checked" : ""}><span class="cn-mode-icon personal">C</span><strong>My Composio key</strong><p>Connect through your own Composio project. Manage your usage and billing directly.</p><small>${s.personalConfigured ? "Your key is saved securely" : "Bring your own project API key"}</small></label></div>
         <div class="cn-key-panel" ${s.mode !== "personal" ? "hidden" : ""}>${field("Composio project API key", `<input name="key" type="password" autocomplete="off" placeholder="${s.personalConfigured ? "Saved securely · leave blank to keep" : "Paste your Composio key"}">`)}<p>Find your project key in <a href="https://dashboard.composio.dev/" target="_blank" rel="noopener noreferrer">Composio settings ↗</a>. KAI encrypts it on this computer.</p></div>
-        <div class="cn-setup-actions"><button class="cn-button cn-primary" type="submit">Save connection method</button>${!s.signedIn ? btn("Sign in to KAI", "signin") : ""}</div><p class="cn-muted">Connected accounts stay with the Composio project that created them. Changing methods does not move or disconnect those accounts.</p></form>`;
+        <div class="cn-setup-actions"><button class="cn-button cn-primary" type="submit">Save connection method</button>${!s.signedIn ? btn("Sign in to KAI", "signin") : ""}</div><p class="cn-muted">Connected accounts stay with the Composio project that created them. Changing methods does not move or disconnect those accounts.</p></form>
+        <section class="cn-recent-actions"><h2>Always allowed actions</h2><p>These exact capabilities can run in an attended KAI request without another prompt. Account and action permission changes invalidate connected-app grants.</p>${grants.length ? grants.map(g => `<div><strong>${esc(g.label)}</strong>${btn("Revoke", "revokeGrant", g.key)}</div>`).join("") : '<p class="cn-muted">No actions are always allowed.</p>'}</section>`;
     }
     function openDrawer(title, content) {
       if (!host.querySelector(".cn-drawer")) focusBeforeDrawer = document.activeElement;
@@ -124,7 +126,7 @@
       } else if (d.kind === "access") {
         const c = d.connection;
         openDrawer("Manage " + c.name, `<form id="cn-access">${field("Account name", `<input name="name" value="${esc(c.name)}" maxlength="100">`)}
-          ${check("allowAgent", "Use in conversations", "KAI asks before using an action from this account.", c.allowAgent || !c.operations.length)}
+          ${check("allowAgent", "Use in conversations", "KAI asks before using an action unless you explicitly make that account action always allowed.", c.allowAgent || !c.operations.length)}
           ${check("allowWrite", "Allow reviewed actions", "Changes and actions without verified read-only behavior always ask for approval.", c.allowWrite)}
           ${check("allowSync", "Allow Brain and workflow reads", "Only selected, verified read actions can run in the background.", c.allowSync)}
           ${window.KaiConnectionProfiles?.[c.toolkit] ? `<div class="cn-profile"><h3>${esc(window.KaiConnectionProfiles[c.toolkit].name)}</h3><p>${esc(window.KaiConnectionProfiles[c.toolkit].guidance)}</p><div class="cn-account-actions">${window.KaiConnectionProfiles[c.toolkit].searches.map(q => btn(q, "profileSearch", q)).join("")}</div><p>Choose the actions you need below, then Save access. These shortcuts do not grant permissions.</p></div>` : ""}<div class="cn-actions-heading"><h3>Choose actions for KAI</h3><span id="cn-selected-count"></span></div><input type="search" id="cn-action-search" aria-label="Search app actions" placeholder="Search actions and data…"><div class="cn-tool-list" id="cn-tool-list"></div><div id="cn-tool-more"></div>
@@ -199,6 +201,7 @@
       if (name === "check") return checkConnection();
       if (name === "access") { const c = connections().find(c => c.id === value); if (!c) return; drawer = { kind: "access", connection: c, tools: c.operations, selected: new Set(c.operations.map(o => o.id)), known: new Map(c.operations.map(o => [o.id, o])), initial: true }; drawDrawer(); await loadTools(); return; }
       if (name === "reviewReceipt") { const [turnId, id] = value.split(":"); await manage("conversationReview", { turnId, id }); state = await manage("status"); draw(); return; }
+      if (name === "revokeGrant") { await manage("approvalGrantRemove", { key: value }); state = await manage("status"); draw(); return; }
       if (name === "profileSearch") { host.querySelector("#cn-action-search").value = value; return loadTools(); }
       if (name === "moreTools") return loadTools(true);
       if (name === "collect" || name === "try") { const c = connections().find(c => c.id === value); if (!c) return; if (name === "collect" && !c.allowSync) throw new Error("Enable Brain and workflow reads in Manage access first."); drawer = { kind: name, connection: c }; drawDrawer(); return; }

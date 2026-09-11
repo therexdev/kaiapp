@@ -1,5 +1,7 @@
 ### Reliable connected actions and voice approvals
 
+- Public research now falls back from DuckDuckGo to Bing's compact search feed before the narrower Wikipedia fallback, uses browser-compatible request headers, recognizes block/challenge pages, and tries more independent sources instead of letting one inaccessible site derail the answer.
+- Approval dialogs for public research and a specific connected-account action now offer **Always allow this action**. The grant is encrypted locally, stays scoped to that capability and account/action revision, and can be revoked under Connections → Connection settings.
 - Compound requests such as researching local businesses and putting the results into Google Sheets now stay in one connected workflow. Natural phrases such as “look up” and “put in a Sheet” are recognized, public research remains separately reviewed, and ordinary chats no longer inherit the connected planner's long retry loop.
 - Pocket voice now uses an adaptive jitter buffer throughout each sentence. Fast generation still begins early; slower generation waits for a clean sentence, and a mid-reply CPU slowdown rebuilds an audio lead before resuming instead of stuttering through tiny fragments.
 - Direct connected-app requests now expose only the relevant connected-action tools to KAI's planner. An unrelated Brain lookup can no longer replace a Drive or Calendar action, and KAI gives a short failure statement instead of manual instructions when no write actually ran.
@@ -8,7 +10,7 @@
 - Calendar, Google Drive and other explicit connected-app requests now leave Koinos Network inference and use an available local/private desktop model before any account data is read. If none is available, KAI explains the required model instead of falling into desktop observation and showing a misleading error.
 - Compact and expanded KAI use the same connected-action path. Keeping the text box open is no longer relevant.
 - Voice playback and listening stop cleanly while private tools and native approvals are active, preventing Pocket KAI audio from overlapping an approval or the following reply.
-- Connected accounts still need **Use in conversations** and the required actions enabled under Connections → Connected apps → Manage access. Every external call retains its exact one-time native approval.
+- Connected accounts still need **Use in conversations** and the required actions enabled under Connections → Connected apps → Manage access. Actions prompt once unless you explicitly choose an action-scoped always-allow grant.
 
 ### Smoother GPU earning and accurate producer status
 

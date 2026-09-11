@@ -134,13 +134,26 @@ function registerCompanionIPC({ ipcMain, service, origin, getMainWindow, getMasc
       if (jobs.size >= 12) return { ok: false, error: "Finish the current companion operation first." };
       const key = id(), stop = () => controller.abort(), navigate = (_e, _url, _inPlace, main) => { if (main) stop(); };
       jobs.set(key, { controller, sender }); sender.on("destroyed", stop); sender.on("render-process-gone", stop); sender.on("did-start-navigation", navigate); window.on("hide", stop);
-      const confirm = async (name, details) => {
+      const confirm = async (name, details, permission = null) => {
         controller.signal.throwIfAborted(); if (approvalPending || !window.isVisible()) return false;
+        const grantKey = permission && typeof permission.key === "string" && /^[a-z0-9:_-]{1,500}$/i.test(permission.key) ? permission.key : null;
+        const grantLabel = grantKey && typeof permission.label === "string" ? permission.label.trim().slice(0, 180) : null;
+        if (grantKey && service.store.data.settings?.approvalGrants?.some(g => g.key === grantKey)) return true;
         const detail = JSON.stringify(details, null, 2); if (detail.length > 20000) throw new CompanionError("This action is too large to review.");
         approvalPending = true;
         try {
-          const { response } = await dialog.showMessageBox(window, { type: "question", title: "KAI · Review action", message: name, detail: detail + "\n\nAllow this exact action once?", buttons: ["Cancel", "Allow once"], defaultId: 0, cancelId: 0, noLink: true });
-          return response === 1 && !controller.signal.aborted && !!windowFor(event, management) && window.isVisible();
+          const buttons = grantKey && grantLabel ? ["Cancel", "Allow once", "Always allow this action"] : ["Cancel", "Allow once"];
+          const suffix = grantKey && grantLabel
+            ? "\n\nAllow once, or always allow this action for this account? You can revoke an always-allow grant in Connections → Connection settings."
+            : "\n\nAllow this exact action once?";
+          const { response } = await dialog.showMessageBox(window, { type: "question", title: "KAI · Review action", message: name, detail: detail + suffix, buttons, defaultId: 0, cancelId: 0, noLink: true });
+          const active = !controller.signal.aborted && !!windowFor(event, management) && window.isVisible();
+          if (!active || (response !== 1 && !(response === 2 && grantKey && grantLabel))) return false;
+          if (response === 2 && grantKey && grantLabel) service.store.change(d => {
+            d.settings ||= { recall: true }; d.settings.approvalGrants ||= [];
+            d.settings.approvalGrants = [{ key: grantKey, label: grantLabel, at: Date.now() }, ...d.settings.approvalGrants.filter(g => g.key !== grantKey)].slice(0, 200);
+          });
+          return true;
         } finally { approvalPending = false; }
       };
       try { return { ok: true, result: await fn({ event, window, signal: controller.signal, confirm }, ...args) }; }
@@ -272,6 +285,10 @@ function registerCompanionIPC({ ipcMain, service, origin, getMainWindow, getMasc
         return service.brain.exportVault(result.filePaths[0]);
       }
       case "recall": return service.store.change(d => { d.settings.recall = input.enabled === true; });
+      case "approvalGrantRemove": return service.store.change(d => {
+        const key = typeof input.key === "string" ? input.key : "";
+        d.settings.approvalGrants = (d.settings.approvalGrants || []).filter(g => g.key !== key);
+      });
       case "importLegacy": {
         const memories = service.legacyMemory?.list() || [];
         return service.importText("Previously remembered facts", memories.map(m => "- " + m.text).join("\n"));
@@ -290,7 +307,8 @@ function registerCompanionIPC({ ipcMain, service, origin, getMainWindow, getMasc
       case "removeConnection": return service.connections.remove(input.id);
       case "request": {
         const request = service.connections.prepare(input.connectionId, input.operationId, input.variables || {}, input.body);
-        if (request.method !== "GET" && !await ctx.confirm(request.name, request)) throw new CompanionError("User declined. The request did not run.");
+        const c = service.store.data.connections.find(c => c.id === input.connectionId);
+        if (request.method !== "GET" && !await ctx.confirm(request.name, request, { key: `connected:${c.id}:${request.operationId}:${c.revision}`, label: `${c.name} · ${request.name}` })) throw new CompanionError("User declined. The request did not run.");
         return service.connections.execute(request, ctx.signal);
       }
       case "source": return service.source(input);

@@ -97,6 +97,16 @@ test("public research after private observations uses only reviewed query/URL wi
   assert.equal(calls.length, 1);
 });
 
+test("public research and connected actions expose narrow persistent-permission scopes", async t => {
+  const f = fixture(t, { lookup: async()=>[{address:"93.184.216.34",family:4}], fetchImpl: async () => new Response('<title>Result</title><p>Useful public source material.</p>', { headers: { "content-type": "text/html" } }) });
+  let permission;
+  await f.call("connected_research", { operation: "read", url: "https://fixture.example/source" }, async (_name, _details, scope) => { permission = scope; return true; });
+  assert.deepEqual(permission, { key: "public-research", label: "Public research" });
+  await f.call("connected_call", { connectionId: f.c.id, operationId: "create", body: { name: "one" } }, async (_name, _details, scope) => { permission = scope; return true; });
+  assert.match(permission.key, new RegExp(`^connected:${f.c.id}:create:`));
+  assert.match(permission.label, /Fixture account.*Create object/);
+});
+
 test("major connector action schemas execute through both personal and managed Composio with identical permissions", async t => {
   const { ComposioClient } = require("../lib/composio-client");
   const samples = [

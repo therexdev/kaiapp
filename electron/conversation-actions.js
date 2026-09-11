@@ -118,7 +118,7 @@ class ConversationActions {
     const a = this.add(key, { name: request.name, connectionId: c.id, operationId: op.id, revision: c.revision, fingerprint, write: request.method !== "GET", status: "review", arguments: bounded(input.arguments || {}, 16000) });
     let dispatched = false;
     try {
-      if (!await confirm(request.name, { account: c.name, request, note: "Verify the recipient, date/time zone, folder and exact content. This allows only this action." })) { this.patch(key, a.id, { status: "declined" }); throw new CompanionError("User declined. Stop this attempt; do not use another route."); }
+      if (!await confirm(request.name, { account: c.name, request, note: "Verify the recipient, date/time zone, folder and exact content. Always allow is limited to this selected action on this account and can be revoked in Connection settings." }, { key: `connected:${c.id}:${op.id}:${c.revision}`, label: `${c.name} · ${request.name}` })) { this.patch(key, a.id, { status: "declined" }); throw new CompanionError("User declined. Stop this attempt; do not use another route."); }
       signal.throwIfAborted(); this.account(c.id, op.id);
       if (this.privacyMode() === "local-only") throw new CompanionError("Local-Only blocks connected actions.");
       if (digest(this.hub.connections.prepare(c.id, op.id, input.arguments || {}, input.body)) !== requestHash) throw new CompanionError("The connection or input changed after review.");
@@ -182,7 +182,7 @@ class ConversationActions {
   async research(args, confirm, signal) {
     if (!["search", "read"].includes(args.operation)) throw new CompanionError("Choose search or read.");
     const payload = args.operation === "search" ? { query: text(args.query, 1000, "Public query") } : { url: text(args.url, 2000, "Public URL") };
-    if (!await confirm("Use public research", { ...payload, note: "Only this query or URL goes to the public web; no conversation or Brain transcript is sent. Check it contains only information you intend to disclose." })) throw new CompanionError("User declined public research. Do not retry.");
+    if (!await confirm("Use public research", { ...payload, note: "Only this query or URL goes to the public web; no conversation or Brain transcript is sent. Check it contains only information you intend to disclose." }, { key: "public-research", label: "Public research" })) throw new CompanionError("User declined public research. Do not retry.");
     signal.throwIfAborted(); if (this.privacyMode() === "local-only") throw new CompanionError("Local-Only blocks public research.");
     const controller = new AbortController(), both = AbortSignal.any([signal, controller.signal]);
     const timer = setInterval(() => { if (this.privacyMode() === "local-only") controller.abort(); }, 100); timer.unref?.();

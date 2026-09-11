@@ -222,10 +222,10 @@ async function webResearch(query, statusEl) {
   const results = search?.results || [];
   if (!results.length) { setStatus("🌐 No web results — answering from the model."); return null; }
 
-  // Read the best page we can (top result, then second on failure) — the
+  // Read the best page we can (several independent results on failure) — the
   // "multi-action" part: search, then fetch, then answer.
   let extract = null;
-  for (const cand of results.slice(0, 2)) {
+  for (const cand of results.slice(0, 4)) {
     setStatus(`🌐 Reading ${cand.title || cand.url}…`);
     try {
       const r = await fetch("/core/fetch", {

@@ -40,6 +40,18 @@ test("IPC denies remote documents, subframes and mascot management; cancellation
  const pending=handlers.get("companion:tool")(event(main),"brain_remember",{text:"do not save"},"local");await new Promise(r=>setImmediate(r));await handlers.get("companion:cancel")(event(main));resolve({response:1});const result=await pending;assert.equal(result.ok,false);assert.equal(hub.store.data.notes.length,0);
 });
 
+test("IPC always-allow grants persist, skip repeat prompts and can be revoked",async t=>{const {hub}=setup(t),handlers=new Map(),ipcMain={handle:(c,f)=>handlers.set(c,f),removeHandler:c=>handlers.delete(c)};
+ function win(url,n){const wc=new EventEmitter();wc.id=n;wc.getURL=()=>url;wc.isDestroyed=()=>false;wc.mainFrame={url};const w=new EventEmitter();w.webContents=wc;w.isDestroyed=()=>false;w.isVisible=()=>true;return w;}
+ const main=win("http://127.0.0.1:41100/",7),event={sender:main.webContents,senderFrame:main.webContents.mainFrame};let prompts=0,spec;
+ const ctl=registerCompanionIPC({ipcMain,service:hub,origin:"http://127.0.0.1:41100",getMainWindow:()=>main,getMascotWindow:()=>null,dialog:{showMessageBox:async(_w,s)=>{prompts++;spec=s;return {response:2};}}});t.after(()=>ctl.dispose());
+ const session=await handlers.get("companion:session")(event,"begin",{model:"local",question:"Research this",conversationId:"grant-test"});assert.equal(session.ok,true);
+ const call=()=>handlers.get("companion:tool")(event,"connected_research",{operation:"search",query:"Koinos"},"local",session.result.id);
+ assert.equal((await call()).ok,true);assert.deepEqual(spec.buttons,["Cancel","Allow once","Always allow this action"]);assert.equal(prompts,1);assert.equal(hub.store.data.settings.approvalGrants[0].key,"public-research");
+ assert.equal((await call()).ok,true);assert.equal(prompts,1,"saved capability skips the second prompt");
+ await handlers.get("companion:manage")(event,"approvalGrantRemove",{key:"public-research"});assert.equal(hub.store.data.settings.approvalGrants.length,0);
+ assert.equal((await call()).ok,true);assert.equal(prompts,2,"revocation restores review");
+});
+
 test("renderer private context protects routing and never gives worker models Brain notes", async () => {
  const vm=require("vm"),calls=[];const window={kaiCompanionBridge:{context:async model=>({ok:true,result:{eligible:model==="local",context:model==="local"?"Private fixture memory":""}})}};
  vm.runInNewContext(fs.readFileSync(path.join(__dirname,"../../ui/companion-client.js"),"utf8"),{window,DOMException});
