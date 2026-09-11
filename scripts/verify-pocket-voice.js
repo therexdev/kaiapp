@@ -10,9 +10,9 @@ async function check(root = path.join(__dirname, "..")) {
   const metrics = [];
   try {
     await retryFixtureDownload(() => manager.ensure());
-    const cold = performance.now(); await manager.warm("alba"); const coldWarmMs = performance.now() - cold;
+    const cold = performance.now(); await manager.warm(); const coldWarmMs = performance.now() - cold;
     for (const voice of manager.status().voices) {
-      for (const pass of voice.id === "alba" ? ["warm", "repeat"] : ["first"]) {
+      for (const pass of voice.id === manager.status().defaultVoice ? ["warm", "repeat"] : ["first"]) {
         const chunks = [], starts = [], start = performance.now();
         const stats = await manager.generate({ voice: voice.id, text }, chunk => { starts.push(performance.now() - start); chunks.push(chunk.samples); });
         assert.ok(chunks.length > 2 && starts[0] < stats.totalMs, "Audio is delivered before inference finishes");

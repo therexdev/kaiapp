@@ -1,3 +1,9 @@
+### Azelma Pocket by default
+
+- KAI now selects Azelma Pocket on Windows x64 and Linux x64 for new profiles and profiles still using the former Bella default. Existing alternative voices and later manual choices are preserved.
+- When KAI opens with Azelma selected, its pinned voice pack (about 201 MB) downloads automatically if missing. Progress and retry remain available in the compact companion. Existing voice files are reused; hiding KAI pauses setup and reopening resumes it.
+- Voice reply and microphone toggles keep their existing settings. Unsupported computers retain their existing voice setup. English speech stays local.
+
 ### Release checks and code completion
 
 - Koinos Code keeps its completed status when an approval acknowledgement arrives after the answer. A delayed-response browser regression now checks the full approval, file write and final answer.

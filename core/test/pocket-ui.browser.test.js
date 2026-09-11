@@ -2,7 +2,7 @@
 const { test } = require("node:test"), assert = require("node:assert/strict"), fs = require("fs"), os = require("os"), path = require("path");
 const { startMascotServer } = require("./fixtures/mascot-server");
 const CHROMIUM = process.env.KAI_TEST_CHROMIUM || "/opt/pw-browsers/chromium-1169/chrome-linux/chrome";
-test("Pocket is opt-in, streams audibly before inference completes, preserves effects and stops on hide", { skip: !fs.existsSync(CHROMIUM), timeout: 45000 }, async t => {
+test("Alternative voice selection is preserved; Pocket streams audibly before inference completes, preserves effects and stops on hide", { skip: !fs.existsSync(CHROMIUM), timeout: 45000 }, async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-pocket-ui-")), fixture = await startMascotServer(dir);
   const browser = await require("playwright-core").chromium.launch({ executablePath: CHROMIUM, args: ["--no-sandbox", "--autoplay-policy=no-user-gesture-required"] });
   t.after(async () => { await browser.close(); await fixture.close(); fs.rmSync(dir, { recursive: true, force: true }); });
@@ -102,4 +102,75 @@ test("Missing Pocket voice has a compact download action, progress and retry wit
   const hit = await page.locator("#compact-pocket").evaluate(button => { const r = button.getBoundingClientRect(); return window.__regions.some(b => r.x >= b.x && r.y >= b.y && r.right <= b.x + b.width && r.bottom <= b.y + b.height); });
   assert.equal(hit, true, "Native hit regions include the complete compact action");
   if (process.env.KAI_MASCOT_QA_DIR) await page.screenshot({ path: path.join(process.env.KAI_MASCOT_QA_DIR, "pocket-compact-ready.png") });
+});
+
+
+test("Azelma becomes the installed default once, retries safely, and preserves user choices and unsupported platforms", { skip: !fs.existsSync(CHROMIUM), timeout: 45000 }, async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-azelma-default-")), fixture = await startMascotServer(dir);
+  const browser = await require("playwright-core").chromium.launch({ executablePath: CHROMIUM, args: ["--no-sandbox"] });
+  t.after(async () => { await browser.close(); await fixture.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  for (const scenario of [
+    { name: "new", selected: null, supported: true, expected: "pocket:azelma", downloads: 1 },
+    { name: "old default", selected: "natural:af_bella", supported: true, expected: "pocket:azelma", downloads: 1 },
+    { name: "chosen alternative", selected: "pocket:alba", supported: true, expected: "pocket:alba", downloads: 0 },
+    { name: "already installed", selected: "pocket:azelma", supported: true, available: true, expected: "pocket:azelma", downloads: 0 },
+    { name: "unsupported", selected: null, supported: false, expected: "natural:af_bella", downloads: 0 },
+  ]) {
+    const page = await browser.newPage({ viewport: { width: 660, height: 560 } }), errors = [];
+    page.on("pageerror", e => errors.push(e.message));
+    await page.addInitScript(scenario => {
+      if (!localStorage.getItem("fixture-initialized")) {
+        if (scenario.selected) {
+          localStorage.setItem("kai-mascot-cute-default-v1", "1");
+          localStorage.setItem("kai-mascot-voice-choice", scenario.selected);
+        }
+        localStorage.setItem("fixture-initialized", "1");
+      }
+      window.__setup = { calls: 0, available: !!scenario.available, state: "idle", pct: 0, warms: [], error: "Connection interrupted. Try again." };
+      window.kaiDesktop = {
+        expand: async () => ({}), regions() {}, onEvent(fn) { window.__kaiEvent = fn; },
+        pocketWarm: async voice => { window.__setup.warms.push(voice); },
+        releasePocket: async () => {
+          if (window.__setup.state === "downloading") { window.__setup.state = "error"; window.__setup.paused = true; }
+        },
+        cancelPocketSpeech: async () => {},
+        pocketStatus: async () => ({ supported: scenario.supported, available: window.__setup.available, defaultVoice: "azelma",
+          voices: [{ id: "alba", name: "Alba" }, { id: "azelma", name: "Azelma" }], setup: window.__setup }),
+        pocketSetup: async () => { window.__setup.calls++; window.__setup.state = "downloading"; window.__setup.paused = false; window.__setup.pct = 25; },
+      };
+    }, scenario);
+    await page.goto(fixture.origin + "/mascot.html");
+    await page.waitForFunction(() => document.querySelector("#model").value);
+    assert.equal(await page.inputValue("#voice-choice"), scenario.expected, scenario.name);
+    assert.equal(await page.evaluate(() => window.__setup.calls), scenario.downloads, scenario.name);
+    assert.equal(await page.evaluate(() => window.__setup.warms.length), 0, "Setup leaves voice replies off");
+    assert.equal(fixture.state.transcriptions.length, 0, "Setup does not enable the microphone");
+    if (scenario.name === "new") {
+      assert.equal(await page.locator("#pocket-card").isVisible(), true, "Default setup progress is visible in compact KAI");
+      assert.match(await page.textContent("#pocket-card-copy"), /25%/);
+      await page.evaluate(() => { window.__setup.state = "error"; });
+      await page.waitForFunction(() => document.querySelector("#compact-pocket").textContent === "Retry download");
+      await page.waitForTimeout(1400);
+      assert.equal(await page.evaluate(() => window.__setup.calls), 1, "A failed download does not retry in a loop");
+      await page.click("#compact-pocket");
+      assert.equal(await page.evaluate(() => window.__setup.calls), 2);
+      await page.evaluate(() => window.__kaiEvent({ type: "suspend", value: true }));
+      await page.waitForTimeout(100);
+      assert.equal(await page.evaluate(() => window.__setup.calls), 2, "Hidden KAI never restarts setup");
+      await page.evaluate(() => window.__kaiEvent({ type: "suspend", value: false }));
+      await page.waitForFunction(() => window.__setup.calls === 3);
+      await page.evaluate(() => { window.__setup.available = true; window.__setup.state = "done"; });
+      await page.waitForFunction(() => document.querySelector("#compact-pocket").textContent === "Try Azelma");
+      await page.click("#toggle-chat");
+      await page.click("#read-aloud");
+      await page.waitForFunction(() => window.__setup.warms.includes("azelma"));
+      await page.click("#voice-options");
+      await page.selectOption("#voice-choice", "natural:af_bella");
+      await page.reload(); await page.waitForFunction(() => document.querySelector("#model").value);
+      assert.equal(await page.inputValue("#voice-choice"), "natural:af_bella", "A later manual Bella choice survives reload");
+      assert.equal(await page.evaluate(() => window.__setup.calls), 0, "A later voice choice does not trigger default downloads");
+    }
+    assert.deepEqual(errors, [], scenario.name);
+    await page.close();
+  }
 });

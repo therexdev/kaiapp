@@ -50,6 +50,7 @@ test("Pocket never downloads from status/warm; validates voices, language and te
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-pocket-")); let downloads = 0, workers = 0;
   const m = new PocketVoice({ dir, download: async () => { downloads++; }, workerFactory: () => { workers++; } });
   t.after(() => { m.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  assert.equal(m.status().defaultVoice, "azelma");
   assert.equal(m.status().available, false); await assert.rejects(m.warm(), /Download/);
   await assert.rejects(m.generate({ voice: "alba", text: "안녕하세요" }), /English/);
   await assert.rejects(m.generate({ voice: "../../secret", text: "Hello" }), /Choose/);
@@ -72,7 +73,7 @@ test("Warm-up is shared with generation, native timeout and idle release leave n
   const m = new PocketVoice({ dir: os.tmpdir(), timeoutMs: 100, idleMs: 30, workerFactory: () => {
     worker = new EventEmitter(); worker.postMessage = x => { worker.request = x; }; worker.terminate = () => { worker.killed = true; }; return worker;
   } }); m.status = () => ({ available: true }); t.after(() => m.close());
-  const warm = m.warm(); const generation = m.generate({ voice: "alba", text: "Hi." }); const timedOut = assert.rejects(generation, /too long/); const id = worker.request.id;
+  const warm = m.warm(); assert.equal(worker.request.voice, "azelma", "Default warm-up prepares Azelma"); const generation = m.generate({ voice: "alba", text: "Hi." }); const timedOut = assert.rejects(generation, /too long/); const id = worker.request.id;
   worker.emit("message", { id, done: true }); await warm; await tick(); assert.notEqual(worker.request.id, id);
   await timedOut; assert.equal(worker.killed, true);
   const next = m.warm(); worker.emit("message", { id: worker.request.id, done: true }); await next;

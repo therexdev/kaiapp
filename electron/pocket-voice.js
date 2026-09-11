@@ -22,7 +22,7 @@ class PocketVoice {
   status() {
     const supported = ["win32", "linux"].includes(process.platform) && process.arch === "x64";
     const available = catalog.files.every(f => { try { return fs.statSync(path.join(this.dir, f.path)).size === f.sizeBytes; } catch { return false; } });
-    return { supported, available, voices: catalog.voices, downloadBytes: catalog.files.reduce((n, f) => n + f.sizeBytes, 0), setup: this.setup };
+    return { supported, available, defaultVoice: catalog.defaultVoice, voices: catalog.voices, downloadBytes: catalog.files.reduce((n, f) => n + f.sizeBytes, 0), setup: this.setup };
   }
   async ensure() {
     if (this.installing) return this.installing;
@@ -55,7 +55,7 @@ class PocketVoice {
     child.postMessage = value => child.send(value); return child;
   }
   lease() { clearTimeout(this.idle); this.idle = setTimeout(() => { if (!this.pending) this.cancel(); else this.lease(); }, this.idleMs); this.idle.unref?.(); }
-  async warm(voice = "alba") {
+  async warm(voice = catalog.defaultVoice) {
     validate({ voice }); this.lease();
     if (this.pending) return;
     return this.request({ voice });
