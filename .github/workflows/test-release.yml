@@ -85,8 +85,6 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
-        env:
-          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
       - name: Install Chromium for macOS browser tests
         shell: bash
         run: |
@@ -96,7 +94,9 @@ jobs:
           test -x "$chromium"
           echo "KAI_TEST_CHROMIUM=$chromium" >> "$GITHUB_ENV"
       - name: Verify macOS app behavior
-        run: npm test
+        # Browser fixtures share the macOS audio devices. Run files serially
+        # and install Electron up front so Core cannot download it mid-test.
+        run: node --test --test-concurrency=1 "core/test/*.test.js"
         env:
           KAI_SCHEDULER_URL: http://127.0.0.1:9/scheduler
           KAI_RELAY_URL: http://127.0.0.1:9

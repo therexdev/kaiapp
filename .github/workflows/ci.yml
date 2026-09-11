@@ -177,7 +177,9 @@ jobs:
           test -x "$chromium"
           echo "KAI_TEST_CHROMIUM=$chromium" >> "$GITHUB_ENV"
       - name: Run tests on macOS
-        run: npm test
+        # Browser fixtures share the macOS audio devices; keep the same
+        # serial verification used by the Test publication gate.
+        run: node --test --test-concurrency=1 "core/test/*.test.js"
       - name: Configure Developer ID signing and notarization when available
         shell: bash
         env:
