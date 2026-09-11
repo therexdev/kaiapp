@@ -52,6 +52,47 @@
       this.read = length; this.done = final; return result;
     }
   }
+  // Pocket inference is bursty under CPU load. Once the scheduled audio runs
+  // dry, playing every newly-arrived native chunk immediately turns one pause
+  // into rapid stop/start speech. Keep a small jitter reservoir, and only
+  // resume after an underrun when that reservoir is healthy again. If the
+  // opening production rate cannot outrun playback, retain the complete
+  // sentence instead of beginning a stream that is guaranteed to break up.
+  class PlaybackBuffer {
+    constructor(rate = 24000, { startMs = 750, resumeMs = 650, blockMs = 80, speedMargin = 1.15 } = {}) {
+      this.rate = rate; this.startSamples = Math.round(rate * startMs / 1000);
+      this.resumeSamples = Math.round(rate * resumeMs / 1000); this.blockSamples = Math.round(rate * blockMs / 1000);
+      this.speedMargin = speedMargin; this.parts = []; this.samples = 0; this.started = false;
+      this.waiting = false; this.slow = false; this.pauses = 0; this.firstAt = null;
+    }
+    append(samples) {
+      if (!samples.length) return;
+      this.parts.push(samples); this.samples += samples.length;
+    }
+    drain() {
+      if (!this.samples) return null;
+      const joined = new Float32Array(this.samples); let at = 0;
+      for (const part of this.parts) { joined.set(part, at); at += part.length; }
+      this.parts = []; this.samples = 0; return joined;
+    }
+    push(samples, { ended = false, nowMs = performance.now(), audioNow = 0, next = 0 } = {}) {
+      if (samples?.length) { if (this.firstAt === null) this.firstAt = nowMs; this.append(samples); }
+      if (!this.started) {
+        if (!ended && this.samples < this.startSamples) return null;
+        const elapsed = Math.max(1, nowMs - (this.firstAt ?? nowMs));
+        const producedMs = this.samples / this.rate * 1000;
+        if (!ended && producedMs < elapsed * this.speedMargin) { this.slow = true; return null; }
+        if (this.slow && !ended) return null;
+        this.started = true; return this.drain();
+      }
+      if (next && next < audioNow) {
+        if (!this.waiting) { this.waiting = true; this.pauses++; }
+        if (!ended && this.samples < this.resumeSamples) return null;
+      }
+      if (!ended && !this.waiting && this.samples < this.blockSamples) return null;
+      this.waiting = false; return this.drain();
+    }
+  }
   async function prepare(bridge, request, signal) {
     signal.throwIfAborted();
     const id = crypto.randomUUID(), chunks = [];
@@ -79,7 +120,8 @@
   }
   function play(value, { onAudible, onMetric, contextFactory = () => new AudioContext({ sampleRate: 24000 }) }) {
     const context = contextFactory(), tone = new Tone(24000, value.tone, value.pitch);
-    let next = 0, started = false, closed = false, ended = false, held = false, unsubscribe, interval, buffered = [], bufferedSamples = 0, pauses = 0;
+    const jitter = new PlaybackBuffer(24000);
+    let next = 0, closed = false, ended = false, held = false, unsubscribe, interval;
     const sources = new Set(); let resolve, reject;
     const finished = new Promise((yes, no) => { resolve = yes; reject = no; });
     let audible = false;
@@ -92,22 +134,13 @@
     const check = () => {
       if (closed) return;
       setAudible(!held && context.state === "running" && [...sources].some(s => context.currentTime >= s.kaiStart && context.currentTime < s.kaiEnd));
-      if (ended && !sources.size && !buffered.length) { onMetric?.({ ...value.stats, firstPlaybackMs: value.firstPlaybackMs, pauses }); close(); }
+      if (ended && !sources.size && !jitter.samples) { onMetric?.({ ...value.stats, firstPlaybackMs: value.firstPlaybackMs, pauses: jitter.pauses }); close(); }
     };
-    function schedule(samples) {
+    function schedule(samples, final = false) {
+      samples = jitter.push(samples, { ended: final, nowMs: performance.now(), audioNow: context.currentTime, next });
+      if (!samples) return;
       if (!samples.length) return;
-      if (!started) {
-        buffered.push(samples); bufferedSamples += samples.length;
-        // A 200 ms head start was too small on busy machines: local model
-        // generation or a just-finished connected workflow could briefly
-        // starve inference and make the opening sound chopped before it caught
-        // up. Keep streaming, but begin with enough audio to absorb that jitter.
-        if (bufferedSamples < 24000 * .6 && !ended) return;
-        started = true; const joined = new Float32Array(bufferedSamples); let at = 0;
-        for (const p of buffered) { joined.set(p, at); at += p.length; } buffered = []; samples = joined;
-      }
       const now = context.currentTime;
-      if (next && next < now) pauses++;
       const at = Math.max(next, now + .015);
       if (value.firstPlaybackMs == null) value.firstPlaybackMs = performance.now() - value.start + (at - now) * 1000;
       const buffer = context.createBuffer(1, samples.length, 24000); buffer.copyToChannel(samples, 0);
@@ -119,12 +152,12 @@
       if (closed) return;
       try {
         if (chunk.error) return close(chunk.error);
-        if (chunk.done) { ended = true; schedule(tone.push(new Float32Array(0), true)); if (!started && bufferedSamples) schedule(new Float32Array(1)); check(); }
+        if (chunk.done) { ended = true; schedule(tone.push(new Float32Array(0), true), true); check(); }
         else schedule(tone.push(chunk.samples));
       } catch (error) { close(error); }
     });
     if (!closed) { interval = setInterval(check, 15); context.resume().catch(close); }
     return { finished, cancel: () => close(), hold: v => { held = v; if (v) { setAudible(false); context.suspend().catch(close); } else context.resume().catch(close); } };
   }
-  return { Tone, prepare, play };
+  return { Tone, PlaybackBuffer, prepare, play };
 });

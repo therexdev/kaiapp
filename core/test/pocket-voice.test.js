@@ -1,7 +1,7 @@
 "use strict";
 const { test } = require("node:test"), assert = require("node:assert/strict"), fs = require("fs"), os = require("os"), path = require("path");
 const { EventEmitter } = require("events");
-const { Tone } = require("../../ui/mascot-pocket"), { Queue } = require("../../ui/mascot-speech");
+const { Tone, PlaybackBuffer } = require("../../ui/mascot-pocket"), { Queue } = require("../../ui/mascot-speech");
 const { PocketVoice, validate } = require("../../electron/pocket-voice");
 const tick = () => new Promise(r => setImmediate(r));
 test("Pocket character pitch and tempo are continuous and independent of native chunk boundaries", () => {
@@ -20,6 +20,24 @@ test("Pocket character pitch and tempo are continuous and independent of native 
     assert.ok(Math.abs(result.length / input.length - 1 / tempo) < .0001);
     assert.ok(parts[0].length > 0, "Effects produce audio before the sentence ends");
   }
+});
+test("Pocket buffers slow synthesis and rebuilds a lead after an underrun instead of stuttering", () => {
+  const audio = length => new Float32Array(length).fill(.2);
+  const fast = new PlaybackBuffer(24000);
+  assert.equal(fast.push(audio(9000), { nowMs: 0 }), null);
+  assert.equal(fast.push(audio(9000), { nowMs: 100 }).length, 18000, "fast generation still streams before completion");
+
+  const slow = new PlaybackBuffer(24000);
+  assert.equal(slow.push(audio(6000), { nowMs: 0 }), null);
+  assert.equal(slow.push(audio(6000), { nowMs: 400 }), null);
+  assert.equal(slow.push(audio(6000), { nowMs: 800 }), null, "slower-than-playback synthesis never starts a broken stream");
+  assert.equal(slow.push(audio(6000), { nowMs: 1200, ended: true }).length, 24000, "the completed sentence remains playable");
+
+  assert.equal(fast.push(audio(2400), { nowMs: 800, audioNow: 1, next: .9 }), null, "one late block is retained");
+  assert.equal(fast.pauses, 1);
+  assert.equal(fast.push(audio(12000), { nowMs: 850, audioNow: 1.05, next: .9 }), null, "an underrun does not emit another tiny fragment");
+  assert.equal(fast.push(audio(2400), { nowMs: 900, audioNow: 1.1, next: .9 }).length, 16800, "playback resumes once with a safe lead");
+  assert.equal(fast.pauses, 1, "the entire starvation period is one buffering pause");
 });
 test("Queue plays streaming audio before generation finishes, retains one inference, and Stop discards late chunks", async () => {
   let endGeneration, endPlayback, signal, prepares = 0; const played = [];

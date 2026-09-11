@@ -1,7 +1,7 @@
 ### Reliable connected actions and voice approvals
 
 - Compound requests such as researching local businesses and putting the results into Google Sheets now stay in one connected workflow. Natural phrases such as “look up” and “put in a Sheet” are recognized, public research remains separately reviewed, and ordinary chats no longer inherit the connected planner's long retry loop.
-- Pocket voice now starts with a slightly larger jitter buffer, preventing a busy model or just-finished connected action from chopping the beginning of a spoken reply while retaining streaming playback.
+- Pocket voice now uses an adaptive jitter buffer throughout each sentence. Fast generation still begins early; slower generation waits for a clean sentence, and a mid-reply CPU slowdown rebuilds an audio lead before resuming instead of stuttering through tiny fragments.
 - Direct connected-app requests now expose only the relevant connected-action tools to KAI's planner. An unrelated Brain lookup can no longer replace a Drive or Calendar action, and KAI gives a short failure statement instead of manual instructions when no write actually ran.
 - When KAI must leave the public network for a connected action, it now prefers a configured private OpenAI or Anthropic model over silently selecting a weaker local model. A local model explicitly selected by the user remains selected.
 - Explicit Drive, Calendar and other connected-app requests now begin with actual account discovery. Small local models get a bounded corrective planning pass instead of falling back to a generic “I do not have access” reply after an enabled account was found.
