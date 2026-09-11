@@ -159,7 +159,7 @@ test("main and mascot runtimes retain the attended bridge through an eight-actio
     const question="Make eight objects in my Google Drive";
     const json=window.KaiCompanionClient.toolJSON("local",async()=>({tools:[]}),new AbortController().signal,{question,conversationId:"runtime-"+surface});
     const ask=async()=> { const n=plans++; return JSON.stringify(n>=16 ? {answer:true} : n%2 ? {tool:"connected_history",args:{}} : {tool:"connected_call",args:{connectionId:f.c.id,operationId:"create",body:{name:"item-"+n}}}); };
-    if(surface==="main")await Agents.makeRuntime({json,askModelOnce:ask}).runAgent("Make eight objects","local");
+    if(surface==="main")await Agents.makeRuntime({json,askModelOnce:ask}).runAgent(question,"local");
     else await Mascot.run({question,json,askModel:ask,contextSize:16000});
     assert.equal(f.count(),8);assert.equal(finished,1);assert.equal(f.hub.actions.turn(session.id).status,"finished");
   }

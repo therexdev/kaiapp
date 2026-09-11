@@ -166,7 +166,9 @@ function registerCompanionIPC({ ipcMain, service, origin, getMainWindow, getMasc
   }
   handle("companion:context", false, (_ctx, model, query) => {
     const eligible = service.canUseModel(model) && service.store.available() && !service.store.locked;
-    return { eligible, context: eligible ? service.store.context(String(query || "")) : "" };
+    // null is an eligibility-only check during planning; do not run and
+    // discard a full Brain search on every intermediate model completion.
+    return { eligible, context: eligible && query !== null ? service.store.context(String(query || "")) : "" };
   });
   handle("companion:tools", false, (_ctx, model) => service.toolList(model));
   handle("companion:tool", false, (ctx, name, args, model, sessionId) => service.tool(name, args || {}, model, ctx.confirm, ctx.signal, { owner: ctx.event.sender.id, id: sessionId }));

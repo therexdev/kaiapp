@@ -1,3 +1,11 @@
+### Faster chat and local recall
+
+- Main Chat and desktop KAI now share intent routing. A personal-memory question such as “What is my daughters name?” bypasses the tool planner, web search, memory writes and connected-account sessions, including when the globe is enabled. Ordinary conversation also answers directly.
+- Local memory is retrieved once per store for the final reply, not repeatedly during planning. Family plurals/possessives match reliably; the legacy memory search index is reused until memories change. Model-proposed memory saves require explicit approval and are not available for recall requests.
+- Real actions retain bounded planning and recent conversation context. Connected workflows keep their longer budget and fresh read-after-write verification; unrelated account tools no longer receive an unconditional ranking boost. Repeated discovery, malformed planner output and repeated failures stop sooner.
+- Connected sessions and result polling now start lazily, only for actual connected work. Stop cancels research and recall, and a stopped planning phase cannot start a second answer request. The displayed first-reply time now includes planning and retrieval.
+- Partial connected tasks report actual returned results instead of incorrectly claiming that nothing changed. See [the routing audit, regression coverage and remaining performance checks](CHAT_OPTIMIZATION_2026-09-11.md). Hardware/model latency still needs measurement on the target Windows machine.
+
 ### Reliable connected actions and voice approvals
 
 - Local-business requests now use structured OpenStreetMap place data instead of trying to infer practice names from directory pages and search advertisements. KAI receives spreadsheet-ready names, addresses, phones, websites and source links, keeps those rows through the connected-action plan, and does not count a newly created blank Sheet as completion.

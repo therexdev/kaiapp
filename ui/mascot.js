@@ -735,9 +735,7 @@
         toolActivity = null;
         trace.textContent = phase.trace.map(t => t.tool + " · " + t.status).join(" → ");
         mood("thinking");
-        if (phase.connectedIncomplete) {
-          content = "I found your connected account, but the requested action did not run, so nothing was created or changed. Please choose a stronger local model or a private OpenAI or Anthropic model and try again.";
-        } else {
+        {
           const response = await KaiProviders.chatFetch("/core/chat/completions", {
             method: "POST", headers: { "content-type": "application/json" }, signal: chatAbort.signal,
             body: JSON.stringify({ model, stream: true, ...(phase.privateDesktop ? { kai_private_desktop: true } : {}),

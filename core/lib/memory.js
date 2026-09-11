@@ -30,7 +30,10 @@ const STOP = new Set(
 function tokens(text) {
   return String(text)
     .toLowerCase()
+    .replace(/[’']/g, "")
     .split(/[^a-z0-9]+/)
+    // Normalize common family plurals/possessives, not arbitrary names.
+    .map(w => /^(?:daughter|son|wife|husband|child|mother|father|sister|brother|dog|cat)s$/.test(w) ? w.slice(0, -1) : w)
     .filter((w) => w.length > 1 && !STOP.has(w));
 }
 
@@ -47,6 +50,7 @@ class MemoryStore {
   }
 
   _save() {
+    this._index = null;
     fs.mkdirSync(path.dirname(this.file), { recursive: true });
     const tmp = this.file + ".tmp";
     fs.writeFileSync(tmp, JSON.stringify(this.items, null, 0));
@@ -92,12 +96,16 @@ class MemoryStore {
     const q = new Set(tokens(query));
     if (!q.size || !this.items.length) return [];
     // Document frequency over the (small) corpus for idf weighting.
-    const df = new Map();
-    const docTokens = this.items.map((m) => {
-      const ts = new Set(tokens(m.text));
-      for (const t of ts) df.set(t, (df.get(t) || 0) + 1);
-      return ts;
-    });
+    if (!this._index) {
+      const df = new Map();
+      const docTokens = this.items.map(m => {
+        const ts = new Set(tokens(m.text));
+        for (const t of ts) df.set(t, (df.get(t) || 0) + 1);
+        return ts;
+      });
+      this._index = { df, docTokens };
+    }
+    const { df, docTokens } = this._index;
     const n = this.items.length;
     const now = Date.now();
     const scored = this.items
@@ -116,9 +124,7 @@ class MemoryStore {
   }
 }
 
-/** Wire memory into the unified tool layer. All-local: egress false; reading
- *  is not sensitive, writing is visible in the trace but harmless — still
- *  marked non-sensitive so agents can take notes without nagging. */
+/** All-local retrieval; model-proposed writes require explicit review. */
 function registerMemoryTools(registry, store) {
   registry.register({
     name: "memory_search",
@@ -133,10 +139,10 @@ function registerMemoryTools(registry, store) {
   });
   registry.register({
     name: "memory_save",
-    description: "Remember a short fact for future conversations (e.g. \"prefers Python\", \"timezone is CET\"). One concise fact per call.",
+    description: "Only when the user explicitly asks to remember/save a fact: save one short fact for future conversations. Never use to answer a recall question.",
     params: { text: "the fact to remember" },
     egress: false,
-    sensitive: false,
+    sensitive: true,
     handler: ({ text }) => {
       store.add(text, { source: "agent" });
       return "remembered";

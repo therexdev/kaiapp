@@ -182,7 +182,7 @@ test("Explicit connected requests reject unrelated Brain routing and never inven
   });
   assert.deepEqual(calls.map(c => c.name), ["connected_find", "connected_actions"]);
   assert.equal(result.connectedIncomplete, true);
-  assert.match(result.context, /DID NOT RUN/);
+  assert.match(result.context, /incomplete or unverified/);
   assert.doesNotMatch(result.trace.map(x => x.tool).join(" "), /brain_goals/);
 });
 
@@ -226,7 +226,7 @@ test("Ordinary requests do not inherit the connected planner's long loop", async
     json: async path => path === "/core/tools" ? { tools } : { ok: true, result: "unused" },
     askModel: async () => { plans++; return JSON.stringify({ tool: "web_search", args: { query: "topic-" + plans } }); },
   });
-  assert.equal(plans, 6);
+  assert.equal(plans, 0, "ordinary conversation never invokes a tool planner");
 });
 
 test("Declined tools and cancelled approvals never mutate or retry, even with model-supplied confirmed", async () => {

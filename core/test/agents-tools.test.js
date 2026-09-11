@@ -64,10 +64,11 @@ test("memory: persists across store instances, dedups, searches by relevance", (
   assert.strictEqual(new MemoryStore(dir).list().length, 2, "delete persists");
 });
 
-test("memory tools register as all-local and callable without confirmation", async () => {
+test("memory reads stay local and free; model-proposed saves require approval", async () => {
   const reg = new ToolRegistry({ privacyMode: () => "local-only" });
   registerMemoryTools(reg, new MemoryStore(tmp()));
-  assert.strictEqual(await reg.call("memory_save", { text: "likes espresso" }), "remembered");
+  await assert.rejects(reg.call("memory_save", { text: "likes espresso" }), e => e.needsConfirmation);
+  assert.strictEqual(await reg.call("memory_save", { text: "likes espresso" }, { confirmed: true }), "remembered");
   assert.match(await reg.call("memory_search", { query: "espresso coffee" }), /espresso/);
 });
 

@@ -177,7 +177,7 @@ async function askModelOnce(messages, model) {
     method: "POST",
     headers: { "content-type": "application/json" },
     signal: state.abort?.signal,
-    body: JSON.stringify({ model, stream: false, messages }),
+    body: JSON.stringify({ model, stream: false, max_tokens: KaiProviders.isModel(model) ? 4096 : 900, messages }),
   });
   const j = await r.json().catch(() => null);
   if (!r.ok) throw new Error(j?.error?.message || `Core answered ${r.status}`);
@@ -206,19 +206,20 @@ document.getElementById("btn-web")?.addEventListener("click", () => setWebSearch
  *  hand the model a bounded, cited context block. Deterministic on purpose —
  *  reliable with 4k-context local models, no flaky model-driven tool calls.
  *  Returns { context, citations } or null (caller answers from the model). */
-async function webResearch(query, statusEl) {
+async function webResearch(query, statusEl, signal) {
   const setStatus = (t) => { if (statusEl) statusEl.textContent = t; };
   setStatus("🌐 Searching the web…");
   let search;
   try {
     const r = await fetch("/core/search", {
+      signal,
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ q: query }),
     });
     if (r.status === 403) { setWebSearch(false); setStatus("🌐 Web search is off in Local-Only mode."); return null; }
     search = await r.json();
-  } catch { search = null; }
+  } catch (e) { if (e.name === "AbortError") throw e; search = null; }
   const results = search?.results || [];
   if (!results.length) { setStatus("🌐 No web results — answering from the model."); return null; }
 
@@ -229,13 +230,14 @@ async function webResearch(query, statusEl) {
     setStatus(`🌐 Reading ${cand.title || cand.url}…`);
     try {
       const r = await fetch("/core/fetch", {
+        signal,
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ url: cand.url }),
       });
       const j = await r.json();
       if (j.ok && j.page?.text) { extract = { ...j.page, from: cand }; break; }
-    } catch { /* try the next result */ }
+    } catch (e) { if (e.name === "AbortError") throw e; /* try the next result */ }
   }
 
   // Budget hard: every char here competes with history in a 4k context.
@@ -878,6 +880,7 @@ async function send(replayText) {
   $("btn-send").disabled = true;
   $("btn-stop").hidden = false;
   state.abort = new AbortController();
+  const t0 = performance.now(); // include routing, tools, memory and model load
 
   // 🌐 research first (search → read → answer). The web context is a
   // TRANSIENT turn: it shapes THIS request but never enters state.history —
@@ -957,64 +960,65 @@ async function send(replayText) {
     return;
   }
 
-  if (answerMode !== "chat" || (!replayText && window.kaiCompanionBridge?.session)) {
-    // Research / Agent phase: gather first (multi-round, tool calls), then
-    // the final answer streams through the normal path below. The gathered
-    // context is a TRANSIENT turn — same rule as the 🌐 flow.
-    const status = document.createElement("div");
-    status.className = "web-status";
-    bubble.before(status);
-    try {
-      if (!state.chatId) await saveCurrentChat();
-      const actionHost = document.createElement("div"); bubble.before(actionHost);
-      const connectedJSON = window.KaiCompanionClient?.toolJSON(chatModel, async (url, options) => {
-        const response = await fetch(url, { ...options, signal: state.abort.signal }); return response.json();
-      }, state.abort.signal, { question: text, conversationId: state.chatId || "main-new", host: actionHost });
-      const rt = KaiAgents.makeRuntime({
-        askModelOnce,
-        confirmTool,
-        json: connectedJSON,
-        setStatus: (t) => { status.textContent = t; },
-      });
-      const phase = answerMode === "research" ? await rt.deepResearch(text, chatModel) : await rt.runAgent(text, chatModel, state.history.slice(-5, -1).map(m => m.role + ": " + m.content).join("\n"));
-      if (phase) {
-        webCitations = phase.citations?.length ? phase.citations : null;
-        status.textContent = phase.trace || "";
-        reqHistory = [...state.history.slice(0, -1), { role: "user", content: phase.context }, state.history[state.history.length - 1]];
-      }
-    } catch (e) {
-      status.textContent = `⚠ ${String(e.message || e).slice(0, 140)} — answering without tools.`;
-    } finally {
-      if (!status.textContent) status.remove();
-    }
-  } else if (state.webSearch && !replayText) {
-    const status = document.createElement("div");
-    status.className = "web-status";
-    bubble.before(status);
-    try {
-      const research = await webResearch(text, status);
-      if (research) {
-        webCitations = research.citations;
-        reqHistory = [...state.history.slice(0, -1), { role: "user", content: research.context }, state.history[state.history.length - 1]];
-      }
-    } finally {
-      if (!status.textContent) status.remove();
-    }
-  }
-
-  // Cross-chat memory: quietly bring in the few facts that match this
-  // message. All local, fail-open — a memory hiccup never blocks a chat.
-  let memoryNote = "";
   try {
-    const mr = await fetch(`/core/memory?q=${encodeURIComponent(text.slice(0, 300))}&k=3`);
-    const mj = await mr.json();
-    if (mj?.memories?.length) {
-      memoryNote = "Things you remember about this user from earlier conversations:\n" + mj.memories.map((m) => `- ${m.text}`).join("\n");
+    const turnHistory = state.history.slice(-5, -1).map(m => m.role + ": " + m.content).join("\n");
+    const route = KaiAgents.routeTurn(text, { mode: answerMode, history: turnHistory });
+    if (!route.needsTools) {
+      reqHistory = [{ role: "system", content: KaiAgents.fastContext(route) }, ...state.history];
     }
-  } catch { /* memory is a bonus, never a blocker */ }
+    if (!replayText && (answerMode === "research" || route.needsTools && (route.lane !== "web" || answerMode === "agent"))) {
+      // Research / Agent phase: gather first (multi-round, tool calls), then
+      // the final answer streams through the normal path below. The gathered
+      // context is a TRANSIENT turn — same rule as the 🌐 flow.
+      const status = document.createElement("div");
+      status.className = "web-status";
+      bubble.before(status);
+      try {
+        if (!state.chatId) await saveCurrentChat();
+        const actionHost = document.createElement("div"); bubble.before(actionHost);
+        const connectedJSON = window.KaiCompanionClient?.toolJSON(chatModel, async (url, options) => {
+          const response = await fetch(url, { ...options, signal: state.abort.signal }); return response.json();
+        }, state.abort.signal, { question: text, conversationId: state.chatId || "main-new", host: actionHost });
+        const rt = KaiAgents.makeRuntime({
+          askModelOnce,
+          confirmTool,
+          json: connectedJSON,
+          signal: state.abort.signal,
+          route,
+          setStatus: (t) => { status.textContent = t; },
+        });
+        const phase = answerMode === "research" ? await rt.deepResearch(text, chatModel) : await rt.runAgent(text, chatModel, turnHistory);
+        if (phase) {
+          webCitations = phase.citations?.length ? phase.citations : null;
+          status.textContent = phase.trace || "";
+          reqHistory = [...state.history.slice(0, -1), { role: "user", content: phase.context }, state.history[state.history.length - 1]];
+        }
+      } catch (e) {
+        if (e.name === "AbortError") throw e;
+        status.textContent = `⚠ ${String(e.message || e).slice(0, 140)} — answering without tools.`;
+      } finally {
+        if (!status.textContent) status.remove();
+      }
+    } else if (!replayText && route.lane === "web" && state.webSearch) {
+      const status = document.createElement("div");
+      status.className = "web-status";
+      bubble.before(status);
+      try {
+        const research = await webResearch(text, status, state.abort.signal);
+        if (research) {
+          webCitations = research.citations;
+          reqHistory = [...state.history.slice(0, -1), { role: "user", content: research.context }, state.history[state.history.length - 1]];
+        }
+      } finally {
+        if (!status.textContent) status.remove();
+      }
+    } else if (!replayText && route.lane === "web") {
+      reqHistory = [{ role: "system", content: "No live lookup ran: the web toggle is off. Do not invent current results. Explain that enabling the globe allows this lookup, or answer only the parts supported by existing knowledge." }, ...state.history];
+    }
 
-  const t0 = performance.now();
-  try {
+    // Shared provider enrichment retrieves local memory once, on the final
+    // answer only. Both main Chat and desktop KAI use that same path.
+    state.abort.signal.throwIfAborted();
     const resp = await KaiProviders.chatFetch("/core/chat/completions", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -1027,7 +1031,7 @@ async function send(replayText) {
         // content parts and strips UI-only fields (citations) off the rest.
         messages: toWire(
           (() => {
-            const sys = [personaText(), memoryNote].filter(Boolean).join("\n\n");
+            const sys = personaText();
             return sys ? [{ role: "system", content: sys }, ...reqHistory] : reqHistory;
           })()
         ),

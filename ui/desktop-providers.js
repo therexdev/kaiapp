@@ -24,7 +24,9 @@
   }
   async function chatFetch(url, init) {
     let body = JSON.parse(init.body);
-    if (window.KaiCompanionClient) body = await window.KaiCompanionClient.enrich(body);
+    init.signal?.throwIfAborted();
+    if (window.KaiCompanionClient) body = await window.KaiCompanionClient.enrich(body, init.signal);
+    init.signal?.throwIfAborted();
     if (!isModel(body.model)) return fetch(url, { ...init, body: JSON.stringify(body) });
     if (!bridge) throw new Error("This model is available only in the desktop app.");
     const signal = init.signal;
