@@ -133,7 +133,10 @@ function registerCompanionIPC({ ipcMain, service, origin, getMainWindow, getMasc
       const controller = new AbortController(), sender = event.sender;
       if (jobs.size >= 12) return { ok: false, error: "Finish the current companion operation first." };
       const key = id(), stop = () => controller.abort(), navigate = (_e, _url, _inPlace, main) => { if (main) stop(); };
-      jobs.set(key, { controller, sender }); sender.on("destroyed", stop); sender.on("render-process-gone", stop); sender.on("did-start-navigation", navigate); window.on("hide", stop);
+      // Hiding/minimizing the companion stops its microphone and speech in the
+      // renderer, but an already-approved text/action job may finish in the
+      // background. Destruction, navigation and explicit Cancel still abort.
+      jobs.set(key, { controller, sender }); sender.on("destroyed", stop); sender.on("render-process-gone", stop); sender.on("did-start-navigation", navigate);
       const confirm = async (name, details, permission = null) => {
         controller.signal.throwIfAborted(); if (approvalPending || !window.isVisible()) return false;
         const grantKey = permission && typeof permission.key === "string" && /^[a-z0-9:_-]{1,500}$/i.test(permission.key) ? permission.key : null;
@@ -158,7 +161,7 @@ function registerCompanionIPC({ ipcMain, service, origin, getMainWindow, getMasc
       };
       try { return { ok: true, result: await fn({ event, window, signal: controller.signal, confirm }, ...args) }; }
       catch (e) { return { ok: false, error: e instanceof CompanionError ? e.message : e.name === "AbortError" ? "Operation stopped." : "The companion operation failed. Check the saved settings and try again." }; }
-      finally { jobs.delete(key); sender.removeListener("destroyed", stop); sender.removeListener("render-process-gone", stop); sender.removeListener("did-start-navigation", navigate); window.removeListener("hide", stop); }
+      finally { jobs.delete(key); sender.removeListener("destroyed", stop); sender.removeListener("render-process-gone", stop); sender.removeListener("did-start-navigation", navigate); }
     });
   }
   handle("companion:context", false, (_ctx, model, query) => {
@@ -179,9 +182,9 @@ function registerCompanionIPC({ ipcMain, service, origin, getMainWindow, getMasc
       const sender = ctx.event.sender, window = ctx.window;
       const stop = () => { service.actions.stop(owner); cleanup(); };
       const navigate = (_e, _url, _inPlace, main) => { if (main) stop(); };
-      const cleanup = () => { sender.removeListener("destroyed", stop); sender.removeListener("render-process-gone", stop); sender.removeListener("did-start-navigation", navigate); window.removeListener("hide", stop); sessions.delete(owner); };
+      const cleanup = () => { sender.removeListener("destroyed", stop); sender.removeListener("render-process-gone", stop); sender.removeListener("did-start-navigation", navigate); sessions.delete(owner); };
       const result = service.actions.begin(owner, input.model, input);
-      sender.on("destroyed", stop); sender.on("render-process-gone", stop); sender.on("did-start-navigation", navigate); window.on("hide", stop); sessions.set(owner, cleanup);
+      sender.on("destroyed", stop); sender.on("render-process-gone", stop); sender.on("did-start-navigation", navigate); sessions.set(owner, cleanup);
       return result;
     }
     if (operation === "finish") { const result = service.actions.finish(owner, input.id, input.cancel === true); sessions.get(owner)?.(); return result; }

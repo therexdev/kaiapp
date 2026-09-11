@@ -3,7 +3,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert");
 
-const { searchWeb, fetchPage, isPublicHttpUrl, parseDdgHtml, parseBingRss } = require("../lib/websearch");
+const { searchWeb, searchBusinesses, fetchPage, isPublicHttpUrl, parseDdgHtml, parseBingRss } = require("../lib/websearch");
 
 /*
  * Web search runs Core-side behind the §7 privacy gate. These tests use an
@@ -22,6 +22,9 @@ const DDG_FIXTURE = `
 </div>
 <div class="result">
   <a rel="nofollow" class="result__a" href="http://127.0.0.1:41100/core/keys">Evil local</a>
+</div>
+<div class="result">
+  <a rel="nofollow" class="result__a" href="https://duckduckgo.com/y.js?ad_provider=bingv7aa&amp;u3=https%3A%2F%2Fwww.bing.com%2Faclick">Sponsored redirect</a>
 </div>`;
 
 test("websearch: DDG parser extracts titles, decodes redirect URLs, drops private targets", () => {
@@ -30,6 +33,25 @@ test("websearch: DDG parser extracts titles, decodes redirect URLs, drops privat
   assert.strictEqual(results[0].url, "https://koinos.io/whitepaper", "uddg redirect decoded to the real URL");
   assert.strictEqual(results[0].title, "Koinos Whitepaper", "tags stripped from titles");
   assert.ok(results[0].snippet.includes("free-to-use"), "snippets ride along");
+});
+
+test("websearch: structured local business lookup returns named spreadsheet rows", async () => {
+  const calls = [];
+  const fetchImpl = async (url, init = {}) => {
+    calls.push([String(url), init.method || "GET", init.body || ""]);
+    if (String(url).includes("nominatim")) return new Response(JSON.stringify([{ display_name: "Omaha, Douglas County, Nebraska, USA", boundingbox: ["41.20", "41.35", "-96.10", "-95.85"] }]), { status: 200 });
+    return new Response(JSON.stringify({ elements: [
+      { type: "node", id: 1, tags: { name: "Dundee Dental", "addr:housenumber": "5002", "addr:street": "Underwood Ave", "addr:city": "Omaha", "addr:state": "NE", "addr:postcode": "68132", phone: "+1 402 555 0100", website: "https://dundee.example" } },
+      { type: "way", id: 2, tags: { name: "Midtown Dental", "contact:phone": "+1 402 555 0101" } },
+    ] }), { status: 200 });
+  };
+  const result = await searchBusinesses("dentists", "Omaha, Nebraska", { fetchImpl, limit: 10 });
+  assert.equal(result.rows.length, 2);
+  assert.deepEqual(result.columns, ["Name", "Address", "Phone", "Website", "Source"]);
+  assert.match(result.rows[0].address, /5002 Underwood Ave, Omaha, NE, 68132/);
+  assert.equal(result.rows[0].sourceUrl, "https://www.openstreetmap.org/node/1");
+  assert.match(calls[1][2], /amenity%22%3D%22dentist/);
+  await assert.rejects(() => searchBusinesses("spaceship dealers", "Omaha", { fetchImpl }), /not supported/);
 });
 
 test("websearch: falls back to Bing full-web search, then Wikipedia", async () => {

@@ -189,10 +189,12 @@ test("Explicit connected requests reject unrelated Brain routing and never inven
 test("Research then put results in a Google Sheet stays in the connected workflow", async () => {
   const question = "Can you look up some dentists in Omaha, Nebraska and put them in a Google sheet for me?";
   const calls = [], outputs = [
-    JSON.stringify({ tool: "connected_research", args: { operation: "search", query: "dentists in Omaha Nebraska" } }),
+    JSON.stringify({ tool: "connected_research", args: { operation: "businesses", category: "dentists", location: "Omaha, Nebraska", limit: 12 } }),
     JSON.stringify({ tool: "connected_actions", args: { connectionId: "sheets", query: "create spreadsheet rows" } }),
     JSON.stringify({ tool: "connected_describe", args: { connectionId: "sheets", operationId: "create_sheet" } }),
-    JSON.stringify({ tool: "connected_call", args: { connectionId: "sheets", operationId: "create_sheet", arguments: { title: "Omaha Dentists", rows: [["Name"], ["Dundee Dental"]] } } }),
+    JSON.stringify({ tool: "connected_call", args: { connectionId: "sheets", operationId: "create_sheet", arguments: { title: "Omaha Dentists" } } }),
+    JSON.stringify({ tool: "connected_describe", args: { connectionId: "sheets", operationId: "write_rows" } }),
+    JSON.stringify({ tool: "connected_call", args: { connectionId: "sheets", operationId: "write_rows", arguments: { spreadsheet_id: "sheet-1", values: [["Name", "Address", "Phone", "Website", "Source"], ["Dundee Dental", "5002 Underwood Ave, Omaha, NE", "402-555-0100", "https://dundee.example", "OpenStreetMap"]] } } }),
     JSON.stringify({ answer: true }),
   ];
   const tools = ["connected_find", "connected_actions", "connected_describe", "connected_call", "connected_research", "brain_goals", "web_search"].map(name => ({ name, description: name, params: {}, conversationAction: name.startsWith("connected_") }));
@@ -201,10 +203,10 @@ test("Research then put results in a Google Sheet stays in the connected workflo
       if (path === "/core/tools") return { tools };
       const call = JSON.parse(options.body); calls.push(call);
       if (call.name === "connected_find") return { ok: true, result: JSON.stringify({ accounts: [{ id: "sheets", name: "Google Sheets", useInChat: true, selectedActions: 1, enabled: true }] }) };
-      if (call.name === "connected_research") return { ok: true, result: JSON.stringify({ results: [{ name: "Dundee Dental", url: "https://dentist.example/dundee" }] }) };
-      if (call.name === "connected_actions") return { ok: true, result: JSON.stringify([{ id: "create_sheet", name: "Create spreadsheet", readOnly: false }]) };
-      if (call.name === "connected_describe") return { ok: true, result: JSON.stringify({ action: { id: "create_sheet", schema: { properties: { title: { type: "string" }, rows: { type: "array" } } } } }) };
-      return { ok: true, result: JSON.stringify({ status: "returned", data: { id: "sheet-1", title: "Omaha Dentists" }, links: ["https://docs.google.com/spreadsheets/d/sheet-1"] }) };
+      if (call.name === "connected_research") return { ok: true, result: JSON.stringify({ columns: ["Name", "Address", "Phone", "Website", "Source"], rows: [{ name: "Dundee Dental", address: "5002 Underwood Ave, Omaha, NE", phone: "402-555-0100", website: "https://dundee.example", source: "OpenStreetMap" }] }) };
+      if (call.name === "connected_actions") return { ok: true, result: JSON.stringify([{ id: "create_sheet", name: "Create spreadsheet", readOnly: false }, { id: "write_rows", name: "Write rows", readOnly: false }]) };
+      if (call.name === "connected_describe") return { ok: true, result: JSON.stringify({ action: { id: call.args.operationId, schema: { type: "object" } } }) };
+      return { ok: true, result: JSON.stringify({ status: "returned", data: call.args.operationId === "create_sheet" ? { id: "sheet-1", title: "Omaha Dentists" } : { updatedRows: 2 }, links: ["https://docs.google.com/spreadsheets/d/sheet-1"] }) };
     },
     askModel: async messages => {
       assert.match(messages[0].content, /use connected_research/i);
@@ -212,7 +214,7 @@ test("Research then put results in a Google Sheet stays in the connected workflo
       return outputs.shift();
     },
   });
-  assert.deepEqual(calls.map(c => c.name), ["connected_find", "connected_research", "connected_actions", "connected_describe", "connected_call"]);
+  assert.deepEqual(calls.map(c => c.name), ["connected_find", "connected_research", "connected_actions", "connected_describe", "connected_call", "connected_describe", "connected_call"]);
   assert.equal(result.connectedIncomplete, false);
   assert.match(result.context, /sheet-1/);
 });

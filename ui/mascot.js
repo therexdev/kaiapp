@@ -824,9 +824,13 @@
       await poll();
     } catch (error) { notice(error.message); $("install-voice").disabled = false; }
   }
-  function suspend(value) {
+  function suspend(value, cancelTask = false) {
     suspended = !!value; document.body.classList.toggle("suspended", suspended);
-    if (suspended) { clearTimeout(pocketTimer); bridge?.releasePocket?.(); endDrag({ type: "pointercancel" }); clearTimeout(landingTimer); document.body.classList.remove("landing", "perch-target"); chatAbort?.abort(); bridge?.cancelAction?.(); stopWake(); stopSpeech(); }
+    if (suspended) {
+      clearTimeout(pocketTimer); bridge?.releasePocket?.(); endDrag({ type: "pointercancel" }); clearTimeout(landingTimer); document.body.classList.remove("landing", "perch-target");
+      if (cancelTask) { chatAbort?.abort(); bridge?.cancelAction?.(); }
+      stopWake(); stopSpeech();
+    }
     else { wake(); loadPocket(); warmSpeech(); }
   }
   function main(view) {
@@ -980,7 +984,7 @@
   window.addEventListener("resize", regions);
   $("conversation").addEventListener("animationend", regions);
   document.addEventListener("visibilitychange", () => suspend(document.hidden));
-  window.addEventListener("beforeunload", () => { suspend(true); clearTimeout(setupTimer); clearTimeout(speechSetupTimer); });
+  window.addEventListener("beforeunload", () => { suspend(true, true); clearTimeout(setupTimer); clearTimeout(speechSetupTimer); });
   // setShape clips pixels as well as mouse input on Windows. Keep every visible
   // surface's native region current when labels, Stop or notices change size.
   const regionObserver = new ResizeObserver(regions);

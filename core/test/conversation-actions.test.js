@@ -165,7 +165,7 @@ test("main and mascot runtimes retain the attended bridge through an eight-actio
   }
 });
 
-test("attended session is revoked on hide and cannot be resumed by a different frame/window", async t => {
+test("attended session survives minimize, but another frame and explicit cancellation stay blocked", async t => {
   const {EventEmitter}=require("events"),f=fixture(t),handlers=new Map();
   const wc=new EventEmitter();wc.id=50;wc.mainFrame={url:"http://127.0.0.1:41100/"};wc.getURL=()=>wc.mainFrame.url;wc.isDestroyed=()=>false;
   const win=new EventEmitter();win.webContents=wc;win.isDestroyed=()=>false;win.isVisible=()=>true;
@@ -173,7 +173,8 @@ test("attended session is revoked on hide and cannot be resumed by a different f
   const event={sender:wc,senderFrame:wc.mainFrame};
   const s=await handlers.get("companion:session")(event,"begin",{model:"local",question:"Create",conversationId:"ui"});assert.equal(s.ok,true);
   await assert.rejects(handlers.get("companion:session")({...event,senderFrame:{url:wc.mainFrame.url}},"begin",{model:"local",question:"bad"}),/denied/);
-  win.emit("hide");const r=await handlers.get("companion:tool")(event,"connected_call",{connectionId:f.c.id,operationId:"create"},"local",s.result.id);assert.equal(r.ok,false);assert.equal(f.count(),0);
+  win.emit("hide");const r=await handlers.get("companion:tool")(event,"connected_call",{connectionId:f.c.id,operationId:"create"},"local",s.result.id);assert.equal(r.ok,true);assert.equal(f.count(),1);
+  await handlers.get("companion:cancel")(event);const stopped=await handlers.get("companion:session")(event,"status",{id:s.result.id,model:"local"});assert.equal(stopped.ok,false);
 });
 
 test("retention caps keep old uncertain receipts so a later request cannot silently repeat them", async t => {

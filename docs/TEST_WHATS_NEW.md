@@ -1,5 +1,8 @@
 ### Reliable connected actions and voice approvals
 
+- Local-business requests now use structured OpenStreetMap place data instead of trying to infer practice names from directory pages and search advertisements. KAI receives spreadsheet-ready names, addresses, phones, websites and source links, keeps those rows through the connected-action plan, and does not count a newly created blank Sheet as completion.
+- DuckDuckGo and Bing advertisement/tracking redirects are excluded from search results and citations.
+- Minimizing or hiding KAI stops microphone capture and speech but no longer cancels an active text reply or an already-approved connected action. Stop, closing the window and navigation still cancel; an unapproved action still waits for visible review rather than running invisibly.
 - Public research now falls back from DuckDuckGo to Bing's compact search feed before the narrower Wikipedia fallback, uses browser-compatible request headers, recognizes block/challenge pages, and tries more independent sources instead of letting one inaccessible site derail the answer.
 - Approval dialogs for public research and a specific connected-account action now offer **Always allow this action**. The grant is encrypted locally, stays scoped to that capability and account/action revision, and can be revoked under Connections → Connection settings.
 - Compound requests such as researching local businesses and putting the results into Google Sheets now stay in one connected workflow. Natural phrases such as “look up” and “put in a Sheet” are recognized, public research remains separately reviewed, and ordinary chats no longer inherit the connected planner's long retry loop.

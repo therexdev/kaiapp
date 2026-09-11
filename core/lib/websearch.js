@@ -26,6 +26,53 @@ const BROWSER_HEADERS = {
   accept: "text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5",
   "accept-language": "en-US,en;q=0.8",
 };
+const JSON_HEADERS = {
+  "user-agent": "Koinos-AI/0.54 (+https://github.com/therexdev/kaiapp)",
+  accept: "application/json",
+};
+
+// Deliberately fixed mappings: model text never becomes an Overpass query.
+// These cover the common local-business requests where ordinary web result
+// pages are least reliable and most likely to return ads or directory shells.
+const BUSINESS_TAGS = [
+  [/(?:dentist|dental)/, ["amenity", "dentist"]],
+  [/(?:doctor|physician|medical clinic)/, ["amenity", "doctors"]],
+  [/(?:pharmacy|drugstore)/, ["amenity", "pharmacy"]],
+  [/(?:veterinar|\bvet\b)/, ["amenity", "veterinary"]],
+  [/(?:restaurant|place to eat)/, ["amenity", "restaurant"]],
+  [/(?:coffee|cafe)/, ["amenity", "cafe"]],
+  [/(?:bar|pub)/, ["amenity", "bar"]],
+  [/(?:hotel|motel|lodging)/, ["tourism", "hotel"]],
+  [/(?:grocery|supermarket)/, ["shop", "supermarket"]],
+  [/(?:hair salon|hairdresser|barber)/, ["shop", "hairdresser"]],
+  [/(?:gym|fitness)/, ["leisure", "fitness_centre"]],
+  [/(?:auto repair|car repair|mechanic)/, ["shop", "car_repair"]],
+  [/(?:lawyer|law firm|attorney)/, ["office", "lawyer"]],
+  [/(?:accountant|accounting)/, ["office", "accountant"]],
+  [/(?:real estate|realtor)/, ["office", "estate_agent"]],
+];
+const geocodeCache = new Map();
+let geocodeQueue = Promise.resolve(), lastGeocodeAt = 0;
+
+async function geocodePlace(place, fetchImpl, timeoutMs, endpoint) {
+  const key = endpoint + "\n" + place.toLowerCase(), cached = geocodeCache.get(key);
+  if (cached && cached.at > Date.now() - 24 * 60 * 60 * 1000) return cached.value;
+  const task = geocodeQueue.catch(() => {}).then(async () => {
+    const again = geocodeCache.get(key);
+    if (again && again.at > Date.now() - 24 * 60 * 60 * 1000) return again.value;
+    const wait = Math.max(0, 1000 - (Date.now() - lastGeocodeAt));
+    if (wait) await new Promise(resolve => setTimeout(resolve, wait));
+    const url = endpoint + "?format=jsonv2&limit=1&addressdetails=1&q=" + encodeURIComponent(place);
+    const response = await fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs), headers: JSON_HEADERS, redirect: "error" });
+    lastGeocodeAt = Date.now();
+    if (!response.ok) throw new Error(`place lookup failed: http ${response.status}`);
+    const value = await response.json();
+    geocodeCache.set(key, { at: Date.now(), value });
+    return value;
+  });
+  geocodeQueue = task;
+  return task;
+}
 
 /** Decode HTML entities the search providers actually emit. */
 function unescapeHtml(s) {
@@ -246,10 +293,19 @@ function parseDdgHtml(html) {
       }
     }
     if (url.startsWith("//")) url = "https:" + url;
-    if (!isPublicHttpUrl(url)) continue;
+    if (!isPublicHttpUrl(url) || isSearchProviderTrackingUrl(url)) continue;
     out.push({ title: stripTags(m[2]).slice(0, 120), url: url.slice(0, 500), snippet: (snippets[out.length] || "").slice(0, 300) });
   }
   return out;
+}
+
+function isSearchProviderTrackingUrl(raw) {
+  try {
+    const u = new URL(raw), host = u.hostname.replace(/^www\./, "").toLowerCase();
+    if (host.endsWith("duckduckgo.com") && (/^\/(?:y\.js|l\/)/.test(u.pathname) || u.searchParams.has("ad_provider"))) return true;
+    if (host.endsWith("bing.com") && /^\/(?:aclick|ck\/a)/.test(u.pathname)) return true;
+    return false;
+  } catch { return true; }
 }
 
 /** Bing's keyless RSS endpoint is deliberately simple and is a useful
@@ -261,10 +317,65 @@ function parseBingRss(xml) {
   while ((item = itemRe.exec(String(xml))) !== null && out.length < MAX_RESULTS) {
     const field = name => stripTags((item[1].match(new RegExp(`<${name}[^>]*>([\\s\\S]*?)<\\/${name}>`, "i")) || [])[1] || "");
     const url = field("link");
-    if (!isPublicHttpUrl(url)) continue;
+    if (!isPublicHttpUrl(url) || isSearchProviderTrackingUrl(url)) continue;
     out.push({ title: field("title").slice(0, 120), url: url.slice(0, 500), snippet: field("description").slice(0, 300) });
   }
   return out;
+}
+
+function businessAddress(tags = {}) {
+  const street = [tags["addr:housenumber"], tags["addr:street"]].filter(Boolean).join(" ");
+  return [street, tags["addr:city"], tags["addr:state"], tags["addr:postcode"]].filter(Boolean).join(", ");
+}
+
+/** Return named local businesses as structured, spreadsheet-ready rows.
+ * Nominatim resolves the user-supplied place to a bounding box; Overpass then
+ * reads a fixed OSM category within that box. This is one geocode plus one
+ * data query, never a scrape of ad-heavy directory pages. */
+async function searchBusinesses(category, location, { fetchImpl = fetch, timeoutMs = 14000, limit = 12, nominatimUrl, overpassUrls } = {}) {
+  const wanted = String(category || "").trim().toLowerCase().slice(0, 100);
+  const place = String(location || "").trim().slice(0, 200);
+  const match = BUSINESS_TAGS.find(([pattern]) => pattern.test(wanted));
+  if (!match) throw new Error("That business category is not supported by structured local search yet; use ordinary web search.");
+  if (!place) throw new Error("A city or area is required for local business search.");
+  const count = Math.max(1, Math.min(20, Number(limit) || 12));
+  const geocoder = nominatimUrl || process.env.KAI_NOMINATIM_URL || "https://nominatim.openstreetmap.org/search";
+  const places = await geocodePlace(place, fetchImpl, timeoutMs, geocoder);
+  if (!Array.isArray(places) || !places[0]?.boundingbox) throw new Error("The requested location could not be resolved.");
+  const box = places[0].boundingbox.map(Number);
+  if (box.length !== 4 || box.some(n => !Number.isFinite(n))) throw new Error("The place lookup returned an invalid boundary.");
+  const [key, value] = match[1];
+  const query = `[out:json][timeout:12];nwr["${key}"="${value}"]["name"](${box[0]},${box[2]},${box[1]},${box[3]});out center tags ${count * 3};`;
+  let response, lastError;
+  const configured = String(process.env.KAI_OVERPASS_URLS || "").split(",").map(x => x.trim()).filter(Boolean);
+  for (const endpoint of overpassUrls || (configured.length ? configured : ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"])) {
+    try {
+      response = await fetchImpl(endpoint, { method: "POST", signal: AbortSignal.timeout(timeoutMs), headers: { ...JSON_HEADERS, "content-type": "application/x-www-form-urlencoded;charset=UTF-8" }, body: "data=" + encodeURIComponent(query), redirect: "error" });
+      if (response.ok) break;
+      lastError = new Error(`business directory failed: http ${response.status}`);
+    } catch (e) { lastError = e; }
+    response = null;
+  }
+  if (!response) throw lastError || new Error("The business directory is unavailable.");
+  const data = await response.json(), rows = [], seen = new Set();
+  for (const item of Array.isArray(data?.elements) ? data.elements : []) {
+    const tags = item?.tags || {}, name = String(tags.name || "").trim();
+    if (!name) continue;
+    const address = businessAddress(tags), dedupe = (name + "|" + address).toLowerCase();
+    if (seen.has(dedupe)) continue;
+    seen.add(dedupe);
+    rows.push({
+      name: name.slice(0, 160),
+      address: address.slice(0, 300),
+      phone: String(tags["contact:phone"] || tags.phone || "").slice(0, 100),
+      website: String(tags["contact:website"] || tags.website || "").slice(0, 500),
+      category: wanted,
+      source: "OpenStreetMap",
+      sourceUrl: `https://www.openstreetmap.org/${item.type}/${item.id}`,
+    });
+    if (rows.length >= count) break;
+  }
+  return { location: places[0].display_name || place, category: wanted, columns: ["Name", "Address", "Phone", "Website", "Source"], rows, attribution: "Business data © OpenStreetMap contributors", sourceUrl: "https://www.openstreetmap.org/copyright" };
 }
 
 async function searchWeb(q, { fetchImpl = fetch, timeoutMs = FETCH_TIMEOUT_MS, ddgUrl, bingUrl, wikiUrl } = {}) {
@@ -370,4 +481,4 @@ async function fetchPage(url, { fetchImpl = fetch, timeoutMs = FETCH_TIMEOUT_MS,
   return { title, url: target, text };
 }
 
-module.exports = { searchWeb, fetchPage, isPublicHttpUrl, isPrivateAddress, assertPublicTarget, parseDdgHtml, parseBingRss, publicPageRequest };
+module.exports = { searchWeb, searchBusinesses, fetchPage, isPublicHttpUrl, isPrivateAddress, assertPublicTarget, parseDdgHtml, parseBingRss, isSearchProviderTrackingUrl, publicPageRequest };
