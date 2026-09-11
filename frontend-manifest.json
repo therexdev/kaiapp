@@ -1,0 +1,315 @@
+{
+  "version": "0.54.4",
+  "sourceCommit": "072f16edb449731795a773646cb1b7c0ce940823",
+  "repository": "therexdev/kaiapp",
+  "files": [
+    {
+      "path": "ui/COMPOSIO-CATALOG-LICENSE.txt",
+      "gitBlobSha": "fa85d0c3102931030d424d6883b11be98790608a"
+    },
+    {
+      "path": "ui/agent-network.css",
+      "gitBlobSha": "f52938f9ca653f03d39665d0fbfdd6728e0967fd"
+    },
+    {
+      "path": "ui/agent-network.js",
+      "gitBlobSha": "98748684bf4a94e3130a4e534c980b63f747b213"
+    },
+    {
+      "path": "ui/agents.js",
+      "gitBlobSha": "8ec588d8106cbd042fda3bceca9a3fecae570191"
+    },
+    {
+      "path": "ui/app-extras.js",
+      "gitBlobSha": "f7c3a7264633aca19f8ad62497cca7ee02991c3a"
+    },
+    {
+      "path": "ui/app-navigation.js",
+      "gitBlobSha": "edc5900c2429b87deba2b9c5a54ca736d20bb32d"
+    },
+    {
+      "path": "ui/app.js",
+      "gitBlobSha": "503f48c735e54bd44027c3f6394b7d82f78c959f"
+    },
+    {
+      "path": "ui/assets/connections/README.md",
+      "gitBlobSha": "87e6037a5d9ce9d9728dac5d523695aa9d4c3aa5"
+    },
+    {
+      "path": "ui/assets/connections/airtable.svg",
+      "gitBlobSha": "0efc6882bca13adfc3d31287bec5fa737973a57f"
+    },
+    {
+      "path": "ui/assets/connections/asana.svg",
+      "gitBlobSha": "53e7d08c517ad800ed2efa74bc0e162241c3af9a"
+    },
+    {
+      "path": "ui/assets/connections/clickup.svg",
+      "gitBlobSha": "b1fec301c2659c85464bdc84766e5a765b2d44f7"
+    },
+    {
+      "path": "ui/assets/connections/discord.svg",
+      "gitBlobSha": "56026a9425ee3d457acc1d86f85e02475b0687db"
+    },
+    {
+      "path": "ui/assets/connections/dropbox.svg",
+      "gitBlobSha": "693bf362584d11ee8470571cc528226fcfe856d2"
+    },
+    {
+      "path": "ui/assets/connections/figma.svg",
+      "gitBlobSha": "efb0582b1ce7ed9923957538c71eb7a9c0177dea"
+    },
+    {
+      "path": "ui/assets/connections/github.svg",
+      "gitBlobSha": "13604591a072c839cc1807e8f158f8a8ccd302ee"
+    },
+    {
+      "path": "ui/assets/connections/gmail.svg",
+      "gitBlobSha": "5fc6a097dbbc525b9fac369e3474723920fb5227"
+    },
+    {
+      "path": "ui/assets/connections/googlecalendar.svg",
+      "gitBlobSha": "a2d01b6d5e47717fdf6d5d40207f0650779261da"
+    },
+    {
+      "path": "ui/assets/connections/googledocs.svg",
+      "gitBlobSha": "c421b5aaac6014a1e3176c94a21dd6ab1955a51d"
+    },
+    {
+      "path": "ui/assets/connections/googledrive.svg",
+      "gitBlobSha": "2197b52a5aa6206dc51598cb23315b68eeae962a"
+    },
+    {
+      "path": "ui/assets/connections/googlesheets.svg",
+      "gitBlobSha": "05b777355ada24d8001b0cbc5f345a296efe7b3c"
+    },
+    {
+      "path": "ui/assets/connections/hubspot.svg",
+      "gitBlobSha": "c712514e0c9563eba293560799bdbc68b94912f0"
+    },
+    {
+      "path": "ui/assets/connections/linear.svg",
+      "gitBlobSha": "386405cbe1910c81c76394b07fde1887c9d44b5f"
+    },
+    {
+      "path": "ui/assets/connections/microsoft_teams.svg",
+      "gitBlobSha": "22930ac9049e3554db0a610f89c618a37fc70837"
+    },
+    {
+      "path": "ui/assets/connections/notion.svg",
+      "gitBlobSha": "03ffc8d3f516cb8c3b3b4425c1a21ff556bffa00"
+    },
+    {
+      "path": "ui/assets/connections/outlook.svg",
+      "gitBlobSha": "0c55232d9f46bc17f8ba99ceba5f2597c11e1fbc"
+    },
+    {
+      "path": "ui/assets/connections/salesforce.svg",
+      "gitBlobSha": "9174974dd95e0e9b673c0702f5d75fcedcababa5"
+    },
+    {
+      "path": "ui/assets/connections/shopify.svg",
+      "gitBlobSha": "fe77f585b98a0ae74efd3dc447c2f168ac02adef"
+    },
+    {
+      "path": "ui/assets/connections/slack.svg",
+      "gitBlobSha": "dd72b92723527b79c9b165449b7a6dd82758e578"
+    },
+    {
+      "path": "ui/assets/connections/spotify.svg",
+      "gitBlobSha": "58014737a0f3e63998c797a6eac1b81d9756567f"
+    },
+    {
+      "path": "ui/assets/connections/trello.svg",
+      "gitBlobSha": "d29eea0796a1aa9a8d71c45075aebd6422b45630"
+    },
+    {
+      "path": "ui/assets/connections/youtube.svg",
+      "gitBlobSha": "4fb3a1d78c6480cdf27c9129b1c3ab83230104b9"
+    },
+    {
+      "path": "ui/assets/connections/zoom.svg",
+      "gitBlobSha": "edac2bc491ac4f021b6a40f7bd814b661efa3236"
+    },
+    {
+      "path": "ui/assets/kai-character.png",
+      "gitBlobSha": "3a001bd9ed278c08eed1af117e62e8afd4550b5b"
+    },
+    {
+      "path": "ui/assets/kai-voice-hello.wav",
+      "gitBlobSha": "9ef57bae21fe5062a84e4c2f187a6753d2e92d9c"
+    },
+    {
+      "path": "ui/audio-wav.js",
+      "gitBlobSha": "95499ad35727c40710e02addd132a32094caaf4f"
+    },
+    {
+      "path": "ui/brain.css",
+      "gitBlobSha": "220579564883cfba8e995d1a4a7b2e17580a5647"
+    },
+    {
+      "path": "ui/brain.js",
+      "gitBlobSha": "e5142ea001e7b17103cd67dfeda1f5924fcc85c3"
+    },
+    {
+      "path": "ui/brand-mark.svg",
+      "gitBlobSha": "c09d925138ddeb447d684b6cb98f238808279310"
+    },
+    {
+      "path": "ui/brand.js",
+      "gitBlobSha": "ae5429f76a6c3d85b917e2516e3adceb04287ef6"
+    },
+    {
+      "path": "ui/code-view.js",
+      "gitBlobSha": "85b6dc1f9fc127bb9be3e35f5cc598fe3118a6b4"
+    },
+    {
+      "path": "ui/companion-client.js",
+      "gitBlobSha": "63193920c69ac2a6b2aad9e98f97e85694631687"
+    },
+    {
+      "path": "ui/companion-hub.js",
+      "gitBlobSha": "ae694e2bb9eede5334555d57fc9815c0441e9f26"
+    },
+    {
+      "path": "ui/computer-tools.js",
+      "gitBlobSha": "67916251ae32586b53b8b66685ea138ad8b8c701"
+    },
+    {
+      "path": "ui/connection-catalog.js",
+      "gitBlobSha": "489b16b647a49e77c2b123ed85dba2fe703c4ad4"
+    },
+    {
+      "path": "ui/connection-profiles.js",
+      "gitBlobSha": "cc61ad1551bcd6fbdef267ca4550f54f56088256"
+    },
+    {
+      "path": "ui/connections.js",
+      "gitBlobSha": "be8a46f56c833b5f11f3f7f1a41764a842ef1c7f"
+    },
+    {
+      "path": "ui/desktop-providers.js",
+      "gitBlobSha": "328a482650900a9ed6432a5bd947f3c079661245"
+    },
+    {
+      "path": "ui/devtools-view.js",
+      "gitBlobSha": "ec61b8ed95f077bb71bf9bb657c997ff3e0631b3"
+    },
+    {
+      "path": "ui/docs-view.js",
+      "gitBlobSha": "1215046a62fc1904aabffa80aa40bbeefc578a44"
+    },
+    {
+      "path": "ui/index.html",
+      "gitBlobSha": "737f38b219184103e78e6220f2a5cf82b72f98f0"
+    },
+    {
+      "path": "ui/kai-character.css",
+      "gitBlobSha": "b2775d56de3492963f2dec43dd59b560b12efa55"
+    },
+    {
+      "path": "ui/kai-robot.svg",
+      "gitBlobSha": "ef1ed4cb4e7a3148027b17b9a4d3a86f905e2119"
+    },
+    {
+      "path": "ui/knode/bridge.js",
+      "gitBlobSha": "d3d8b691345fa25ca95a3b4f3340b9c4fdddb3f2"
+    },
+    {
+      "path": "ui/knode/index.html",
+      "gitBlobSha": "1babfc1511bb6f6e24285e2c631afe58485419f9"
+    },
+    {
+      "path": "ui/knode/qr.js",
+      "gitBlobSha": "439754a81a09f6cea4c27121552911457e54f8dd"
+    },
+    {
+      "path": "ui/knode/renderer.js",
+      "gitBlobSha": "fd75ff1a0338503d137233e85445e82fefd367ba"
+    },
+    {
+      "path": "ui/knode/styles.css",
+      "gitBlobSha": "e95530d17889200d9b89ca6a64f9439c2a223a52"
+    },
+    {
+      "path": "ui/koinos-node-view.js",
+      "gitBlobSha": "ac6911b2777aece2112bfe4a0dffaf01fc576f14"
+    },
+    {
+      "path": "ui/koinos-view.js",
+      "gitBlobSha": "6bbc67439fcbe733f857bad67713373481a1ebc0"
+    },
+    {
+      "path": "ui/markdown.js",
+      "gitBlobSha": "40716b21d1761cc31874bd4443c5f11191e186a4"
+    },
+    {
+      "path": "ui/mascot-audio-worklet.js",
+      "gitBlobSha": "89bb98a639a76d1ed673515112cbeffc6fdb2b46"
+    },
+    {
+      "path": "ui/mascot-client.js",
+      "gitBlobSha": "7b0087e1f0b7ec886ec2fe1e9d9efdb967a373d8"
+    },
+    {
+      "path": "ui/mascot-launcher.js",
+      "gitBlobSha": "8ab5f75c6ebb62771b85d3e5cc39c5fee005793e"
+    },
+    {
+      "path": "ui/mascot-pocket.js",
+      "gitBlobSha": "04d82b6117c1497edae533c1d2a76617e39af4ae"
+    },
+    {
+      "path": "ui/mascot-speech.js",
+      "gitBlobSha": "e1c6a370cb6439ef76251331aa7c6b52a56f95c3"
+    },
+    {
+      "path": "ui/mascot-tools.js",
+      "gitBlobSha": "122f02eef3e669a8ef93468446da3e239ece14f9"
+    },
+    {
+      "path": "ui/mascot-wake.js",
+      "gitBlobSha": "23b4a14bb2f392d8cd299a18c61aeb311a44b687"
+    },
+    {
+      "path": "ui/mascot.css",
+      "gitBlobSha": "fe24de24a4ce0e790456b3b1234870573efe1e47"
+    },
+    {
+      "path": "ui/mascot.html",
+      "gitBlobSha": "41951b1b15fb18b9a34cf453df10a60dc1ac1239"
+    },
+    {
+      "path": "ui/mascot.js",
+      "gitBlobSha": "bada8eb5f3522917cdbdc6cdeca391bde02faa73"
+    },
+    {
+      "path": "ui/node-brand.css",
+      "gitBlobSha": "1aeeea2a71572fc4a14a476f55c6a5c4c2a9f04a"
+    },
+    {
+      "path": "ui/pocket-credits.html",
+      "gitBlobSha": "adb1be93c0fa53c43d4ada9624a4fab197e0cc7e"
+    },
+    {
+      "path": "ui/styles.css",
+      "gitBlobSha": "7aed18a6eae8e4141180666ac27ffc47319f3b15"
+    },
+    {
+      "path": "ui/tools-view.js",
+      "gitBlobSha": "9230d13f9d2bad4964a7a5ba9e9b63e89835bd6b"
+    },
+    {
+      "path": "ui/workflow-model.js",
+      "gitBlobSha": "92690f89ace04ea57cdd9f27bba007d18f265cb3"
+    },
+    {
+      "path": "ui/workflows.css",
+      "gitBlobSha": "e75cadea112e6f81b82310e278ae062b2bc0c5b9"
+    },
+    {
+      "path": "ui/workflows.js",
+      "gitBlobSha": "10a8d35e1cd46ec1e9795e194b022818d6a22b9a"
+    }
+  ]
+}

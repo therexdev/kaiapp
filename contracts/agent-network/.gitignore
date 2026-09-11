@@ -1,6 +1,0 @@
-node_modules/
-build/
-coverage/
-assembly/__tests__/*.wat
-assembly/__tests__/*.wasm
-assembly/__tests__/*.map

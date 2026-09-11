@@ -1,6 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-  <defs><linearGradient id="shell" x2=".8" y2="1"><stop stop-color="#1bc6ff"/><stop offset=".45" stop-color="#087bff"/><stop offset="1" stop-color="#054bcd"/></linearGradient><linearGradient id="letter" x2=".7" y2="1"><stop stop-color="#fff"/><stop offset="1" stop-color="#b7eeff"/></linearGradient></defs>
-  <rect x="48" y="48" width="928" height="928" rx="235" fill="url(#shell)"/>
-  <rect x="65" y="65" width="894" height="894" rx="220" fill="none" stroke="#ffffff" stroke-opacity=".27" stroke-width="9"/>
-  <g fill="none" stroke="url(#letter)" stroke-width="117" stroke-linecap="round" stroke-linejoin="round"><path d="M324 285v97M324 746V525L718 250M559 573l187 179"/></g>
-</svg>
