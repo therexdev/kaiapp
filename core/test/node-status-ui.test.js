@@ -80,3 +80,13 @@ test("a running node uses a single indicator and keeps registration separate fro
   assert.match($("#n-reg-hint").textContent, /External producer registration verified/);
   assert.match($("#n-reg-hint").textContent, /no blocks are being produced/);
 });
+
+test("node screen shows only the action opposite its running state", () => {
+ const {S,$,paint}=painter();
+ for (const running of [false,true,false]) {
+  S.node.isRunning=running;paint();
+  assert.equal($("#n-start").hidden,running);assert.equal($("#n-stop").hidden,!running);
+ }
+ S.node.op={name:"start",running:true,tail:[]};paint();
+ assert.equal($("#n-start").disabled,true);assert.equal($("#n-stop").disabled,true);
+});

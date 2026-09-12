@@ -107,7 +107,7 @@ class CompanionHub {
     }
     if (name === "brain_remember") {
       const note = { title: String(args.title || "Remembered with KAI").slice(0, 120), text: text(args.text, 12000), category: args.category, source: "agent" };
-      if (!await confirm("Remember in Brain", note)) throw new CompanionError("User declined. Do not retry this action.");
+      if (!await confirm("Remember in Brain", note, { key: "brain:remember", label: "Save memories to Brain from chat and KAI" })) throw new CompanionError("User declined. Do not retry this action.");
       signal?.throwIfAborted(); return this.store.note(note);
     }
     if (name === "workflow_propose") {

@@ -1,3 +1,8 @@
+## Brain permissions and node controls
+
+- Choose “Always allow this action” when chat or KAI asks to save a Brain memory. Revoke it in Connections → Connection settings → Always allowed actions. Forgetting remains separately approved.
+- The node screen shows only Stop node while running, or Start node while stopped. Controls are disabled during node operations, including quick sync.
+
 # Brain is now the single memory store
 
 Chat and desktop KAI save and recall memories through Brain. Earlier facts migrate automatically into encrypted Brain storage; the legacy store is cleared only after a successful save. Manage memories in Brain → Memories. The old Core memory API and tools are retired. Brain remains private to eligible desktop models and is not available to network workers.

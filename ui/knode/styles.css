@@ -307,3 +307,6 @@ pre.logs {
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--card-2); border-radius: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
+
+/* State-dependent controls must stay hidden despite button display styles. */
+[hidden] { display: none !important; }

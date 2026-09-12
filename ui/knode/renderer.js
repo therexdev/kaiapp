@@ -1044,8 +1044,8 @@ function renderNodeView() {
       <div class="row">
         <button id="n-open" class="btn ghost">📁 Data folder</button>
         <button id="n-quicksync" class="btn" style="display:none">⚡ Quick sync</button>
-        <button id="n-stop" class="btn">Stop</button>
-        <button id="n-start" class="btn primary">Start node</button>
+        <button id="n-stop" class="btn" hidden>Stop node</button>
+        <button id="n-start" class="btn primary" hidden>Start node</button>
       </div>
     </div>
     <p class="lead">Runs the official Koinos microservices with Docker. First start downloads images and syncs the chain — this can take a while.</p>
@@ -1450,9 +1450,11 @@ function patchNodeView() {
   const opEl = $("#n-op");
   const op = n?.op;
   const quickSync = op?.running && op.name === "quick-sync";
+  if ($("#n-start")) $("#n-start").hidden = !n || !!n.isRunning;
+  if ($("#n-stop")) $("#n-stop").hidden = !n || !n.isRunning;
   for (const id of ["#n-start", "#n-stop", "#n-quicksync"]) {
     const button = $(id);
-    if (button) button.disabled = !!quickSync;
+    if (button) button.disabled = !!op?.running || !n;
   }
   if (quickSync) {
     const p = op.progress ?? {};

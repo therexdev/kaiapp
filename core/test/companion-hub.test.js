@@ -105,3 +105,18 @@ test("Brain forgetting requires approval and removes the recalled fact",async t=
  await hub.tool("brain_forget",{id:n.id},"local",async()=>true);
  assert.equal(hub.store.search("Luna").length,0);
 });
+
+test("Brain remember always-allow is shared, persists and can be revoked without authorizing forget",async t=>{
+ const {hub,options}=setup(t),handlers=new Map();
+ function window(id,route){const wc=new EventEmitter();wc.id=id;wc.mainFrame={url:"http://127.0.0.1:41100/"+route};wc.getURL=()=>wc.mainFrame.url;wc.isDestroyed=()=>false;const w=new EventEmitter();w.webContents=wc;w.isDestroyed=()=>false;w.isVisible=()=>true;return w;}
+ const main=window(91,""),mascot=window(92,"mascot.html");let prompts=0,last;
+ const ctl=registerCompanionIPC({ipcMain:{handle:(k,f)=>handlers.set(k,f),removeHandler:k=>handlers.delete(k)},service:hub,origin:"http://127.0.0.1:41100",getMainWindow:()=>main,getMascotWindow:()=>mascot,dialog:{showMessageBox:async(_w,s)=>{prompts++;last=s;return {response:s.buttons.length===3?2:0};}}});t.after(()=>ctl.dispose());
+ const event=w=>({sender:w.webContents,senderFrame:w.webContents.mainFrame});
+ const remember=(w,text)=>handlers.get("companion:tool")(event(w),"brain_remember",{text},"local");
+ assert.equal((await remember(main,"First fact")).ok,true);assert.equal(last.buttons[2],"Always allow this action");
+ assert.equal((await remember(mascot,"Second fact")).ok,true);assert.equal(prompts,1);
+ assert.equal(new CompanionStore(options).data.settings.approvalGrants[0].key,"brain:remember");
+ const forgotten=await handlers.get("companion:tool")(event(mascot),"brain_forget",{id:hub.store.data.notes[0].id},"local");assert.equal(forgotten.ok,false);assert.equal(prompts,2);
+ await handlers.get("companion:manage")(event(main),"approvalGrantRemove",{key:"brain:remember"});
+ assert.equal((await remember(main,"Third fact")).ok,true);assert.equal(prompts,3);
+});
