@@ -84,9 +84,9 @@ test("final enrichment retrieves memory once; planning checks eligibility withou
   await f.window.KaiCompanionClient.enrich({ ...body, stream: false });
   assert.deepEqual(f.calls, [["context", null]]);
   const out = await f.window.KaiCompanionClient.enrich({ ...body, stream: true });
-  assert.equal(f.calls.filter(c => c[0] === "fetch").length, 1); assert.equal(out.kai_private_desktop, true);
+  assert.equal(f.calls.filter(c => c[0] === "fetch").length, 0); assert.equal(out.kai_private_desktop, true);
   assert.match(out.messages[0].content, /SYNTHETIC_BRAIN_CONTEXT/);
-  assert.match(out.messages[0].content, /SYNTHETIC_LEGACY_CONTEXT/); assert.equal(body.messages.length, 1);
+  assert.doesNotMatch(out.messages[0].content, /SYNTHETIC_LEGACY_CONTEXT/); assert.equal(body.messages.length, 1);
   f.calls.length = 0;
   const network = await f.window.KaiCompanionClient.enrich({ ...body, model: "koinos-network", stream: true });
   assert.equal(network.messages.length, 1); assert.equal(f.calls.filter(c => c[0] === "fetch").length, 0);
@@ -123,10 +123,10 @@ test("main Chat send with desktop connected and globe on performs one completion
   const f = mainHarness(), { state } = f;
   await f.env.send();
   const requests = f.calls.filter(c => c[0] === "fetch");
-  assert.equal(requests.length, 2); assert.ok(requests[0][1].startsWith("/core/memory?"));
-  assert.equal(requests[1][1], "/core/chat/completions"); assert.equal(requests[1][2].stream, true);
-  assert.match(JSON.stringify(requests[1][2].messages), /SYNTHETIC_BRAIN_CONTEXT/);
-  assert.match(JSON.stringify(requests[1][2].messages), /SYNTHETIC_LEGACY_CONTEXT/);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0][1], "/core/chat/completions"); assert.equal(requests[0][2].stream, true);
+  assert.match(JSON.stringify(requests[0][2].messages), /SYNTHETIC_BRAIN_CONTEXT/);
+  assert.doesNotMatch(JSON.stringify(requests[0][2].messages), /SYNTHETIC_LEGACY_CONTEXT/);
   assert.equal(f.calls.filter(c => ["tool", "session"].includes(c[0])).length, 0);
   assert.equal(state.history.at(-1).content, "Synthetic fixture response."); assert.equal(state.chatting, false);
 });

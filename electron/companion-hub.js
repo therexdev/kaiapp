@@ -8,6 +8,8 @@ const { trustedFrame } = require("./mascot");
 class CompanionHub {
   constructor({ dataDir, safeStorage, privacyMode, models, runLocal, fetchImpl, canUseModel, legacyMemory, account, openExternal, chats, lookup, legacyTasks }) {
     this.store = new CompanionStore({ dataDir, safeStorage }); this.models = models; this.canUseModel = canUseModel; this.legacyMemory = legacyMemory;
+    this.memoryMigrationError = null;
+    try { this.store.migrateLegacy(legacyMemory); } catch (error) { this.memoryMigrationError = "Earlier memories could not be moved to Brain. Free storage or unlock your OS keychain and restart KAI. " + error.message; }
     this.connections = new CompanionConnections({ store: this.store, privacyMode, fetchImpl });
     const { CompanionComposio } = require("./companion-composio");
     this.composio = new CompanionComposio({ store: this.store, privacyMode, account, fetchImpl, openExternal });
@@ -28,7 +30,7 @@ class CompanionHub {
     const s = this.store;
     if (s.locked || !s.available()) return { locked: true, available: s.available() };
     const { connections, composio, ...data } = s.data;
-    return { ...copy(data), brainIndex: this.brain.index(), awarenessRunning: this.awareness.active?.id || null, available: true, locked: false, composio: this.composio.status(), connections: this.connections.list(), templates: copy(TEMPLATES), models: this.models().filter(m => m.status === "ready"), stepTypes: TYPES, syncing: [...this.syncing] };
+    return { ...copy(data), memoryMigrationError: this.memoryMigrationError, brainIndex: this.brain.index(), awarenessRunning: this.awareness.active?.id || null, available: true, locked: false, composio: this.composio.status(), connections: this.connections.list(), templates: copy(TEMPLATES), models: this.models().filter(m => m.status === "ready"), stepTypes: TYPES, syncing: [...this.syncing] };
   }
   source(input) {
     const request = this.connections.prepare(input.connectionId, input.operationId, input.variables || {});
@@ -78,6 +80,7 @@ class CompanionHub {
     const tools = [...this.actions.tools(),
       { name: "brain_search", description: "Search private Brain notes, people, projects, preferences, and imported sources.", params: { query: "what to find" } },
       { name: "brain_remember", description: "Ask the user to approve a fact for persistent Brain memory.", params: { text: "fact to remember", title: "short title", category: "notes | preferences | people | projects" } },
+      { name: "brain_forget", description: "Forget one personal Brain memory by its exact ID after user approval. Search Brain first. Imported source text must be managed in Brain Sources.", params: { id: "memory ID from brain_search" } },
       { name: "brain_goals", description: "Read the user's active goals from Brain.", params: {} },
       { name: "workflow_propose", description: "Save a disabled workflow draft for the user to review in Workflows. Cannot run or enable it.", params: { name: "workflow name", model: "installed local model alias", graph: "optional v2 canvas {version:2,nodes:[{id,type,label,position,config}],edges:[{id,from,to,port,input}]}; prefer workflow builder Copilot for complex graphs", steps: "array of {type,label,text}; types brain_search,prompt,approval,remember,output; use {{input}} and {{previous}}" } },
     ];
@@ -89,8 +92,19 @@ class CompanionHub {
   async tool(name, args, model, confirm, signal, session) {
     if (!this.toolList(model).some(t => t.name === name)) throw new CompanionError("This private tool is unavailable for the selected model.");
     if (this.actions.tools().some(t => t.name === name)) return this.actions.tool(session?.owner, session?.id, name, args, model, confirm, signal);
-    if (name === "brain_search") return this.store.search(String(args.query || ""), 6).map(n => ({ title: n.title, text: n.text.slice(0, 1500), source: n.source }));
+    if (name === "brain_search") return this.store.search(String(args.query || ""), 6).map(n => ({ id: n.id, title: n.title, text: n.text.slice(0, 1500), source: n.source, imported: !!n.sourceId }));
     if (name === "brain_goals") return this.store.data.goals.filter(g => g.status === "active");
+    if (name === "brain_forget") {
+      const note = this.store.data.notes.find(n => n.id === args.id && !n.sourceId);
+      if (!note) throw new CompanionError("Search Brain for an exact personal memory first. Manage imported material in Brain Sources.");
+      if (!await confirm("Forget Brain memory", { title: note.title, text: note.text })) throw new CompanionError("User declined. Do not retry this action.");
+      signal?.throwIfAborted();
+      const current = this.store.data.notes.find(n => n.id === note.id);
+      if (!current || current.updatedAt !== note.updatedAt || current.text !== note.text) throw new CompanionError("Memory changed while awaiting approval. Search Brain again.");
+      this.awareness.cancel();
+      this.store.remove("notes", note.id);
+      return { forgotten: true, id: note.id };
+    }
     if (name === "brain_remember") {
       const note = { title: String(args.title || "Remembered with KAI").slice(0, 120), text: text(args.text, 12000), category: args.category, source: "agent" };
       if (!await confirm("Remember in Brain", note)) throw new CompanionError("User declined. Do not retry this action.");
@@ -294,10 +308,7 @@ function registerCompanionIPC({ ipcMain, service, origin, getMainWindow, getMasc
         const key = typeof input.key === "string" ? input.key : "";
         d.settings.approvalGrants = (d.settings.approvalGrants || []).filter(g => g.key !== key);
       });
-      case "importLegacy": {
-        const memories = service.legacyMemory?.list() || [];
-        return service.importText("Previously remembered facts", memories.map(m => "- " + m.text).join("\n"));
-      }
+
       case "import": {
         const result = await dialog.showOpenDialog(ctx.window, { title: "Add a source to KAI Brain", properties: ["openFile"], filters: [{ name: "Text and Markdown", extensions: ["txt", "md", "csv", "json"] }] });
         ctx.signal.throwIfAborted(); if (result.canceled || !result.filePaths[0]) return null;

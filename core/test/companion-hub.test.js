@@ -76,3 +76,32 @@ test("renderer brackets private tools so voice and listening cannot overlap nati
  await json("/core/tools");await json("/core/tools/call",{body:JSON.stringify({name:"brain_search",args:{query:"KAI"}})});
  assert.deepEqual(events,[[true,"brain_search"],[false,"brain_search"]]);
 });
+
+test("legacy migration is durable, deduplicates imported facts and never resurrects forgotten notes", t => {
+ const {hub, options}=setup(t); let items=[{text:"My cat is Luna",ts:123},{text:"My cat is Luna",ts:123},{text:"I live in Omaha",ts:456}];
+ hub.store.note({text:"My cat is Luna"});
+ const legacy={list:()=>items,clear:()=>{items=[];}};
+ hub.store.migrateLegacy(legacy);
+ assert.equal(hub.store.data.notes.length,2); assert.equal(items.length,0);
+ const migrated=hub.store.data.notes.find(n=>n.text==="I live in Omaha");assert.equal(migrated.createdAt,456);
+ hub.store.remove("notes",migrated.id);
+ items=[{text:"I live in Omaha"}];
+ const reopened=new CompanionStore(options);reopened.migrateLegacy(legacy);
+ assert.equal(reopened.data.notes.length,1);assert.equal(items.length,0);
+ reopened.change(d=>{d.settings.recall=false;});assert.equal(reopened.context("cat"),"");
+});
+test("legacy migration leaves original facts intact if encrypted save fails",t=>{
+ const {hub}=setup(t);let cleared=false;
+ const encrypt=hub.store.storage.encryptString;
+ hub.store.storage.encryptString=()=>{throw new Error("disk/keychain failure");};
+ assert.throws(()=>hub.store.migrateLegacy({list:()=>[{text:"Keep this fact"}],clear:()=>{cleared=true;}}),/failure/);
+ assert.equal(cleared,false);assert.equal(hub.store.data.notes.length,0);assert.equal(hub.store.data.settings.legacyMemoryMigrated,undefined);
+ hub.store.storage.encryptString=encrypt;
+});
+test("Brain forgetting requires approval and removes the recalled fact",async t=>{
+ const {hub}=setup(t);const n=hub.store.note({text:"My cat is Luna"});
+ await assert.rejects(hub.tool("brain_forget",{id:n.id},"local",async()=>false),/declined/);
+ assert.equal(hub.store.search("Luna").length,1);
+ await hub.tool("brain_forget",{id:n.id},"local",async()=>true);
+ assert.equal(hub.store.search("Luna").length,0);
+});

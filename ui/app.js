@@ -814,10 +814,13 @@ $("messages").addEventListener("click", async (e) => {
         { role: "user", content: `Condense this into ONE short fact worth remembering long-term (max 25 words, no preamble):\n\n${src.slice(0, 2000)}` },
       ], state.alias);
       fact = String(fact || "").trim().slice(0, 300) || src.slice(0, 200);
-      await fetch("/core/memory", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: fact, source: "pinned" }) });
+      if (!window.kaiCompanionBridge) throw new Error("Open the desktop app to save memories in Brain.");
+      const saved = await window.kaiCompanionBridge.manage("note", { text: fact, pinned: true });
+      if (!saved?.ok) throw new Error(saved?.error || "Brain could not save this memory.");
       act.textContent = "📌 Remembered";
       setTimeout(() => (act.textContent = "📌 Remember"), 1600);
-    } catch {
+    } catch (error) {
+      alert(error.message || "Brain could not save this memory.");
       act.textContent = "📌 Remember";
     }
   }

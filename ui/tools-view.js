@@ -138,23 +138,6 @@
       nodeBox.appendChild(el("span", "hint", "Tool servers that need Node.js aren't available for this platform yet — web-based (URL) servers still work."));
     }
 
-    // ---- memory ----
-    const mem = await jfetch("/core/memory");
-    const ml = $("memory-list");
-    ml.innerHTML = "";
-    for (const m of (mem.memories || []).slice(0, 50)) {
-      const row = el("div", "tool-row slim");
-      row.appendChild(el("span", null, m.text));
-      const rm = el("button", "linklike danger", "Forget");
-      rm.onclick = async () => {
-        await jfetch(`/core/memory/${m.id}`, { method: "DELETE" });
-        render();
-      };
-      row.appendChild(rm);
-      ml.appendChild(row);
-    }
-    if (!(mem.memories || []).length) ml.appendChild(el("p", "hint", "Nothing remembered yet. Pin a message with 📌, or add a fact below."));
-
     // ---- email ----
     const ej = await jfetch("/core/email");
     $("tools-localonly-note").hidden = !ej.localOnly;
@@ -465,14 +448,6 @@
       const c = await jfetch(`/core/mcp/${r.server.id}/connect`, { method: "POST" });
       if (!c.ok) alert(`Added, but couldn't connect:\n${c.error}`);
     } else alert(r.error || "couldn't add");
-    render();
-  });
-
-  $("memory-add")?.addEventListener("click", async () => {
-    const text = $("memory-new").value.trim();
-    if (!text) return;
-    await jfetch("/core/memory", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
-    $("memory-new").value = "";
     render();
   });
 

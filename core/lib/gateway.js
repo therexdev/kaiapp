@@ -639,28 +639,9 @@ class Gateway {
       }
     }
 
-    // ---- cross-chat memory (all local — no privacy gate needed) ----
-    if (this.memory && path === "/core/memory" && req.method === "GET") {
-      const q = url.searchParams.get("q");
-      return this._json(res, 200, { ok: true, memories: q ? this.memory.search(q, Number(url.searchParams.get("k")) || 4) : this.memory.list() });
-    }
-    if (this.memory && path === "/core/memory" && req.method === "POST") {
-      const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
-      try {
-        return this._json(res, 200, { ok: true, memory: this.memory.add(body.text, { source: body.source || "user" }) });
-      } catch (e) {
-        return this._json(res, 400, { ok: false, error: String(e.message) });
-      }
-    }
-    if (this.memory && path.startsWith("/core/memory/") && req.method === "DELETE") {
-      try {
-        const id = decodeURIComponent(path.split("/")[3]);
-        if (id === "all") this.memory.clear();
-        else this.memory.remove(id);
-        return this._json(res, 200, { ok: true });
-      } catch (e) {
-        return this._json(res, 404, { ok: false, error: String(e.message) });
-      }
+    // Retired: personal memory is managed only through private desktop Brain IPC.
+    if (path === "/core/memory" || path.startsWith("/core/memory/")) {
+      return this._json(res, 410, { ok: false, error: "Memory has moved to Brain in the desktop app." });
     }
 
     // ---- MCP servers (manage; connecting is the user's explicit act) ----

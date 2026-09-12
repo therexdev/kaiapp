@@ -73,10 +73,11 @@
   function turnTools(tools, route) {
     return (tools || []).filter(function(t) {
       var n = t.name;
-      if (!route.memoryWrite && /^(?:memory_save|brain_remember)$/.test(n)) return false;
-      if (route.lane === "recall") return /^(?:memory_search|brain_search)$/.test(n);
+      if (/^memory_(save|search)$/.test(n)) return false;
+      if (!route.memoryWrite && /^(?:brain_remember|brain_forget)$/.test(n)) return false;
+      if (route.lane === "recall") return /^(?:brain_search)$/.test(n);
       if (route.lane === "chat") return false;
-      if (route.lane === "memory-write") return /^(?:memory_search|memory_save|brain_search|brain_remember)$/.test(n);
+      if (route.lane === "memory-write") return /^(?:brain_search|brain_remember|brain_forget)$/.test(n);
       if (route.lane === "connected" || route.lane === "workflow") return /^(?:connected_|instant_workflow$|workflow_control$)/.test(n);
       if (route.lane === "web") return /^(?:web_search|read_page)$/.test(n);
       if (route.lane === "app") return /^app_/.test(n);

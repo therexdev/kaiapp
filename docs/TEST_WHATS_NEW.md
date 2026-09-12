@@ -1,3 +1,7 @@
+# Brain is now the single memory store
+
+Chat and desktop KAI save and recall memories through Brain. Earlier facts migrate automatically into encrypted Brain storage; the legacy store is cleared only after a successful save. Manage memories in Brain → Memories. The old Core memory API and tools are retired. Brain remains private to eligible desktop models and is not available to network workers.
+
 ### Azelma Pocket by default
 
 - KAI now selects Azelma Pocket on Windows x64 and Linux x64 for new profiles and profiles still using the former Bella default. Existing alternative voices and later manual choices are preserved.

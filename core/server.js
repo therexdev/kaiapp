@@ -399,14 +399,15 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
   // ---- unified tool layer: ONE policy point for everything a model can do
   // beyond generating text (§7 egress gating + confirm-before-use) ----
   const { ToolRegistry } = require("./lib/tools");
-  const { MemoryStore, registerMemoryTools } = require("./lib/memory");
+  const { MemoryStore } = require("./lib/memory");
   const { registerBuiltinTools } = require("./lib/builtin-tools");
   const { McpManager } = require("./lib/mcp-manager");
   const { EmailService, registerEmailTools } = require("./lib/email");
   const { CalendarService, registerCalendarTools } = require("./lib/caldav");
   const registry = new ToolRegistry({ privacyMode: () => settings.get("network.privacyMode") || "local-only" });
   const memory = new MemoryStore(dataDir);
-  registerMemoryTools(registry, memory);
+  // Legacy facts are read only for migration into the private desktop Brain.
+  // Brain is never exposed through the Core/network tool registry.
   // Node runtime for npx-based MCP servers AND the run_code sandbox —
   // constructed before the builtin tools so run_code can probe which node
   // binary (and which permission flag) this machine actually has.

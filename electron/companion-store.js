@@ -52,6 +52,28 @@ class CompanionStore {
     } finally { fs.rmSync(tmp, { force: true }); }
     return result === undefined ? undefined : copy(result);
   }
+  migrateLegacy(legacy) {
+    if (!legacy) return;
+    this.requireStorage();
+    if (!this.data.settings.legacyMemoryMigrated) {
+      const facts = legacy.list();
+      this.change(d => {
+        const normalize = value => String(value).trim().replace(/\s+/g, " ").toLowerCase();
+        const known = new Set(d.notes.flatMap(n => [normalize(n.text), ...n.text.split("\n").filter(line => /^- /.test(line)).map(line => normalize(line.slice(2)))]));
+        for (const fact of facts) {
+          const content = text(fact.text, 12000);
+          if (known.has(normalize(content))) continue;
+          if (d.notes.length >= 3000) throw new CompanionError("Brain is full; earlier memories have been preserved.");
+          known.add(normalize(content));
+          d.notes.push({ id: id(), title: content.slice(0, 80), text: content, category: "notes", tags: ["migrated"], pinned: fact.source === "pinned", source: "Earlier KAI memory", createdAt: fact.ts || Date.now(), updatedAt: fact.ts || Date.now() });
+        }
+        d.settings.legacyMemoryMigrated = true;
+      });
+    }
+    // Commit encrypted notes and migration marker before retiring plaintext.
+    // If clearing fails, the marker prevents deleted notes being resurrected.
+    if (legacy.list().length) legacy.clear();
+  }
   note(input) {
     const content = text(input.text, 12000), title = text(input.title || content.slice(0, 80), 120, "Title");
     const category = CATEGORIES.includes(input.category) ? input.category : "notes";
