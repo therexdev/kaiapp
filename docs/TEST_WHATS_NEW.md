@@ -9,7 +9,7 @@ Definitions verified from [the explorer’s producer display](https://github.com
 ## Network information on the Dashboard
 
 - Moved connected-peer information into a dedicated Koinos network section on the blockchain Dashboard.
-- Added a button opening KoinosScan’s producer list, and distinguished local connections from network producer accounts. Active/total producer counts and the explorer’s dot thresholds are not yet integrated; their live data contract could not be verified. No explorer numbers are hard-coded.
+- Added a supplementary button opening KoinosScan’s producer list. Local peer connections remain distinct from the live network producer counts above.
 
 ## Node health, Quick Sync and storage
 
