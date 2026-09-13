@@ -42,15 +42,15 @@ function assessHealth({
   services,
   producing = false,
   headHeight = null,
+  probeFailed = false,
   lastHeight = null,
   lastHeightAt = null,
   now = 0,
   stallMs = 8 * 60 * 1000,
 }) {
   const rows = Array.isArray(services) ? services : [];
-  // No data at all (a transient `docker compose ps` failure) — don't act on it;
-  // acting on nothing would restart a healthy node.
-  if (rows.length === 0) return { ok: true, reason: "no-data", oom: false };
+  // Missing status is unknown health. The watchdog does not restart on no-data.
+  if (rows.length === 0) return { ok: false, reason: "no-data", oom: false };
 
   const byName = new Map(
     rows.map((r) => [String(r?.service ?? r?.name ?? ""), r])
@@ -70,6 +70,10 @@ function assessHealth({
       return { ok: false, reason: t.oom ? "oom" : "service-down", oom: t.oom, service: name };
     }
     if (t.oom) anyOom = true;
+  }
+
+  if (probeFailed && lastHeightAt != null && now - lastHeightAt > stallMs) {
+    return { ok: false, reason: "chain-unresponsive", oom: anyOom, service: "chain" };
   }
 
   // Every container claims "up" but the chain head hasn't moved for too long:
@@ -196,6 +200,7 @@ function classifyCrash(logText) {
   const t = String(logText || "");
   if (/\(137\)|signal:\s*killed|out of memory|cannot allocate memory|oom[-\s]?kill/i.test(t)) return "oom";
   if (/panic:|sigsegv|segmentation violation|nil pointer|invalid memory address|runtime error/i.test(t)) return "panic";
+  if (/replayed state delta merkle root does not match block receipt/i.test(t)) return "replay-mismatch";
   if (/corruption|checksum mismatch|bad table|truncated|malformed|failed to open (the )?database/i.test(t))
     return "corruption";
   return null;
@@ -205,7 +210,7 @@ function classifyCrash(logText) {
 // (rebuild block data via Quick Sync), or null (just restart).
 function crashRemedy(kind) {
   if (kind === "oom") return "memory";
-  if (kind === "panic" || kind === "corruption") return "repair";
+  if (kind === "panic" || kind === "corruption" || kind === "replay-mismatch") return "repair";
   return null;
 }
 

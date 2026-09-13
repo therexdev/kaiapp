@@ -11,6 +11,7 @@ const { httpHead, httpGetText, httpDownload } = require("./download");
 const { assessHealth, describeRecovery, classifyCrash, isCrashLooping } = require("./node-health");
 const dataMove = require("./data-move");
 
+const { assertRestoreReady, inspectLogs, backupList, deleteBackup, installSnapshot, preflightFolders } = require("./node-maintenance");
 const OP_LOG_LIMIT = 400;
 const ARCHIVE_NAME = "koinos-backup.tar.gz";
 
@@ -39,6 +40,7 @@ class NodeManager {
     this.autoRecover = autoRecover !== false;
     this.probeHead = probeHead; // async () => number|null  (local chain head height)
     this._desiredRunning = false; // is the node meant to be up right now?
+    this._observations = new Map();
     this._watch = null; // live watchdog state while the node runs
   }
 
@@ -224,6 +226,9 @@ class NodeManager {
 
   // producerAddress null -> sync-only node (no block_producer service).
   async start(networkId, producerAddress) {
+    if (this._op?.running) throw new Error("Wait for the current node operation to finish.");
+    assertRestoreReady(this.dirs(networkId).basedir);
+    this._observations.delete(networkId);
     const memorySaver = this._watch?.memorySaver || false;
     this.ensureFiles(networkId, producerAddress, { memorySaver });
     this._desiredRunning = true;
@@ -234,10 +239,11 @@ class NodeManager {
   }
 
   async stop(networkId) {
+    if (this._op?.running) throw new Error("Wait for the current node operation to finish.");
     this._desiredRunning = false;
     this._stopWatchdog();
     if (!this.filesReady(networkId)) return { stopped: true, note: "Node was never started" };
-    this._composeOp(networkId, "stop", ["down"]);
+    this._composeOp(networkId, "stop", ["down", "--timeout", "60"]);
     return { stopping: true };
   }
 
@@ -304,9 +310,12 @@ class NodeManager {
       return;
     }
 
-    const health = assessHealth({
+    const observed = await this.observe(w.networkId, services);
+    if (this._watch !== w || !this._desiredRunning || w.recovering || this._op?.running) return;
+    const health = observed.health?.ok === false ? observed.health : assessHealth({
       services,
       producing: w.producing,
+      probeFailed: !!this.probeHead && !w.memorySaver && headHeight == null,
       headHeight,
       lastHeight: w.lastHeight,
       lastHeightAt: w.lastHeightAt,
@@ -314,6 +323,10 @@ class NodeManager {
       stallMs: STALL_MS,
     });
     w.health = health;
+    if (health.needsRepair) {
+      w.needsRepair = true;
+      w.repairReason = health.reason;
+    }
     // Once we've concluded the block data is corrupted, stop restarting into the
     // same wall — wait for the user to repair (Quick Sync).
     if (!health.ok && health.reason !== "no-data" && this.autoRecover && !w.needsRepair) {
@@ -418,7 +431,8 @@ class NodeManager {
   // landing mid-recovery.
   async _restartStack(w) {
     this.ensureFiles(w.networkId, w.producerAddress, { memorySaver: w.memorySaver });
-    await this._compose(w.networkId, ["down", "--remove-orphans"], { timeout: 180000 });
+    const down = await this._compose(w.networkId, ["down", "--remove-orphans", "--timeout", "60"], { timeout: 180000 });
+    if (!down.ok) throw new Error(down.error || "Could not stop the node");
     if (this._watch !== w || !this._desiredRunning) return false;
     const up = await this._compose(w.networkId, ["up", "-d", "--remove-orphans"], { timeout: 300000 });
     if (!up.ok) throw new Error(up.error || up.stderr?.slice(-200) || "compose up failed");
@@ -735,14 +749,12 @@ class NodeManager {
 
     // 1. Stop the node if it's running.
     say("stopping", "Stopping the node (if running)…");
-    const running = (await this.services(networkId).catch(() => [])).some((s) =>
-      /running|up/i.test(s.state)
-    );
-    if (running) {
-      const r = await this._compose(networkId, ["stop"], { timeout: 180000 });
-      if (!r.ok) throw new Error(`Could not stop the node: ${r.error}`);
-      say("stopping", "Node stopped.");
+    if (this.filesReady(networkId)) {
+      const r = await this._compose(networkId, ["down", "--timeout", "60"], { timeout: 180000 });
+      if (!r.ok) throw new Error(`Could not stop and release the node's data folders: ${r.error || r.stderr}`);
     }
+    say("stopping", "Checking that Windows/Docker released the data folders…");
+    preflightFolders(d.basedir);
 
     // 2. Download checksum + archive (with resume).
     say("download", "Fetching published checksum…");
@@ -826,13 +838,8 @@ class NodeManager {
     // p2p identity, config, .env and wallets are never touched.
     say("install", "Installing restored chain data…");
     const rollback = path.join(restoreDir, `previous-${new Date().toISOString().replace(/[:.]/g, "-")}`);
-    fs.mkdirSync(rollback, { recursive: true });
-    for (const dir of ["chain", "block_store", "mempool", "transaction_store", "account_history", "contract_meta_store"]) {
-      const src = path.join(d.basedir, dir);
-      if (fs.existsSync(src)) fs.renameSync(src, path.join(rollback, dir));
-    }
-    fs.renameSync(stagedChain, path.join(d.basedir, "chain"));
-    fs.renameSync(stagedBlockStore, path.join(d.basedir, "block_store"));
+    installSnapshot(d.basedir, rollback, stagedChain, stagedBlockStore);
+    this._observations.delete(networkId);
 
     // 7. Clean up what's no longer needed (keep the rollback copy).
     say("cleanup", "Cleaning up download and staging files…");
@@ -844,7 +851,7 @@ class NodeManager {
 
   async services(networkId) {
     if (!this.filesReady(networkId)) return [];
-    const r = await this._compose(networkId, ["ps", "--format", "json"], { timeout: 20000 });
+    const r = await this._compose(networkId, ["ps", "--all", "--format", "json"], { timeout: 20000 });
     if (!r.ok) return [];
     return parseComposePs(r.stdout);
   }
@@ -857,12 +864,49 @@ class NodeManager {
     return (r.stdout + (r.stderr ? `\n${r.stderr}` : "")).trim();
   }
 
+  async backups(networkId) { return backupList(this.restoreDir(networkId)); }
+
+  async removeBackup(networkId, id) {
+    if (this._op?.running) throw new Error("Wait for the current node operation to finish.");
+    assertRestoreReady(this.dirs(networkId).basedir);
+    const op = { name: "delete-backup", network: networkId, running: true, startedAt: Date.now(), lines: [] };
+    this._op = op;
+    try { const result = await deleteBackup(this.restoreDir(networkId), id); op.code = 0; return result; }
+    catch (e) { op.code = 1; op.error = e.message; throw e; }
+    finally { op.running = false; op.finishedAt = Date.now(); }
+  }
+
+  async observe(networkId, services) {
+    const old = this._observations.get(networkId);
+    if (old?.pending) return old.pending;
+    if (old && Date.now() - old.at < WATCH_INTERVAL_MS) return old.value;
+    const entry = { at: Date.now(), value: old?.value };
+    entry.pending = (async () => {
+      let value = { health: null, peers: null };
+      if (services.length && !this._op?.running) {
+        const r = await this._compose(networkId, ["logs", "--no-color", "--timestamps", "--since", "2m", "--tail", "200", "chain", "block_producer", "p2p"], { timeout: 15000 });
+        value = r.ok ? inspectLogs(r.stdout + "\n" + r.stderr) : value;
+        if (old?.value?.health?.needsRepair) value.health = old.value.health;
+        if (!value.health) {
+          const health = assessHealth({ services, producing: services.some(s => s.service === "block_producer") });
+          value.health = health;
+        }
+      }
+      entry.value = value;
+      return value;
+    })().finally(() => { entry.pending = null; });
+    this._observations.set(networkId, entry);
+    return entry.pending;
+  }
+
   async status(networkId) {
     const docker = await this.dockerInfo();
     const services = docker.ok ? await this.services(networkId) : [];
     const running = services.filter((s) => /running|up/i.test(s.state)).length;
     const w = this._watch;
+    const observed = await this.observe(networkId, services);
     return {
+      peers: observed.peers,
       docker,
       filesReady: this.filesReady(networkId),
       services,
@@ -873,7 +917,7 @@ class NodeManager {
       dataDir: this.dirs(networkId).root,
       autoRecover: this.autoRecover,
       memorySaver: w?.memorySaver || false,
-      health: w
+      health: observed.health?.ok === false ? observed.health : w
         ? {
             ok: w.health?.ok !== false && !w.needsRepair,
             reason: w.needsRepair ? "needs-repair" : w.health?.reason || null,
@@ -884,7 +928,7 @@ class NodeManager {
             recoveries: w.recoveries?.length || 0,
             lastRecoveryAt: w.recoveries?.length ? w.recoveries[w.recoveries.length - 1] : null,
           }
-        : null,
+        : observed.health,
     };
   }
 }

@@ -1,3 +1,11 @@
+## Node health, Quick Sync and storage
+
+- Replay validation failures, fatal chain errors and repeated producer request timeouts now show warnings on Node and Dashboard, even when Docker containers look running or automatic recovery is off. Replay mismatches stop automatic restart loops. Exited containers are included in status.
+- Quick Sync removes stopped node containers to release mounts, checks data folder locks before downloading, and explains when a full Windows restart may be needed. Failed installs roll original databases back; an interrupted restore blocks node starts until recovered.
+- Manage backups on the Node screen lists previous chain copies with dates and sizes. Delete individual copies after confirming the restored node works. Cleanup is never automatic and does not target active data, wallets or producer keys.
+- Node status shows connected peers from the latest P2P report (about once a minute). A capped list shows a lower bound with “+”; missing reports show unavailable. This is this node's connections, not the total network size.
+- These changes do not establish or fix the underlying Koinos replay-validation cause. Save full chain logs and Docker image versions if it repeats after a verified restore.
+
 ## Brain permissions and node controls
 
 - Choose “Always allow this action” when chat or KAI asks to save a Brain memory. Revoke it in Connections → Connection settings → Always allowed actions. Forgetting remains separately approved.

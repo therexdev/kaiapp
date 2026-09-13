@@ -90,3 +90,14 @@ test("node screen shows only the action opposite its running state", () => {
  S.node.op={name:"start",running:true,tail:[]};paint();
  assert.equal($("#n-start").disabled,true);assert.equal($("#n-stop").disabled,true);
 });
+
+test("unhealthy containers never show a green node or healthy banner", () => {
+ const {S,$,paint}=painter(); S.node.isRunning=true; S.node.runningCount=7;
+ S.node.health={ok:false,reason:"chain-unresponsive",memorySaver:true};
+ S.node.peers={count:4}; paint();
+ assert.equal($("#d-status-text").textContent,"Needs attention");
+ assert.equal($("#d-dot").className,"dot red");
+ assert.equal($("#n-run-pill").textContent,"needs attention");
+ assert.match($("#n-health").innerHTML,/chain-unresponsive/);
+ assert.match($("#n-peers").textContent,/Connected peers: 4/);
+});

@@ -254,6 +254,9 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
     let sync = null;
     if (status.isRunning) {
       sync = await chain.syncStatus().catch(() => null);
+      if ((!sync || sync.local?.error) && !status.memorySaver && status.health?.ok !== false) {
+        status.health = { ok: false, reason: "local-chain-unavailable" };
+      }
     }
     // Only probe prerequisites while Docker isn't usable yet — this is what
     // drives the guided setup card.
@@ -431,6 +434,8 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
   handle("node:moveDataDirStatus", () => nodeMgr.moveStatus());
   handle("node:moveDataDirCancel", () => nodeMgr.cancelMove());
 
+  handle("node:backups", () => nodeMgr.backups(chain.network().id));
+  handle("node:deleteBackup", ({ id }) => nodeMgr.removeBackup(chain.network().id, id));
   handle("node:quickSyncInfo", () => nodeMgr.quickSyncInfo(chain.network().id));
   handle("node:quickSync", () => nodeMgr.quickSync(chain.network().id));
   handle("node:quickSyncCancel", () => nodeMgr.cancelQuickSync());
@@ -458,11 +463,16 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
         docker: ns.docker,
         isRunning: ns.isRunning,
         runningCount: ns.runningCount,
+        health: ns.health,
+        peers: ns.peers,
         op: ns.op,
         producerRegistered: null,
       };
       if (ns.isRunning) {
         out.sync = await chain.syncStatus().catch(() => null);
+        if ((!out.sync || out.sync.local?.error) && !ns.memorySaver && out.node.health?.ok !== false) {
+          out.node.health = { ok: false, reason: "local-chain-unavailable" };
+        }
       }
     } catch (e) {
       out.node = { error: String(e.message) };
@@ -890,8 +900,8 @@ function createKoinosNode({ dataDir, wallet, appVersion, onEvent = () => {} }) {
     onEvent,
     autoRecover: settings.get("node.autoRecover", true),
     probeHead: async () => {
-      const s = await chain.syncStatus().catch(() => null);
-      const h = s?.local?.height;
+      const s = await chain.headInfo([chain.network().localRpcUrl]).catch(() => null);
+      const h = s?.height;
       return h != null ? Number(h) : null;
     },
   });

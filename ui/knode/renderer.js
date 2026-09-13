@@ -252,7 +252,7 @@ function patchDashboardView() {
   const text = $("#d-status-text");
   const sub = $("#d-status-sub");
   const toggle = $("#d-toggle");
-  dot.className = "dot " + (quickSync ? "amber" : running ? "green" : "red");
+  dot.className = "dot " + (quickSync ? "amber" : d.node?.health?.ok === false ? "red" : running ? "green" : "red");
   if (quickSync) {
     text.textContent = "Quick syncing";
     text.className = "status-text warn-text";
@@ -261,8 +261,8 @@ function patchDashboardView() {
     toggle.className = "btn";
     toggle.dataset.action = "";
   } else if (running) {
-    text.textContent = "Running";
-    text.className = "status-text good-text";
+    text.textContent = d.node.health?.ok === false ? "Needs attention" : "Running";
+    text.className = d.node.health?.ok === false ? "status-text bad-text" : "status-text good-text";
     const op = d.node.op;
     sub.textContent = op && op.running ? `${op.name} in progress…` : `${d.node.runningCount} services · ${d.network.label}`;
     toggle.textContent = "Stop node";
@@ -1079,11 +1079,17 @@ function renderNodeView() {
     </div>
     <div id="n-docker"></div>
     <div id="n-op"></div>
+    <div class="card">
+      <div class="row spread"><h2>Previous chain backups</h2><button id="n-backups" class="btn">Manage backups</button></div>
+      <p class="small muted">Quick Sync keeps the previous chain data. After the restored node is working, remove old backups here to reclaim space.</p>
+      <div id="n-backup-list"></div>
+    </div>
     <div class="grid-2">
       <div class="card">
         <h2>📡 Status <span id="n-run-pill"></span></h2>
         <div id="n-health" class="stack"></div>
         <div id="n-sync" class="stack"></div>
+        <p id="n-peers" class="small muted"></p>
         <label class="row small" style="gap:8px;margin-top:10px;cursor:pointer">
           <input type="checkbox" id="n-autorecover" checked>
           <span>Recover after an unexpected stop <span class="muted">— manual stops and quick sync keep the node stopped.</span></span>
@@ -1133,6 +1139,7 @@ function renderNodeView() {
   producerAction("#pc-prepare", async () => { const d = await call("producer:prepare", { action: $("#pc-action").value, amount: $("#pc-amount").value, token: $("#pc-token").value, to: $("#pc-to").value.trim() }); $("#pc-unsigned").value = JSON.stringify(d, null, 2); $("#pc-signed").value = ""; $("#pc-confirm").checked = false; $("#pc-result").textContent = "Prepared only — nothing signed or broadcast. Review decoded operations on your separate signing machine."; });
   producerAction("#pc-copy-draft", () => call("util:copy", { text: $("#pc-unsigned").value }));
   producerAction("#pc-broadcast", async () => { const tx = JSON.parse($("#pc-signed").value); const r = await call("producer:broadcast", { transaction: tx, confirm: $("#pc-confirm").checked }); $("#pc-signed").value = ""; $("#pc-unsigned").value = ""; $("#pc-confirm").checked = false; txToast(r, "External transaction"); $("#pc-result").textContent = r.note; await refreshNode(); });
+  $("#n-backups").addEventListener("click", loadNodeBackups);
   $("#n-open").addEventListener("click", () => call("util:openPath", { which: "nodeData" }).catch(() => {}));
   $("#n-docker").addEventListener("click", onSetupClick);
   $("#n-start").addEventListener("click", onStartNode);
@@ -1162,6 +1169,24 @@ function fmtBytes(n) {
   if (v >= 1e9) return `${(v / 1e9).toFixed(1)} GB`;
   if (v >= 1e6) return `${(v / 1e6).toFixed(1)} MB`;
   return `${Math.round(v / 1e3)} kB`;
+}
+
+async function loadNodeBackups() {
+  const el = $("#n-backup-list");
+  el.textContent = "Measuring backups…";
+  try {
+    const rows = await call("node:backups");
+    el.innerHTML = rows.length ? rows.map(b => `<div class="row spread" style="margin-top:8px"><span>${esc(b.createdAt ? new Date(b.createdAt).toLocaleString() : b.id)} · ${b.bytes == null ? "Size unavailable" : fmtBytes(b.bytes)}</span><button class="btn danger" data-backup="${esc(b.id)}" ${b.error ? "disabled" : ""}>Delete backup</button></div>`).join("") : '<p class="muted small">No previous chain backups.</p>';
+    el.querySelectorAll("[data-backup]").forEach(btn => btn.addEventListener("click", () => {
+      showModal({ title: "Delete previous chain backup?", body: `<p>This permanently deletes ${esc(btn.dataset.backup)}. Confirm the restored node is working before removing your rollback copy. Active chain data, wallets and keys are kept.</p>`, actions: [
+        { label: "Cancel", onClick: close => close() },
+        { label: "Delete backup", class: "danger", onClick: async close => {
+          try { await call("node:deleteBackup", { id: btn.dataset.backup }); close(); await loadNodeBackups(); }
+          catch (e) { toast(e.message, "bad"); }
+        } },
+      ] });
+    }));
+  } catch (e) { el.textContent = e.message; }
 }
 
 async function onQuickSync() {
@@ -1481,9 +1506,14 @@ function patchNodeView() {
   // run pill + services
   const pill = $("#n-run-pill");
   if (pill) {
-    pill.className = "pill " + (!quickSync && n?.isRunning ? "good" : "warn");
-    pill.textContent = quickSync ? (n?.isRunning ? "stopping for quick sync" : "stopped · quick syncing") : n?.isRunning ? `running (${n.runningCount} services)` : "stopped";
+    pill.className = "pill " + (!quickSync && n?.isRunning && n?.health?.ok !== false ? "good" : "warn");
+    pill.textContent = quickSync ? (n?.isRunning ? "stopping for quick sync" : "stopped · quick syncing") : n?.isRunning ? (n?.health?.ok === false ? "needs attention" : `running (${n.runningCount} services)`) : "stopped";
   }
+
+  const peerEl = $("#n-peers");
+  if (peerEl) peerEl.textContent = !quickSync && n?.isRunning
+    ? (n.peers ? `Connected peers: ${n.peers.count}${n.peers.lowerBound ? "+" : ""} · latest P2P report (about once a minute)` : "Connected peers: unavailable — waiting for a P2P report")
+    : "Connected peers: node stopped";
 
   // friendly, jargon-free health line + auto-recover toggle state
   const autoBox = $("#n-autorecover");
@@ -1497,7 +1527,7 @@ function patchNodeView() {
     } else if (h?.needsRepair) {
       // Corrupted block data — a restart can't fix it. Offer the one-click rebuild.
       healthEl.innerHTML = `<div class="banner bad">
-        <b>Your node's block data got corrupted.</b> Restarting won't fix it — it needs to be rebuilt from a verified snapshot. Your wallet, keys and settings are safe, and it takes a few minutes.
+        <b>Chain validation failed — block production is not healthy.</b> The saved chain state could not be replayed correctly. Quick Sync can rebuild the local data from a verified snapshot; completion time depends on your disk and connection. If this repeats, save the chain logs for investigation. Your wallet, keys and settings are kept.
         <div style="margin-top:8px"><button id="n-repair" class="btn primary" style="padding:6px 12px">🔧 Repair node data</button></div>
       </div>`;
       $("#n-repair")?.addEventListener("click", onQuickSync);
@@ -1505,10 +1535,11 @@ function patchNodeView() {
       healthEl.innerHTML = "";
     } else if (h?.recovering) {
       healthEl.innerHTML = `<div class="banner info"><span class="spin"></span> Getting your node back up — this takes a minute. You don't need to do anything.</div>`;
+    } else if (h && h.ok === false) {
+      healthEl.innerHTML = `<div class="banner bad">The node is not confirmed healthy (${esc(h.reason || "status unavailable")}). Block production may be interrupted. Check the chain logs${n?.autoRecover ? "; automatic recovery is enabled" : "; automatic recovery is off"}.</div>`;
     } else if (h?.memorySaver) {
       healthEl.innerHTML = `<div class="banner warn">Running in memory-saver mode to stay stable on this PC — your node services are running.${recovered}</div>`;
-    } else if (h && h.ok === false) {
-      healthEl.innerHTML = `<div class="banner warn">Your node needs attention — the app is taking care of it.</div>`;
+
     } else if (h) {
       healthEl.innerHTML = `<div class="banner good">✓ Your node is running and healthy.${recovered}</div>`;
     } else {
