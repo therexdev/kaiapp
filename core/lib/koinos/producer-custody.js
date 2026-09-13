@@ -4,15 +4,18 @@ const { isDeepStrictEqual } = require("util");
 const { Signer, Transaction, utils } = require("koilib");
 const { parseAmount, cmpSats } = require("./format");
 const keyText = value => value ? Buffer.from(value, "base64").toString("base64url") : null;
-const externalMode = settings => settings.get("producer.mode", "local") === "external";
+const settingsHealth = settings => typeof settings.health === "function" ? settings.health() : { ok: true, error: null, recoveredFromBackup: false, backupError: null };
+const requireHealthySettings = settings => { const health = settingsHealth(settings); if (!health.ok) throw new Error("Producer custody settings could not be loaded safely. Production and producer wallet actions are disabled until you stop the node and explicitly save the intended custody mode again."); return health; };
+const externalMode = settings => { requireHealthySettings(settings); return settings.get("producer.mode", "local") === "external"; };
 const producerAddress = (settings, wallet) => externalMode(settings) ? settings.get(`producer.addresses.${settings.get("network", "mainnet")}`, "") : wallet.address;
 
 class ProducerCustody {
   constructor({ settings, state, wallet, chain, nodeMgr, rewards }) { Object.assign(this, { settings, state, wallet, chain, nodeMgr, rewards }); }
-  config() { return { mode: externalMode(this.settings) ? "external" : "local", address: producerAddress(this.settings, this.wallet), localWalletAddress: this.wallet.address || null }; }
-  requireExternal() { if (!externalMode(this.settings)) throw new Error("Select External/cold producer wallet first."); if (!this.config().address) throw new Error("Set a watch-only producer address for this network."); }
-  requireLocal() { if (externalMode(this.settings)) throw new Error("External producer mode never signs with the earning wallet. Use External signing in Node setup."); }
+  config() { const health = settingsHealth(this.settings); if (!health.ok) return { mode: "unresolved", address: null, localWalletAddress: this.wallet.address || null, settingsHealth: health }; return { mode: externalMode(this.settings) ? "external" : "local", address: producerAddress(this.settings, this.wallet), localWalletAddress: this.wallet.address || null, settingsHealth: health }; }
+  requireExternal() { requireHealthySettings(this.settings); if (!externalMode(this.settings)) throw new Error("Select External/cold producer wallet first."); if (!this.config().address) throw new Error("Set a watch-only producer address for this network."); }
+  requireLocal() { requireHealthySettings(this.settings); if (externalMode(this.settings)) throw new Error("External producer mode never signs with the earning wallet. Use External signing in Node setup."); }
   hotPublicKey() {
+    requireHealthySettings(this.settings);
     const pub = keyText(this.nodeMgr.readProducerPublicKey(this.chain.network().id));
     if (!externalMode(this.settings)) return pub;
     const file = path.join(this.nodeMgr.dirs(this.chain.network().id).producerKeyDir, "private.key");
@@ -38,11 +41,23 @@ class ProducerCustody {
     this.rewards.configure({ enabled: false });
     const addresses = { ...this.settings.get("producer.addresses", {}), ...(mode === "external" ? { [this.chain.network().id]: address } : {}) };
     this.settings.set("producer", { mode, addresses });
+    // Do not report success from in-memory state alone. Re-open the settings
+    // file and verify the exact custody selection/address that will be loaded
+    // by the next KAI process.
+    const { JsonStore } = require("../store");
+    const { DEFAULT_SETTINGS } = require("./constants");
+    const reread = new JsonStore(this.settings.filePath, DEFAULT_SETTINGS);
+    const expectedAddress = mode === "external" ? address : this.wallet.address;
+    const persistedMode = reread.get("producer.mode", "local");
+    const persistedAddress = mode === "external" ? reread.get(`producer.addresses.${this.chain.network().id}`, "") : this.wallet.address;
+    if (!reread.health().ok || persistedMode !== mode || persistedAddress !== expectedAddress) throw new Error("Producer custody could not be verified on disk. Nothing else was changed; leave the node stopped and save the custody mode again.");
     this.state.set("producerDraft", null);
     return this.config();
   }
   async status() {
-    const config = this.config(), filePublicKey = this.hotPublicKey();
+    const config = this.config();
+    if (config.mode === "unresolved") return { ...config, filePublicKey: null, registeredPublicKey: null, matches: false, verificationError: "Producer custody settings could not be loaded safely. Node production is disabled until custody mode is confirmed again.", keyDirectory: this.nodeMgr.dirs(this.chain.network().id).producerKeyDir };
+    const filePublicKey = this.hotPublicKey();
     let registeredPublicKey = null, verificationError = null;
     if (config.address) {
       try { registeredPublicKey = keyText(await this.chain.registeredPublicKey(config.address, { strict: true })); }
@@ -61,7 +76,6 @@ class ProducerCustody {
     if (rotate && fs.existsSync(priv)) {
       backup = path.join(dir, "key-backup-" + Date.now() + "-" + crypto.randomBytes(4).toString("hex"));
       fs.mkdirSync(backup, { mode: 0o700 });
-      // Copy both before removing the current key. Never discard the old key.
       fs.copyFileSync(priv, path.join(backup, "private.key")); fs.chmodSync(path.join(backup, "private.key"), 0o600);
       if (fs.existsSync(pub)) fs.copyFileSync(pub, path.join(backup, "public.key"));
       fs.unlinkSync(priv);
@@ -129,12 +143,11 @@ class ProducerCustody {
     if (!signers.includes(this.config().address)) throw new Error("The signature does not belong to the external producer address.");
     if (draft.summary.action === "register" && draft.summary.publicKey !== this.hotPublicKey()) throw new Error("The hot key changed. Prepare a new registration.");
     const provider = this.chain.provider();
-    if (await provider.getChainId() !== transaction.header.chain_id || await provider.getNextNonce(this.config().address) !== transaction.header.nonce) throw new Error("Network or account nonce changed. Prepare and sign a new draft.");
-    // Consume before sending: an uncertain network response must not auto-replay.
+    if (await provider.getChainId() !== transaction.header.chain_id || await provider.getNextNonce(this.config().address) !== transaction.header.nonce) throw new Error("Network or account nonce changed. Prepare a new draft.");
     this.state.set("producerDraft", null);
     const tx = new Transaction({ provider, transaction });
     await tx.send();
     return { txId: transaction.id, confirmed: false, note: "Submitted. Verify confirmation in the explorer; registration must be checked on-chain before starting production." };
   }
 }
-module.exports = { ProducerCustody, externalMode, producerAddress };
+module.exports = { ProducerCustody, externalMode, producerAddress, requireHealthySettings };
