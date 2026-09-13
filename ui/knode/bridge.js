@@ -166,6 +166,11 @@
   connectEvents();
 
   window.koinos = {
+    connectionQr: function (uri) {
+      var url = new URL(uri);
+      if (url.origin !== "https://koinvault.app" || url.pathname !== "/" || !/^[A-Za-z0-9_-]{24}$/.test(url.searchParams.get("connect") || "") || !/^[A-Za-z0-9_-]{43}$/.test(url.searchParams.get("secret") || "")) throw new Error("Invalid wallet connection link");
+      return window.KQR.svg(window.KQR.encode(uri, { ec: "M" }), { scale: 5, quiet: 4 });
+    },
     invoke: invoke,
     onEvent: function (cb) {
       listeners.push(cb);

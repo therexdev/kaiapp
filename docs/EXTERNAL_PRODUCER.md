@@ -81,3 +81,17 @@ If the host was compromised, rotate registration from a trusted external machine
 Selecting external mode does not delete existing wallet/session files or old backups. KAI refuses to label its current earning-wallet address as an external producer. For actual cold custody, use a producer whose account private key has never been on the production host. If the old producer key was stored there, moving it elsewhere does not erase prior exposure; use a new externally controlled account and migrate assets with your wallet's normal reviewed process. This update performs no automatic transfers or wallet deletion.
 
 Verification covers setup without the cold WIF, persistent configuration, hot-key reuse/rotation, exact signed-transaction validation, nonce/network checks, and disabled local/automatic signing. No real funds are moved by development tests. Actual mainnet signing remains an explicit user operation.
+
+## Sign with Koin Vault on your phone
+
+1. Stop the node. Open **Node → Producer wallet custody → Koin Vault → Connect Koin Vault**.
+2. In Koin Vault on your phone, choose **Connect App** and scan the QR. Approve the connection with your fingerprint or device passkey. You can also open/copy the connection link. Keep this link private and keep the wallet open while approving requests.
+3. In KAI, check the connected address and click **Use this producer wallet**. This saves external custody and turns off automatic burns/transfers. It does not move funds from any previous wallet.
+4. Click **Generate hot key**. In the Koin Vault section select **Register hot public key**, then **Review and sign with Koin Vault**. Check the producer address and full hot public key in KAI and the wallet. Approve in Koin Vault; that approval submits the transaction.
+5. Click **Verify registration** in KAI. Once the on-chain key matches, the node can produce blocks for that wallet. Fund that producer address and approve a burn to VHP through the same Koin Vault section as needed.
+
+For burns, the confirmation shows the permanent KOIN burn amount and the same-wallet VHP destination. For transfers, it shows token, amount and full recipient. Each action requires its own wallet approval. Your phone's fingerprint/device passkey signs through Koin Vault's smart-account flow; it is never exported to KAI. The local block key handles normal block production without repeated fingerprint prompts.
+
+Connections last up to 30 minutes and requests up to 10 minutes. KAI retains the producer address across restarts, but keeps connection credentials only in memory: reconnect after restarting KAI. Disconnecting revokes the connection and unsubmitted requests; it does not switch custody, stop the node or reverse a submitted transaction. If a network error leaves delivery uncertain, check Koin Vault before retrying, or disconnect successfully first. Changing custody or hot keys while approval is pending is blocked.
+
+This integration uses Koinos Mainnet, including when running Koinos AI Test. Koin Vault prepares its own sponsored smart-account transaction; this is separate from importing a Kondor signature. KAI compares the submitted operations and payee with its request on-chain. Registration is independently checked before allowing production. The authoritative wallet backend must expose `features.kaiProducer: true`; deployments with an explicit `DAPP_ORIGINS` setting must include `https://koinosai.com`.

@@ -310,3 +310,11 @@ pre.logs {
 
 /* State-dependent controls must stay hidden despite button display styles. */
 [hidden] { display: none !important; }
+
+/* Producer wallet connection */
+.custody-vault { margin: 20px 0; padding: 18px; border: 1px solid var(--border, #384659); border-radius: 14px; }
+.custody-vault h3 { margin: 0 0 8px; }
+.custody-vault .mono, #pc-vault-status { overflow-wrap: anywhere; }
+#pc-vault-qr { max-width: 290px; margin: 16px 0; }
+#pc-vault-qr svg { display: block; width: 100%; height: auto; }
+.custody-vault [hidden] { display: none !important; }

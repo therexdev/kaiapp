@@ -16,6 +16,7 @@ const S = {
   balances: null,     // chain:balances
   balancesAt: 0,
   node: null,         // node:status
+  vault: null,
   producer: null,     // producer:status
   rewards: null,      // rewards:status
   dashboard: null,    // dashboard:summary
@@ -1061,6 +1062,42 @@ function onBurn() {
 
 // ---------- node view ----------
 
+// Session polling is separate from slower Docker and balance refreshes. It
+// pauses off the Node screen; the wallet still requires its own approval.
+let vaultPolling = false;
+async function refreshVault() {
+  if (vaultPolling || S.view !== "node" || !$("#pc-vault-status")) return;
+  vaultPolling = true;
+  try { S.vault = await call("producer:vaultStatus"); patchVault(); }
+  catch (e) { if ($("#pc-vault-status")) $("#pc-vault-status").textContent = e.message; }
+  finally { vaultPolling = false; }
+}
+function patchVault() {
+  if (!$("#pc-vault-status")) return;
+  const v = S.vault || {}, p = v.pending;
+  const paired = !!v.connected, active = paired || !!v.uri;
+  $("#pc-vault-connect").hidden = active;
+  $("#pc-vault-connect").disabled = net().id !== "mainnet";
+  $("#pc-vault-disconnect").hidden = !active;
+  $("#pc-vault-use").hidden = !paired || (S.appInfo.settings.producer?.mode === "external" && S.appInfo.settings.producer?.addresses?.[net().id] === v.address);
+  $("#pc-vault-pair").hidden = !v.uri;
+  const qr = $("#pc-vault-qr");
+  if (qr.dataset.uri !== (v.uri || "")) {
+    qr.dataset.uri = v.uri || "";
+    qr.innerHTML = v.uri ? window.koinos.connectionQr(v.uri) : "";
+  }
+  $("#pc-vault-account").textContent = paired ? v.address : "";
+  $("#pc-vault-operations").hidden = !paired;
+  const busy = p && ["sending", "pending", "submitting", "unknown", "submitted"].includes(p.status) && p.expiresAt > Date.now();
+  $("#pc-vault-prepare").disabled = !!busy;
+  $("#pc-vault-use").disabled = !!busy;
+  const messages = { pending: "Waiting for your approval in Koin Vault…", sending: "Sending request to Koin Vault…", submitting: "Wallet is submitting your transaction…", rejected: "You rejected the request. Nothing was submitted by this request.", confirmed: "Transaction verified on-chain. For registration, click Verify registration before starting the node." };
+  $("#pc-vault-status").textContent = p ? (messages[p.status] || p.note || p.status) + (p.txId ? " Transaction: " + p.txId : "")
+    : paired ? "Connected. Use this producer wallet, generate a hot key, then sign its registration below."
+    : v.uri ? "Scan with Koin Vault → Connect App. This connection expires in 30 minutes."
+    : "Mainnet · No wallet connected.";
+}
+
 function renderNodeView() {
   const custody = S.appInfo.settings.producer || { mode: "local", addresses: {} };
   const root = $("#view-node");
@@ -1086,6 +1123,21 @@ function renderNodeView() {
         <button id="pc-copy" class="btn ghost">Copy public key</button>
       </div>
       <p id="pc-result" class="hint" role="status"></p>
+      <div class="custody-vault">
+        <h3>Koin Vault</h3>
+        <p class="hint">Connect your phone, use its wallet as your producer, then approve registration, burns and transfers with your fingerprint or device passkey. Your node keeps running after the phone disconnects.</p>
+        <div class="row custody-actions"><button id="pc-vault-connect" class="btn primary">Connect Koin Vault</button><button id="pc-vault-use" class="btn" hidden>Use this producer wallet</button><button id="pc-vault-disconnect" class="btn ghost" hidden>Disconnect / cancel approval</button></div>
+        <div id="pc-vault-pair" hidden><div id="pc-vault-qr" aria-label="Scan with Koin Vault Connect App"></div><p class="hint">Open Koin Vault → Connect App → scan this QR and approve. Keep the wallet open for transaction requests.</p><div class="row custody-actions"><button id="pc-vault-open" class="btn">Open Koin Vault</button><button id="pc-vault-copy" class="btn ghost">Copy connection link</button></div></div>
+        <p id="pc-vault-status" class="hint" role="status">Mainnet · No wallet connected.</p>
+        <p id="pc-vault-account" class="mono"></p>
+        <div id="pc-vault-operations" hidden>
+          <label class="field"><span>Operation</span><select id="pc-vault-action"><option value="register">Register hot public key</option><option value="burn">Burn KOIN to this producer's VHP</option><option value="transfer">Transfer tokens</option></select></label>
+          <label class="field" id="pc-vault-amount-field" hidden><span>Amount</span><input id="pc-vault-amount" type="text" inputmode="decimal" placeholder="0.00"></label>
+          <label class="field" id="pc-vault-token-field" hidden><span>Token</span><select id="pc-vault-token"><option value="koin">KOIN</option><option value="vhp">VHP</option></select></label>
+          <label class="field" id="pc-vault-to-field" hidden><span>Recipient</span><input id="pc-vault-to" type="text" placeholder="Koinos address"></label>
+          <button id="pc-vault-prepare" class="btn primary">Review and sign with Koin Vault</button>
+        </div>
+      </div>
       <details class="custody-signing"><summary>External signing: registration, burns and transfers</summary>
         <div class="custody-signing-content">
         <div class="row custody-actions"><button id="pc-signer" class="btn">Open Kondor signer</button><button id="pc-copy-signer" class="btn ghost">Copy signer link</button><button id="pc-guide" class="btn ghost">Signing and backup guide</button></div>
@@ -1161,6 +1213,39 @@ function renderNodeView() {
   producerAction("#pc-key", async () => { const r = await call("producer:key"); await refreshNode(); $("#pc-result").textContent = "Hot key ready. Back up private.key and public.key securely from: " + r.keyDirectory; });
   producerAction("#pc-rotate", async () => showModal({ title: "Rotate hot production key?", body: "<p>Stop the node first. KAI will preserve a local backup of the old hot key. Register the new public key with your external wallet before restarting production.</p>", actions: [{ label: "Cancel", onClick: close => close() }, { label: "Rotate key", onClick: async close => { try { const r = await call("producer:key", { rotate: true, confirm: true }); close(); await refreshNode(); $("#pc-result").textContent = "New hot key ready. Old key backup: " + (r.backupDirectory || "none"); } catch (e) { toast(e.message, "bad"); } } }] }));
   producerAction("#pc-verify", async () => { await refreshNode(); $("#pc-result").textContent = S.producer?.matches ? "On-chain registration matches this node's hot key." : S.producer?.verificationError || "Registration does not match yet. Sign and confirm the registration, then check again."; });
+  producerAction("#pc-vault-connect", async () => { S.vault = await call("producer:vaultConnect"); patchVault(); });
+  producerAction("#pc-vault-disconnect", async () => { S.vault = await call("producer:vaultDisconnect"); patchVault(); });
+  producerAction("#pc-vault-use", async () => {
+    await call("producer:vaultUse");
+    S.appInfo = await call("app:info"); S.balancesAt = 0; S.balances = null;
+    $("#pc-mode").value = "external"; $("#pc-address").value = S.vault.address;
+    await refreshNode(); renderBurnView(); renderReturnsView(); await refreshRewards(); patchVault();
+    $("#pc-result").textContent = "Koin Vault producer saved. Generate a hot key, then register it with Koin Vault below.";
+  });
+  producerAction("#pc-vault-open", () => { if (!S.vault?.uri) throw new Error("Create a connection QR first."); return call("util:openExternal", { url: S.vault.uri }); });
+  producerAction("#pc-vault-copy", () => { if (!S.vault?.uri) throw new Error("Create a connection QR first."); return call("util:copy", { text: S.vault.uri }); });
+  $("#pc-vault-action").addEventListener("change", () => {
+    const action = $("#pc-vault-action").value;
+    $("#pc-vault-amount-field").hidden = action === "register";
+    $("#pc-vault-token-field").hidden = $("#pc-vault-to-field").hidden = action !== "transfer";
+  });
+  producerAction("#pc-vault-prepare", async () => {
+    const draft = await call("producer:vaultPrepare", { action: $("#pc-vault-action").value, amount: $("#pc-vault-amount").value, token: $("#pc-vault-token").value, to: $("#pc-vault-to").value.trim() });
+    const a = draft.summary;
+    const detail = a.action === "register" ? `<p>Register this node's hot public key:</p><p class="mono">${esc(a.publicKey)}</p>`
+      : a.action === "burn" ? `<p>Permanently burn <b>${esc(a.amount)} KOIN</b> for the same amount of VHP in your producer wallet.</p>`
+      : `<p>Transfer <b>${esc(a.amount)} ${esc(a.token.toUpperCase())}</b> to:</p><p class="mono">${esc(a.to)}</p>`;
+    showModal({ title: "Review Koin Vault request", body: `<p>Mainnet · Producer:</p><p class="mono">${esc(a.producer)}</p>${detail}<p>Next, review the same details in Koin Vault and approve with your fingerprint or device passkey. Wallet approval submits the transaction.</p>`, actions: [
+      { label: "Cancel", onClick: close => close() },
+      { label: "Request wallet approval", class: "primary", onClick: async (close, modal) => {
+        const button = $(".btn.primary", modal); button.disabled = true;
+        try { S.vault = await call("producer:vaultSend", { confirm: true, draftId: draft.id }); close(); patchVault(); }
+        catch (e) { close(); $("#pc-result").textContent = e.message; await refreshVault(); }
+      } }
+    ] });
+  });
+  patchVault();
+  void refreshVault();
   const signerUrl = "https://koinosai.com/producer-signer/";
   producerAction("#pc-signer", () => call("util:openExternal", { url: signerUrl }));
   producerAction("#pc-copy-signer", () => call("util:copy", { text: signerUrl }));
@@ -2920,6 +3005,7 @@ async function init() {
   refreshRewards();
 
   setInterval(heartbeat, 5000);
+  setInterval(() => { if (S.vault?.expiresAt) void refreshVault(); }, 2500);
 }
 
 init().catch((e) => {

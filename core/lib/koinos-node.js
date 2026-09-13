@@ -67,11 +67,19 @@ const { compareRoutes, descriptor } = require("./koinos/fund-routes");
 const DEFAULT_ONRAMP_ENDPOINT = "https://koinos-node.vercel.app/api/session";
 const ONRAMP_APP_KEY = "kkapp_71854dc40591df1aeb8811a514e3dbc302bb382f";
 
-function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards, stats, bridge, routeC, userData, appVersion, defaultNodeData = null, priceCache: injectedPriceCache = null, producerCache: injectedProducerCache = null, onEvent = () => {} }) {
+function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards, stats, bridge, routeC, userData, appVersion, defaultNodeData = null, priceCache: injectedPriceCache = null, producerCache: injectedProducerCache = null, vaultRequest = undefined, onEvent = () => {} }) {
   const channels = new Map();
   const handle = (channel, fn) => channels.set(channel, fn);
   const { ProducerCustody } = require("./koinos/producer-custody");
   const custody = new ProducerCustody({ settings, state, wallet, chain, nodeMgr, rewards });
+  const { ProducerVault } = require("./koinos/producer-vault");
+  const vault = new ProducerVault({ custody, chain, request: vaultRequest });
+  handle("producer:vaultConnect", () => vault.connect());
+  handle("producer:vaultStatus", () => vault.status());
+  handle("producer:vaultUse", () => vault.useWallet());
+  handle("producer:vaultPrepare", input => vault.prepare(input));
+  handle("producer:vaultSend", input => vault.send(input));
+  handle("producer:vaultDisconnect", () => vault.disconnect());
   const producerAddress = () => custody.config().address;
   handle("producer:configure", input => custody.configure(input));
   handle("producer:key", input => custody.key(input));
@@ -863,12 +871,14 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
   // Serialize custody/network/node mutations so asynchronous RPC checks cannot
   // authorize a start, rotation or draft against a different producer context.
   let producerMutation = false;
-  for (const name of ["producer:configure", "producer:key", "producer:prepare", "producer:broadcast", "producer:register", "settings:update", "node:start", "node:stop", "chain:burn", "chain:send", "rewards:runNow", "rewards:configure"]) {
+  for (const name of ["producer:vaultConnect", "producer:vaultUse", "producer:vaultPrepare", "producer:vaultSend", "producer:vaultDisconnect", "producer:vaultStatus", "producer:configure", "producer:key", "producer:prepare", "producer:broadcast", "producer:register", "settings:update", "node:start", "node:stop", "chain:burn", "chain:send", "rewards:runNow", "rewards:configure"]) {
     const fn = channels.get(name);
     channels.set(name, async input => {
       if (producerMutation) throw new Error("Wait for the current producer operation to finish.");
       producerMutation = true;
-      try { return await fn(input); } finally { producerMutation = false; }
+      try {
+        if (!name.startsWith("producer:vault") && name !== "node:stop") vault.guardMutation();
+        return await fn(input); } finally { producerMutation = false; }
     });
   }
   return channels;

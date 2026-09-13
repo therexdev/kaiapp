@@ -11,7 +11,7 @@ const { RewardEngine } = require("../lib/koinos/rewards");
 const { ProducerCustody } = require("../lib/koinos/producer-custody");
 const { buildChannels } = require("../lib/koinos-node");
 const { inspect } = require("../../scripts/sign-producer-transaction");
-function fixture(t) {
+function fixture(t, overrides = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-cold-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const settings = new JsonStore(path.join(dir, "settings.json"), DEFAULT_SETTINGS), state = new JsonStore(path.join(dir, "state.json"));
@@ -29,7 +29,7 @@ function fixture(t) {
   nodeMgr.start = async (network, address) => ({ network, address });
   const rewards = new RewardEngine({ settings, state, chain, wallet, stats: { refresh() { throw new Error("REWARD READ IN COLD MODE"); } } });
   t.after(() => rewards.stop());
-  const args = { settings, state, chain, wallet, nodeMgr, rewards };
+  const args = { settings, state, chain, wallet, nodeMgr, rewards, ...overrides };
   const custody = new ProducerCustody(args);
   const channels = buildChannels({ ...args, setup: { optimizeWslMemory: async () => {} }, stats: {}, userData: dir, appVersion: "test" });
   return { ...args, dir, owner, custody, channels, provider, calls, registered: value => { registered = value; } };
@@ -222,5 +222,62 @@ test("producer UI configures cold custody without a local wallet, generates a ke
   assert.equal((await f.channels.get("node:start")({ produce: true })).address, f.owner.getAddress());
   await page.locator('[data-view="returns"]').click();
   assert.match(await page.locator("#view-returns").textContent(), /Automatic burns and transfers are disabled/);
+  assert.deepEqual(errors, []);
+});
+
+test("Koin Vault QR connects a producer, requests registration and handles rejection and disconnection in the node UI", { skip: !fs.existsSync(process.env.KAI_TEST_CHROMIUM || "/opt/pw-browsers/chromium"), timeout: 45000 }, async t => {
+  let connected = false, requested = null, status = "pending", f;
+  const vaultRequest = async (route, body) => {
+    if (route === "config") return { network: "mainnet", demo: false, features: { kaiProducer: true } };
+    if (route === "dapp/create") return { sessionId: "a".repeat(24), secret: "b".repeat(43), expiresAt: Date.now() + 1800000 };
+    if (route === "dapp/status") return { connected, address: connected ? f.owner.getAddress() : null };
+    if (route === "dapp/request") { requested = body; return { requestId: "r".repeat(24), expiresAt: Date.now() + 600000 }; }
+    if (route === "dapp/request-status") return { status };
+    if (route === "dapp/disconnect") { connected = false; return {}; }
+    throw new Error(route);
+  };
+  f = fixture(t, { vaultRequest });
+  const { startMascotServer } = require("./fixtures/mascot-server");
+  const server = await startMascotServer(f.dir);
+  const browser = await require("playwright-core").chromium.launch({ executablePath: process.env.KAI_TEST_CHROMIUM || "/opt/pw-browsers/chromium", args: ["--no-sandbox"] });
+  t.after(async () => { await browser.close(); await server.close(); });
+  const page = await browser.newPage({ viewport: { width: 1000, height: 900 } });
+  const errors = []; page.on("pageerror", e => errors.push(e.message));
+  await page.route("**/core/koinos/rpc", async route => {
+    const { channel, payload } = route.request().postDataJSON();
+    try { await route.fulfill({ json: { ok: true, data: await f.channels.get(channel)(payload || {}) } }); }
+    catch (e) { await route.fulfill({ json: { ok: false, error: e.message } }); }
+  });
+  await page.goto(server.origin + "/knode/index.html");
+  await page.locator('[data-view="node"]').click();
+  await page.click("#pc-vault-connect");
+  await page.waitForSelector("#pc-vault-qr svg");
+  const uri = await page.locator("#pc-vault-qr").getAttribute("data-uri");
+  assert.equal(new URL(uri).origin, "https://koinvault.app");
+  assert.equal(await page.locator("#pc-vault-qr path").getAttribute("d"), await page.evaluate(url => new DOMParser().parseFromString(KQR.svg(KQR.encode(url, { ec: "M" }), { scale: 5, quiet: 4 }), "image/svg+xml").querySelector("path").getAttribute("d"), uri));
+  assert.equal(f.settings.get("producer.mode", "local"), "local");
+  connected = true; await page.evaluate(() => refreshVault());
+  await page.click("#pc-vault-use");
+  await page.waitForFunction(() => document.querySelector("#pc-result").textContent.includes("Koin Vault producer saved"));
+  assert.equal(f.settings.get("producer.mode"), "external");
+  assert.equal(f.settings.get("producer.addresses.mainnet"), f.owner.getAddress());
+  await page.click("#pc-key");
+  await page.waitForFunction(() => document.querySelector("#pc-public").value.length > 20);
+  await page.click("#pc-vault-prepare");
+  await page.waitForSelector(".modal");
+  const pub = await page.inputValue("#pc-public");
+  assert.match(await page.locator(".modal").textContent(), /Wallet approval submits/);
+  assert.ok((await page.locator(".modal").textContent()).includes(pub));
+  await page.getByRole("button", { name: "Request wallet approval", exact: true }).click();
+  await page.waitForFunction(() => document.querySelector("#pc-vault-status").textContent.includes("Waiting for your approval"));
+  assert.ok(requested.operations.length === 1); assert.equal(f.calls.length, 0, "KAI never uses local signing or broadcasts a vault request");
+  await assert.rejects(f.channels.get("producer:key")({ rotate: true, confirm: true }), /Finish or cancel/);
+  status = "rejected"; await page.evaluate(() => refreshVault());
+  await page.waitForFunction(() => document.querySelector("#pc-vault-status").textContent.includes("rejected"));
+  if (process.env.KAI_VAULT_SCREENSHOT) await page.screenshot({ path: process.env.KAI_VAULT_SCREENSHOT, fullPage: true });
+  await page.click("#pc-vault-disconnect");
+  await page.waitForFunction(() => !document.querySelector("#pc-vault-connect").hidden);
+  assert.equal(await page.locator("#pc-vault-account").textContent(), "");
+  assert.equal(f.settings.get("producer.addresses.mainnet"), f.owner.getAddress(), "disconnect preserves the node's producer");
   assert.deepEqual(errors, []);
 });

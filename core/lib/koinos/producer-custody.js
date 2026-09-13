@@ -90,11 +90,11 @@ class ProducerCustody {
     this.state.set("producerDraft", null);
     return { publicKey, keyDirectory: dir, backupDirectory: backup };
   }
-  async prepare({ action, amount, to, token = "koin" }) {
+  async operations({ action, amount, to, token = "koin" }) {
     this.requireExternal();
     const { address } = this.config(), network = this.chain.network().id;
-    const provider = this.chain.provider(), rcLimit = await this.chain._rcLimit(provider, address);
-    const tx = new Transaction({ provider, options: { payer: address, rcLimit } });
+    const provider = this.chain.provider();
+    const tx = new Transaction({ provider });
     const summary = { action, producer: address, network };
     if (action === "register") {
       const publicKey = this.hotPublicKey();
@@ -124,6 +124,13 @@ class ProducerCustody {
         await tx.pushOperation(contract.functions.transfer, { from: address, to, value: amountSat });
       }
     } else throw new Error("Choose register, burn or transfer.");
+    return { summary, operations: tx.transaction.operations };
+  }
+  async prepare(input) {
+    const { summary, operations } = await this.operations(input);
+    const provider = this.chain.provider(), rcLimit = await this.chain._rcLimit(provider, summary.producer);
+    const tx = new Transaction({ provider, options: { payer: summary.producer, rcLimit } });
+    for (const op of operations) await tx.pushOperation(op);
     await tx.prepare();
     const draft = { format: "kai-producer-transaction-v1", expiresAt: Date.now() + 15 * 60000, summary, transaction: tx.transaction };
     this.state.set("producerDraft", draft);

@@ -1,3 +1,11 @@
+## Koin Vault producer signing
+
+- Node → Producer wallet custody → Koin Vault now connects your phone with a QR code. Scan with Koin Vault's Connect App, approve the connection, then click Use this producer wallet while the node is stopped.
+- Generate the separate hot key and use Review and sign with Koin Vault to register it. Koin Vault shows the full public key and requests your fingerprint/device passkey before submitting. The same flow supports burns and KOIN/VHP transfers.
+- Producer selection persists across restarts. The temporary phone connection expires after 30 minutes and reconnects with a new QR. Production continues without the phone once registration is verified.
+- Pending approval blocks conflicting custody/key/network changes. Rejections, expiry, uncertain delivery and disconnect failures retain clear status; requests are never automatically retried. KAI checks submitted operations on-chain and still requires matching on-chain registration before production.
+- Mainnet only. The Koin Vault and original wallet backend updates enable this integration; an older backend shows an update-needed message. Existing Kondor/offline signing remains available.
+
 ## Kondor producer signing
 
 - Keep the producer account key in Kondor on a separate computer. The new Mainnet Producer Signer at https://koinosai.com/producer-signer/ reviews and signs registration, KOIN burns, and KOIN/VHP transfers.
