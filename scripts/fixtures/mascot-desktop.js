@@ -9,6 +9,7 @@ const dir = process.env.KAI_MASCOT_NATIVE_DATA;
 if (!dir) throw new Error("The mascot check requires a temporary profile.");
 fs.mkdirSync(path.join(dir, "electron"), { recursive: true });
 app.setPath("userData", path.join(dir, "electron"));
+let shuttingDown = false;
 app.whenReady().then(async () => {
   const fixture = await startMascotServer(dir);
   const main = new BrowserWindow({ width: 800, height: 650, webPreferences: {
@@ -53,6 +54,21 @@ app.whenReady().then(async () => {
   globalThis.__companionHub = hub;
   globalThis.__kaiMain = main; globalThis.__kaiController = controller;
   await main.loadURL(fixture.origin + "/main-fixture");
-  app.on("before-quit", () => { companionIPC.dispose(); providerIPC.dispose(); controller.dispose(); fixture.server.close(); fixture.server.closeAllConnections(); });
+  let disposed = false, serverClosed;
+  function dispose() {
+    if (disposed) return serverClosed;
+    disposed = true; shuttingDown = true;
+    companionIPC.dispose(); providerIPC.dispose(); controller.dispose();
+    serverClosed = fixture.close();
+    return serverClosed;
+  }
+  // Dispose the fixture before Playwright asks Electron to quit. In particular,
+  // no renderer may keep polling a server being closed inside before-quit.
+  globalThis.__shutdownFixture = async () => {
+    await dispose();
+    for (const window of BrowserWindow.getAllWindows()) window.destroy();
+    return { windows: BrowserWindow.getAllWindows().length, listening: fixture.server.listening };
+  };
+  app.once("before-quit", dispose);
 });
-app.on("window-all-closed", () => app.quit());
+app.on("window-all-closed", () => { if (!shuttingDown) app.quit(); });

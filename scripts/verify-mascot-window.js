@@ -197,8 +197,29 @@ async function main() {
     console.log("PASS: native provider DPAPI encryption, private main/companion IPC, both streaming protocols and settings restrictions.");
     console.log("PASS: native KAI launch, transparent always-on-top window, sandbox, chat, resizing, single-window reuse, tray handoff and return to the main app.");
   } finally {
-    await app?.close();
-    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    let shutdownTimer;
+    try {
+      if (app) {
+        console.log("Closing native companion fixture...");
+        await Promise.race([
+          (async () => {
+            const state = await app.evaluate(async () => globalThis.__shutdownFixture?.());
+            if (state) assert.deepEqual(state, { windows: 0, listening: false });
+            await app.close();
+          })(),
+          new Promise((_, reject) => { shutdownTimer = setTimeout(() => reject(new Error("Native companion fixture did not close within 20 seconds")), 20000); }),
+        ]);
+        console.log("PASS: native companion fixture closed its windows, server and Electron process.");
+      }
+    } catch (error) {
+      // Fail the check if cleanup stalls; never turn an assertion/quit failure
+      // into a pass or leave it holding the entire Windows release for 30 min.
+      app?.process().kill("SIGKILL");
+      throw error;
+    } finally {
+      clearTimeout(shutdownTimer);
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
   }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
