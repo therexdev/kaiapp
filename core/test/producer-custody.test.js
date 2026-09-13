@@ -1,9 +1,10 @@
 "use strict";
 const { test } = require("node:test"), assert = require("node:assert/strict");
 const fs = require("fs"), os = require("os"), path = require("path");
-const { Signer, utils } = require("koilib");
+const { Signer, Transaction, utils } = require("koilib");
 const { JsonStore } = require("../lib/store");
-const { DEFAULT_SETTINGS, NETWORKS } = require("../lib/koinos/constants");
+const { DEFAULT_SETTINGS, NETWORKS, POB_ABI, TOKEN_ABI } = require("../lib/koinos/constants");
+const { inspectDraft } = require("../../ui/producer-signer/validation");
 const { ChainService } = require("../lib/koinos/chain");
 const { NodeManager } = require("../lib/koinos/node-manager");
 const { RewardEngine } = require("../lib/koinos/rewards");
@@ -104,6 +105,78 @@ test("failed chain reads, changed nonce, expiry and changed network never author
   assert.equal(f.calls.length, 0);
 });
 
+test("Kondor can lower mana for registration, burn and both transfers; review ignores untrusted summary", async t => {
+  const f = fixture(t); await f.custody.configure({ mode: "external", address: f.owner.getAddress() }); await f.custody.key();
+  for (const input of [{ action: "register" }, { action: "burn", amount: "1" }, { action: "transfer", token: "koin", amount: "1", to: f.wallet.address }, { action: "transfer", token: "vhp", amount: "1", to: f.wallet.address }]) {
+    const draft = await f.custody.prepare(input);
+    const untrusted = structuredClone(draft); untrusted.summary = { action: "safe", amount: "0", producer: "someone else" };
+    const review = await inspectDraft(untrusted, { chainId: await f.provider.getChainId(), contracts: NETWORKS.mainnet.contracts, pobAbi: POB_ABI, tokenAbi: TOKEN_ABI });
+    assert.equal(review.action, input.action); assert.equal(review.payer, f.owner.getAddress());
+    const tx = structuredClone(draft.transaction); tx.header.rc_limit = "5000000";
+    await Transaction.prepareTransaction(tx); await f.owner.signTransaction(tx);
+    assert.notEqual(tx.id, draft.transaction.id);
+    assert.equal((await f.custody.broadcast({ transaction: tx, confirm: true })).txId, tx.id);
+    assert.equal(f.calls.at(-1).header.rc_limit, "5000000");
+  }
+});
+
+test("even valid owner signatures cannot change operations, headers, payer, nonce, network or exceed mana cap", async t => {
+  const f = fixture(t); await f.custody.configure({ mode: "external", address: f.owner.getAddress() }); await f.custody.key();
+  const draft = await f.custody.prepare({ action: "burn", amount: "1" });
+  const other = await f.custody.prepare({ action: "transfer", amount: "2", to: f.wallet.address });
+  f.state.set("producerDraft", draft);
+  const mutations = [
+    tx => { tx.header.rc_limit = "1000000001"; },
+    tx => { tx.header.payer = f.wallet.address; },
+    tx => { tx.header.payee = f.owner.getAddress(); },
+    tx => { tx.header.chain_id = utils.encodeBase64url(new Uint8Array(34).fill(2)); },
+    tx => { tx.header.nonce = "KAI="; },
+    tx => { tx.operations = other.transaction.operations; },
+    tx => { tx.operations.reverse(); },
+    tx => { tx.operations.pop(); },
+    tx => { tx.operations[0].call_contract.contract_id = f.wallet.address; },
+  ];
+  for (const mutate of mutations) {
+    const tx = structuredClone(draft.transaction); mutate(tx); await Transaction.prepareTransaction(tx); await f.owner.signTransaction(tx);
+    await assert.rejects(f.custody.broadcast({ transaction: tx, confirm: true }));
+  }
+  for (const value of ["0", "-1", "01", "1e6", "18446744073709551616", 5000000, null]) {
+    const tx = await f.owner.signTransaction(structuredClone(draft.transaction)); tx.header.rc_limit = value;
+    await assert.rejects(f.custody.broadcast({ transaction: tx, confirm: true }));
+  }
+  const tx = await f.owner.signTransaction(structuredClone(draft.transaction));
+  tx.header.rc_limit = "5000000"; await Transaction.prepareTransaction(tx); // old signature on a new ID
+  await assert.rejects(f.custody.broadcast({ transaction: tx, confirm: true }), /signature/);
+  tx.header.unknown = "ignored by protobuf";
+  await assert.rejects(f.custody.broadcast({ transaction: tx, confirm: true }), /header/);
+  assert.equal(f.calls.length, 0);
+});
+
+test("browser review rejects wrong chains/contracts and unrelated or excessive burn approvals", async t => {
+  const f = fixture(t); await f.custody.configure({ mode: "external", address: f.owner.getAddress() }); await f.custody.key();
+  const options = { chainId: await f.provider.getChainId(), contracts: NETWORKS.mainnet.contracts, pobAbi: POB_ABI, tokenAbi: TOKEN_ABI };
+  const draft = await f.custody.prepare({ action: "burn", amount: "1" });
+  await assert.rejects(inspectDraft(draft, { ...options, chainId: "wrong" }), /network/);
+  await assert.rejects(inspectDraft(draft, { ...options, contracts: { ...options.contracts, koin: f.wallet.address } }), /unrecognized/);
+  const { Contract } = require("koilib"), koin = new Contract({ id: options.contracts.koin, abi: TOKEN_ABI });
+  for (const args of [{ owner: f.owner.getAddress(), spender: options.contracts.pob, value: "200000000" }, { owner: f.owner.getAddress(), spender: f.wallet.address, value: "100000000" }]) {
+    const bad = structuredClone(draft); bad.transaction.operations[0] = (await koin.functions.approve(args, { onlyOperation: true })).operation;
+    await Transaction.prepareTransaction(bad.transaction);
+    await assert.rejects(inspectDraft(bad, options), /Unexpected/);
+  }
+});
+
+test("concurrent broadcasts consume a draft once, and rotation invalidates signed registration", async t => {
+  const f = fixture(t); await f.custody.configure({ mode: "external", address: f.owner.getAddress() }); await f.custody.key();
+  let draft = await f.custody.prepare({ action: "register" });
+  let signed = await f.owner.signTransaction(structuredClone(draft.transaction));
+  const results = await Promise.allSettled([1, 2].map(() => f.custody.broadcast({ transaction: signed, confirm: true })));
+  assert.equal(results.filter(r => r.status === "fulfilled").length, 1); assert.equal(f.calls.length, 1);
+  draft = await f.custody.prepare({ action: "register" }); signed = await f.owner.signTransaction(structuredClone(draft.transaction));
+  await f.custody.key({ rotate: true, confirm: true });
+  await assert.rejects(f.custody.broadcast({ transaction: signed, confirm: true }), /expired/);
+});
+
 test("producer UI configures cold custody without a local wallet, generates a key and prepares external registration", { skip: !fs.existsSync(process.env.KAI_TEST_CHROMIUM || "/opt/pw-browsers/chromium"), timeout: 45000 }, async t => {
   const f = fixture(t); f.wallet.address = null; f.wallet.status = () => ({ exists: false, unlocked: false, address: null });
   const { startMascotServer } = require("./fixtures/mascot-server");
@@ -131,8 +204,16 @@ test("producer UI configures cold custody without a local wallet, generates a ke
   await page.click("#pc-prepare");
   await page.waitForFunction(() => document.querySelector("#pc-unsigned").value.includes("kai-producer-transaction-v1"));
   const draft = JSON.parse(await page.inputValue("#pc-unsigned"));
-  const signed = await f.owner.signTransaction(draft.transaction);
-  await page.fill("#pc-signed", JSON.stringify(signed)); await page.check("#pc-confirm"); await page.click("#pc-broadcast");
+  const downloading = page.waitForEvent("download"); await page.click("#pc-download-draft");
+  const download = await downloading;
+  assert.deepEqual(JSON.parse(fs.readFileSync(await download.path(), "utf8")), draft);
+  const adjusted = structuredClone(draft.transaction); adjusted.header.rc_limit = "5000000"; await Transaction.prepareTransaction(adjusted);
+  const signed = await f.owner.signTransaction(adjusted);
+  await page.check("#pc-confirm");
+  await page.setInputFiles("#pc-import-signed", { name: "signed.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(signed)) });
+  await page.waitForFunction(() => document.querySelector("#pc-signed-review").textContent.includes("0.05000000"));
+  assert.equal(await page.isChecked("#pc-confirm"), false);
+  await page.check("#pc-confirm"); await page.click("#pc-broadcast");
   await page.waitForFunction(() => document.querySelector("#pc-result").textContent.includes("Submitted"));
   assert.equal(f.calls.length, 1);
   f.registered(await page.inputValue("#pc-public"));

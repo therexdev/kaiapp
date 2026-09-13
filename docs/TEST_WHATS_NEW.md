@@ -1,3 +1,10 @@
+## Kondor producer signing
+
+- Keep the producer account key in Kondor on a separate computer. The new Mainnet Producer Signer at https://koinosai.com/producer-signer/ reviews and signs registration, KOIN burns, and KOIN/VHP transfers.
+- Node → Producer wallet custody → External signing now includes the signer link, unsigned JSON download and signed JSON import. No WIF export or KAI installation is needed on the Kondor computer.
+- Accept Kondor mana reductions within the prepared maximum while verifying the new transaction ID and producer signature. All operations, accounts, recipients, amounts, chain ID, nonce and hot public key stay protected. Keep Kondor Use free mana off.
+- The browser signer checks canonical Mainnet contracts and exact burn approvals. Signing requests and broadcasting remain separate explicit user actions; registration still needs on-chain verification before starting production.
+
 ## Cleaner node dashboard
 
 - Node Details now has its own titled card directly below the running status, followed by Node value, Profit & projected return, Koinos network and Activity feed.

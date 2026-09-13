@@ -43,6 +43,8 @@ jobs:
           KAI_FEEDBACK_URL: http://127.0.0.1:9/feedback
       - name: Verify live network producer data
         run: node core/scripts/verify-network-producers.js
+      - name: Verify producer signer Mainnet RPC
+        run: node scripts/verify-producer-signer-network.js
       - name: Replay MCP Agent mode
         run: node core/scripts/verify-agent-loop.js
       - name: Verify Agent Network contract prototype

@@ -1088,16 +1088,18 @@ function renderNodeView() {
       <p id="pc-result" class="hint" role="status"></p>
       <details class="custody-signing"><summary>External signing: registration, burns and transfers</summary>
         <div class="custody-signing-content">
-        <button id="pc-guide" class="btn ghost">Open signing and backup guide</button>
-        <p class="hint">Prepare a transaction here, then sign it on a separate machine with the offline signing helper documented in docs/EXTERNAL_PRODUCER.md. Never import the producer WIF here. Drafts expire after 15 minutes. Automatic funds operations are disabled in external mode.</p>
+        <div class="row custody-actions"><button id="pc-signer" class="btn">Open Kondor signer</button><button id="pc-copy-signer" class="btn ghost">Copy signer link</button><button id="pc-guide" class="btn ghost">Signing and backup guide</button></div>
+        <p class="hint">Prepare and download the unsigned JSON here. On your secure computer, open https://koinosai.com/producer-signer/ in the browser with Kondor, load the file, review and sign. Bring the signed JSON back and import it below. Your private key stays in Kondor. The offline helper remains available in the guide. Drafts expire after 15 minutes.</p>
         <label class="field"><span>Operation</span><select id="pc-action"><option value="register">Register hot public key</option><option value="burn">Burn KOIN to this producer's VHP</option><option value="transfer">Transfer tokens</option></select></label>
         <label class="field"><span>Amount (burn/transfer)</span><input type="text" id="pc-amount" inputmode="decimal" placeholder="0.00"></label>
         <label class="field"><span>Token (transfer)</span><select id="pc-token"><option value="koin">KOIN</option><option value="vhp">VHP</option></select></label>
         <label class="field"><span>Recipient (transfer)</span><input type="text" id="pc-to" placeholder="Koinos address"></label>
         <button id="pc-prepare" class="btn">Prepare unsigned transaction</button>
-        <label class="field"><span>Unsigned transaction — copy to a JSON file</span><textarea id="pc-unsigned" rows="7" readonly></textarea></label>
-        <button id="pc-copy-draft" class="btn ghost">Copy unsigned JSON</button>
+        <label class="field"><span>Unsigned transaction — take this file to the secure computer</span><textarea id="pc-unsigned" rows="7" readonly></textarea></label>
+        <div class="row custody-actions"><button id="pc-download-draft" class="btn">Download unsigned JSON</button><button id="pc-copy-draft" class="btn ghost">Copy unsigned JSON</button></div>
+        <label class="field"><span>Import signed JSON</span><input id="pc-import-signed" type="file" accept=".json,application/json"></label>
         <label class="field"><span>Signed transaction JSON returned by your external signer</span><textarea id="pc-signed" rows="7" placeholder="Paste signed transaction JSON only"></textarea></label>
+        <p id="pc-signed-review" class="hint" role="status"></p>
         <label class="field"><span><input type="checkbox" id="pc-confirm" style="width:auto"> I reviewed the actual operations, recipient, amount and network on my signing machine.</span></label>
         <button id="pc-broadcast" class="btn primary">Broadcast signed transaction</button>
         </div>
@@ -1159,11 +1161,40 @@ function renderNodeView() {
   producerAction("#pc-key", async () => { const r = await call("producer:key"); await refreshNode(); $("#pc-result").textContent = "Hot key ready. Back up private.key and public.key securely from: " + r.keyDirectory; });
   producerAction("#pc-rotate", async () => showModal({ title: "Rotate hot production key?", body: "<p>Stop the node first. KAI will preserve a local backup of the old hot key. Register the new public key with your external wallet before restarting production.</p>", actions: [{ label: "Cancel", onClick: close => close() }, { label: "Rotate key", onClick: async close => { try { const r = await call("producer:key", { rotate: true, confirm: true }); close(); await refreshNode(); $("#pc-result").textContent = "New hot key ready. Old key backup: " + (r.backupDirectory || "none"); } catch (e) { toast(e.message, "bad"); } } }] }));
   producerAction("#pc-verify", async () => { await refreshNode(); $("#pc-result").textContent = S.producer?.matches ? "On-chain registration matches this node's hot key." : S.producer?.verificationError || "Registration does not match yet. Sign and confirm the registration, then check again."; });
+  const signerUrl = "https://koinosai.com/producer-signer/";
+  producerAction("#pc-signer", () => call("util:openExternal", { url: signerUrl }));
+  producerAction("#pc-copy-signer", () => call("util:copy", { text: signerUrl }));
   producerAction("#pc-guide", () => call("util:openExternal", { url: "https://github.com/therexdev/kaiapp/blob/test/docs/EXTERNAL_PRODUCER.md" }));
   producerAction("#pc-copy", () => call("util:copy", { text: $("#pc-public").value }));
-  producerAction("#pc-prepare", async () => { const d = await call("producer:prepare", { action: $("#pc-action").value, amount: $("#pc-amount").value, token: $("#pc-token").value, to: $("#pc-to").value.trim() }); $("#pc-unsigned").value = JSON.stringify(d, null, 2); $("#pc-signed").value = ""; $("#pc-confirm").checked = false; $("#pc-result").textContent = "Prepared only — nothing signed or broadcast. Review decoded operations on your separate signing machine."; });
+  producerAction("#pc-prepare", async () => { const d = await call("producer:prepare", { action: $("#pc-action").value, amount: $("#pc-amount").value, token: $("#pc-token").value, to: $("#pc-to").value.trim() }); $("#pc-unsigned").value = JSON.stringify(d, null, 2); $("#pc-signed").value = ""; $("#pc-import-signed").value = ""; $("#pc-signed-review").textContent = ""; $("#pc-confirm").checked = false; $("#pc-result").textContent = "Prepared only — nothing signed or broadcast. Review decoded operations on your separate signing machine."; });
+  producerAction("#pc-download-draft", () => {
+    const content = $("#pc-unsigned").value;
+    if (!content) throw new Error("Prepare a transaction first.");
+    const url = URL.createObjectURL(new Blob([content + "\n"], { type: "application/json" }));
+    const a = document.createElement("a"); a.href = url; a.download = "kai-producer-unsigned.json"; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+  const signedChanged = () => {
+    $("#pc-confirm").checked = false;
+    try {
+      const tx = JSON.parse($("#pc-signed").value), rc = tx.header?.rc_limit;
+      if (typeof rc !== "string" || !/^[0-9]{1,20}$/.test(rc)) throw new Error("Invalid mana");
+      $("#pc-signed-review").textContent = `Imported transaction ID: ${tx.id}. Mana limit: ${(BigInt(rc) / 100000000n).toString()}.${(BigInt(rc) % 100000000n).toString().padStart(8, "0")}. KAI will verify its signature and compare all operations with your prepared draft before broadcasting.`;
+    } catch { $("#pc-signed-review").textContent = $("#pc-signed").value ? "Choose or paste a valid signed transaction JSON file." : ""; }
+  };
+  $("#pc-signed").addEventListener("input", signedChanged);
+  $("#pc-import-signed").addEventListener("change", async () => {
+    const file = $("#pc-import-signed").files[0];
+    $("#pc-signed").value = ""; signedChanged();
+    if (!file) return;
+    try {
+      if (file.size > 100000) throw new Error("Choose a signed JSON file smaller than 100 KB.");
+      const content = await file.text(); JSON.parse(content);
+      $("#pc-signed").value = content; signedChanged();
+    } catch (e) { $("#pc-result").textContent = e.message; }
+  });
   producerAction("#pc-copy-draft", () => call("util:copy", { text: $("#pc-unsigned").value }));
-  producerAction("#pc-broadcast", async () => { const tx = JSON.parse($("#pc-signed").value); const r = await call("producer:broadcast", { transaction: tx, confirm: $("#pc-confirm").checked }); $("#pc-signed").value = ""; $("#pc-unsigned").value = ""; $("#pc-confirm").checked = false; txToast(r, "External transaction"); $("#pc-result").textContent = r.note; await refreshNode(); });
+  producerAction("#pc-broadcast", async () => { const tx = JSON.parse($("#pc-signed").value); const r = await call("producer:broadcast", { transaction: tx, confirm: $("#pc-confirm").checked }); $("#pc-signed").value = ""; $("#pc-unsigned").value = ""; $("#pc-import-signed").value = ""; $("#pc-signed-review").textContent = ""; $("#pc-confirm").checked = false; txToast(r, "External transaction"); $("#pc-result").textContent = r.note; await refreshNode(); });
   $("#n-backups").addEventListener("click", loadNodeBackups);
   $("#n-open").addEventListener("click", () => call("util:openPath", { which: "nodeData" }).catch(() => {}));
   $("#n-docker").addEventListener("click", onSetupClick);

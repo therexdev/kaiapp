@@ -1,6 +1,6 @@
 "use strict";
 const fs = require("fs"), path = require("path"), crypto = require("crypto");
-const { isDeepStrictEqual } = require("util");
+const { validateSigned } = require("../../../ui/producer-signer/validation");
 const { Signer, Transaction, utils } = require("koilib");
 const { parseAmount, cmpSats } = require("./format");
 const keyText = value => value ? Buffer.from(value, "base64").toString("base64url") : null;
@@ -135,15 +135,14 @@ class ProducerCustody {
     const draft = this.state.get("producerDraft", null);
     if (!draft || draft.expiresAt < Date.now()) throw new Error("The draft expired. Prepare and sign a fresh transaction.");
     if (draft.summary.network !== this.chain.network().id || draft.summary.producer !== this.config().address) throw new Error("Producer or network changed. Prepare a new draft.");
-    if (!transaction || JSON.stringify(transaction).length > 100000 || Object.keys(transaction).some(k => !["id", "header", "operations", "signatures"].includes(k))) throw new Error("Paste only the signed transaction JSON, never a private key.");
-    const { signatures, ...unsigned } = transaction, { signatures: _ignored, ...expected } = draft.transaction;
-    if (!isDeepStrictEqual(unsigned, expected)) throw new Error("Signed transaction differs from the prepared draft. Nothing was broadcast.");
-    if (!Array.isArray(signatures) || signatures.length !== 1 || typeof signatures[0] !== "string" || signatures[0].length > 100) throw new Error("A single external producer signature is required.");
-    const signers = await Signer.recoverAddresses(transaction);
-    if (!signers.includes(this.config().address)) throw new Error("The signature does not belong to the external producer address.");
+    transaction = await validateSigned(draft, transaction);
     if (draft.summary.action === "register" && draft.summary.publicKey !== this.hotPublicKey()) throw new Error("The hot key changed. Prepare a new registration.");
     const provider = this.chain.provider();
     if (await provider.getChainId() !== transaction.header.chain_id || await provider.getNextNonce(this.config().address) !== transaction.header.nonce) throw new Error("Network or account nonce changed. Prepare a new draft.");
+    // Recheck after asynchronous validation; two clicks must never submit twice.
+    const current = this.state.get("producerDraft", null);
+    if (!current || current.transaction.id !== draft.transaction.id || current.expiresAt !== draft.expiresAt || current.expiresAt <= Date.now() || this.config().mode !== "external" || this.config().address !== draft.summary.producer || this.chain.network().id !== draft.summary.network) throw new Error("The draft changed or expired. Prepare a fresh transaction.");
+    if (draft.summary.action === "register" && draft.summary.publicKey !== this.hotPublicKey()) throw new Error("The hot key changed. Prepare a new registration.");
     this.state.set("producerDraft", null);
     const tx = new Transaction({ provider, transaction });
     await tx.send();

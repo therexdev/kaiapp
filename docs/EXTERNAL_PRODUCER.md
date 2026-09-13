@@ -13,12 +13,28 @@ This changes KOIN/VHP producer custody, not KAI settlement. It follows Koinos's 
 2. Stop the node. Docker must be available so KAI can verify that it is stopped.
 3. Select External/cold producer wallet, paste its public address and save. The address is saved separately for each network. Automatic returns are turned off when switching either direction; switching back never silently re-enables them.
 4. Click **Generate hot key**. KAI creates `private.key` (WIF) and `public.key` (compressed secp256k1 public key, base64url) in the node's `basedir/block_producer` directory, matching the official block producer's key formats. Existing keys are reused. Copy the displayed public key.
-5. Use **External signing → Register hot public key → Prepare unsigned transaction**. Copy the JSON into `unsigned.json` and take it to the signing machine. No funds or registration have been submitted yet.
-6. Sign externally as described below. Paste the signed transaction JSON back, tick the review checkbox and broadcast.
+5. Use **External signing → Register hot public key → Prepare unsigned transaction**. Click **Download unsigned JSON** and take the file to the signing machine. No funds or registration have been submitted yet.
+6. Sign externally as described below. Use **Import signed JSON** (or paste it), tick the review checkbox and broadcast.
 7. Wait for confirmation, then click **Verify registration**. Start production only when the on-chain key matches. An RPC failure is reported as unverified. A successful broadcast alone is not a verified registration.
 8. Fund/burn to the external producer as needed. Its VHP is shown in the production checklist; the node dashboard shows this producer's balances and rewards. The Wallet tab remains the local earning wallet.
 
 The node's Docker services use the configured public producer address and hot key across restarts. Account keys are unnecessary for signing blocks. KAI checks registration when you start production; ordinary Docker restart/recovery continues the existing configuration and cannot sign account transactions.
+
+## Kondor on a separate computer
+
+No WIF export is needed. The browser signer is available at **https://koinosai.com/producer-signer/** for Mainnet, including KAI Test installations connected to Mainnet. It works in the browser where Kondor is installed; the secure computer does not need KAI, Docker or Node.js.
+
+1. In KAI on the node computer, prepare the registration, burn or transfer and click **Download unsigned JSON**. **Copy signer link** gives you the page address to open on the other computer.
+2. On the secure computer, open the signer page in your Kondor browser. Choose the unsigned JSON file and click **Review transaction**. The page checks the chain ID and current canonical contract addresses through the fixed Mainnet RPC. It decodes actual operations without trusting the file's descriptive summary, including exact-amount burn approvals.
+3. Independently check the producer address, recipient, token amount, network, maximum mana and (for registration) the hot public key copied from your node. Tick the review checkbox and click **Sign with Kondor**. Select the matching producer account and approve the signature in Kondor.
+4. Keep Kondor's **Use free mana** off: changing payer/payee is not supported. **Optimize mana** can remain on. KAI accepts a positive mana limit at or below the prepared maximum; it verifies the resulting ID and signature and requires every other header field and operation to remain unchanged. If Kondor exceeds that maximum, lower Max mana in its advanced controls and sign again. Do not edit the already signed JSON.
+5. Download the verified signed JSON, return it to the node computer and choose **Import signed JSON**. Confirm and broadcast. For registration, wait for confirmation and **Verify registration** before starting production.
+
+This page never requests a private key, uploads the JSON to KAI's website, or requests a broadcast. Kondor itself may contact its configured RPC to simulate the transaction before returning a signature, so this is an online wallet workflow. Protect signed files; the 15-minute expiry is enforced by KAI, not by the blockchain.
+
+If Kondor is missing, locked, denied, or its popup is closed, the page reports the error or times out. Close any pending Kondor prompt before retrying. If the draft expires, prepare a fresh one. For Harbinger or a fully offline signing machine, use the CLI helper below. The signer supports one ordinary account signature; multisig and contract-wallet authorization remain unsupported.
+
+The signer uses a pinned Kondor JS SDK and the website's locked Koilib 9.3.0 bundle, with no CDN scripts, analytics or persistent transaction storage. `scripts/export-producer-signer.js` copies the exact UI and shared validator to the website checkout and records their hashes. Automated tests cover the browser SDK message flow with disposable test keys; installed-extension approvals and real-network confirmation still need tester validation.
 
 ## Offline signing helper
 
@@ -46,9 +62,9 @@ node scripts/sign-producer-transaction.js unsigned.json /secure/producer.wif sig
 
 Replace the last two arguments with the reviewed ID and independently verified chain ID. On Windows, use the corresponding file paths. Only file paths and public identifiers are command arguments; the helper never prints the key. It refuses to overwrite an existing output file.
 
-Return only `signed.json` to KAI. The desktop accepts only the exact prepared header/operations/ID plus the producer's signature. It rejects changed contents, another signer's signature, a changed hot registration key, changed network/account nonce and expired drafts. It rechecks the chain ID and next nonce before submission. Drafts expire locally after 15 minutes; this is an application check, not an on-chain expiry guarantee. Signing an account transaction authorizes its contents, so protect unused signed files too.
+Return only `signed.json` to KAI. The desktop accepts the exact prepared transaction plus the producer's signature, or a lower positive mana limit with a correctly recomputed ID and signature. It rejects changed contents, another signer's signature, a changed hot registration key, changed network/account nonce and expired drafts. It rechecks the chain ID and next nonce before submission. Drafts expire locally after 15 minutes; this is an application check, not an on-chain expiry guarantee. Signing an account transaction authorizes its contents, so protect unused signed files too.
 
-Registration, burn, KOIN transfer and VHP transfer use this same flow. The initial implementation supports a single ordinary producer-account signature; smart-contract/multisig wallet authorization and unattended remote signers are not supported. A compatible wallet may sign the raw prepared transaction instead of the helper, provided it preserves the exact header and operations.
+Registration, burn, KOIN transfer and VHP transfer use this same flow. The initial implementation supports a single ordinary producer-account signature; smart-contract/multisig wallet authorization and unattended remote signers are not supported. A compatible wallet may sign the raw prepared transaction instead of the helper, provided it preserves all operations and header fields other than the permitted mana reduction.
 
 Submission consumes the local draft before broadcasting. If the response is uncertain, check the transaction ID in the explorer before preparing another payment. KAI never automatically retries a funds operation.
 
