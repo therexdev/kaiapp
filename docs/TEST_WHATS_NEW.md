@@ -1,3 +1,8 @@
+## Network information on the Dashboard
+
+- Moved connected-peer information into a dedicated Koinos network section on the blockchain Dashboard.
+- Added a button opening KoinosScan’s producer list, and distinguished local connections from network producer accounts. Active/total producer counts and the explorer’s dot thresholds are not yet integrated; their live data contract could not be verified. No explorer numbers are hard-coded.
+
 ## Node health, Quick Sync and storage
 
 - Replay validation failures, fatal chain errors and repeated producer request timeouts now show warnings on Node and Dashboard, even when Docker containers look running or automatic recovery is off. Replay mismatches stop automatic restart loops. Exited containers are included in status.

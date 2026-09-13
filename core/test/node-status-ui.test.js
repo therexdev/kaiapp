@@ -99,5 +99,20 @@ test("unhealthy containers never show a green node or healthy banner", () => {
  assert.equal($("#d-dot").className,"dot red");
  assert.equal($("#n-run-pill").textContent,"needs attention");
  assert.match($("#n-health").innerHTML,/chain-unresponsive/);
- assert.match($("#n-peers").textContent,/Connected peers: 4/);
+ assert.match($("#d-peers").innerHTML,/Your node’s connected peers/);
+ assert.match($("#d-peers").innerHTML,/>4</);
+});
+
+
+test("Dashboard separates peer connections from network producers and handles missing data", () => {
+ const {S,$,paint}=painter(); S.node.isRunning=true;
+ S.node.peers={count:12,lowerBound:true}; paint();
+ assert.match($("#d-peers").innerHTML,/>12\+</);
+ assert.match($("#d-peers").innerHTML,/Network block producers/);
+ S.node.peers=null; paint();
+ assert.match($("#d-peers").innerHTML,/Unavailable/);
+ assert.doesNotMatch($("#d-peers").innerHTML,/>0</);
+ S.node.peers={count:14}; S.node.isRunning=false; paint();
+ assert.match($("#d-peers").innerHTML,/Node stopped/);
+ assert.doesNotMatch($("#d-peers").innerHTML,/>14</);
 });

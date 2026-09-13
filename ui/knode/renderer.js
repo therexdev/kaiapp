@@ -214,6 +214,11 @@ function renderDashboardView() {
       </div>
       <div id="d-sync"></div>
     </div>
+    <div class="card">
+      <div class="row spread"><h2>Koinos network</h2><button id="d-producers" class="btn">View block producers ↗</button></div>
+      <div id="d-peers" class="widget-grid"></div>
+      <p class="small muted">KoinosScan lists producer accounts and their block activity. Producer totals are separate from your node’s direct connections and do not count every running blockchain node.</p>
+    </div>
     <div class="widget-grid" id="d-tiles"></div>
     <div class="card">
       <div class="row spread"><h2>💵 Profit &amp; projected return</h2><span class="muted small" id="d-returns-note"></span></div>
@@ -224,6 +229,7 @@ function renderDashboardView() {
       <div class="feed" id="d-feed"><span class="muted small">Loading…</span></div>
     </div>`;
   $("#d-toggle").addEventListener("click", onDashToggle);
+  $("#d-producers").addEventListener("click", () => call("util:openExternal", { url: "https://koinosscan.com/producers" }).catch(e => toast(e.message, "bad")));
   $("#d-feed").addEventListener("click", (e) => {
     const el = e.target.closest("[data-tx]");
     if (el) openTx(el.dataset.tx);
@@ -247,6 +253,10 @@ function patchDashboardView() {
   const running = !!(d.node && d.node.isRunning);
   const quickSync = d.node?.op?.running && d.node.op.name === "quick-sync";
   const dockerOk = d.node && d.node.docker && d.node.docker.ok;
+  const peers = running && !quickSync ? d.node?.peers : null;
+  const peerValue = !running || quickSync ? "Node stopped" : peers ? `${Number(peers.count)}${peers.lowerBound ? "+" : ""}` : "Unavailable";
+  $("#d-peers").innerHTML = tile("Your node’s connected peers", esc(peerValue), peers ? "Latest P2P report · updates about once a minute" : running && !quickSync ? "Waiting for your node’s P2P report" : "Start your node to see its direct connections")
+    + tile("Network block producers", "KoinosScan", "Open the producer list for its active and total counts");
 
   const dot = $("#d-dot");
   const text = $("#d-status-text");
@@ -1089,7 +1099,6 @@ function renderNodeView() {
         <h2>📡 Status <span id="n-run-pill"></span></h2>
         <div id="n-health" class="stack"></div>
         <div id="n-sync" class="stack"></div>
-        <p id="n-peers" class="small muted"></p>
         <label class="row small" style="gap:8px;margin-top:10px;cursor:pointer">
           <input type="checkbox" id="n-autorecover" checked>
           <span>Recover after an unexpected stop <span class="muted">— manual stops and quick sync keep the node stopped.</span></span>
@@ -1509,11 +1518,6 @@ function patchNodeView() {
     pill.className = "pill " + (!quickSync && n?.isRunning && n?.health?.ok !== false ? "good" : "warn");
     pill.textContent = quickSync ? (n?.isRunning ? "stopping for quick sync" : "stopped · quick syncing") : n?.isRunning ? (n?.health?.ok === false ? "needs attention" : `running (${n.runningCount} services)`) : "stopped";
   }
-
-  const peerEl = $("#n-peers");
-  if (peerEl) peerEl.textContent = !quickSync && n?.isRunning
-    ? (n.peers ? `Connected peers: ${n.peers.count}${n.peers.lowerBound ? "+" : ""} · latest P2P report (about once a minute)` : "Connected peers: unavailable — waiting for a P2P report")
-    : "Connected peers: node stopped";
 
   // friendly, jargon-free health line + auto-recover toggle state
   const autoBox = $("#n-autorecover");
