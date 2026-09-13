@@ -99,22 +99,18 @@ test("unhealthy containers never show a green node or healthy banner", () => {
  assert.equal($("#d-dot").className,"dot red");
  assert.equal($("#n-run-pill").textContent,"needs attention");
  assert.match($("#n-health").innerHTML,/chain-unresponsive/);
- assert.match($("#d-peers").textContent,/Your node’s connected peers/);
- assert.match($("#d-peers").textContent,/: 4/);
 });
 
 
-test("Dashboard separates peer connections from network producers and handles missing data", () => {
+test("Dashboard never substitutes local peer connections for missing network counts", () => {
  const {S,$,paint}=painter(); S.node.isRunning=true;
- S.node.peers={count:12,lowerBound:true}; paint();
- assert.match($("#d-peers").textContent,/: 12\+/);
- assert.match($("#d-producer-counts").innerHTML,/Active producers/);
- S.node.peers=null; paint();
- assert.match($("#d-peers").textContent,/Unavailable/);
- assert.doesNotMatch($("#d-peers").textContent,/>0</);
- S.node.peers={count:14}; S.node.isRunning=false; paint();
- assert.match($("#d-peers").textContent,/Node stopped/);
- assert.doesNotMatch($("#d-peers").textContent,/>14</);
+ S.networkProducers={network:"mainnet",available:false};
+ for(const peers of [{count:12,lowerBound:true},null,{count:14}]) {
+  S.node.peers=peers; paint();
+  assert.match($("#d-producer-counts").innerHTML,/Active producers/);
+  assert.doesNotMatch($("#d-producer-counts").innerHTML,/>[0-9]+\+?</);
+  assert.match($("#d-producer-source").textContent,/unavailable/);
+ }
 });
 
 
@@ -123,7 +119,7 @@ test("Dashboard shows live network counts even when the local node is stopped", 
  S.networkProducers={network:"mainnet",available:true,activeApprox24h:18,recent2h:14,totalTracked:201,fetchedAt:Date.now()};
  paint();
  for(const value of [18,14,201]) assert.match($("#d-producer-counts").innerHTML,new RegExp(">"+value+"<"));
- assert.match($("#d-peers").textContent,/Node stopped/);
+ assert.equal($("#d-producer-source").textContent,"");
  S.networkProducers.stale=true; paint(); assert.match($("#d-producer-source").textContent,/Last known data/);
  S.networkProducers.available=false; paint(); assert.doesNotMatch($("#d-producer-counts").innerHTML,/>201</);
  S.networkProducers.available=true; S.networkProducers.network="testnet"; paint();

@@ -21,6 +21,12 @@ pre.logs{background:#102441;color:#dcecff;border-color:#284362;border-radius:12p
 .banner.warn{background:#fff8e8;color:#855e16;border-color:#eed9a9}.banner.bad{background:#fff0f2;color:#ab3446;border-color:#edc3ca}.banner.info{background:#edf5ff;color:#3265a1;border-color:#ccdef7}
 .wif-box{color:#855e16;background:#fff9ec;border-color:#e7cf9b}.tile .t-value{color:#235591}
 
+/* Give every dashboard section a consistent header and space above its tiles. */
+#view-dashboard>.card:not(.status-card)>.row:first-child{gap:12px 18px;margin-bottom:16px}
+#view-dashboard>.card:not(.status-card)>.row:first-child h2{margin-bottom:0}
+#view-dashboard>.card>.widget-grid:last-child{margin-bottom:0}
+#d-producer-source:empty{display:none}
+
 /* Producer custody uses the same calm fields and spacing as the node settings. */
 .producer-custody .custody-actions{gap:10px;margin:4px 0 20px}
 .producer-custody .custody-key-row{display:flex;align-items:flex-end;gap:10px}

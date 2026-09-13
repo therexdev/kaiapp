@@ -539,9 +539,10 @@
       var grid = el("div", "widget-grid");
       grid.id = "kai-value-grid";
       card.appendChild(grid);
-      // Above "Profit & projected return", which is the KOIN-denominated
-      // version of the same story.
-      tiles.parentNode.insertBefore(card, tiles.nextSibling);
+      // Keep Node value beside the Node Details card, above Profit & return.
+      // The tile-grid fallback also supports the standalone UI scaffold.
+      var details = document.getElementById("d-node-details") || tiles;
+      details.parentNode.insertBefore(card, details.nextSibling);
     }
 
     var grid = document.getElementById("kai-value-grid");

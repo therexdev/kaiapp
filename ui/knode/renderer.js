@@ -221,17 +221,17 @@ function renderDashboardView() {
       </div>
       <div id="d-sync"></div>
     </div>
-    <div class="card">
-      <div class="row spread"><h2>Koinos network</h2><button id="d-producers" class="btn">View block producers ↗</button></div>
-      <div id="d-producer-counts" class="widget-grid"></div>
-      <p id="d-producer-source" class="small muted" aria-live="polite"></p>
-      <p id="d-peers" class="small muted"></p>
-      <p class="small muted">Active uses the last 28,800 blocks (about 24 hours). Green status uses the last 2 hours. Tracked accounts include VHP holders who may not be producing; this is not a count of all running nodes.</p>
+    <div class="card" id="d-node-details">
+      <div class="row spread"><h2>Node Details</h2></div>
+      <div class="widget-grid" id="d-tiles"></div>
     </div>
-    <div class="widget-grid" id="d-tiles"></div>
     <div class="card">
       <div class="row spread"><h2>💵 Profit &amp; projected return</h2><span class="muted small" id="d-returns-note"></span></div>
       <div class="widget-grid" id="d-returns"></div>
+    </div>
+    <div class="card" id="d-network">
+      <div class="row spread"><h2>Koinos network</h2><span id="d-producer-source" class="small muted" aria-live="polite"></span><button id="d-producers" class="btn">View block producers ↗</button></div>
+      <div id="d-producer-counts" class="widget-grid"></div>
     </div>
     <div class="card">
       <div class="row spread"><h2>📡 Activity feed</h2><span class="muted small" id="d-feed-note"></span></div>
@@ -262,9 +262,6 @@ function patchDashboardView() {
   const running = !!(d.node && d.node.isRunning);
   const quickSync = d.node?.op?.running && d.node.op.name === "quick-sync";
   const dockerOk = d.node && d.node.docker && d.node.docker.ok;
-  const peers = running && !quickSync ? d.node?.peers : null;
-  const peerValue = !running || quickSync ? "Node stopped" : peers ? `${Number(peers.count)}${peers.lowerBound ? "+" : ""}` : "Unavailable";
-  $("#d-peers").textContent = `Your node’s connected peers: ${peerValue}`;
   const np = S.networkProducers;
   const matching = np?.network === d.network.id;
   const available = matching && np.available;
@@ -273,9 +270,9 @@ function patchDashboardView() {
     + tile("Recent producers · 2h", value("recent2h"), "Produced within 2 hours · green status")
     + tile("Tracked producer accounts", value("totalTracked"), "Recent producers plus VHP holders");
   $("#d-producer-source").textContent = available
-    ? `${np.stale ? "Last known data · refresh unavailable" : "Source: KoinosScan"} · updated ${new Date(np.fetchedAt).toLocaleTimeString()}`
-    : matching && np.unsupported ? "Producer totals are available for mainnet only."
-    : np ? "Producer totals unavailable. Retrying automatically; missing data is not zero." : "Loading network producer totals…";
+    ? np.stale ? "Last known data · refresh unavailable" : ""
+    : matching && np.unsupported ? "Mainnet only"
+    : np ? "Counts unavailable · retrying…" : "Loading counts…";
 
   const dot = $("#d-dot");
   const text = $("#d-status-text");

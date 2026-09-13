@@ -1,3 +1,9 @@
+## Cleaner node dashboard
+
+- Node Details now has its own titled card directly below the running status, followed by Node value, Profit & projected return, Koinos network and Activity feed.
+- Removed the network source, connected-peer and block-definition footer text. Loading, stale and unavailable counts still show a short status in the network header.
+- Added consistent spacing between section headings, action buttons and tiles, including View block producers.
+
 ## Live network producer counts
 
 The blockchain Dashboard now displays live numbers directly: active producers over the last 28,800 blocks (about 24 hours), producers with a block in the last 2 hours (the green status rule), and total tracked producer accounts. Tracked includes VHP holders who may not be producing; these are accounts, not a census of every running node.
