@@ -1,3 +1,11 @@
+## Live network producer counts
+
+The blockchain Dashboard now displays live numbers directly: active producers over the last 28,800 blocks (about 24 hours), producers with a block in the last 2 hours (the green status rule), and total tracked producer accounts. Tracked includes VHP holders who may not be producing; these are accounts, not a census of every running node.
+
+Data comes from KoinosScan’s public producer API, refreshes at most once a minute, and loads independently of wallet/node status. Counts remain available when your local node is stopped. Failed refreshes show explicitly stale data for at most ten minutes, then unavailable; missing data is never shown as zero. Mainnet counts are not shown for other networks. Local-Only blocks the request.
+
+Definitions verified from [the explorer’s producer display](https://github.com/interfecto/koinos-token-tracker/blob/aa11ddfc19adb9ef0afa0e244b363706fcb732fd/internal/api/explorer.html) and [its indexed producer query](https://github.com/interfecto/koinos-token-tracker/blob/aa11ddfc19adb9ef0afa0e244b363706fcb732fd/internal/store/sqlite.go). The live API response is checked during Test release verification.
+
 ## Network information on the Dashboard
 
 - Moved connected-peer information into a dedicated Koinos network section on the blockchain Dashboard.

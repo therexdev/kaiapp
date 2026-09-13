@@ -35,7 +35,7 @@ test("node: the whole Koinos Node surface is present", async () => {
       "setup:installWsl", "setup:installDocker", "setup:startDocker", "setup:restart", "setup:status",
       "wallet:status", "wallet:create", "wallet:unlock", "wallet:revealWif",
       "chain:balances", "chain:send", "chain:burn", "chain:maxBurn",
-      "producer:register", "producer:status",
+      "producer:register", "producer:status", "network:producers",
       "rewards:status", "rewards:configure", "rewards:runNow",
       "fund:buyUrl", "fund:status", "fund:bridgeStart", "fund:routeCStart", "fund:routeCompare",
       "fund:ethSend", "fund:usdtSend", "fund:vkoinSend", "dashboard:summary",

@@ -179,6 +179,7 @@ async function withFetchTrap(fn) {
 
 test("koinos: Local-Only means LOCAL — the chain is never reached", async () => {
   const { gw, base } = await gatewayWith("local-only");
+  gw.koinosNode = { call() { throw new Error("Producer reader must not be called in Local-Only"); } };
   try {
     await withFetchTrap(async (calls) => {
       const bal = await fetch(`${base}/core/koinos/balances?address=1K1AUovu5NjjPcaTxmde6wPB8Y8PQGFV3E`);
@@ -190,6 +191,8 @@ test("koinos: Local-Only means LOCAL — the chain is never reached", async () =
       const node = await fetch(`${base}/core/koinos/node`);
       assert.strictEqual(node.status, 403, "so is probing a node");
 
+      const producers = await fetch(`${base}/core/koinos/rpc`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ channel: "network:producers" }) });
+      assert.strictEqual(producers.status, 403);
       assert.deepStrictEqual(calls, [], "nothing left this machine — the promise in the sidebar");
     });
   } finally {

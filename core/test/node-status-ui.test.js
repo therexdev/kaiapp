@@ -26,7 +26,7 @@ function painter() {
     vm.runInContext(end < 0 ? remainder : remainder.slice(0, end), context);
   }
   const paint = () => {
-    S.dashboard = { network: { label: "Mainnet", tokenSymbol: "KOIN" }, node: S.node,
+    S.dashboard = { network: { id: "mainnet", label: "Mainnet", tokenSymbol: "KOIN" }, node: S.node,
       wallet: { exists: false }, sync: { inSync: true, local: { height: 100 }, progressPct: 100 } };
     vm.runInContext("patchNodeView(); patchDashboardView();", context);
   };
@@ -99,20 +99,33 @@ test("unhealthy containers never show a green node or healthy banner", () => {
  assert.equal($("#d-dot").className,"dot red");
  assert.equal($("#n-run-pill").textContent,"needs attention");
  assert.match($("#n-health").innerHTML,/chain-unresponsive/);
- assert.match($("#d-peers").innerHTML,/Your node’s connected peers/);
- assert.match($("#d-peers").innerHTML,/>4</);
+ assert.match($("#d-peers").textContent,/Your node’s connected peers/);
+ assert.match($("#d-peers").textContent,/: 4/);
 });
 
 
 test("Dashboard separates peer connections from network producers and handles missing data", () => {
  const {S,$,paint}=painter(); S.node.isRunning=true;
  S.node.peers={count:12,lowerBound:true}; paint();
- assert.match($("#d-peers").innerHTML,/>12\+</);
- assert.match($("#d-peers").innerHTML,/Network block producers/);
+ assert.match($("#d-peers").textContent,/: 12\+/);
+ assert.match($("#d-producer-counts").innerHTML,/Active producers/);
  S.node.peers=null; paint();
- assert.match($("#d-peers").innerHTML,/Unavailable/);
- assert.doesNotMatch($("#d-peers").innerHTML,/>0</);
+ assert.match($("#d-peers").textContent,/Unavailable/);
+ assert.doesNotMatch($("#d-peers").textContent,/>0</);
  S.node.peers={count:14}; S.node.isRunning=false; paint();
- assert.match($("#d-peers").innerHTML,/Node stopped/);
- assert.doesNotMatch($("#d-peers").innerHTML,/>14</);
+ assert.match($("#d-peers").textContent,/Node stopped/);
+ assert.doesNotMatch($("#d-peers").textContent,/>14</);
+});
+
+
+test("Dashboard shows live network counts even when the local node is stopped", () => {
+ const {S,$,paint}=painter();
+ S.networkProducers={network:"mainnet",available:true,activeApprox24h:18,recent2h:14,totalTracked:201,fetchedAt:Date.now()};
+ paint();
+ for(const value of [18,14,201]) assert.match($("#d-producer-counts").innerHTML,new RegExp(">"+value+"<"));
+ assert.match($("#d-peers").textContent,/Node stopped/);
+ S.networkProducers.stale=true; paint(); assert.match($("#d-producer-source").textContent,/Last known data/);
+ S.networkProducers.available=false; paint(); assert.doesNotMatch($("#d-producer-counts").innerHTML,/>201</);
+ S.networkProducers.available=true; S.networkProducers.network="testnet"; paint();
+ assert.doesNotMatch($("#d-producer-counts").innerHTML,/>201</);
 });

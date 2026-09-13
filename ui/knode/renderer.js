@@ -188,6 +188,13 @@ async function refreshRewards() {
 // ---------- dashboard ----------
 
 async function refreshDashboard() {
+  // Producer data loads separately so a slow explorer never delays wallet/node UI.
+  if (!S.producerNetworkPending) {
+    S.producerNetworkPending = true;
+    call("network:producers").then(data => { S.networkProducers = data; })
+      .catch(() => { S.networkProducers = { available: false, error: "Producer data unavailable" }; })
+      .finally(() => { S.producerNetworkPending = false; patchDashboardView(); });
+  }
   try {
     S.dashboard = await call("dashboard:summary");
   } catch (e) {
@@ -216,8 +223,10 @@ function renderDashboardView() {
     </div>
     <div class="card">
       <div class="row spread"><h2>Koinos network</h2><button id="d-producers" class="btn">View block producers ↗</button></div>
-      <div id="d-peers" class="widget-grid"></div>
-      <p class="small muted">KoinosScan lists producer accounts and their block activity. Producer totals are separate from your node’s direct connections and do not count every running blockchain node.</p>
+      <div id="d-producer-counts" class="widget-grid"></div>
+      <p id="d-producer-source" class="small muted" aria-live="polite"></p>
+      <p id="d-peers" class="small muted"></p>
+      <p class="small muted">Active uses the last 28,800 blocks (about 24 hours). Green status uses the last 2 hours. Tracked accounts include VHP holders who may not be producing; this is not a count of all running nodes.</p>
     </div>
     <div class="widget-grid" id="d-tiles"></div>
     <div class="card">
@@ -255,8 +264,18 @@ function patchDashboardView() {
   const dockerOk = d.node && d.node.docker && d.node.docker.ok;
   const peers = running && !quickSync ? d.node?.peers : null;
   const peerValue = !running || quickSync ? "Node stopped" : peers ? `${Number(peers.count)}${peers.lowerBound ? "+" : ""}` : "Unavailable";
-  $("#d-peers").innerHTML = tile("Your node’s connected peers", esc(peerValue), peers ? "Latest P2P report · updates about once a minute" : running && !quickSync ? "Waiting for your node’s P2P report" : "Start your node to see its direct connections")
-    + tile("Network block producers", "KoinosScan", "Open the producer list for its active and total counts");
+  $("#d-peers").textContent = `Your node’s connected peers: ${peerValue}`;
+  const np = S.networkProducers;
+  const matching = np?.network === d.network.id;
+  const available = matching && np.available;
+  const value = key => available ? esc(Number(np[key]).toLocaleString()) : "—";
+  $("#d-producer-counts").innerHTML = tile("Active producers · ~24h", value("activeApprox24h"), "Produced within the last 28,800 blocks")
+    + tile("Recent producers · 2h", value("recent2h"), "Produced within 2 hours · green status")
+    + tile("Tracked producer accounts", value("totalTracked"), "Recent producers plus VHP holders");
+  $("#d-producer-source").textContent = available
+    ? `${np.stale ? "Last known data · refresh unavailable" : "Source: KoinosScan"} · updated ${new Date(np.fetchedAt).toLocaleTimeString()}`
+    : matching && np.unsupported ? "Producer totals are available for mainnet only."
+    : np ? "Producer totals unavailable. Retrying automatically; missing data is not zero." : "Loading network producer totals…";
 
   const dot = $("#d-dot");
   const text = $("#d-status-text");
