@@ -1,0 +1,25 @@
+name: Producer API integration
+
+on:
+  push:
+    branches: [test]
+    paths:
+      - .github/workflows/producer-api-check.yml
+      - core/lib/koinos/network-producers.js
+      - core/scripts/verify-network-producers.js
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  producer-api:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify live producer response using the shipping reader
+        run: node core/scripts/verify-network-producers.js
