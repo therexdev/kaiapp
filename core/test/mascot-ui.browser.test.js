@@ -91,7 +91,7 @@ test("KAI UI: natural default, compact voice, follow-ups, barge-in context, hist
       const destination = ctx.createMediaStreamDestination();
       gain.gain.value = window.__roomNoise; oscillator.frequency.value = 240;
       oscillator.connect(gain); gain.connect(destination); oscillator.start(); await ctx.resume();
-      window.__gain = gain;
+      window.__gain = gain; window.__toneContext = ctx;
       const stream = destination.stream;
       stream.getTracks().forEach(track => {
         const stop = track.stop.bind(track);
@@ -116,9 +116,22 @@ test("KAI UI: natural default, compact voice, follow-ups, barge-in context, hist
   const idle = () => page.waitForFunction(() => document.querySelector("#stop").hidden && !document.querySelector("#send").hidden);
   const utterance = async (text, duration = 400) => {
     fixture.state.transcript = text;
-    await page.evaluate(() => { window.__gain.gain.value = .06; });
-    await page.waitForTimeout(duration);
-    await page.evaluate(() => { window.__gain.gain.value = window.__roomNoise; });
+    await page.evaluate(async duration => {
+      // The VAD measures captured samples, not wall time. Schedule the tone on
+      // the audio clock so a busy runner still delivers the requested speech
+      // duration, including the deliberately short interruption below.
+      const ctx = window.__toneContext, gain = window.__gain.gain;
+      await ctx.resume();
+      const start = ctx.currentTime, end = start + duration / 1000;
+      gain.cancelScheduledValues(start);
+      gain.setValueAtTime(.06, start);
+      gain.setValueAtTime(window.__roomNoise, end);
+      const deadline = Date.now() + 10000;
+      while (ctx.currentTime < end) {
+        if (Date.now() > deadline) throw new Error("Fixture audio clock stopped during an utterance");
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+    }, duration);
   };
   const screenshot = async name => {
     if (!process.env.KAI_MASCOT_QA_DIR) return;
