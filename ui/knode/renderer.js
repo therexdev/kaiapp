@@ -1158,6 +1158,7 @@ function renderNodeView() {
         <p id="pc-signed-review" class="hint" role="status"></p>
         <label class="field"><span><input type="checkbox" id="pc-confirm" style="width:auto"> I reviewed the actual operations, recipient, amount and network on my signing machine.</span></label>
         <button id="pc-broadcast" class="btn primary">Broadcast signed transaction</button>
+        <p id="pc-broadcast-result" class="hint" role="status" aria-live="polite"></p>
         </div>
       </details>
     </div>
@@ -1204,10 +1205,12 @@ function renderNodeView() {
     </div>`;
 
   const producerAction = (id, fn) => $(id).addEventListener("click", async () => {
-    const button = $(id); button.disabled = true;
+    const button = $(id); if (button.disabled) return; button.disabled = true;
+    if (id === "#pc-broadcast") $("#pc-broadcast-result").textContent = "Checking the signed transaction and submitting to the network…";
     if (id.startsWith("#pc-vault-")) $("#pc-vault-result").textContent = "";
     try { await fn(); } catch (e) {
       $("#pc-result").textContent = e.message;
+      if (id === "#pc-broadcast") { $("#pc-broadcast-result").textContent = e.message; toast(e.message, "bad"); }
       if (id.startsWith("#pc-vault-")) { $("#pc-vault-result").textContent = e.message; toast(e.message, "bad"); }
     }
     finally { button.disabled = false; }
@@ -1299,7 +1302,7 @@ function renderNodeView() {
     } catch (e) { $("#pc-result").textContent = e.message; }
   });
   producerAction("#pc-copy-draft", () => call("util:copy", { text: $("#pc-unsigned").value }));
-  producerAction("#pc-broadcast", async () => { const tx = JSON.parse($("#pc-signed").value); const r = await call("producer:broadcast", { transaction: tx, confirm: $("#pc-confirm").checked }); $("#pc-signed").value = ""; $("#pc-unsigned").value = ""; $("#pc-import-signed").value = ""; $("#pc-signed-review").textContent = ""; $("#pc-confirm").checked = false; txToast(r, "External transaction"); $("#pc-result").textContent = r.note; await refreshNode(); });
+  producerAction("#pc-broadcast", async () => { const tx = JSON.parse($("#pc-signed").value); const r = await call("producer:broadcast", { transaction: tx, confirm: $("#pc-confirm").checked }); $("#pc-signed").value = ""; $("#pc-unsigned").value = ""; $("#pc-import-signed").value = ""; $("#pc-signed-review").textContent = ""; $("#pc-confirm").checked = false; txToast(r, "External transaction"); $("#pc-result").textContent = r.note; $("#pc-broadcast-result").textContent = `${r.note} Transaction ID: ${r.txId}`; await refreshNode(); });
   $("#n-backups").addEventListener("click", loadNodeBackups);
   $("#n-open").addEventListener("click", () => call("util:openPath", { which: "nodeData" }).catch(() => {}));
   $("#n-docker").addEventListener("click", onSetupClick);

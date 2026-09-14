@@ -361,3 +361,5 @@ Listening remains opt-in, with a green microphone indicator. Hiding KAI, returni
 Test continues using your existing profile, wallet, models and earning node.
 
 - Updated the Kondor producer signer to match the website and explain extension connection failures without implying a signature was received.
+
+- External signing now shows broadcast progress, transaction IDs and errors directly below Broadcast, with an error notification.
