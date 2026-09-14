@@ -70,7 +70,11 @@ class ProducerVault {
             if (!/^0x1220[0-9a-f]{64}$/i.test(result.txid || "")) throw new Error("Koin Vault returned an invalid transaction ID.");
             this.pending.txId = result.txid;
             this.pending.note = "Wallet submitted. Checking the transaction on-chain…";
-          } else if (result.status === "failed") this.pending.note = "Wallet submission failed. Check Koin Vault before preparing another request.";
+          } else if (result.status === "failed") {
+            const detail = typeof result.error === "string" ? result.error.replace(/[\u0000-\u001f\u007f]/g, " ").slice(0, 500).trim() : "";
+            this.pending.note = "Wallet submission failed." + (detail ? " " + detail : " Check Koin Vault for the reason.") + " Check wallet history before preparing another request.";
+            if (/^0x1220[0-9a-f]{64}$/i.test(result.txid || "")) this.pending.txId = result.txid;
+          }
         }
       }
       if (this.pending?.status === "submitted") await this.verifySubmitted();

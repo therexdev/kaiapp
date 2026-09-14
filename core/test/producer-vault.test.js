@@ -23,7 +23,7 @@ function fixture() {
     if (route === "dapp/create") return { sessionId, secret, expiresAt: now + 1800000, uri: "https://evil.example/" };
     if (route === "dapp/status") return { connected, address: connected ? address : null };
     if (route === "dapp/request") { sent.push(body); if (fail) throw new Error("network lost"); return { requestId: "r".repeat(24), expiresAt: now + 600000 }; }
-    if (route === "dapp/request-status") return { status, txid: chainResult.transactions?.[0]?.transaction.id || "0x1220" + "1".repeat(64) };
+    if (route === "dapp/request-status") return { status, error: "fixture: insufficient mana", txid: chainResult.transactions?.[0]?.transaction.id || "0x1220" + "1".repeat(64) };
     if (route === "dapp/disconnect") { if (fail) throw new Error("network lost"); connected = false; return {}; }
     throw new Error(route);
   };
@@ -108,4 +108,14 @@ test("burn-and-allow refuses older wallet backends before preparing or sending",
   const f = fixture(); await f.connect();
   await assert.rejects(f.vault.prepare({ action: "burn", amount: "1", allowFullVhp: true }), /burn-and-allow update/);
   assert.equal(f.sent.length, 0);
+});
+
+test("failed wallet approvals retain the specific reason and transaction ID", async () => {
+ const f = fixture(); await f.connect(); const d = await f.vault.prepare({ action: "register" });
+ await f.vault.send({ confirm: true, draftId: d.id }); f.status("failed");
+ const v = await f.vault.status();
+ assert.match(v.pending.note, /fixture: insufficient mana/);
+ assert.match(v.pending.note, /Check wallet history/);
+ assert.match(v.pending.txId, /^0x1220/);
+ assert.equal(v.pending.status, "failed");
 });

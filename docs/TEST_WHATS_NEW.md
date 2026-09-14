@@ -1,3 +1,7 @@
+## Wallet submission results
+
+- Show Koin Vault’s actual submission error and transaction ID instead of hiding the reason behind a generic failure message.
+
 ## Zero VHP allowance fix
 
 - Accept the protobuf empty response for a zero allowance. Full-balance approvals and manual burn-plus-allowance requests now prepare correctly before an allowance has been set. RPC failures still stop preparation.
