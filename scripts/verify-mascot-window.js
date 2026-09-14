@@ -1,6 +1,24 @@
 "use strict";
 const fs = require("fs"), os = require("os"), path = require("path"), assert = require("assert/strict");
 const { _electron: electron } = require("playwright-core");
+const { execFileSync } = require("child_process");
+let activeApp, lastCheckpoint = "Launching the native fixture";
+function checkpoint(message) { lastCheckpoint = message; console.log(message); }
+function killFixture() {
+  const pid = activeApp?.process()?.pid;
+  if (!Number.isInteger(pid) || pid <= 0) return;
+  try {
+    if (process.platform === "win32") execFileSync("taskkill.exe", ["/PID", String(pid), "/T", "/F"], { timeout: 10000, stdio: "ignore" });
+    else activeApp.process().kill("SIGKILL");
+  } catch { /* already exited; the failed check still exits nonzero */ }
+}
+// page.evaluate() can wait indefinitely on native IPC/event promises. Bound
+// the complete fixture, including shutdown, without converting a stall into
+// a pass or letting it consume the whole 30-minute installer job.
+const deadline = setTimeout(() => {
+  console.error("Native companion check exceeded 180 seconds. Last checkpoint: " + lastCheckpoint);
+  killFixture(); process.exit(1);
+}, 180000);
 
 async function main() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-mascot-native-"));
@@ -9,6 +27,7 @@ async function main() {
     const env = { ...process.env, KAI_MASCOT_NATIVE_DATA: dir };
     delete env.ELECTRON_RUN_AS_NODE;
     app = await electron.launch({ executablePath: require("electron"), args: [path.join(__dirname, "fixtures/mascot-desktop.js")], env, timeout: 30000 });
+    activeApp = app;
     const main = await app.firstWindow();
     await main.waitForSelector("#launch-kai:not([hidden])");
     // Capture the initial native shape too: fixed-size status pills need no
@@ -37,12 +56,12 @@ async function main() {
     await mascot.waitForFunction(async () => !(await window.kaiDesktop.computerStatus()).active);
     assert.equal(await app.evaluate(({ globalShortcut }) => globalShortcut.isRegistered("CommandOrControl+Alt+Backspace")), false);
     await app.evaluate(() => { globalThis.__approveFolder = false; });
-    console.log("PASS: native desktop IPC, direct Tubi command, task grant and Stop shortcut cleanup.");
+    checkpoint("PASS: native desktop IPC, direct Tubi command, task grant and Stop shortcut cleanup.");
     const voiceStatus = await mascot.evaluate(() => window.kaiDesktop.windowsVoices());
     assert.ok(voiceStatus.available); assert.ok(voiceStatus.voices.length);
     const voiceBytes = await mascot.evaluate(async id => Array.from((await window.kaiDesktop.windowsSpeech({ voice: id, text: "Hey, I'm KAI." })).slice(0, 44)), voiceStatus.voices[0].id);
     assert.equal(Buffer.from(voiceBytes).toString("ascii", 0, 4), "RIFF", "Sandboxed Windows audio reaches the renderer for character processing");
-    console.log("PASS: native fast Windows voice enumeration and PCM speech through the private companion preload.");
+    checkpoint("PASS: native fast Windows voice enumeration and PCM speech through the private companion preload.");
     if (!voiceStatus.voices.some(v => /^ko(?:[-_]|$)/i.test(v.lang))) {
       const languageError = await mascot.evaluate(async voice => {
         try { await window.kaiDesktop.windowsSpeech({ voice, text: "안녕하세요. 저는 카이입니다." }); return ""; }
@@ -50,7 +69,7 @@ async function main() {
       }, voiceStatus.voices.find(v => /^en/i.test(v.lang)).id);
       assert.match(languageError, /Korean Windows voice.*Add Windows voices/);
       assert.doesNotMatch(languageError, /invoking remote method|mascot:windows-speech|unsupported audio format/);
-      console.log("PASS: missing Korean speech gives actionable guidance through the real sandboxed preload.");
+      checkpoint("PASS: missing Korean speech gives actionable guidance through the real sandboxed preload.");
     }
     const checkPill = async (label, stop) => {
       await mascot.evaluate(({ label, stop }) => {
@@ -70,7 +89,7 @@ async function main() {
     await checkPill("Thinking it through…", true);
     await checkPill("KAI is speaking", true);
     await checkPill("Here when you need me", false);
-    console.log("PASS: native window shape covers every status label and Stop visibility.");
+    checkpoint("PASS: native window shape covers every status label and Stop visibility.");
     let native = await app.evaluate(({ BrowserWindow }) => {
       const w = globalThis.__kaiController.getWindow();
       return { count: BrowserWindow.getAllWindows().length, mainVisible: globalThis.__kaiMain.isVisible(),
@@ -97,7 +116,7 @@ async function main() {
     assert.equal(fs.readFileSync(brainFile, "utf8").includes("Native Brain recall fixture."), false);
     assert.equal(await main.evaluate(async () => { try { await window.kaiCompanionBridge.manage("status"); return false; } catch { return true; } }), true, "Other Core documents cannot manage Brain");
     assert.equal(await mascot.evaluate(() => typeof window.kaiCompanionBridge.manage), "undefined", "Mascot gets private tools without management access");
-    console.log("PASS: native Brain encryption, bounded recall, private routing and document restrictions.");
+    checkpoint("PASS: native Brain encryption, bounded recall, private routing and document restrictions.");
     await mascot.fill("#question", "Bring up my Pictures folder.");
     await mascot.press("#question", "Enter");
     await mascot.waitForFunction(() => document.querySelector("#messages").textContent.includes("left the folder closed") && document.querySelector("#stop").hidden);
@@ -171,7 +190,7 @@ async function main() {
     await drop(true);
     await mascot.waitForFunction(() => document.body.dataset.pose === "free");
     await app.evaluate(() => { globalThis.__kaiCursor = null; });
-    console.log("PASS: native pickup, bottom-edge drop, horizontal slide, lift, chat anchoring and drag cancellation.");
+    checkpoint("PASS: native pickup, bottom-edge drop, horizontal slide, lift, chat anchoring and drag cancellation.");
     // Real Windows safeStorage and sandboxed provider IPC; no paid APIs.
     assert.equal(await main.evaluate(async () => { try { await window.kaiProviderBridge.status(); return false; } catch { return true; } }), true, "Other Core documents have no provider capability");
     await app.evaluate(async () => {
@@ -194,13 +213,13 @@ async function main() {
       assert.equal(reply, "Native private reply.");
     }
     assert.equal(await mascot.evaluate(async () => { try { await window.kaiProviderBridge.remove("openai"); return false; } catch { return true; } }), true, "KAI cannot change provider credentials");
-    console.log("PASS: native provider DPAPI encryption, private main/companion IPC, both streaming protocols and settings restrictions.");
-    console.log("PASS: native KAI launch, transparent always-on-top window, sandbox, chat, resizing, single-window reuse, tray handoff and return to the main app.");
+    checkpoint("PASS: native provider DPAPI encryption, private main/companion IPC, both streaming protocols and settings restrictions.");
+    checkpoint("PASS: native KAI launch, transparent always-on-top window, sandbox, chat, resizing, single-window reuse, tray handoff and return to the main app.");
   } finally {
     let shutdownTimer;
     try {
       if (app) {
-        console.log("Closing native companion fixture...");
+        checkpoint("Closing native companion fixture...");
         await Promise.race([
           (async () => {
             const state = await app.evaluate(async () => globalThis.__shutdownFixture?.());
@@ -209,12 +228,12 @@ async function main() {
           })(),
           new Promise((_, reject) => { shutdownTimer = setTimeout(() => reject(new Error("Native companion fixture did not close within 20 seconds")), 20000); }),
         ]);
-        console.log("PASS: native companion fixture closed its windows, server and Electron process.");
+        checkpoint("PASS: native companion fixture closed its windows, server and Electron process.");
       }
     } catch (error) {
       // Fail the check if cleanup stalls; never turn an assertion/quit failure
       // into a pass or leave it holding the entire Windows release for 30 min.
-      app?.process().kill("SIGKILL");
+      killFixture();
       throw error;
     } finally {
       clearTimeout(shutdownTimer);
@@ -222,4 +241,11 @@ async function main() {
     }
   }
 }
-main().catch(error => { console.error(error); process.exitCode = 1; });
+main().then(() => {
+  clearTimeout(deadline);
+  // All assertions and explicit fixture shutdown have completed. Do not let
+  // an orphaned Playwright transport hold a completed check open forever.
+  process.exit(0);
+}, error => {
+  console.error(error); killFixture(); clearTimeout(deadline); process.exit(1);
+});
