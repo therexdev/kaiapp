@@ -228,7 +228,7 @@ test("producer UI configures cold custody without a local wallet, generates a ke
 test("Koin Vault QR connects a producer, requests registration and handles rejection and disconnection in the node UI", { skip: !fs.existsSync(process.env.KAI_TEST_CHROMIUM || "/opt/pw-browsers/chromium"), timeout: 45000 }, async t => {
   let connected = false, requested = null, status = "pending", f;
   const vaultRequest = async (route, body) => {
-    if (route === "config") return { network: "mainnet", demo: false, features: { kaiProducer: true, kaiProductionAllowance: true } };
+    if (route === "config") return { network: "mainnet", demo: false, features: { kaiProducer: true, kaiProductionAllowance: true, kaiBurnFullVhp: true } };
     if (route === "dapp/create") return { sessionId: "a".repeat(24), secret: "b".repeat(43), expiresAt: Date.now() + 1800000 };
     if (route === "dapp/status") return { connected, address: connected ? f.owner.getAddress() : null };
     if (route === "dapp/request") { requested = body; return { requestId: "r".repeat(24), expiresAt: Date.now() + 600000 }; }
@@ -298,6 +298,18 @@ test("Koin Vault QR connects a producer, requests registration and handles rejec
   assert.equal(approved.args.spender, NETWORKS.mainnet.contracts.pob);
   assert.equal(approved.args.value, "1000000000");
   status = "rejected"; await page.evaluate(() => refreshVault());
+  await page.selectOption("#pc-vault-action", "burn");
+  assert.equal(await page.isChecked("#pc-vault-burn-full"), true);
+  await page.fill("#pc-vault-amount", "20");
+  await page.click("#pc-vault-prepare");
+  await page.waitForSelector(".modal");
+  assert.match(await page.locator(".modal").textContent(), /120 VHP/);
+  assert.match(await page.locator(".modal").textContent(), /Both changes succeed together/);
+  status = "pending";
+  await page.getByRole("button", { name: "Request wallet approval", exact: true }).click();
+  await page.waitForFunction(() => document.querySelector("#pc-vault-status").textContent.includes("Waiting for your approval"));
+  assert.equal(requested.operations.length, 3);
+  status = "rejected"; await page.evaluate(() => refreshVault());
   if (process.env.KAI_VAULT_SCREENSHOT) await page.screenshot({ path: process.env.KAI_VAULT_SCREENSHOT, fullPage: true });
   await page.click("#pc-vault-disconnect");
   await page.waitForFunction(() => !document.querySelector("#pc-vault-connect").hidden);
@@ -331,6 +343,16 @@ test("production allowance targets official PoB, is balance-limited, revocable a
     assert.equal(f.calls.length, 0);
   }
   await assert.rejects(f.custody.operations({ action: "productionAllowance", amount: "101" }), /balance/);
+  const full = await f.custody.operations({ action: "productionAllowance", useFullBalance: true });
+  assert.equal(full.summary.amount, "100");
+  const burn = await f.custody.operations({ action: "burn", amount: "20", allowFullVhp: true });
+  assert.equal(burn.operations.length, 3);
+  assert.equal(burn.summary.productionAllowance, "120");
+  const token = await original("vhp", { provider: f.provider });
+  const approval = await token.decodeOperation(burn.operations[2]);
+  assert.equal(approval.args.value, "12000000000");
+  assert.equal(approval.args.spender, NETWORKS.mainnet.contracts.pob);
+  assert.equal((await f.custody.operations({ action: "burn", amount: "20" })).operations.length, 2);
   supported = false;
   await assert.rejects(f.custody.operations({ action: "productionAllowance", amount: "1" }), /unavailable/);
 });

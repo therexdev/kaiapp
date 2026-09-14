@@ -1,3 +1,8 @@
+## Full VHP allowance with manual burns
+
+- Koin Vault manual burns offer “Also allow my full VHP balance for production” (checked by default). The same phone-approved transaction burns KOIN and sets the PoB allowance to the VHP balance read during preparation plus the newly burned amount. Uncheck it to burn only.
+- The allowance action offers “Use full VHP balance”; KAI reads the balance when preparing the review. Other deposits or burns outside this flow do not automatically change the allowance.
+
 ## Koin Vault VHP production allowance
 
 - Add a phone-approved, limited VHP allowance for the official Proof-of-Burn contract. Choose an amount up to the current VHP balance; 0 revokes it. This replaces the remaining allowance and does not grant token-transfer authority to the hot key. Requires the companion Koin Vault backend update.

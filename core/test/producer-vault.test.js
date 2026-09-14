@@ -103,3 +103,9 @@ test("older Koin Vault cannot receive unsupported production allowance requests"
   await assert.rejects(f.vault.prepare({ action: "productionAllowance", amount: "10" }), /production-allowance update/);
   assert.equal(f.sent.length, 0);
 });
+
+test("burn-and-allow refuses older wallet backends before preparing or sending", async () => {
+  const f = fixture(); await f.connect();
+  await assert.rejects(f.vault.prepare({ action: "burn", amount: "1", allowFullVhp: true }), /burn-and-allow update/);
+  assert.equal(f.sent.length, 0);
+});

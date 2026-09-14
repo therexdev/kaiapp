@@ -1133,6 +1133,8 @@ function renderNodeView() {
         <div id="pc-vault-operations" hidden>
           <label class="field"><span>Operation</span><select id="pc-vault-action"><option value="register">Register hot public key</option><option value="productionAllowance">Allow VHP for block production</option><option value="burn">Burn KOIN to this producer's VHP</option><option value="transfer">Transfer tokens</option></select></label>
           <label class="field" id="pc-vault-amount-field" hidden><span>Amount</span><input id="pc-vault-amount" type="text" inputmode="decimal" placeholder="0.00"></label>
+          <label id="pc-vault-full-field" class="field" hidden><span><input type="checkbox" id="pc-vault-full" style="width:auto"> Use full VHP balance</span></label>
+          <label id="pc-vault-burn-full-field" class="field" hidden><span><input type="checkbox" id="pc-vault-burn-full" style="width:auto" checked> Also allow my full VHP balance for production</span><span class="hint">Includes the new VHP. Both changes use one phone approval.</span></label>
           <label class="field" id="pc-vault-token-field" hidden><span>Token</span><select id="pc-vault-token"><option value="koin">KOIN</option><option value="vhp">VHP</option></select></label>
           <label class="field" id="pc-vault-to-field" hidden><span>Recipient</span><input id="pc-vault-to" type="text" placeholder="Koinos address"></label>
           <p id="pc-vault-result" class="hint" role="alert"></p>
@@ -1233,8 +1235,12 @@ function renderNodeView() {
   $("#pc-vault-action").addEventListener("change", () => {
     const action = $("#pc-vault-action").value;
     $("#pc-vault-amount-field").hidden = action === "register";
+    $("#pc-vault-full-field").hidden = action !== "productionAllowance";
+    $("#pc-vault-burn-full-field").hidden = action !== "burn";
+    $("#pc-vault-amount").disabled = action === "productionAllowance" && $("#pc-vault-full").checked;
     $("#pc-vault-token-field").hidden = $("#pc-vault-to-field").hidden = action !== "transfer";
   });
+  $("#pc-vault-full").addEventListener("change", () => { $("#pc-vault-amount").disabled = $("#pc-vault-full").checked; });
   producerAction("#pc-vault-prepare", async () => {
     S.appInfo = await call("app:info");
     const producer = S.appInfo.settings.producer;
@@ -1242,12 +1248,12 @@ function renderNodeView() {
       throw new Error('Click "Use this producer wallet" above first (stop the node if it is running), then generate a hot key before registering it.');
     }
     $("#pc-vault-result").textContent = "Preparing review…";
-    const draft = await call("producer:vaultPrepare", { action: $("#pc-vault-action").value, amount: $("#pc-vault-amount").value, token: $("#pc-vault-token").value, to: $("#pc-vault-to").value.trim() });
+    const draft = await call("producer:vaultPrepare", { useFullBalance: $("#pc-vault-full").checked, allowFullVhp: $("#pc-vault-burn-full").checked, action: $("#pc-vault-action").value, amount: $("#pc-vault-amount").value, token: $("#pc-vault-token").value, to: $("#pc-vault-to").value.trim() });
     $("#pc-vault-result").textContent = "Review the request in KAI, then click Request wallet approval to send it to your phone.";
     const a = draft.summary;
     const detail = a.action === "productionAllowance" ? `<p>Set the official Proof-of-Burn contract's spending allowance to <b>${esc(a.amount)} VHP</b>.</p><p class="mono">${esc(a.spender)}</p><p>This replaces the remaining allowance. Block production consumes it as VHP converts to KOIN rewards. Renew it when exhausted; set 0 to revoke it. No tokens move now. Your hot key gains no transfer permission.</p>`
       : a.action === "register" ? `<p>Register this node's hot public key:</p><p class="mono">${esc(a.publicKey)}</p>`
-      : a.action === "burn" ? `<p>Permanently burn <b>${esc(a.amount)} KOIN</b> for the same amount of VHP in your producer wallet.</p>`
+      : a.action === "burn" ? `<p>Permanently burn <b>${esc(a.amount)} KOIN</b> for the same amount of VHP in your producer wallet.</p>${a.productionAllowance ? `<p>Also set the official PoB production allowance to <b>${esc(a.productionAllowance)} VHP</b>: current VHP plus this burn. Both changes succeed together. This replaces the remaining allowance; later deposits need a new approval.</p>` : ""}`
       : `<p>Transfer <b>${esc(a.amount)} ${esc(a.token.toUpperCase())}</b> to:</p><p class="mono">${esc(a.to)}</p>`;
     showModal({ title: "Review Koin Vault request", body: `<p>Mainnet · Producer:</p><p class="mono">${esc(a.producer)}</p>${detail}<p>Next, review the same details in Koin Vault and approve with your fingerprint or device passkey. Wallet approval submits the transaction.</p>`, actions: [
       { label: "Cancel", onClick: close => close() },

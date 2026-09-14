@@ -90,7 +90,7 @@ class ProducerCustody {
     this.state.set("producerDraft", null);
     return { publicKey, keyDirectory: dir, backupDirectory: backup };
   }
-  async operations({ action, amount, to, token = "koin" }) {
+  async operations({ action, amount, to, token = "koin", useFullBalance = false, allowFullVhp = false }) {
     this.requireExternal();
     const { address } = this.config(), network = this.chain.network().id;
     const provider = this.chain.provider();
@@ -104,9 +104,9 @@ class ProducerCustody {
       summary.publicKey = publicKey;
     } else if (action === "productionAllowance") {
       if (network !== "mainnet") throw new Error("Production allowance currently supports Mainnet only.");
-      const amountSat = parseAmount(amount);
-      if (cmpSats(amountSat, "0") < 0) throw new Error("Allowance cannot be negative.");
       const balances = await this.chain.balances(address);
+      const amountSat = useFullBalance === true ? balances.vhp : parseAmount(amount);
+      if (cmpSats(amountSat, "0") < 0) throw new Error("Allowance cannot be negative.");
       if (cmpSats(amountSat, balances.vhp) > 0) throw new Error("Choose a VHP allowance no larger than your current VHP balance.");
       const vhp = await this.chain._contract("vhp", { provider }), addrs = await this.chain.resolveContracts();
       // Probe support before preparing any approval. Never fall back to changing
@@ -114,7 +114,7 @@ class ProducerCustody {
       const result = await vhp.functions.allowance({ owner: address, spender: addrs.pob });
       if (!/^(0|[1-9][0-9]*)$/.test(String(result.result?.value ?? ""))) throw new Error("Could not verify VHP allowance support on this network.");
       await tx.pushOperation(vhp.functions.approve, { owner: address, spender: addrs.pob, value: amountSat });
-      Object.assign(summary, { amount: String(amount), token: "vhp", spender: addrs.pob });
+      Object.assign(summary, { amount: utils.formatUnits(amountSat, 8), token: "vhp", spender: addrs.pob });
     } else if (action === "burn" || action === "transfer") {
       const amountSat = parseAmount(amount);
       if (cmpSats(amountSat, "0") <= 0) throw new Error("Amount must be positive.");
@@ -130,6 +130,17 @@ class ProducerCustody {
           await tx.pushOperation(koin.functions.approve, { owner: address, spender: addrs.pob, value: amountSat });
         }
         await tx.pushOperation(pob.functions.burn, { token_amount: amountSat, burn_address: address, vhp_address: address });
+        if (allowFullVhp === true) {
+          if (network !== "mainnet") throw new Error("Production allowance currently supports Mainnet only.");
+          const total = BigInt(balances.vhp) + BigInt(amountSat);
+          if (total >= 18446744073709551615n) throw new Error("VHP allowance exceeds the supported limit.");
+          const vhp = await this.chain._contract("vhp", { provider }), addrs = await this.chain.resolveContracts();
+          const result = await vhp.functions.allowance({ owner: address, spender: addrs.pob });
+          if (!/^(0|[1-9][0-9]*)$/.test(String(result.result?.value ?? ""))) throw new Error("Could not verify VHP allowance support on this network.");
+          await tx.pushOperation(vhp.functions.approve, { owner: address, spender: addrs.pob, value: total.toString() });
+          summary.productionAllowance = utils.formatUnits(total.toString(), 8);
+          summary.spender = addrs.pob;
+        }
       } else {
         if (!this.chain.isValidAddress(to)) throw new Error("Invalid recipient address.");
         if (token === "koin") this.chain._assertMana(amountSat, balances.mana, "send");

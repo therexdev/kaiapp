@@ -106,6 +106,10 @@ class ProducerVault {
       const config = await this.request("config", null, "GET");
       if (config.features?.kaiProductionAllowance !== true) throw new Error("Koin Vault needs its production-allowance update before this approval can be sent. Your wallet permissions have not changed.");
     }
+    if (input?.action === "burn" && input.allowFullVhp === true) {
+      const config = await this.request("config", null, "GET");
+      if (config.features?.kaiBurnFullVhp !== true) throw new Error("Koin Vault needs its burn-and-allow update. Nothing was burned; retry after the wallet updates.");
+    }
     const draft = await this.custody.operations(input);
     this.assertContext(draft.summary);
     this.draft = { ...clone(draft), id: randomBytes(16).toString("hex"), expiresAt: this.now() + 5 * 60000 };
