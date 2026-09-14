@@ -355,3 +355,5 @@ KAI does not recognize your individual voice yet. Sensitivity filters sound leve
 Listening remains opt-in, with a green microphone indicator. Hiding KAI, returning to the full app or quitting turns it off. Microphone audio stays on this computer; accepted questions go to your selected chat model. Local transcription and voice generation still take some processing time, and speaker/microphone hardware affects interruption performance.
 
 Test continues using your existing profile, wallet, models and earning node.
+
+- Updated the Kondor producer signer to match the website and explain extension connection failures without implying a signature was received.
