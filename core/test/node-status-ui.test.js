@@ -125,3 +125,14 @@ test("Dashboard shows live network counts even when the local node is stopped", 
  S.networkProducers.available=true; S.networkProducers.network="testnet"; paint();
  assert.doesNotMatch($("#d-producer-counts").innerHTML,/>201</);
 });
+
+test("VHP burn rejection overrides healthy services on Node and Dashboard", () => {
+  const { S, $, paint } = painter();
+  S.node.isRunning = true; S.node.health = { ok: true };
+  S.node.production = { reason: "vhp-burn-rejected" };
+  paint();
+  assert.match($("#n-health").innerHTML, /Block submissions rejected/);
+  assert.match($("#n-checklist").innerHTML, /Last observed block submission failed/);
+  assert.equal($("#d-status-text").textContent, "Needs attention");
+  assert.equal($("#d-dot").className, "dot red");
+});

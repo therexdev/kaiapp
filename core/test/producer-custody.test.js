@@ -228,7 +228,7 @@ test("producer UI configures cold custody without a local wallet, generates a ke
 test("Koin Vault QR connects a producer, requests registration and handles rejection and disconnection in the node UI", { skip: !fs.existsSync(process.env.KAI_TEST_CHROMIUM || "/opt/pw-browsers/chromium"), timeout: 45000 }, async t => {
   let connected = false, requested = null, status = "pending", f;
   const vaultRequest = async (route, body) => {
-    if (route === "config") return { network: "mainnet", demo: false, features: { kaiProducer: true } };
+    if (route === "config") return { network: "mainnet", demo: false, features: { kaiProducer: true, kaiProductionAllowance: true } };
     if (route === "dapp/create") return { sessionId: "a".repeat(24), secret: "b".repeat(43), expiresAt: Date.now() + 1800000 };
     if (route === "dapp/status") return { connected, address: connected ? f.owner.getAddress() : null };
     if (route === "dapp/request") { requested = body; return { requestId: "r".repeat(24), expiresAt: Date.now() + 600000 }; }
@@ -257,6 +257,9 @@ test("Koin Vault QR connects a producer, requests registration and handles rejec
   assert.equal(await page.locator("#pc-vault-qr path").getAttribute("d"), await page.evaluate(url => new DOMParser().parseFromString(KQR.svg(KQR.encode(url, { ec: "M" }), { scale: 5, quiet: 4 }), "image/svg+xml").querySelector("path").getAttribute("d"), uri));
   assert.equal(f.settings.get("producer.mode", "local"), "local");
   connected = true; await page.evaluate(() => refreshVault());
+  await page.click("#pc-vault-prepare");
+  await page.waitForFunction(() => document.querySelector("#pc-vault-result").textContent.includes("Use this producer wallet"));
+  assert.equal(requested, null);
   await page.click("#pc-vault-use");
   await page.waitForFunction(() => document.querySelector("#pc-result").textContent.includes("Koin Vault producer saved"));
   assert.equal(f.settings.get("producer.mode"), "external");
@@ -274,10 +277,60 @@ test("Koin Vault QR connects a producer, requests registration and handles rejec
   await assert.rejects(f.channels.get("producer:key")({ rotate: true, confirm: true }), /Finish or cancel/);
   status = "rejected"; await page.evaluate(() => refreshVault());
   await page.waitForFunction(() => document.querySelector("#pc-vault-status").textContent.includes("rejected"));
+  const originalContract = f.chain._contract.bind(f.chain);
+  f.chain._contract = async (...args) => {
+    const c = await originalContract(...args);
+    if (args[0] === "vhp") c.functions.allowance = async () => ({ result: { value: "0" } });
+    return c;
+  };
+  await page.selectOption("#pc-vault-action", "productionAllowance");
+  await page.fill("#pc-vault-amount", "10");
+  await page.click("#pc-vault-prepare");
+  await page.waitForSelector(".modal");
+  assert.match(await page.locator(".modal").textContent(), /10 VHP/);
+  assert.match(await page.locator(".modal").textContent(), /set 0 to revoke/i);
+  status = "pending";
+  await page.getByRole("button", { name: "Request wallet approval", exact: true }).click();
+  await page.waitForFunction(() => document.querySelector("#pc-vault-status").textContent.includes("Waiting for your approval"));
+  const vhp = await originalContract("vhp", { provider: f.provider });
+  const approved = await vhp.decodeOperation(requested.operations[0]);
+  assert.equal(approved.name, "approve");
+  assert.equal(approved.args.spender, NETWORKS.mainnet.contracts.pob);
+  assert.equal(approved.args.value, "1000000000");
+  status = "rejected"; await page.evaluate(() => refreshVault());
   if (process.env.KAI_VAULT_SCREENSHOT) await page.screenshot({ path: process.env.KAI_VAULT_SCREENSHOT, fullPage: true });
   await page.click("#pc-vault-disconnect");
   await page.waitForFunction(() => !document.querySelector("#pc-vault-connect").hidden);
   assert.equal(await page.locator("#pc-vault-account").textContent(), "");
   assert.equal(f.settings.get("producer.addresses.mainnet"), f.owner.getAddress(), "disconnect preserves the node's producer");
   assert.deepEqual(errors, []);
+});
+
+test("production allowance targets official PoB, is balance-limited, revocable and unsigned", async t => {
+  const f = fixture(t); await f.custody.configure({ mode: "external", address: f.owner.getAddress() });
+  const original = f.chain._contract.bind(f.chain);
+  let supported = true;
+  f.chain._contract = async (...args) => {
+    const c = await original(...args);
+    if (args[0] === "vhp") c.functions.allowance = async () => {
+      if (!supported) throw new Error("allowance unavailable");
+      return { result: { value: "0" } };
+    };
+    return c;
+  };
+  for (const amount of ["10", "0"]) {
+    const d = await f.custody.operations({ action: "productionAllowance", amount });
+    assert.equal(d.operations.length, 1);
+    const c = await original("vhp", { provider: f.provider });
+    const decoded = await c.decodeOperation(d.operations[0]);
+    assert.equal(decoded.name, "approve");
+    assert.equal(decoded.args.owner, f.owner.getAddress());
+    assert.equal(decoded.args.spender, NETWORKS.mainnet.contracts.pob);
+    assert.equal(BigInt(decoded.args.value || "0"), BigInt(amount) * 100000000n);
+    assert.equal(d.summary.spender, NETWORKS.mainnet.contracts.pob);
+    assert.equal(f.calls.length, 0);
+  }
+  await assert.rejects(f.custody.operations({ action: "productionAllowance", amount: "101" }), /balance/);
+  supported = false;
+  await assert.rejects(f.custody.operations({ action: "productionAllowance", amount: "1" }), /unavailable/);
 });

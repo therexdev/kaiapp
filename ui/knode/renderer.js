@@ -279,7 +279,7 @@ function patchDashboardView() {
   const text = $("#d-status-text");
   const sub = $("#d-status-sub");
   const toggle = $("#d-toggle");
-  dot.className = "dot " + (quickSync ? "amber" : d.node?.health?.ok === false ? "red" : running ? "green" : "red");
+  dot.className = "dot " + (quickSync ? "amber" : d.node?.health?.ok === false || d.node?.production?.reason ? "red" : running ? "green" : "red");
   if (quickSync) {
     text.textContent = "Quick syncing";
     text.className = "status-text warn-text";
@@ -288,8 +288,8 @@ function patchDashboardView() {
     toggle.className = "btn";
     toggle.dataset.action = "";
   } else if (running) {
-    text.textContent = d.node.health?.ok === false ? "Needs attention" : "Running";
-    text.className = d.node.health?.ok === false ? "status-text bad-text" : "status-text good-text";
+    text.textContent = d.node.health?.ok === false || d.node.production?.reason ? "Needs attention" : "Running";
+    text.className = d.node.health?.ok === false || d.node.production?.reason ? "status-text bad-text" : "status-text good-text";
     const op = d.node.op;
     sub.textContent = op && op.running ? `${op.name} in progress…` : `${d.node.runningCount} services · ${d.network.label}`;
     toggle.textContent = "Stop node";
@@ -1131,10 +1131,12 @@ function renderNodeView() {
         <p id="pc-vault-status" class="hint" role="status">Mainnet · No wallet connected.</p>
         <p id="pc-vault-account" class="mono"></p>
         <div id="pc-vault-operations" hidden>
-          <label class="field"><span>Operation</span><select id="pc-vault-action"><option value="register">Register hot public key</option><option value="burn">Burn KOIN to this producer's VHP</option><option value="transfer">Transfer tokens</option></select></label>
+          <label class="field"><span>Operation</span><select id="pc-vault-action"><option value="register">Register hot public key</option><option value="productionAllowance">Allow VHP for block production</option><option value="burn">Burn KOIN to this producer's VHP</option><option value="transfer">Transfer tokens</option></select></label>
           <label class="field" id="pc-vault-amount-field" hidden><span>Amount</span><input id="pc-vault-amount" type="text" inputmode="decimal" placeholder="0.00"></label>
           <label class="field" id="pc-vault-token-field" hidden><span>Token</span><select id="pc-vault-token"><option value="koin">KOIN</option><option value="vhp">VHP</option></select></label>
           <label class="field" id="pc-vault-to-field" hidden><span>Recipient</span><input id="pc-vault-to" type="text" placeholder="Koinos address"></label>
+          <p id="pc-vault-result" class="hint" role="alert"></p>
+          <p class="hint">For Koin Vault production, approve a VHP allowance after registering the hot key. Choose a limited amount up to your VHP balance, or 0 to revoke.</p>
           <button id="pc-vault-prepare" class="btn primary">Review and sign with Koin Vault</button>
         </div>
       </div>
@@ -1201,7 +1203,11 @@ function renderNodeView() {
 
   const producerAction = (id, fn) => $(id).addEventListener("click", async () => {
     const button = $(id); button.disabled = true;
-    try { await fn(); } catch (e) { $("#pc-result").textContent = e.message; }
+    if (id.startsWith("#pc-vault-")) $("#pc-vault-result").textContent = "";
+    try { await fn(); } catch (e) {
+      $("#pc-result").textContent = e.message;
+      if (id.startsWith("#pc-vault-")) { $("#pc-vault-result").textContent = e.message; toast(e.message, "bad"); }
+    }
     finally { button.disabled = false; }
   });
   producerAction("#pc-save", async () => {
@@ -1230,9 +1236,17 @@ function renderNodeView() {
     $("#pc-vault-token-field").hidden = $("#pc-vault-to-field").hidden = action !== "transfer";
   });
   producerAction("#pc-vault-prepare", async () => {
+    S.appInfo = await call("app:info");
+    const producer = S.appInfo.settings.producer;
+    if (producer?.mode !== "external" || producer?.addresses?.[net().id] !== S.vault?.address) {
+      throw new Error('Click "Use this producer wallet" above first (stop the node if it is running), then generate a hot key before registering it.');
+    }
+    $("#pc-vault-result").textContent = "Preparing review…";
     const draft = await call("producer:vaultPrepare", { action: $("#pc-vault-action").value, amount: $("#pc-vault-amount").value, token: $("#pc-vault-token").value, to: $("#pc-vault-to").value.trim() });
+    $("#pc-vault-result").textContent = "Review the request in KAI, then click Request wallet approval to send it to your phone.";
     const a = draft.summary;
-    const detail = a.action === "register" ? `<p>Register this node's hot public key:</p><p class="mono">${esc(a.publicKey)}</p>`
+    const detail = a.action === "productionAllowance" ? `<p>Set the official Proof-of-Burn contract's spending allowance to <b>${esc(a.amount)} VHP</b>.</p><p class="mono">${esc(a.spender)}</p><p>This replaces the remaining allowance. Block production consumes it as VHP converts to KOIN rewards. Renew it when exhausted; set 0 to revoke it. No tokens move now. Your hot key gains no transfer permission.</p>`
+      : a.action === "register" ? `<p>Register this node's hot public key:</p><p class="mono">${esc(a.publicKey)}</p>`
       : a.action === "burn" ? `<p>Permanently burn <b>${esc(a.amount)} KOIN</b> for the same amount of VHP in your producer wallet.</p>`
       : `<p>Transfer <b>${esc(a.amount)} ${esc(a.token.toUpperCase())}</b> to:</p><p class="mono">${esc(a.to)}</p>`;
     showModal({ title: "Review Koin Vault request", body: `<p>Mainnet · Producer:</p><p class="mono">${esc(a.producer)}</p>${detail}<p>Next, review the same details in Koin Vault and approve with your fingerprint or device passkey. Wallet approval submits the transaction.</p>`, actions: [
@@ -1240,7 +1254,7 @@ function renderNodeView() {
       { label: "Request wallet approval", class: "primary", onClick: async (close, modal) => {
         const button = $(".btn.primary", modal); button.disabled = true;
         try { S.vault = await call("producer:vaultSend", { confirm: true, draftId: draft.id }); close(); patchVault(); }
-        catch (e) { close(); $("#pc-result").textContent = e.message; await refreshVault(); }
+        catch (e) { close(); $("#pc-result").textContent = e.message; $("#pc-vault-result").textContent = e.message; toast(e.message, "bad"); await refreshVault(); }
       } }
     ] });
   });
@@ -1647,8 +1661,8 @@ function patchNodeView() {
   // run pill + services
   const pill = $("#n-run-pill");
   if (pill) {
-    pill.className = "pill " + (!quickSync && n?.isRunning && n?.health?.ok !== false ? "good" : "warn");
-    pill.textContent = quickSync ? (n?.isRunning ? "stopping for quick sync" : "stopped · quick syncing") : n?.isRunning ? (n?.health?.ok === false ? "needs attention" : `running (${n.runningCount} services)`) : "stopped";
+    pill.className = "pill " + (!quickSync && n?.isRunning && n?.health?.ok !== false && !n?.production?.reason ? "good" : "warn");
+    pill.textContent = quickSync ? (n?.isRunning ? "stopping for quick sync" : "stopped · quick syncing") : n?.isRunning ? (n?.health?.ok === false || n?.production?.reason ? "needs attention" : `running (${n.runningCount} services)`) : "stopped";
   }
 
   // friendly, jargon-free health line + auto-recover toggle state
@@ -1669,6 +1683,10 @@ function patchNodeView() {
       $("#n-repair")?.addEventListener("click", onQuickSync);
     } else if (!n?.isRunning) {
       healthEl.innerHTML = "";
+    } else if (n?.production?.reason === "vhp-burn-rejected") {
+      healthEl.innerHTML = `<div class="banner bad"><b>Block submissions rejected: could not burn VHP.</b> The node is running, but its last observed block attempt failed. For Koin Vault, connect the producer wallet and choose Allow VHP for block production above. This needs phone approval. Quick Sync does not fix wallet authorization.</div>`;
+    } else if (n?.production?.reason) {
+      healthEl.innerHTML = `<div class="banner bad"><b>Last observed block submission was rejected.</b> Open block_producer logs for the failure details. Running services and a registered key do not guarantee accepted blocks.</div>`;
     } else if (h?.recovering) {
       healthEl.innerHTML = `<div class="banner info"><span class="spin"></span> Getting your node back up — this takes a minute. You don't need to do anything.</div>`;
     } else if (h && h.ok === false) {
@@ -1740,6 +1758,7 @@ function patchNodeView() {
       [st(!!p?.filePublicKey), "Signing key generated", "Generated automatically by the node on first start."],
       [st(!!p?.matches), "Signing key registered on chain", "Register it with the button below (needs unlocked wallet + mana)."],
     ];
+    if (n?.isRunning && n?.production?.reason) items.push(["empty", "Last observed block submission failed", n.production.reason === "vhp-burn-rejected" ? "VHP burn rejected. Approve a production allowance in Koin Vault; registration alone does not confirm successful production." : "Check block_producer logs for the rejection reason."]);
     const tickFor = (s) => (s === "ok" ? "✅" : s === "pending" ? "⏳" : "⬜");
     checklist.innerHTML = items
       .map(

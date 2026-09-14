@@ -102,6 +102,19 @@ class ProducerCustody {
       const pob = await this.chain._contract("pob", { provider });
       await tx.pushOperation(pob.functions.register_public_key, { producer: address, public_key: publicKey });
       summary.publicKey = publicKey;
+    } else if (action === "productionAllowance") {
+      if (network !== "mainnet") throw new Error("Production allowance currently supports Mainnet only.");
+      const amountSat = parseAmount(amount);
+      if (cmpSats(amountSat, "0") < 0) throw new Error("Allowance cannot be negative.");
+      const balances = await this.chain.balances(address);
+      if (cmpSats(amountSat, balances.vhp) > 0) throw new Error("Choose a VHP allowance no larger than your current VHP balance.");
+      const vhp = await this.chain._contract("vhp", { provider }), addrs = await this.chain.resolveContracts();
+      // Probe support before preparing any approval. Never fall back to changing
+      // account authority or giving the hot key permission to move tokens.
+      const result = await vhp.functions.allowance({ owner: address, spender: addrs.pob });
+      if (!/^(0|[1-9][0-9]*)$/.test(String(result.result?.value ?? ""))) throw new Error("Could not verify VHP allowance support on this network.");
+      await tx.pushOperation(vhp.functions.approve, { owner: address, spender: addrs.pob, value: amountSat });
+      Object.assign(summary, { amount: String(amount), token: "vhp", spender: addrs.pob });
     } else if (action === "burn" || action === "transfer") {
       const amountSat = parseAmount(amount);
       if (cmpSats(amountSat, "0") <= 0) throw new Error("Amount must be positive.");

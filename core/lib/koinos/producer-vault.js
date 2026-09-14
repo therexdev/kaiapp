@@ -102,6 +102,10 @@ class ProducerVault {
   async prepare(input) {
     if (this.hasPending() || this.pending?.status === "submitted") throw new Error("Finish the existing Koin Vault request first.");
     await this.status(); this.assertContext();
+    if (input?.action === "productionAllowance") {
+      const config = await this.request("config", null, "GET");
+      if (config.features?.kaiProductionAllowance !== true) throw new Error("Koin Vault needs its production-allowance update before this approval can be sent. Your wallet permissions have not changed.");
+    }
     const draft = await this.custody.operations(input);
     this.assertContext(draft.summary);
     this.draft = { ...clone(draft), id: randomBytes(16).toString("hex"), expiresAt: this.now() + 5 * 60000 };

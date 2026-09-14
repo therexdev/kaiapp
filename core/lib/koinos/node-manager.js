@@ -884,8 +884,11 @@ class NodeManager {
     entry.pending = (async () => {
       let value = { health: null, peers: null };
       if (services.length && !this._op?.running) {
-        const r = await this._compose(networkId, ["logs", "--no-color", "--timestamps", "--since", "2m", "--tail", "200", "chain", "block_producer", "p2p"], { timeout: 15000 });
+        const r = await this._compose(networkId, ["logs", "--no-color", "--timestamps", "--since", old?.value ? "2m" : "24h", "--tail", "200", "chain", "block_producer", "p2p"], { timeout: 15000 });
         value = r.ok ? inspectLogs(r.stdout + "\n" + r.stderr) : value;
+        // Keep the last failed attempt visible through quiet periods. Merely
+        // logging "Producing with VHP" is not a successful block submission.
+        if (!value.production && services.some(s => s.service === "block_producer" && /running|up/i.test(s.state))) value.production = old?.value?.production || null;
         if (old?.value?.health?.needsRepair) value.health = old.value.health;
         if (!value.health) {
           const health = assessHealth({ services, producing: services.some(s => s.service === "block_producer") });
@@ -907,6 +910,7 @@ class NodeManager {
     const observed = await this.observe(networkId, services);
     return {
       peers: observed.peers,
+      production: observed.production || null,
       docker,
       filesReady: this.filesReady(networkId),
       services,

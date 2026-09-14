@@ -110,3 +110,21 @@ test("successful snapshot preserves old databases and leaves identity untouched"
  for(const name of ["p2p","block_producer"]) assert.equal(fs.readFileSync(path.join(live,name,"data"),"utf8"),"old-"+name);
  assert.equal(fs.existsSync(path.join(live,".kai-restore-incomplete.json")),false);
 });
+
+test("producer rejection is separate from node health and only a successful submission clears it", async () => {
+  const failure = "block_producer-1 | 2026-09-14 09:38:19 Error while submitting block: could not burn vhp";
+  const quiet = "block_producer-1 | Producing with 17569.43050000 VHP";
+  assert.equal(inspectLogs(failure).health, null);
+  assert.equal(inspectLogs(failure + "\n" + quiet).production.reason, "vhp-burn-rejected");
+  assert.equal(inspectLogs("chain-1 | Error while submitting block: could not burn vhp").production, null);
+  assert.equal(inspectLogs(failure + "\nblock_producer-1 | Produced block - Height: 123").production.reason, null);
+  const mgr = new NodeManager({ dataRoot: "/unused" });
+  const services = [{ service: "block_producer", state: "running" }];
+  let log = failure;
+  mgr._compose = async () => ({ ok: true, stdout: log, stderr: "" });
+  assert.equal((await mgr.observe("mainnet", services)).production.reason, "vhp-burn-rejected");
+  mgr._observations.get("mainnet").at = 0; log = quiet;
+  assert.equal((await mgr.observe("mainnet", services)).production.reason, "vhp-burn-rejected");
+  mgr._observations.get("mainnet").at = 0; log = "block_producer-1 | Produced block - Height: 124";
+  assert.equal((await mgr.observe("mainnet", services)).production.reason, null);
+});

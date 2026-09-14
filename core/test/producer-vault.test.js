@@ -97,3 +97,9 @@ test("a newer prepared operation invalidates an earlier review", async () => {
   await assert.rejects(f.vault.send({ confirm: true, draftId: first.id }), /fresh/);
   assert.equal(f.sent.length, 0);
 });
+
+test("older Koin Vault cannot receive unsupported production allowance requests", async () => {
+  const f = fixture(); await f.connect();
+  await assert.rejects(f.vault.prepare({ action: "productionAllowance", amount: "10" }), /production-allowance update/);
+  assert.equal(f.sent.length, 0);
+});

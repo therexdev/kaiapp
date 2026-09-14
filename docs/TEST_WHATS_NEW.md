@@ -1,3 +1,12 @@
+## Koin Vault VHP production allowance
+
+- Add a phone-approved, limited VHP allowance for the official Proof-of-Burn contract. Choose an amount up to the current VHP balance; 0 revokes it. This replaces the remaining allowance and does not grant token-transfer authority to the hot key. Requires the companion Koin Vault backend update.
+- Show failed block submissions separately from healthy running services. A VHP burn rejection remains visible until a successful submission is observed; it does not trigger Quick Sync or automatic restarts.
+
+## Koin Vault signing feedback
+
+- Signing setup errors now appear beside Review and sign and in a notification. If the connected wallet has not been selected as producer, KAI explains which button to click before preparing registration.
+
 ## Koin Vault producer signing
 
 - Node → Producer wallet custody → Koin Vault now connects your phone with a QR code. Scan with Koin Vault's Connect App, approve the connection, then click Use this producer wallet while the node is stopped.

@@ -29,7 +29,16 @@ function inspectLogs(text) {
     }
     peers = { count, lowerBound, observedAt: lines[i].match(/\d{4}-\d\d-\d\dT[\d:.]+Z/)?.[0] || null };
   }
-  return { health, peers };
+  let production = null;
+  for (const line of lines) {
+    if (!/block_producer[^|]*\|/.test(line)) continue;
+    if (/Error while submitting block:/i.test(line)) production = {
+      reason: /could not burn vhp/i.test(line) ? "vhp-burn-rejected" : "block-submission-rejected",
+      observedAt: line.match(/\d{4}-\d\d-\d\d[T ][\d:.]+Z?/)?.[0] || null,
+    };
+    else if (/Produced block - Height:/i.test(line)) production = { reason: null };
+  }
+  return { health, peers, production };
 }
 
 function lockError(e) {
