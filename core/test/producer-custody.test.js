@@ -356,3 +356,23 @@ test("production allowance targets official PoB, is balance-limited, revocable a
   supported = false;
   await assert.rejects(f.custody.operations({ action: "productionAllowance", amount: "1" }), /unavailable/);
 });
+
+test("real allowance decoder accepts protobuf zero and preserves nonzero values, but rejects RPC errors", async t => {
+  const f = fixture(t); await f.custody.configure({ mode: "external", address: f.owner.getAddress() });
+  // The uint64 value 0 can be omitted by protobuf, yielding an empty result.
+  let encoded = "";
+  f.provider.readContract = async () => ({ result: encoded });
+  const vhp = await f.chain._contract("vhp", { provider: f.provider });
+  assert.equal((await vhp.functions.allowance({ owner: f.owner.getAddress(), spender: NETWORKS.mainnet.contracts.pob })).result.value, "0");
+  const full = await f.custody.operations({ action: "productionAllowance", useFullBalance: true });
+  assert.equal(full.summary.amount, "100");
+  const burn = await f.custody.operations({ action: "burn", amount: "20", allowFullVhp: true });
+  assert.equal(burn.operations.length, 3);
+  assert.equal(burn.summary.productionAllowance, "120");
+  encoded = "CAc="; // protobuf field 1, uint64 7
+  assert.equal((await vhp.functions.allowance({ owner: f.owner.getAddress(), spender: NETWORKS.mainnet.contracts.pob })).result.value, "7");
+  f.provider.readContract = async () => { throw new Error("RPC unavailable"); };
+  await assert.rejects(f.custody.operations({ action: "productionAllowance", useFullBalance: true }), /RPC unavailable/);
+  await assert.rejects(f.custody.operations({ action: "burn", amount: "20", allowFullVhp: true }), /RPC unavailable/);
+  assert.equal(f.calls.length, 0);
+});

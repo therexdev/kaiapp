@@ -1,3 +1,7 @@
+## Zero VHP allowance fix
+
+- Accept the protobuf empty response for a zero allowance. Full-balance approvals and manual burn-plus-allowance requests now prepare correctly before an allowance has been set. RPC failures still stop preparation.
+
 ## Full VHP allowance with manual burns
 
 - Koin Vault manual burns offer “Also allow my full VHP balance for production” (checked by default). The same phone-approved transaction burns KOIN and sets the PoB allowance to the VHP balance read during preparation plus the newly burned amount. Uncheck it to burn only.
