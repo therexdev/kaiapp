@@ -202,7 +202,8 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
   });
 
   handle("chain:send", async ({ to, amount, token, password }) => {
-    custody.requireLocal();
+    // Wallet sends spend only the local earning wallet, independently of
+    // producer custody. External producer transfers use producer:prepare.
     const amountSat = parseAmount(amount);
     // Sending moves value to somebody else: the password is proved HERE,
     // on this call, because the wallet auto-unlocks at start-up and being

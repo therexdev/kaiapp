@@ -58,10 +58,37 @@ test("external producer setup, restart, rotation and host files never need the c
     assert.ok(!content.includes(f.owner.getPrivateKey("wif")) && !content.includes(f.owner.getPrivateKey()), file);
   }
 });
+test("local wallet sends remain password-protected and independent of external producer custody", async t => {
+  const f = fixture(t);
+  await f.custody.configure({ mode: "external", address: f.owner.getAddress() });
+  const signer = Signer.fromSeed("unrelated earning wallet"), transfers = [];
+  f.wallet.signerFor = password => {
+    if (password !== "correct password") throw new Error("Incorrect password");
+    return signer;
+  };
+  f.chain.transfer = async (actualSigner, input) => {
+    assert.equal(actualSigner.getAddress(), f.wallet.address);
+    assert.notEqual(actualSigner.getAddress(), f.owner.getAddress());
+    transfers.push(input);
+    return { txId: "mock-wallet-transfer" };
+  };
+  const send = f.channels.get("chain:send");
+  for (const token of ["koin", "vhp"]) {
+    const input = { to: f.owner.getAddress(), amount: "1", token };
+    await assert.rejects(send(input), /Incorrect password/);
+    await assert.rejects(send({ ...input, password: "wrong" }), /Incorrect password/);
+    const result = await send({ ...input, password: "correct password" });
+    assert.equal(result.amountSat, "100000000");
+    assert.deepEqual(transfers.at(-1), { to: input.to, amountSat: "100000000", token });
+  }
+  assert.equal(transfers.length, 2);
+  assert.equal(f.custody.config().mode, "external");
+  assert.equal(f.custody.config().address, f.owner.getAddress());
+});
 test("cold producer refuses local signing and disables even previously configured automatic funds operations", async t => {
   const f = fixture(t);
   await f.custody.configure({ mode: "external", address: f.owner.getAddress() });
-  for (const channel of ["chain:burn", "chain:send", "producer:register", "rewards:runNow"]) await assert.rejects(async () => f.channels.get(channel)({ amount: "1", token: "koin", to: f.wallet.address }), /External producer/);
+  for (const channel of ["chain:burn", "producer:register", "rewards:runNow"]) await assert.rejects(async () => f.channels.get(channel)({ amount: "1", token: "koin", to: f.wallet.address }), /External producer/);
   assert.throws(() => f.rewards.configure({ enabled: true }), /disabled/);
   f.settings.set("rewards.enabled", true); f.rewards.start();
   assert.equal(f.rewards.status().running, false);

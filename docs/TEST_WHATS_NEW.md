@@ -1,3 +1,7 @@
+## Send from the KAI wallet with external producer custody
+
+- Fix KOIN and VHP sends from the local KAI wallet being blocked when an external producer wallet is selected. Sends still require the local wallet password; external producer transfers still require external signing.
+
 ## Wallet submission results
 
 - Show Koin Vault’s actual submission error and transaction ID instead of hiding the reason behind a generic failure message.
