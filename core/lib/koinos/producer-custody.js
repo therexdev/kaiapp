@@ -1,6 +1,6 @@
 "use strict";
 const fs = require("fs"), path = require("path"), crypto = require("crypto");
-const { validateSigned } = require("../../../ui/producer-signer/validation");
+const { validateSigned, fresh } = require("../../../ui/producer-signer/validation");
 const { Signer, Transaction, utils } = require("koilib");
 const { parseAmount, cmpSats } = require("./format");
 const keyText = value => value ? Buffer.from(value, "base64").toString("base64url") : null;
@@ -150,13 +150,22 @@ class ProducerCustody {
     } else throw new Error("Choose register, burn or transfer.");
     return { summary, operations: tx.transaction.operations };
   }
+  savedDraft() {
+    this.requireExternal();
+    const draft = this.state.get("producerDraft", null);
+    fresh(draft);
+    if (draft.summary.network !== this.chain.network().id || draft.summary.producer !== this.config().address) throw new Error("Producer or network changed. Prepare a new draft.");
+    if (draft.summary.action === "register" && draft.summary.publicKey !== this.hotPublicKey()) throw new Error("The hot key changed. Prepare a new registration.");
+    return structuredClone(draft);
+  }
   async prepare(input) {
     const { summary, operations } = await this.operations(input);
     const provider = this.chain.provider(), rcLimit = await this.chain._rcLimit(provider, summary.producer);
     const tx = new Transaction({ provider, options: { payer: summary.producer, rcLimit } });
     for (const op of operations) await tx.pushOperation(op);
     await tx.prepare();
-    const draft = { format: "kai-producer-transaction-v1", expiresAt: Date.now() + 15 * 60000, summary, transaction: tx.transaction };
+    const createdAt = Date.now(), offline = input.offlineSigning === true;
+    const draft = { format: "kai-producer-transaction-v1", createdAt, signingWindow: offline ? "offline-24h" : "standard-15m", expiresAt: createdAt + (offline ? 24 * 60 : 15) * 60000, summary, transaction: tx.transaction };
     this.state.set("producerDraft", draft);
     return draft;
   }

@@ -228,9 +228,15 @@ test("producer UI configures cold custody without a local wallet, generates a ke
   await page.waitForFunction(() => document.querySelector("#pc-public").value.length > 20);
   assert.equal(await page.locator("#n-register").isDisabled(), true);
   await page.locator("summary").filter({ hasText: "External signing:" }).click();
+  await page.check("#pc-offline");
   await page.click("#pc-prepare");
   await page.waitForFunction(() => document.querySelector("#pc-unsigned").value.includes("kai-producer-transaction-v1"));
   const draft = JSON.parse(await page.inputValue("#pc-unsigned"));
+  assert.equal(draft.signingWindow, "offline-24h");
+  await page.evaluate(() => { document.querySelector("#pc-unsigned").value = ""; });
+  await page.click("#pc-resume");
+  await page.waitForFunction(() => document.querySelector("#pc-broadcast-result").textContent.includes("Saved draft restored"));
+  assert.deepEqual(JSON.parse(await page.inputValue("#pc-unsigned")), draft);
   const downloading = page.waitForEvent("download"); await page.click("#pc-download-draft");
   const download = await downloading;
   assert.deepEqual(JSON.parse(fs.readFileSync(await download.path(), "utf8")), draft);
@@ -402,4 +408,38 @@ test("real allowance decoder accepts protobuf zero and preserves nonzero values,
   await assert.rejects(f.custody.operations({ action: "productionAllowance", useFullBalance: true }), /RPC unavailable/);
   await assert.rejects(f.custody.operations({ action: "burn", amount: "20", allowFullVhp: true }), /RPC unavailable/);
   assert.equal(f.calls.length, 0);
+});
+
+
+test("dual-boot draft survives disk reopen and two hours offline, validates and submits only once", async t => {
+  const f = fixture(t); await f.custody.configure({ mode: "external", address: f.owner.getAddress() }); await f.custody.key();
+  const draft = await f.custody.prepare({ action: "register", offlineSigning: true });
+  assert.equal(draft.expiresAt - draft.createdAt, 24 * 60 * 60000);
+  const signed = await f.owner.signTransaction(structuredClone(draft.transaction));
+  t.mock.timers.enable({ apis: ["Date"], now: draft.createdAt + 2 * 60 * 60000 });
+  const restarted = new ProducerCustody({ ...f, settings: new JsonStore(path.join(f.dir, "settings.json")), state: new JsonStore(path.join(f.dir, "state.json")) });
+  assert.deepEqual(restarted.savedDraft(), draft);
+  await inspectDraft(draft, { chainId: await f.provider.getChainId(), contracts: NETWORKS.mainnet.contracts, pobAbi: POB_ABI, tokenAbi: TOKEN_ABI });
+  const wrong = await Signer.fromSeed("another offline owner").signTransaction(structuredClone(draft.transaction));
+  await assert.rejects(restarted.broadcast({ transaction: wrong, confirm: true }), /does not belong/);
+  f.provider.getNextNonce = async () => "KAI=";
+  await assert.rejects(restarted.broadcast({ transaction: signed, confirm: true }), /nonce changed/);
+  f.provider.getNextNonce = async () => "KAE=";
+  assert.equal((await restarted.broadcast({ transaction: signed, confirm: true })).txId, signed.id);
+  assert.equal(f.calls.length, 1);
+  assert.throws(() => restarted.savedDraft(), /expired/);
+  await assert.rejects(restarted.broadcast({ transaction: signed, confirm: true }), /expired/);
+});
+
+test("offline expiry stays bounded and legacy drafts still expire after 15 minutes", async t => {
+  const f = fixture(t); await f.custody.configure({ mode: "external", address: f.owner.getAddress() }); await f.custody.key();
+  const standard = await f.custody.prepare({ action: "register" });
+  assert.equal(standard.expiresAt - standard.createdAt, 15 * 60000);
+  const { fresh } = require("../../ui/producer-signer/validation");
+  assert.throws(() => fresh(standard, standard.createdAt + 16 * 60000), /expired/);
+  const offline = await f.custody.prepare({ action: "register", offlineSigning: true });
+  assert.throws(() => fresh(offline, offline.expiresAt), /expired/);
+  assert.throws(() => fresh({ ...offline, expiresAt: offline.expiresAt + 60000 }), /Invalid/);
+  await f.custody.key({ rotate: true, confirm: true });
+  assert.throws(() => f.custody.savedDraft(), /expired/);
 });

@@ -95,3 +95,9 @@ For burns, the confirmation shows the permanent KOIN burn amount and the same-wa
 Connections last up to 30 minutes and requests up to 10 minutes. KAI retains the producer address across restarts, but keeps connection credentials only in memory: reconnect after restarting KAI. Disconnecting revokes the connection and unsubmitted requests; it does not switch custody, stop the node or reverse a submitted transaction. If a network error leaves delivery uncertain, check Koin Vault before retrying, or disconnect successfully first. Changing custody or hot keys while approval is pending is blocked.
 
 This integration uses Koinos Mainnet, including when running Koinos AI Test. Koin Vault prepares its own sponsored smart-account transaction; this is separate from importing a Kondor signature. KAI compares the submitted operations and payee with its request on-chain. Registration is independently checked before allowing production. The authoritative wallet backend must expose `features.kaiProducer: true`; deployments with an explicit `DAPP_ORIGINS` setting must include `https://koinosai.com`.
+
+## Dual-boot signing on one PC
+
+Before preparing in Windows, select **Dual-boot / offline signing — keep this draft for 24 hours**. Download the unsigned JSON, boot Linux and sign with Kondor. Return to Windows, reopen the same KAI profile, and choose **Resume saved draft**. Import the signed JSON, confirm the review and broadcast. Do not generate a new hot key or prepare a replacement draft between these steps.
+
+KAI saves the original unsigned draft locally; a signed file cannot replace that reference. A new draft replaces the old one. Changing custody, generating/rotating a hot key, or attempting broadcast clears the pending draft. A changed account nonce requires preparing and signing again. The 24-hour limit is a KAI validation limit, not a blockchain-enforced expiry; protect signed files even after it passes.

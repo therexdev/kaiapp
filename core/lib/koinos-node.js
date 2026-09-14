@@ -84,6 +84,7 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
   handle("producer:configure", input => custody.configure(input));
   handle("producer:key", input => custody.key(input));
   handle("producer:prepare", input => custody.prepare(input));
+  handle("producer:draft", () => custody.savedDraft());
   handle("producer:broadcast", input => custody.broadcast(input));
 
   // One KOIN price for this Core, refreshed at most every few minutes and kept

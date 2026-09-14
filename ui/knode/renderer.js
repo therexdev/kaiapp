@@ -1145,11 +1145,13 @@ function renderNodeView() {
       <details class="custody-signing"><summary>External signing: registration, burns and transfers</summary>
         <div class="custody-signing-content">
         <div class="row custody-actions"><button id="pc-signer" class="btn">Open Kondor signer</button><button id="pc-copy-signer" class="btn ghost">Copy signer link</button><button id="pc-guide" class="btn ghost">Signing and backup guide</button></div>
-        <p class="hint">Prepare and download the unsigned JSON here. On your secure computer, open https://koinosai.com/producer-signer/ in the browser with Kondor, load the file, review and sign. Bring the signed JSON back and import it below. Your private key stays in Kondor. The offline helper remains available in the guide. Drafts expire after 15 minutes.</p>
+        <p class="hint">Prepare and download the unsigned JSON here. On your secure computer, open https://koinosai.com/producer-signer/ in the browser with Kondor, load the file, review and sign. Bring the signed JSON back and import it below. Your private key stays in Kondor. The offline helper remains available in the guide. Drafts last 15 minutes by default. For dual boot, select the 24-hour window before preparing; after restarting KAI, use Resume saved draft.</p>
         <label class="field"><span>Operation</span><select id="pc-action"><option value="register">Register hot public key</option><option value="burn">Burn KOIN to this producer's VHP</option><option value="transfer">Transfer tokens</option></select></label>
         <label class="field"><span>Amount (burn/transfer)</span><input type="text" id="pc-amount" inputmode="decimal" placeholder="0.00"></label>
         <label class="field"><span>Token (transfer)</span><select id="pc-token"><option value="koin">KOIN</option><option value="vhp">VHP</option></select></label>
         <label class="field"><span>Recipient (transfer)</span><input type="text" id="pc-to" placeholder="Koinos address"></label>
+        <label class="field"><span><input type="checkbox" id="pc-offline" style="width:auto"> Dual-boot / offline signing — keep this draft for 24 hours</span></label>
+        <button id="pc-resume" class="btn">Resume saved draft</button>
         <button id="pc-prepare" class="btn">Prepare unsigned transaction</button>
         <label class="field"><span>Unsigned transaction — take this file to the secure computer</span><textarea id="pc-unsigned" rows="7" readonly></textarea></label>
         <div class="row custody-actions"><button id="pc-download-draft" class="btn">Download unsigned JSON</button><button id="pc-copy-draft" class="btn ghost">Copy unsigned JSON</button></div>
@@ -1210,7 +1212,7 @@ function renderNodeView() {
     if (id.startsWith("#pc-vault-")) $("#pc-vault-result").textContent = "";
     try { await fn(); } catch (e) {
       $("#pc-result").textContent = e.message;
-      if (id === "#pc-broadcast") { $("#pc-broadcast-result").textContent = e.message; toast(e.message, "bad"); }
+      if (["#pc-broadcast", "#pc-resume"].includes(id)) { $("#pc-broadcast-result").textContent = e.message; toast(e.message, "bad"); }
       if (id.startsWith("#pc-vault-")) { $("#pc-vault-result").textContent = e.message; toast(e.message, "bad"); }
     }
     finally { button.disabled = false; }
@@ -1274,7 +1276,15 @@ function renderNodeView() {
   producerAction("#pc-copy-signer", () => call("util:copy", { text: signerUrl }));
   producerAction("#pc-guide", () => call("util:openExternal", { url: "https://github.com/therexdev/kaiapp/blob/test/docs/EXTERNAL_PRODUCER.md" }));
   producerAction("#pc-copy", () => call("util:copy", { text: $("#pc-public").value }));
-  producerAction("#pc-prepare", async () => { const d = await call("producer:prepare", { action: $("#pc-action").value, amount: $("#pc-amount").value, token: $("#pc-token").value, to: $("#pc-to").value.trim() }); $("#pc-unsigned").value = JSON.stringify(d, null, 2); $("#pc-signed").value = ""; $("#pc-import-signed").value = ""; $("#pc-signed-review").textContent = ""; $("#pc-confirm").checked = false; $("#pc-result").textContent = "Prepared only — nothing signed or broadcast. Review decoded operations on your separate signing machine."; });
+  producerAction("#pc-prepare", async () => { const d = await call("producer:prepare", { action: $("#pc-action").value, offlineSigning: $("#pc-offline").checked, amount: $("#pc-amount").value, token: $("#pc-token").value, to: $("#pc-to").value.trim() }); $("#pc-unsigned").value = JSON.stringify(d, null, 2); $("#pc-signed").value = ""; $("#pc-import-signed").value = ""; $("#pc-signed-review").textContent = ""; $("#pc-confirm").checked = false; $("#pc-result").textContent = "Prepared only — nothing signed or broadcast. Review decoded operations on your separate signing machine."; });
+  producerAction("#pc-resume", async () => {
+    const draft = await call("producer:draft");
+    $("#pc-unsigned").value = JSON.stringify(draft, null, 2);
+    $("#pc-signed").value = ""; $("#pc-import-signed").value = "";
+    $("#pc-signed-review").textContent = ""; $("#pc-confirm").checked = false;
+    $("#pc-offline").checked = draft.signingWindow === "offline-24h";
+    $("#pc-broadcast-result").textContent = `Saved draft restored. Expires ${new Date(draft.expiresAt).toLocaleString()}. Import its signed JSON below. Do not prepare another draft for this signature.`;
+  });
   producerAction("#pc-download-draft", () => {
     const content = $("#pc-unsigned").value;
     if (!content) throw new Error("Prepare a transaction first.");
