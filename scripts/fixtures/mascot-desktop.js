@@ -11,6 +11,12 @@ fs.mkdirSync(path.join(dir, "electron"), { recursive: true });
 app.setPath("userData", path.join(dir, "electron"));
 let shuttingDown = false;
 app.whenReady().then(async () => {
+  // The fixture deliberately hides windows during navigation. Keep their
+  // automation acknowledgements running while hidden; production retains
+  // background throttling and its normal resource-saving behavior.
+  app.on("web-contents-created", (_event, contents) => {
+    contents.setBackgroundThrottling(false);
+  });
   const fixture = await startMascotServer(dir);
   const main = new BrowserWindow({ width: 800, height: 650, webPreferences: {
     preload: path.join(__dirname, "../../electron/preload.js"), contextIsolation: true, nodeIntegration: false, sandbox: true,

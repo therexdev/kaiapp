@@ -2,14 +2,14 @@
 const fs = require("fs"), os = require("os"), path = require("path"), assert = require("assert/strict");
 const { _electron: electron } = require("playwright-core");
 const { execFileSync } = require("child_process");
-let activeApp, lastCheckpoint = "Launching the native fixture";
+let activeApp, fixtureProcess, lastCheckpoint = "Launching the native fixture";
 function checkpoint(message) { lastCheckpoint = message; console.log(message); }
 function killFixture() {
-  const pid = activeApp?.process()?.pid;
+  const pid = fixtureProcess?.pid;
   if (!Number.isInteger(pid) || pid <= 0) return;
   try {
     if (process.platform === "win32") execFileSync("taskkill.exe", ["/PID", String(pid), "/T", "/F"], { timeout: 10000, stdio: "ignore" });
-    else activeApp.process().kill("SIGKILL");
+    else fixtureProcess.kill("SIGKILL");
   } catch { /* already exited; the failed check still exits nonzero */ }
 }
 // page.evaluate() can wait indefinitely on native IPC/event promises. Bound
@@ -27,7 +27,7 @@ async function main() {
     const env = { ...process.env, KAI_MASCOT_NATIVE_DATA: dir };
     delete env.ELECTRON_RUN_AS_NODE;
     app = await electron.launch({ executablePath: require("electron"), args: [path.join(__dirname, "fixtures/mascot-desktop.js")], env, timeout: 30000 });
-    activeApp = app;
+    activeApp = app; fixtureProcess = app.process();
     const main = await app.firstWindow();
     await main.waitForSelector("#launch-kai:not([hidden])");
     // Capture the initial native shape too: fixed-size status pills need no
@@ -222,8 +222,10 @@ async function main() {
         checkpoint("Closing native companion fixture...");
         await Promise.race([
           (async () => {
+            checkpoint("Disposing native fixture resources...");
             const state = await app.evaluate(async () => globalThis.__shutdownFixture?.());
             if (state) assert.deepEqual(state, { windows: 0, listening: false });
+            checkpoint("Fixture resources disposed; waiting for Electron exit...");
             await app.close();
           })(),
           new Promise((_, reject) => { shutdownTimer = setTimeout(() => reject(new Error("Native companion fixture did not close within 20 seconds")), 20000); }),
