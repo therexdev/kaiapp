@@ -31,12 +31,12 @@ function prepare(rootDir, buildNumber, attempt = "1") {
   // Installing Test must not claim the live app's koinos-code command.
   delete pkg.build.nsis.include;
   // Keep private companion helpers without shipping the live CLI launchers.
+  // Directory matchers apply electron-builder's signing transformer. Direct
+  // single-file copies bypass it and would leave these embedded EXEs unsigned.
   pkg.build.win.extraResources = [{
-    from: "build/bin/kai-windows-voice.exe",
-    to: "bin/kai-windows-voice.exe",
-  }, {
-    from: "build/bin/kai-computer.exe",
-    to: "bin/kai-computer.exe",
+    from: "build/bin",
+    to: "bin",
+    filter: ["kai-windows-voice.exe", "kai-computer.exe"],
   }];
   fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + "\n");
   const coreFile = path.join(rootDir, "core/package.json");

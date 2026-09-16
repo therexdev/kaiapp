@@ -1,3 +1,9 @@
+## Verified Windows releases
+
+- Test and alpha Windows releases now require Azure signing and Windows verification of the installer, portable app, packaged app and helper executables before upload.
+- Updates verify the existing Michael Milas publisher identity. Signed releases include timestamps and a versioned signature report with checksums.
+- SmartScreen can still show an “unrecognized app” reputation warning for a correctly signed download.
+
 ## Send from the KAI wallet with external producer custody
 
 - Fix KOIN and VHP sends from the local KAI wallet being blocked when an external producer wallet is selected. Sends still require the local wallet password; external producer transfers still require external signing.

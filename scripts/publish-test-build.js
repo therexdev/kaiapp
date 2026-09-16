@@ -6,6 +6,7 @@ const os = require("os");
 const crypto = require("crypto");
 const { execFileSync } = require("child_process");
 const yaml = require("js-yaml");
+const { readVerifiedArtifacts } = require("./windows-signing");
 const TAG = "test-build"; // Deliberately NOT semver: legacy updaters use latest*.yml.
 const REPO = "therexdev/kaiapp";
 
@@ -39,6 +40,8 @@ function publish(dir) {
   if (process.env.GITHUB_REPOSITORY !== REPO || process.env.GITHUB_REF !== "refs/heads/test") {
     throw new Error("Test publication must run from therexdev/kaiapp:test");
   }
+  // Fail before any GitHub write if Windows verification is absent or stale.
+  const windows = readVerifiedArtifacts(dir, { commit: process.env.GITHUB_SHA, workflowRun: process.env.GITHUB_RUN_ID });
   const gh = (...args) => execFileSync("gh", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   const latest = JSON.parse(gh("api", `repos/${REPO}/releases/latest`, "--jq", "{tag_name,prerelease,draft,assets:[.assets[]|{name}]}"));
   if (latest.prerelease || latest.draft) throw new Error("No published live release available");
@@ -84,7 +87,7 @@ function publish(dir) {
     }
     // Binaries first, feeds last. Retain old versioned binaries so an app
     // already downloading a previous build can finish during publication.
-    gh("release", "upload", TAG, "--repo", REPO, ...binaries.map(n => path.join(dir, n)), checksum, provenance, "--clobber");
+    gh("release", "upload", TAG, "--repo", REPO, ...binaries.map(n => path.join(dir, n)), checksum, provenance, path.join(dir, windows.reportFile), "--clobber");
     gh("release", "upload", TAG, "--repo", REPO, ...compatibility, "--clobber");
     gh("release", "upload", TAG, "--repo", REPO, ...feeds.map(n => path.join(dir, n)), "--clobber");
     gh("release", "edit", TAG, "--repo", REPO, "--draft=false", "--prerelease", "--latest=false",
