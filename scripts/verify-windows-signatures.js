@@ -12,7 +12,9 @@ function inspectFiles(files) {
   try {
     const manifest = path.join(temp, "files.json"), output = path.join(temp, "signatures.json");
     fs.writeFileSync(manifest, JSON.stringify(files));
-    execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
+    // Use the same PowerShell edition as the GitHub runner. Windows PowerShell
+    // 5 inherits PS7's module path and can fail to load its Security module.
+    execFileSync("pwsh.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
       path.join(__dirname, "inspect-windows-signatures.ps1"), "-ManifestPath", manifest, "-OutputPath", output],
     { stdio: "inherit", windowsHide: true, timeout: 300000 });
     return JSON.parse(fs.readFileSync(output, "utf8").replace(/^\uFEFF/, ""));
