@@ -18,6 +18,22 @@ test("Quick start plays the first complete sentence while preparing the second, 
   assert.deepEqual(played, ["First complete sentence."], "Stop discards look-ahead audio");
 });
 
+test("Speech queue scopes discard late text and audio from an interrupted turn", async () => {
+  const pending = [], played = [], states = [];
+  const q = new Queue({ prepare: (text, signal, scope) => new Promise(resolve => pending.push({ text, scope, resolve })),
+    play: (value, scope) => { played.push({ value, scope }); }, cancel() {},
+    onState: (state, scope, detail) => states.push({ state, scope, ended: detail.ended }), onError: assert.fail });
+  q.begin(41); q.enqueue(["Old sentence."], 41); await tick();
+  q.begin(42); q.enqueue(["New sentence."], 42); q.end(42); await tick();
+  assert.equal(q.enqueue(["Late old text."], 41), false);
+  pending.find(item => item.scope === 41).resolve("old audio"); await tick();
+  assert.deepEqual(played, [], "old synthesis cannot cross the new turn boundary");
+  pending.find(item => item.scope === 42).resolve("new audio"); await tick(); await tick();
+  assert.deepEqual(played, [{ value: "new audio", scope: 42 }]);
+  assert.ok(states.some(item => item.scope === 42 && item.state === "idle" && item.ended));
+  q.stop();
+});
+
 test("Cute voice raises pitch without rushing words, stays bounded, and preserves silence", async () => {
   for (const pitch of [5, 9, 12]) {
     const original = wav(1), changed = cuteTone(original, pitch), view = new DataView(changed);

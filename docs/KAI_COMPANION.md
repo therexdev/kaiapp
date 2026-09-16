@@ -1,5 +1,7 @@
 # KAI desktop companion
 
+The realtime request lifecycle is defined in [KAI Live Senses architecture](KAI_LIVE_SENSES_ARCHITECTURE.md). One scoped turn now spans listening output, model and tool work, streamed text, speech synthesis and playback; later sensory stages can be replaced independently without changing KAI's Brain or approval boundaries.
+
 Choose **Launch KAI** in the app's left sidebar. The main window moves out of the way and the same Core, wallet and earning node keep running. KAI appears above your desktop as a small animated robot. The tray menu also offers **Launch KAI companion** and **Hide KAI companion**.
 
 - Click KAI or the chat bubble to open the conversation panel. Drag the robot to pick him up; his limbs and cape dangle and sway, and he settles when dropped. Drop near the bottom of the usable screen to rest his hands along the edge above the taskbar. Slide sideways there or pull up to lift him back onto the desktop. Position and edge pose are remembered.

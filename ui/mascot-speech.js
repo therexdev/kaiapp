@@ -152,31 +152,47 @@
   class Queue {
     constructor({ prepare, play, cancel, holdPlayback = () => {}, onState, onError, buffer = 1, bufferWaitMs = 1800, merge = values => values[0] }) {
       Object.assign(this, { prepare, play, cancel, holdPlayback, onState, onError, buffer, bufferWaitMs, merge });
-      this.epoch = 0; this.tasks = []; this.ready = []; this.preparing = false; this.playing = false;
+      this.epoch = 0; this.scope = null; this.tasks = []; this.ready = []; this.preparing = false; this.playing = false;
     }
-    enqueue(phrases) { this.tasks.push(...phrases.filter(Boolean)); this.pump(); }
-    end() { this.ended = true; this.pump(); }
-    state() { this.onState(this.playing ? "speaking" : this.preparing || this.tasks.length || this.ready.length ? "preparing" : "idle"); }
+    // A scope is KAI's authoritative turn id. The queue still uses a private
+    // epoch to cancel in-flight synthesis, but it will never accept text, audio
+    // or completion from a different turn. Preview speech may use any unique
+    // non-turn scope; legacy callers can leave it null.
+    begin(scope) {
+      if (scope == null) throw new Error("Speech needs a turn scope.");
+      if (this.scope !== null || this.tasks.length || this.ready.length || this.preparing || this.playing) this.stop();
+      this.scope = scope; this.state(); return scope;
+    }
+    enqueue(phrases, scope = this.scope) {
+      if (scope !== this.scope) return false;
+      this.tasks.push(...phrases.filter(Boolean).map(value => ({ value, scope })));
+      this.pump(); return true;
+    }
+    end(scope = this.scope) { if (scope !== this.scope) return false; this.ended = true; this.pump(); return true; }
+    state(scope = this.scope) {
+      const state = this.playing ? "speaking" : this.preparing || this.tasks.length || this.ready.length ? "preparing" : "idle";
+      this.onState(state, scope, { ended: !!this.ended, held: !!this.held });
+    }
     hold(value) {
       this.held = value; this.holdPlayback(value); this.pump();
     }
     pump() {
       this.state();
-      const epoch = this.epoch;
+      const epoch = this.epoch, scope = this.scope;
       const target = typeof this.buffer === "function" ? this.buffer() : this.buffer;
       const complete = target === "complete";
       // Whole-reply mode stays bounded for unusually long answers. Audio up
       // to 24 MiB / 128 sentences is prepared as a continuous section.
-      const full = this.ready.length >= (complete ? 128 : 2) || (complete && this.ready.reduce((n, v) => n + (v.wav?.byteLength || 0), 0) >= 24 * 1024 * 1024);
+      const full = this.ready.length >= (complete ? 128 : 2) || (complete && this.ready.reduce((n, item) => n + (item.value?.wav?.byteLength || 0), 0) >= 24 * 1024 * 1024);
       if (!this.preparing && this.tasks.length && !full) {
         this.preparing = true;
-        const abort = this.abort = new AbortController(), text = this.tasks.shift();
-        Promise.resolve().then(() => epoch === this.epoch ? this.prepare(text, abort.signal) : null).then(async value => {
-          if (epoch === this.epoch) { this.ready.push(value); this.pump(); }
+        const abort = this.abort = new AbortController(), task = this.tasks.shift();
+        Promise.resolve().then(() => epoch === this.epoch && task.scope === this.scope ? this.prepare(task.value, abort.signal, task.scope) : null).then(async value => {
+          if (epoch === this.epoch && task.scope === this.scope) { this.ready.push({ value, scope: task.scope }); this.pump(); }
           // A streaming voice becomes playable before inference finishes. Keep
           // the single preparation slot until its remaining chunks arrive.
           await value?.finished;
-        }).catch(error => { if (epoch === this.epoch) { this.stop(); this.onError(error); } })
+        }).catch(error => { if (epoch === this.epoch) { const failedScope = this.scope; this.stop(failedScope); this.onError(error, failedScope); } })
           .finally(() => { if (epoch === this.epoch) { this.preparing = false; this.abort = null; this.pump(); } });
       }
       const drained = !this.preparing && !this.tasks.length;
@@ -190,18 +206,22 @@
       if (!this.held && !this.playing && this.ready.length && buffered) {
         clearTimeout(this.bufferTimer); this.bufferTimer = null;
         this.started = true; this.playing = true;
-        const values = complete ? this.ready.splice(0) : [this.ready.shift()];
-        Promise.resolve().then(() => epoch === this.epoch ? this.play(complete ? this.merge(values) : values[0]) : null).catch(error => {
-          if (epoch === this.epoch) { this.stop(); this.onError(error); }
+        const items = complete ? this.ready.splice(0) : [this.ready.shift()];
+        const values = items.map(item => item.value);
+        Promise.resolve().then(() => epoch === this.epoch && scope === this.scope ? this.play(complete ? this.merge(values) : values[0], scope) : null).catch(error => {
+          if (epoch === this.epoch) { const failedScope = this.scope; this.stop(failedScope); this.onError(error, failedScope); }
         }).finally(() => { if (epoch === this.epoch) { this.playing = false; this.pump(); } });
         this.pump(); // Fill the bounded look-ahead buffer.
       }
       this.state();
     }
-    stop() {
+    stop(scope) {
+      if (scope !== undefined && scope !== this.scope) return false;
+      const stoppedScope = this.scope;
       this.epoch++; this.tasks = []; this.ready = []; this.preparing = false; this.playing = false;
       clearTimeout(this.bufferTimer); this.bufferTimer = null; this.bufferExpired = false; this.started = false; this.ended = false;
-      this.abort?.abort(); this.abort = null; this.held = false; this.cancel(); this.state();
+      this.abort?.abort(); this.abort = null; this.held = false; this.cancel(stoppedScope); this.state(stoppedScope); this.scope = null;
+      return true;
     }
   }
   return { Queue, splitSentence, joinWavs, robotTone, cuteTone, characterTone, prepareSentence };

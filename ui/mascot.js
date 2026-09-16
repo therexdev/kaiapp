@@ -6,7 +6,7 @@
   let expanded = false, suspended = false, busy = false, history = [], chatId = read("kai-mascot-chat-id", "");
   let aliases = [], requestedModel = null, chatAbort = null, activeTask = Promise.resolve();
   let voicePending = false, setupTimer = null, voiceStartEpoch = 0, voiceCommandEpoch = 0, currentRequest = null;
-  let speechEpoch = 0, speaking = false, audible = false, waveTimer = null, idleTimer = null;
+  let speechPreview = 0, speaking = false, audible = false, waveTimer = null, idleTimer = null;
   let pointer = null, toolActivity = null, landingTimer = null, restingPose = "free";
   document.body.dataset.pose = "free";
   let voiceReplies = read("kai-mascot-voice", "0") === "1";
@@ -52,6 +52,26 @@
       value === "idle" && wakeEnabled && engaged ? "Your turn · mic on" : labels[value] || labels.idle;
     wake();
   }
+
+  // One authoritative identity now spans the model request, tools, streamed
+  // text, speech synthesis and playback. A cancelled turn cannot revive from
+  // a late fetch chunk or a late voice result. Diagnostics contain timings and
+  // stage names only — never prompts, model output or tool payloads.
+  const liveSession = new KaiLive.Session({
+    onPhase: (phase, turn) => {
+      document.body.dataset.turnPhase = phase;
+      if (turn?.id && turn.status === "active") document.body.dataset.turnId = String(turn.id);
+      else delete document.body.dataset.turnId;
+    },
+    onMetric: (metrics, turn) => {
+      const parts = [metrics.sttEndpointMs != null ? "stt+endpoint " + Math.round(metrics.sttEndpointMs) + "ms" : null,
+        metrics.modelFirstTokenMs != null ? "model " + Math.round(metrics.modelFirstTokenMs) + "ms" : null,
+        metrics.ttsFirstAudioMs != null ? "tts " + Math.round(metrics.ttsFirstAudioMs) + "ms" : null,
+        metrics.voiceToVoiceMs != null ? "voice-to-voice " + Math.round(metrics.voiceToVoiceMs) + "ms" : null].filter(Boolean);
+      console.debug("[kai:live] turn " + turn.id + " " + turn.status + (parts.length ? " · " + parts.join(" · ") : ""));
+    },
+  });
+  window.kaiLiveDiagnostics = liveSession.diagnostics();
 
   function wake() {
     document.body.classList.remove("asleep");
@@ -232,45 +252,62 @@
       const text = values.map(v => v.text).join(" ");
       return values.every(v => v.wav) ? { wav: KaiSpeech.joinWavs(values.map(v => v.wav)), text } : { ...values[0], text };
     },
-    prepare: async (text, signal) => {
+    prepare: async (text, signal, scope) => {
+      let turn = liveSession.isCurrent(scope) ? liveSession.current : null;
+      turn?.mark("tts_started");
       const preview = typeof text === "object" && text.preview;
       if (preview) text = previewHello;
       const voice = voiceChoice, tone = voiceTone, pitch = voicePitch;
-      if (voice.startsWith("pocket:")) return KaiPocket.prepare(bridge, { text, voice: voice.slice(7), tone, pitch }, signal);
-      if (voice.startsWith("windows:")) {
-        if (!bridge?.windowsSpeech) throw new Error("Fast Windows voices need the installed desktop app.");
-        signal.throwIfAborted();
-        const abort = () => bridge.cancelWindowsSpeech(); signal.addEventListener("abort", abort, { once: true });
-        try {
-          const bytes = new Uint8Array(await bridge.windowsSpeech({ text, voice: voice.slice(8) }));
-          signal.throwIfAborted();
-          return { wav: KaiSpeech.characterTone(bytes.buffer, tone, pitch), text };
-        } finally { signal.removeEventListener("abort", abort); }
+      try {
+        const value = await (async () => {
+          if (voice.startsWith("pocket:")) return KaiPocket.prepare(bridge, { text, voice: voice.slice(7), tone, pitch }, signal);
+          if (voice.startsWith("windows:")) {
+            if (!bridge?.windowsSpeech) throw new Error("Fast Windows voices need the installed desktop app.");
+            signal.throwIfAborted();
+            const abort = () => bridge.cancelWindowsSpeech(); signal.addEventListener("abort", abort, { once: true });
+            try {
+              const bytes = new Uint8Array(await bridge.windowsSpeech({ text, voice: voice.slice(8) }));
+              signal.throwIfAborted();
+              return { wav: KaiSpeech.characterTone(bytes.buffer, tone, pitch), text };
+            } finally { signal.removeEventListener("abort", abort); }
+          }
+          if (!voice.startsWith("natural:")) return { text, voice, tone, pitch };
+          if (preview && voice === "natural:af_bella") {
+            if (!helloAudio) {
+              const response = await fetch("assets/kai-voice-hello.wav", { signal });
+              if (!response.ok) throw new Error("KAI's voice preview could not load. Please try again.");
+              helloAudio = await response.arrayBuffer();
+            }
+            signal.throwIfAborted();
+            const wav = KaiSpeech.characterTone(helloAudio, tone, pitch);
+            return { wav, text };
+          }
+          const wav = await KaiSpeech.prepareSentence(text, { signal, tone, pitch, synthesize: async (chunk, signal) => {
+            const response = await fetch("/core/speech", { method: "POST", signal,
+              headers: { "content-type": "application/json" }, body: JSON.stringify({ text: chunk, voice: voice.slice(8) }) });
+            if (!response.ok) { const error = await response.json().catch(() => ({})); throw new Error(error.error || "Natural voice is unavailable. Choose a computer voice or retry setup."); }
+            return response.arrayBuffer();
+          } });
+          return { wav, text };
+        })();
+        turn = liveSession.isCurrent(scope) ? liveSession.current : null;
+        turn?.mark("tts_ready");
+        return value;
+      } catch (error) {
+        turn = liveSession.isCurrent(scope) ? liveSession.current : null;
+        turn?.mark("tts_failed");
+        throw error;
       }
-      if (!voice.startsWith("natural:")) return { text, voice, tone, pitch };
-      if (preview && voice === "natural:af_bella") {
-        if (!helloAudio) {
-          const response = await fetch("assets/kai-voice-hello.wav", { signal });
-          if (!response.ok) throw new Error("KAI's voice preview could not load. Please try again.");
-          helloAudio = await response.arrayBuffer();
-        }
-        signal.throwIfAborted();
-        const wav = KaiSpeech.characterTone(helloAudio, tone, pitch);
-        return { wav, text };
-      }
-      const wav = await KaiSpeech.prepareSentence(text, { signal, tone, pitch, synthesize: async (chunk, signal) => {
-        const response = await fetch("/core/speech", { method: "POST", signal,
-          headers: { "content-type": "application/json" }, body: JSON.stringify({ text: chunk, voice: voice.slice(8) }) });
-        if (!response.ok) { const error = await response.json().catch(() => ({})); throw new Error(error.error || "Natural voice is unavailable. Choose a computer voice or retry setup."); }
-        return response.arrayBuffer();
-      } });
-      return { wav, text };
     },
-    play: value => {
+    play: (value, scope) => {
+      const playbackStarted = () => {
+        const turn = liveSession.isCurrent(scope) ? liveSession.current : null;
+        turn?.mark("playback_started"); turn?.setPhase("speaking");
+      };
       if (value.pocket) {
         let heard = false;
         const player = KaiPocket.play(value, { onAudible: active => {
-          if (active && !heard) { heard = true; wakeListener.hearOutput(value.text); }
+          if (active && !heard) { heard = true; wakeListener.hearOutput(value.text); playbackStarted(); }
           playbackState(active);
         }, onMetric: metric => {
           $("pocket-metric").hidden = false;
@@ -283,7 +320,7 @@
       let audio, utterance, url, done = false, started = false;
       const playing = () => {
         if (done || speech.held) return;
-        if (!started) { started = true; wakeListener.hearOutput(value.text); }
+        if (!started) { started = true; wakeListener.hearOutput(value.text); playbackStarted(); }
         playbackState(true);
       };
       const silent = () => { if (!done) playbackState(false); };
@@ -328,25 +365,41 @@
     },
     cancel: () => { window.speechSynthesis?.cancel(); window.speechSynthesis?.resume(); cancelPlayback?.(); },
     holdPlayback: held => holdPlayback?.(held),
-    onState: state => {
+    onState: (state, scope, detail) => {
       speaking = state !== "idle";
+      const turn = liveSession.isCurrent(scope) ? liveSession.current : null;
+      if (state === "speaking") turn?.setPhase("speaking");
+      else if (state === "idle" && detail?.ended) turn?.finishSpeech();
       if (speaking) mood(state === "speaking" ? "speaking" : "voicing");
       else if (!voicePending) mood(busy ? "thinking" : "idle");
       controls();
     },
-    onError: error => {
+    onError: (error, scope) => {
       // Do not retry an unavailable language/voice for every streamed sentence.
       // The text answer continues, and the next turn can speak normally.
-      speechEpoch++; notice(error.message + " The reply is still in your chat.");
+      if (liveSession.isCurrent(scope)) liveSession.current.finishSpeech();
+      notice(error.message + " The reply is still in your chat.");
     },
   });
-  function stopSpeech() { replyPose = false; speechEpoch++; speech.stop(); }
+  function stopSpeech(scope = speech.scope, { finish = true } = {}) {
+    replyPose = false;
+    const turn = liveSession.isCurrent(scope) ? liveSession.current : null;
+    const stopped = speech.stop(scope === null ? undefined : scope);
+    if (stopped && finish) turn?.finishSpeech();
+  }
+  function canSpeak() {
+    return voiceReplies && !suspended && (!voiceChoice.startsWith("natural:") || speechStatus?.available) &&
+      (!voiceChoice.startsWith("pocket:") || pocketStatus?.available);
+  }
   function speak(text) {
     stopSpeech();
-    if (voiceReplies && !suspended && ensureNatural()) { speech.enqueue(new api.SpeechPhrases().push(text, true)); speech.end(); }
+    if (voiceReplies && !suspended && ensureNatural()) {
+      const scope = "preview:" + ++speechPreview;
+      speech.begin(scope); speech.enqueue(new api.SpeechPhrases().push(text, true), scope); speech.end(scope);
+    }
   }
-  function enqueueSpeech(phrases, epoch) {
-    if (voiceReplies && !suspended && epoch === speechEpoch && (!voiceChoice.startsWith("natural:") || speechStatus?.available) && (!voiceChoice.startsWith("pocket:") || pocketStatus?.available)) speech.enqueue(phrases);
+  function enqueueSpeech(phrases, turn) {
+    if (turn?.active() && turn.expectSpeech && canSpeak()) speech.enqueue(phrases, turn.id);
   }
   function voiceChoices() {
     const select = $("voice-choice"); select.replaceChildren();
@@ -528,8 +581,10 @@
   }
   function interruptResponse(keepContext = true) {
     voiceCommandEpoch++;
+    const turn = liveSession.current;
     if (keepContext && currentRequest) currentRequest.keepUser = true;
-    chatAbort?.abort(); bridge?.cancelAction?.(); stopSpeech();
+    if (turn) turn.cancel("interrupted");
+    else { chatAbort?.abort(); bridge?.cancelAction?.(); stopSpeech(); }
   }
   const wakeListener = new KaiWake.Listener({
     wakeRequest: api.wakeRequest,
@@ -553,7 +608,7 @@
     // the reply remain armed, without acquiring another microphone stream.
     onInterrupt: () => speech.hold(true),
     onResume: () => speech.hold(false),
-    onCommand: async text => {
+    onCommand: async (text, detail) => {
       if (!wakeEnabled || suspended) return;
       interruptResponse();
       const epoch = voiceCommandEpoch;
@@ -563,7 +618,7 @@
         $("question").value += " " + text;
         notice("Added your voice to the draft. Open chat to review and send it."); controls(); return;
       }
-      $("question").value = text; controls(); ask({ source: "voice" });
+      $("question").value = text; controls(); ask({ source: "voice", preflight: detail?.timing });
     },
     onEnd: async off => { interruptResponse(); if (off) stopWake(); await activeTask; },
     onError: (error, options) => {
@@ -659,7 +714,7 @@
       (speechStatus?.voices?.find(v => "natural:" + v.id === voiceChoice)?.name.split(" · ")[0] || "Natural") : "Computer";
     $("read-aloud").querySelector("span").textContent = voiceReplies ? name + " voice on" : "Voice replies off";
   }
-  async function send({ source = "typed" } = {}) {
+  async function send({ source = "typed", preflight = null } = {}) {
     const text = $("question").value.trim(); let model = $("model").value, routingNotice = "";
     const folder = api.folderRequest(text), destination = folder ? null : KaiAppNavigation.request(text);
     const website = !folder && !destination ? KaiComputerTools.websiteRequest(text) : null;
@@ -679,16 +734,22 @@
       notice("Open the full app to choose a chat model so KAI can answer, then try again."); mood("error"); return;
     }
     if (source !== "voice") wakeListener.cancelTurn();
-    stopSpeech(); notice(routingNotice); toolActivity = null; busy = true; mood("thinking");
-    const request = currentRequest = { keepUser: source === "voice" };
     if (voiceReplies) { ensureNatural(); warmSpeech(); }
-    const phrases = new api.SpeechPhrases(); let replyEpoch = speechEpoch;
+    stopSpeech();
+    const turn = liveSession.begin({ source, expectSpeech: canSpeak(), preflight,
+      meta: { keepUser: source === "voice" } });
+    const request = currentRequest = turn.meta;
+    chatAbort = turn.controller;
+    turn.onCancel(() => { bridge?.cancelAction?.(); speech.stop(turn.id); });
+    turn.watch("first response", 180000, "KAI did not receive a response in three minutes. The turn was stopped so listening can recover.");
+    if (turn.expectSpeech) speech.begin(turn.id);
+    notice(routingNotice); toolActivity = null; busy = true; mood("thinking");
+    const phrases = new api.SpeechPhrases();
     $("question").value = "";
     history.push({ role: "user", content: text });
     const userBubble = message("user", text), reply = message("assistant");
     reply.element.classList.add("streaming");
     controls(); scroll();
-    chatAbort = new AbortController();
     let content = "", served = null, lastPaint = 0, completed = false, phase = null;
     const observations = [];
     const trace = document.createElement("div"); trace.className = "tool-trace"; trace.setAttribute("role", "status"); reply.element.prepend(trace);
@@ -706,6 +767,7 @@
         request.keepUser = true;
       } else if (destination) {
         const result = open ? await open(destination) : { ok: false };
+        if (!turn.active()) throw turn.signal.reason || new DOMException("Stopped", "AbortError");
         content = result.ok ? "The main app is open. I'm still here if you need me. If that feature is disabled, you'll see its switch in Settings." : "I couldn't open the main app. This control needs the installed desktop companion.";
       } else if (folder) {
         reply.content.textContent = "Waiting for your approval…";
@@ -721,8 +783,15 @@
         phase = await KaiMascotTools.run({ question: text, history, chatId, contextSize, signal: chatAbort.signal, json: window.KaiCompanionClient?.toolJSON(model, toolJson, chatAbort.signal, { question: text, conversationId: chatId || "mascot-new", host: trace.parentElement,
           onPrivateTool: active => {
             approvalPending = active;
-            if (active) { stopSpeech(); replyEpoch = speechEpoch; wakeListener.pause(true); }
-            else if (wakeEnabled && !suspended) wakeListener.pause(false);
+            if (active) {
+              turn.clearWatch(); stopSpeech(turn.id, { finish: false }); wakeListener.pause(true);
+            } else {
+              if (turn.active()) {
+                turn.watch("tool response", 180000, "The approved action stopped responding. KAI cancelled the turn safely.");
+                if (turn.expectSpeech && !turn.speechDone && speech.scope !== turn.id) speech.begin(turn.id);
+              }
+              if (wakeEnabled && !suspended) wakeListener.pause(false);
+            }
             controls();
           },
         }) || toolJson, open,
@@ -730,24 +799,31 @@
           confirm: async (name, args) => {
             // Pause capture while a human reviews a mutation. Background audio
             // is never an approval, and Off/Stop/hide invalidate a late click.
-            approvalPending = true; wakeListener.pause(true);
+            approvalPending = true; turn.clearWatch(); wakeListener.pause(true);
             try { return bridge?.confirmTool ? await bridge.confirmTool(name, args) : false; }
-            finally { approvalPending = false; if (wakeEnabled && !suspended) wakeListener.pause(false); }
+            finally {
+              approvalPending = false;
+              if (turn.active()) turn.watch("tool response", 180000, "The approved action stopped responding. KAI cancelled the turn safely.");
+              if (wakeEnabled && !suspended) wakeListener.pause(false);
+            }
           },
           status: (value, detail) => {
             // A web lookup includes the planning between search/read calls.
             // Keep that pose until the tool phase ends instead of flashing the
             // thinking pose between every quickly returning web request.
             toolActivity = detail?.activity === "searching" || (detail?.phase === "planning" && toolActivity === "searching") ? "searching" : null;
+            turn.touch("tool_activity", { phase: detail?.phase || null, activity: detail?.activity || null });
             trace.textContent = value; mood("thinking");
             if (value && !audible && !replyPose) $("mood-label").textContent = value;
             scroll();
           },
           onObservation: value => { observations.push(value); request.keepUser = true; },
           askModel: async (messages, signal, options = {}) => {
+            turn.touch("planner_request");
             const response = await KaiProviders.chatFetch("/core/chat/completions", { method: "POST", headers: { "content-type": "application/json" }, signal,
               body: JSON.stringify({ model, stream: false, max_tokens: KaiProviders.isModel(model) ? 4096 : 900, messages, ...(options.privateDesktop ? { kai_private_desktop: true } : {}) }) });
-            let output = ""; for await (const delta of api.completion(response)) output += delta.content; return output;
+            let output = ""; for await (const delta of api.completion(response)) { output += delta.content; turn.touch(); }
+            turn.touch("planner_response"); return output;
           },
         });
         if (chatAbort.signal.aborted) throw new DOMException("Stopped", "AbortError");
@@ -755,15 +831,23 @@
         trace.textContent = phase.trace.map(t => t.tool + " · " + t.status).join(" → ");
         mood("thinking");
         {
+          turn.touch("answer_request");
           const response = await KaiProviders.chatFetch("/core/chat/completions", {
             method: "POST", headers: { "content-type": "application/json" }, signal: chatAbort.signal,
             body: JSON.stringify({ model, stream: true, ...(phase.privateDesktop ? { kai_private_desktop: true } : {}),
               messages: api.messagesFor(history, contextSize, phase.context) }),
           });
           for await (const delta of api.completion(response)) {
+            if (!turn.active()) throw turn.signal.reason || new DOMException("Stopped", "AbortError");
             if (delta.warning) notice(delta.warning);
-            if (delta.content) content += delta.content;
-            enqueueSpeech(phrases.push(content), replyEpoch);
+            if (delta.content) {
+              if (!content) {
+                turn.mark("first_token");
+                turn.watch("response stream", 90000, "KAI's reply stream stopped responding. The partial answer was kept in chat.");
+              } else turn.touch();
+              content += delta.content;
+            }
+            enqueueSpeech(phrases.push(content), turn);
             if (delta.model === "koinos-network" || delta.model?.startsWith("koinos-network:")) served = "Answered on the Koinos Network";
             if (delta.served) served = "Answered by " + delta.served;
             const now = performance.now();
@@ -772,14 +856,21 @@
         }
       }
       if (!content.trim()) throw new Error("The model returned an empty reply. Try another model or rephrase your question.");
+      turn.mark("first_token");
+      turn.clearWatch();
       completed = true;
-      enqueueSpeech(phrases.push(content, true), replyEpoch);
-      speech.end();
+      enqueueSpeech(phrases.push(content, true), turn);
+      if (turn.expectSpeech && speech.scope === turn.id) speech.end(turn.id);
     } catch (error) {
-      toolActivity = null; stopSpeech();
-      if (error.name === "AbortError") {
+      toolActivity = null;
+      if (turn.active()) {
+        if (error.name === "AbortError") turn.cancel("stopped");
+        else turn.fail(error);
+      }
+      const failure = turn.error || error;
+      if (turn.status === "cancelled" || failure.name === "AbortError") {
         if (!suspended) notice(content || request.keepUser ? "Response stopped." : "Stopped. Your message is back in the composer.");
-      } else { notice(error.message); mood("error"); }
+      } else { notice(failure.message); mood("error"); }
     } finally {
       await bridge?.computerEnd?.().catch(() => {});
       if (!content.trim() && observations.length) content = "I stopped before finishing the reply. App tool results so far:\n" + observations.filter(o => o.tool !== "app_capabilities").map(o => "- " + o.tool + ": " + String(o.result).slice(0, 500)).join("\n");
@@ -803,7 +894,11 @@
         reply.element.remove(); userBubble.element.remove(); history.pop();
         if (!$("question").value) $("question").value = text;
       }
-      toolActivity = null; busy = false; chatAbort = null; currentRequest = null; controls(); scroll();
+      if (completed && turn.active()) turn.finishModel();
+      toolActivity = null; busy = false;
+      if (chatAbort === turn.controller) chatAbort = null;
+      if (currentRequest === request) currentRequest = null;
+      controls(); scroll();
       if (completed) { if (!speaking) mood("idle"); }
       else if (document.body.dataset.state !== "error") mood("idle");
     }
@@ -845,8 +940,9 @@
     suspended = !!value; document.body.classList.toggle("suspended", suspended);
     if (suspended) {
       clearTimeout(pocketTimer); bridge?.releasePocket?.(); endDrag({ type: "pointercancel" }); clearTimeout(landingTimer); document.body.classList.remove("landing", "perch-target");
-      if (cancelTask) { chatAbort?.abort(); bridge?.cancelAction?.(); }
-      stopWake(); stopSpeech();
+      if (cancelTask) interruptResponse(false);
+      stopWake();
+      if (!cancelTask) stopSpeech();
     }
     else { pocketAutoAttempted = false; wake(); loadPocket(); warmSpeech(); }
   }
@@ -890,7 +986,10 @@
     if (busy || voicePending) return;
     voiceReplies = true; write("kai-mascot-voice", "1"); voiceReplyUI(); notice("");
     stopSpeech();
-    if (voiceChoice === "natural:af_bella" || ensureNatural()) { speech.enqueue([{ preview: true }]); speech.end(); }
+    if (voiceChoice === "natural:af_bella" || ensureNatural()) {
+      const scope = "preview:" + ++speechPreview;
+      speech.begin(scope); speech.enqueue([{ preview: true }], scope); speech.end(scope);
+    }
     warmSpeech();
   };
   window.speechSynthesis?.addEventListener?.("voiceschanged", voiceChoices);

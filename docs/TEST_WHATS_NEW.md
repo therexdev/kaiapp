@@ -1,3 +1,10 @@
+## KAI Live Senses architecture foundation
+
+- KAI's listening, model work, tools, streamed text, voice synthesis and playback now share one turn identity and cancellation boundary. Stop, a wake-guarded interruption, or a newer request retires the whole old turn so late text or audio cannot reappear.
+- Spoken replies remain active until both the model and the scoped audio queue finish. Voice failures leave the text answer intact, and tool approvals pause recovery timers while you review them.
+- New local, content-free timing diagnostics measure capture, speech recognition/endpointing, first model text, first audible speech and total turn time. First-response and stream-stall watchdogs recover KAI instead of leaving the companion indefinitely busy.
+- This is the first architecture revision. Existing Hey KAI, local Whisper and calibrated activity detection remain unchanged for this build; Silero VAD, Smart-Turn endpointing and optional camera/screen senses will migrate onto this boundary in later Test revisions.
+
 ## Verified Windows releases
 
 - Test and alpha Windows releases now require Azure signing and Windows verification of the installer, portable app, packaged app and helper executables before upload.

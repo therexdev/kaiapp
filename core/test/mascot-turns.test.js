@@ -81,3 +81,16 @@ test("Manual send flushes a short pause; overload drops the whole ambiguous turn
   assert.match(f.errors[0].message, /catching up/);
   assert.equal(f.listener.active, true);
 });
+
+test("Completed voice commands carry local capture and transcription timing into the shared turn", async t => {
+  const delivered = [];
+  const f = fixture(t, { onCommand: (text, detail) => delivered.push({ text, detail }) });
+  const job = f.say();
+  f.pending.shift()({ text: "Measure this turn." }); await job;
+  assert.equal(delivered[0].text, "Measure this turn.");
+  assert.equal(delivered[0].detail.source, "voice");
+  assert.equal(delivered[0].detail.segments, 1);
+  assert.ok(delivered[0].detail.timing.captureMs > 0);
+  assert.ok(delivered[0].detail.timing.sttMs >= 0);
+  assert.ok(delivered[0].detail.timing.endpointMs >= 0);
+});

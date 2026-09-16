@@ -5,6 +5,7 @@
 })(typeof window !== "undefined" ? window : globalThis, function () {
   "use strict";
   const FOLLOW_UP_MS = 60000;
+  const clock = () => typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
   const TURN_PAUSES = Object.freeze({ quick: 500, natural: 900, patient: 1400 });
   const SENSITIVITY = Object.freeze({
     quiet: { level: .004, ratio: 1.8, voiceMs: 180 },
@@ -198,7 +199,8 @@
     cancelTurn() { const wasPaused = this.paused; this.pause(true); this.pause(wasPaused); }
     collect(command, item, epoch) {
       if (!this.pendingTurn) {
-        this.pendingTurn = { text: "", serial: item.serial, epoch };
+        this.pendingTurn = { text: "", serial: item.serial, epoch, segments: 0,
+          timing: { captureMs: 0, sttMs: 0, lastSpeechEndedAt: 0, lastRecognizedAt: 0 } };
         this.turnTimer = setTimeout(() => {
           if (!this.pendingTurn || epoch !== this.epoch) return;
           this.cancelTurn();
@@ -211,6 +213,11 @@
         this.cancelTurn(); this.onError(new Error("Please ask a shorter question."), { recoverable: true }); return;
       }
       this.pendingTurn.text = text;
+      this.pendingTurn.segments++;
+      this.pendingTurn.timing.captureMs += item.audio.length / this.context.sampleRate * 1000;
+      this.pendingTurn.timing.sttMs += item.transcribeMs || 0;
+      this.pendingTurn.timing.lastSpeechEndedAt = Math.max(this.pendingTurn.timing.lastSpeechEndedAt, item.speechEndedAt || 0);
+      this.pendingTurn.timing.lastRecognizedAt = Math.max(this.pendingTurn.timing.lastRecognizedAt, item.recognizedAt || 0);
     }
     async deliverTurn(epoch = this.epoch) {
       if (this.processing || this.delivering || !this.pendingTurn || this.queue.length || this.activity?.frames.length ||
@@ -219,7 +226,9 @@
       this.clearTurn();
       if (turn.epoch !== epoch) return;
       this.delivering = true;
-      try { await this.onCommand(turn.text); this.releaseInterruption(turn.serial); }
+      const timing = { captureMs: turn.timing.captureMs, sttMs: turn.timing.sttMs,
+        endpointMs: Math.max(0, clock() - (turn.timing.lastRecognizedAt || clock())) };
+      try { await this.onCommand(turn.text, { source: "voice", serial: turn.serial, segments: turn.segments, timing }); this.releaseInterruption(turn.serial); }
       catch (error) { if (epoch === this.epoch && !this.paused) this.onError(error, { recoverable: true }); }
       finally { if (epoch === this.epoch) { this.delivering = false; this.state(); } }
     }
@@ -227,7 +236,7 @@
       if (!this.active || this.paused || epoch !== this.epoch) return;
       if (!this.activity.frames.length) this.segment = { serial: ++this.serial, armed: this.engaged,
         guarded: this.responding && this.interruptWithWake, replySerial: this.replySerial,
-        echo: this.playback || Date.now() < (this.echoUntil || 0) ? this.echoText() : "", started: false };
+        echo: this.playback || Date.now() < (this.echoUntil || 0) ? this.echoText() : "", started: false, captureStartedAt: clock() };
       // Output can start after capture began; retain that overlap for echo
       // rejection instead of treating KAI's first audible sentence as a user.
       if (this.playback) this.segment.echo = this.echoText();
@@ -267,13 +276,14 @@
         this.onError(new Error("I'm catching up. Please repeat the last question."), { recoverable: true });
         return;
       }
-      this.queue.push({ audio, serial: segment.serial ?? ++this.serial, ...segment });
+      this.queue.push({ audio, serial: segment.serial ?? ++this.serial, speechEndedAt: clock(), ...segment });
       this.state(); return this.drain(epoch);
     }
     async recognize(item, abort) {
       let timer, cancelled;
+      const startedAt = clock();
       try {
-        return await Promise.race([
+        const result = await Promise.race([
           this.transcribe(item.audio, this.context.sampleRate, abort.signal),
           new Promise((resolve, reject) => {
             cancelled = () => reject(abort.signal.reason || new Error("Listening cancelled."));
@@ -284,7 +294,12 @@
             }, this.transcribeMs);
           }),
         ]);
-      } finally { clearTimeout(timer); abort.signal.removeEventListener("abort", cancelled); }
+        item.recognizedAt = clock();
+        return result;
+      } finally {
+        item.transcribeMs = clock() - startedAt;
+        clearTimeout(timer); abort.signal.removeEventListener("abort", cancelled);
+      }
     }
     async drain(epoch) {
       if (this.processing || !this.active || this.paused) return;
