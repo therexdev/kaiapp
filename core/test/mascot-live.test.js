@@ -99,3 +99,15 @@ test("Failed-turn diagnostics do not retain provider or tool error text", () => 
   assert.deepEqual(saved.error, { name: "Error", code: "UPSTREAM_FAILED", stage: "model" });
   assert.equal(JSON.stringify(saved).includes("private provider response"), false);
 });
+
+test("Watchdogs call timer adapters without rebinding them to the session", () => {
+  let receiver, scheduled;
+  const browserTimer = function (fn) { receiver = this; scheduled = fn; return 7; };
+  const browserClear = function () { assert.notEqual(this?.constructor?.name, "Session"); };
+  const session = new Session({ setTimer: browserTimer, clearTimer: browserClear });
+  const turn = session.begin();
+  turn.watch("browser timer", 1000);
+  assert.equal(receiver, globalThis);
+  assert.equal(typeof scheduled, "function");
+  turn.clearWatch();
+});

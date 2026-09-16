@@ -84,8 +84,11 @@
       this.onTurn = onTurn;
       this.onMetric = onMetric;
       this.clock = clock;
-      this.setTimer = setTimer;
-      this.clearTimer = clearTimer;
+      // Chromium's Window timers are Web-IDL methods. Storing a bare native
+      // timer and later calling `this.setTimer()` gives it the Session receiver
+      // and throws "Illegal invocation". Always restore the global receiver.
+      this.setTimer = (fn, ms) => Reflect.apply(setTimer, globalThis, [fn, ms]);
+      this.clearTimer = timer => Reflect.apply(clearTimer, globalThis, [timer]);
       this.historyLimit = Math.max(5, Math.min(500, historyLimit));
       this.sequence = 0;
       this.phase = "idle";
