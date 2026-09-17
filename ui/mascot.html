@@ -52,6 +52,7 @@
         <label for="mic-sensitivity">Microphone sensitivity</label>
         <select id="mic-sensitivity"><option value="tv">TV nearby · less sensitive</option><option value="balanced">Everyday room · balanced</option><option value="quiet">Quiet room · more sensitive</option></select>
         <div class="mic-meter"><meter id="mic-level" min="0" max="1" value="0" aria-label="Microphone level"></meter><span id="mic-level-label">Microphone off</span></div>
+        <p id="listening-engine" class="muted" role="status">Local speech detection starts with the microphone.</p>
         <p>With the mic on, background sound should stay below the listening level and your voice should rise above it. Move closer or choose a more sensitive setting if KAI misses you.</p>
         <strong>Say “KAI” to interrupt</strong>
         <p>While KAI is answering, say “KAI” on its own or “KAI” followed by your new question. It stops when it recognizes the name. After the reply, just keep talking—follow-ups need no name.</p>
@@ -128,6 +129,7 @@
   <script src="mascot-tools.js"></script>
   <script src="mascot-speech.js"></script>
   <script src="mascot-pocket.js"></script>
+  <script src="mascot-vad.js"></script>
   <script src="mascot-wake.js"></script>
   <script src="mascot-live.js"></script>
   <script src="mascot.js"></script>

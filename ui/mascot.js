@@ -596,6 +596,13 @@
       $("mic-level").value = rms || 0;
       $("mic-level-label").textContent = !threshold ? "Microphone off" : rms >= threshold ? "Above listening level" : "Below listening level";
     },
+    onEngine: status => {
+      document.body.dataset.vadEngine = status.id;
+      $("listening-engine").textContent = status.id === "silero-v5" ?
+        "Silero VAD · local speech detection active." :
+        "Calibrated detector · compatibility fallback active.";
+      console.debug("[kai:live] listener " + status.id + (status.fallback && status.reason ? " · " + status.reason : ""));
+    },
     transcribe: (samples, rate, signal) => json("/core/transcribe", { method: "POST", signal,
       headers: { "content-type": "audio/wav" }, body: KaiWav.encodeWav16kMono(samples, rate) }),
     onState: phase => {

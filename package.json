@@ -30,6 +30,7 @@
     "koinos-code": "cli/koinos-code.js"
   },
   "devDependencies": {
+    "@ricky0123/vad-web": "0.0.29",
     "electron": "^43.4.0",
     "electron-builder": "^26.15.3",
     "js-yaml": "^4.3.2",
@@ -52,6 +53,24 @@
       "build/icon.png",
       "build/icon.icns",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "node_modules/@ricky0123/vad-web/dist/bundle.min.js",
+        "to": "live-senses/vad/bundle.min.js"
+      },
+      {
+        "from": "node_modules/@ricky0123/vad-web/dist/vad.worklet.bundle.min.js",
+        "to": "live-senses/vad/vad.worklet.bundle.min.js"
+      },
+      {
+        "from": "node_modules/@ricky0123/vad-web/dist/silero_vad_v5.onnx",
+        "to": "live-senses/vad/silero_vad_v5.onnx"
+      },
+      {
+        "from": "docs/licenses/KAI-LIVE-SENSES.txt",
+        "to": "live-senses/LICENSE.txt"
+      }
     ],
     "asarUnpack": [
       "cli/**",

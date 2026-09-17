@@ -1,8 +1,8 @@
 (function (root, factory) {
-  const api = factory();
+  const api = factory(root);
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.KaiWake = api;
-})(typeof window !== "undefined" ? window : globalThis, function () {
+})(typeof window !== "undefined" ? window : globalThis, function (root) {
   "use strict";
   const FOLLOW_UP_MS = 60000;
   const clock = () => typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
@@ -86,8 +86,8 @@
     }
   }
   class Listener {
-    constructor({ transcribe, wakeRequest, onCommand, onState, onError, onInterrupt = () => {}, onResume = () => {}, onEnd = () => {}, onLevel = () => {}, sensitivity = "tv", turnPause = "natural", interruptWithWake = false, followUpMs = FOLLOW_UP_MS, interruptMs = 8000, transcribeMs = 30000 }) {
-      Object.assign(this, { transcribe, wakeRequest, onCommand, onState, onError, onInterrupt, onResume, onEnd, onLevel, sensitivity, interruptWithWake, followUpMs, interruptMs, transcribeMs });
+    constructor({ transcribe, wakeRequest, onCommand, onState, onError, onInterrupt = () => {}, onResume = () => {}, onEnd = () => {}, onLevel = () => {}, onEngine = () => {}, createVAD = null, sensitivity = "tv", turnPause = "natural", interruptWithWake = false, followUpMs = FOLLOW_UP_MS, interruptMs = 8000, transcribeMs = 30000 }) {
+      Object.assign(this, { transcribe, wakeRequest, onCommand, onState, onError, onInterrupt, onResume, onEnd, onLevel, onEngine, createVAD, sensitivity, interruptWithWake, followUpMs, interruptMs, transcribeMs });
       this.turnPause = Object.hasOwn(TURN_PAUSES, turnPause) ? turnPause : "natural";
       this.epoch = 0; this.active = false; this.paused = false; this.engaged = false;
       this.queue = []; this.output = []; this.responding = false; this.serial = 0; this.wakeSerial = null; this.playback = false; this.failures = 0; this.rejectedInterruptions = 0;
@@ -96,6 +96,7 @@
       const stopping = this.stop(), epoch = this.epoch;
       await stopping;
       if (epoch !== this.epoch) return;
+      const startAbort = this.startAbort = new AbortController();
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false }, video: false });
         if (epoch !== this.epoch) { stream.getTracks().forEach(t => t.stop()); return; }
@@ -108,22 +109,46 @@
         }
         if (epoch !== this.epoch) return;
         const context = this.context = new AudioContext();
-        await context.audioWorklet.addModule("mascot-audio-worklet.js");
-        if (epoch !== this.epoch) return;
-        this.activity = new Activity(context.sampleRate, { sensitivity: this.sensitivity });
-        this.source = context.createMediaStreamSource(stream);
-        this.capture = new AudioWorkletNode(context, "kai-capture");
-        this.source.connect(this.capture); this.capture.connect(context.destination);
-        this.capture.port.onmessage = ({ data }) => this.frame(data, epoch);
         stream.getTracks().forEach(t => t.addEventListener("ended", () => {
           if (epoch === this.epoch && this.active) { this.stop(); this.onError(new Error("The microphone disconnected. Tap the mic to reconnect.")); }
         }));
+        let sileroError = null;
+        try {
+          const create = this.createVAD || root.KaiVAD?.SileroCapture?.create?.bind(root.KaiVAD.SileroCapture);
+          if (!create) throw new Error("Silero VAD is unavailable in this renderer.");
+          const engine = await create({ stream, audioContext: context, signal: startAbort.signal,
+            sensitivity: this.sensitivity, turnPause: this.turnPause, guarded: this.responding && this.interruptWithWake,
+            onFrame: (probabilities, frame) => this.vadFrame(probabilities, frame, epoch),
+            onSpeechStart: () => this.vadSpeechStart(epoch),
+            onSpeechRealStart: () => this.vadSpeechRealStart(epoch),
+            onSpeechEnd: audio => this.vadSpeechEnd(audio, epoch),
+            onMisfire: () => this.vadMisfire(epoch) });
+          if (epoch !== this.epoch) { await engine.destroy(); return; }
+          this.captureEngine = engine; this.captureMode = "silero-v5"; this.activity = null;
+        } catch (error) {
+          if (epoch !== this.epoch || startAbort.signal.aborted) return;
+          sileroError = error;
+          // The known calibrated detector remains a complete, local fallback.
+          // Only one worklet is active: Silero must fail before this starts.
+          await context.audioWorklet.addModule("mascot-audio-worklet.js");
+          if (epoch !== this.epoch) return;
+          this.activity = new Activity(context.sampleRate, { sensitivity: this.sensitivity });
+          this.source = context.createMediaStreamSource(stream);
+          this.capture = new AudioWorkletNode(context, "kai-capture");
+          this.source.connect(this.capture); this.capture.connect(context.destination);
+          this.capture.port.onmessage = ({ data }) => this.frame(data, epoch);
+          this.captureMode = "adaptive-rms";
+        }
         await context.resume();
         if (epoch !== this.epoch) return;
         this.failures = 0; this.rejectedInterruptions = 0;
-        this.active = true; if (engaged) this.engage(); this.state();
+        this.active = true; this.startAbort = null;
+        this.onEngine({ id: this.captureMode, fallback: this.captureMode !== "silero-v5",
+          reason: sileroError ? String(sileroError.message || sileroError) : null });
+        if (engaged) this.engage(); this.state();
       } catch (error) { if (epoch === this.epoch) { await this.stop(); throw error; } }
     }
+    capturing() { return !!(this.segment || this.activity?.frames.length); }
     state() {
       const value = !this.active ? "off" : this.paused ? "paused" : this.activity?.calibrating ? "calibrating" : this.segment?.started ? "capturing" :
         this.processing ? "transcribing" : this.engaged ? "listening" : "waiting";
@@ -137,7 +162,7 @@
       clearTimeout(this.timer);
       if (!this.engaged || !this.active) return;
       this.timer = setTimeout(() => {
-        if (this.responding || this.processing || this.pendingTurn || this.activity?.frames.length) return this.armTimer();
+        if (this.responding || this.processing || this.pendingTurn || this.capturing()) return this.armTimer();
         this.endConversation();
       }, this.followUpMs);
       this.timer.unref?.();
@@ -151,6 +176,7 @@
         this.echoUntil = Date.now() + 1200; this.armTimer();
         this.interruptBlocked = false; this.rejectedInterruptions = 0; this.releaseInterruption();
       }
+      this.syncCaptureOptions();
     }
     setPlayback(value) {
       if (this.playback && !value) this.echoUntil = Date.now() + 1200;
@@ -165,7 +191,12 @@
       const wasPaused = this.paused;
       this.pause(true);
       if (this.activity) this.activity.profile = SENSITIVITY[this.sensitivity];
+      this.syncCaptureOptions();
       this.pause(wasPaused);
+    }
+    syncCaptureOptions() {
+      this.captureEngine?.configure({ sensitivity: this.sensitivity, turnPause: this.turnPause,
+        guarded: this.segment?.guarded ?? (this.responding && this.interruptWithWake) });
     }
     echoText() { return this.output.filter(o => Date.now() - o.at < 30000).map(o => o.text).join(" "); }
     interrupt(segment) {
@@ -193,6 +224,9 @@
       if (this.paused === value) return;
       this.paused = value;
       this.clearTurn(); this.activity?.reset(); this.segment = null; this.queue = [];
+      this.captureEngine?.setPaused(value).catch(error => {
+        if (this.active && this.paused === value) this.onError(error, { recoverable: true });
+      });
       this.abort?.abort(); this.releaseInterruption(); this.state();
     }
     clearTurn() { clearTimeout(this.turnTimer); this.pendingTurn = null; }
@@ -214,13 +248,13 @@
       }
       this.pendingTurn.text = text;
       this.pendingTurn.segments++;
-      this.pendingTurn.timing.captureMs += item.audio.length / this.context.sampleRate * 1000;
+      this.pendingTurn.timing.captureMs += item.audio.length / item.sampleRate * 1000;
       this.pendingTurn.timing.sttMs += item.transcribeMs || 0;
       this.pendingTurn.timing.lastSpeechEndedAt = Math.max(this.pendingTurn.timing.lastSpeechEndedAt, item.speechEndedAt || 0);
       this.pendingTurn.timing.lastRecognizedAt = Math.max(this.pendingTurn.timing.lastRecognizedAt, item.recognizedAt || 0);
     }
     async deliverTurn(epoch = this.epoch) {
-      if (this.processing || this.delivering || !this.pendingTurn || this.queue.length || this.activity?.frames.length ||
+      if (this.processing || this.delivering || !this.pendingTurn || this.queue.length || this.capturing() ||
           !this.active || this.paused || epoch !== this.epoch) return;
       const turn = this.pendingTurn;
       this.clearTurn();
@@ -232,8 +266,50 @@
       catch (error) { if (epoch === this.epoch && !this.paused) this.onError(error, { recoverable: true }); }
       finally { if (epoch === this.epoch) { this.delivering = false; this.state(); } }
     }
-    frame(data, epoch = this.epoch) {
+    segmentStart() {
+      return { serial: ++this.serial, armed: this.engaged,
+        guarded: this.responding && this.interruptWithWake, replySerial: this.replySerial,
+        echo: this.playback || Date.now() < (this.echoUntil || 0) ? this.echoText() : "", started: false, captureStartedAt: clock() };
+    }
+    vadFrame(probabilities, _frame, epoch = this.epoch) {
       if (!this.active || this.paused || epoch !== this.epoch) return;
+      if (this.playback && this.segment) this.segment.echo = this.echoText();
+      if (Date.now() - (this.levelAt || 0) >= 100) {
+        this.levelAt = Date.now();
+        const probability = Math.max(0, Math.min(1, Number(probabilities?.isSpeech) || 0));
+        this.onLevel(probability, this.captureEngine?.threshold || .5);
+      }
+    }
+    vadSpeechStart(epoch = this.epoch) {
+      if (!this.active || this.paused || epoch !== this.epoch || this.segment) return;
+      this.segment = this.segmentStart();
+      if (this.playback) this.segment.echo = this.echoText();
+    }
+    vadSpeechRealStart(epoch = this.epoch) {
+      if (!this.active || this.paused || epoch !== this.epoch) return;
+      if (!this.segment) this.segment = this.segmentStart();
+      this.segment.started = true;
+      if (this.segment.armed) this.interrupt(this.segment);
+      this.state();
+    }
+    vadSpeechEnd(audio, epoch = this.epoch) {
+      if (!this.active || this.paused || epoch !== this.epoch) return;
+      const segment = this.segment;
+      this.segment = null;
+      this.syncCaptureOptions();
+      if (segment?.started && audio?.length) return this.submit(audio, epoch, 16000, segment);
+      this.releaseInterruption(segment?.serial, true); this.state();
+      return this.deliverTurn(epoch);
+    }
+    vadMisfire(epoch = this.epoch) {
+      if (!this.active || epoch !== this.epoch) return;
+      const segment = this.segment; this.segment = null;
+      this.syncCaptureOptions();
+      this.releaseInterruption(segment?.serial, true); this.state();
+      return this.deliverTurn(epoch);
+    }
+    frame(data, epoch = this.epoch) {
+      if (!this.active || this.paused || epoch !== this.epoch || !this.activity) return;
       if (!this.activity.frames.length) this.segment = { serial: ++this.serial, armed: this.engaged,
         guarded: this.responding && this.interruptWithWake, replySerial: this.replySerial,
         echo: this.playback || Date.now() < (this.echoUntil || 0) ? this.echoText() : "", started: false, captureStartedAt: clock() };
@@ -262,13 +338,14 @@
     }
     flush() {
       if (!this.active || this.paused) return;
+      if (this.captureEngine) return this.captureEngine.flush().catch(error => this.onError(error, { recoverable: true }));
       const audio = this.activity.finish();
       if (audio) return this.submit(audio, this.epoch);
       this.segment = null; return this.deliverTurn();
     }
-    submit(audio, epoch) {
-      const segment = this.segment || { armed: this.engaged, echo: "" };
-      this.segment = null;
+    submit(audio, epoch, sampleRate = this.context?.sampleRate || 16000, submittedSegment = this.segment) {
+      const segment = submittedSegment || { armed: this.engaged, echo: "" };
+      if (this.segment === segment) this.segment = null;
       // Keep capturing while Whisper works; a delayed transcription must not
       // create a deaf interval. At most two waiting utterances bound memory.
       if (this.queue.length >= 2) {
@@ -276,7 +353,7 @@
         this.onError(new Error("I'm catching up. Please repeat the last question."), { recoverable: true });
         return;
       }
-      this.queue.push({ audio, serial: segment.serial ?? ++this.serial, speechEndedAt: clock(), ...segment });
+      this.queue.push({ audio, sampleRate, serial: segment.serial ?? ++this.serial, speechEndedAt: clock(), ...segment });
       this.state(); return this.drain(epoch);
     }
     async recognize(item, abort) {
@@ -284,7 +361,7 @@
       const startedAt = clock();
       try {
         const result = await Promise.race([
-          this.transcribe(item.audio, this.context.sampleRate, abort.signal),
+          this.transcribe(item.audio, item.sampleRate, abort.signal),
           new Promise((resolve, reject) => {
             cancelled = () => reject(abort.signal.reason || new Error("Listening cancelled."));
             abort.signal.addEventListener("abort", cancelled, { once: true });
@@ -345,7 +422,7 @@
         }
       } catch (error) {
         if (epoch === this.epoch && (!this.abort?.signal.aborted || error.code === "VOICE_TIMEOUT")) {
-          this.clearTurn(); this.queue = []; this.activity?.reset(); this.segment = null; this.releaseInterruption();
+          this.clearTurn(); this.queue = []; this.activity?.reset(); this.captureEngine?.reset().catch(() => {}); this.segment = null; this.releaseInterruption();
           if (++this.failures >= 3) { await this.stop(); this.onError(new Error("Voice input keeps failing. The microphone is off. Try the mic again or type your question.")); }
           else this.onError(error, { recoverable: true });
         }
@@ -361,9 +438,12 @@
     async stop() {
       this.epoch++; this.clearTurn(); this.active = false; this.processing = false; this.delivering = false; this.paused = false;
       this.engaged = false; this.wakeSerial = null; this.responding = false; this.playback = false; this.interruptBlocked = false; this.segment = null; this.queue = []; this.output = [];
-      clearTimeout(this.timer); this.abort?.abort(); this.abort = null;
+      clearTimeout(this.timer); this.abort?.abort(); this.abort = null; this.startAbort?.abort(); this.startAbort = null;
+      const captureEngine = this.captureEngine; this.captureEngine = null; this.captureMode = null;
       this.capture?.disconnect(); this.source?.disconnect();
       if (this.capture) this.capture.port.onmessage = null;
+      this.capture = null; this.source = null; this.activity = null;
+      await captureEngine?.destroy().catch(() => {});
       this.stream?.getTracks().forEach(t => t.stop()); this.stream = null;
       const context = this.context; this.context = null;
       this.releaseInterruption(); this.state();

@@ -27,7 +27,7 @@ for (const archive of archives) {
   for (const required of ["ui/workflows.js", "ui/workflows.css", "ui/workflow-model.js", "electron/workflow-engine.js", "electron/workflow-events.js", "electron/workflow-assistant.js", "electron/workflow-values.js", "electron/workflow-schedules.js", "core/lib/composio-triggers.js", "electron/pocket-voice.js", "electron/pocket-voice-worker.js", "ui/mascot-pocket.js", "ui/pocket-credits.html", "core/runtimes/pocket.json", "electron/computer-highlight.js", "electron/computer-control.js", "electron/native-computer.js", "ui/computer-tools.js", "electron/providers.js", "electron/provider-http.js", "ui/desktop-providers.js", "electron/mascot.js", "electron/mascot-layout.js", "electron/windows-voice.js", "electron/mascot-preload.js", "ui/mascot.html",
     "ui/brand.js", "ui/brand-mark.svg", "ui/kai-character.css", "ui/assets/kai-character.png", "ui/assets/kai-voice-hello.wav", "ui/node-brand.css",
     "ui/mascot.js", "ui/mascot-client.js", "ui/mascot.css", "ui/kai-robot.svg", "ui/mascot-launcher.js",
-    "ui/mascot-speech.js", "ui/mascot-wake.js", "ui/mascot-live.js", "ui/mascot-audio-worklet.js", "ui/mascot-tools.js", "ui/app-navigation.js", "core/lib/app-tools.js", "electron/tool-approval.js",
+    "ui/mascot-speech.js", "ui/mascot-vad.js", "ui/mascot-wake.js", "ui/mascot-live.js", "ui/mascot-audio-worklet.js", "ui/mascot-tools.js", "ui/app-navigation.js", "core/lib/app-tools.js", "core/lib/live-senses-assets.js", "electron/tool-approval.js",
     "electron/desktop-actions.js", "core/lib/speech.js", "core/lib/speech-worker.js", "core/lib/speech-wasm.js", "core/lib/speech-wasm-runtime.mjs", "core/runtimes/kokoro.json"]) {
     try {
       // ASAR's directory walker splits on the host separator. Forward slashes
@@ -41,8 +41,12 @@ for (const archive of archives) {
   }
   if (process.platform === "win32") assert.ok(fs.statSync(path.join(path.dirname(file), "bin/kai-windows-voice.exe")).size > 0, "Missing bundled fast Windows voice helper");
   if (process.platform === "win32") assert.ok(fs.statSync(path.join(path.dirname(file), "bin/kai-computer.exe")).size > 0, "Missing private desktop control helper");
-  for (const asset of ["ort.node.min.js", "ort-wasm-simd-threaded.mjs", "ort-wasm-simd-threaded.wasm"]) {
+  for (const asset of ["ort.node.min.js", "ort.wasm.min.js", "ort-wasm-simd-threaded.mjs", "ort-wasm-simd-threaded.wasm"]) {
     assert.ok(fs.statSync(path.join(file + ".unpacked", "node_modules/onnxruntime-web/dist", asset)).size > 0, "Missing local compatible voice runtime: " + asset);
+  }
+  const liveSenses = path.join(path.dirname(file), "live-senses");
+  for (const [asset, minimum] of [["vad/bundle.min.js", 50000], ["vad/vad.worklet.bundle.min.js", 2000], ["vad/silero_vad_v5.onnx", 2000000], ["LICENSE.txt", 1000]]) {
+    assert.ok(fs.statSync(path.join(liveSenses, asset)).size > minimum, "Missing packaged Live Senses asset: " + asset);
   }
   if (process.platform === "win32") {
     const native = path.join(file + ".unpacked", "node_modules/sherpa-onnx-win-x64");

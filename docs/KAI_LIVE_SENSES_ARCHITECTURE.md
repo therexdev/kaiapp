@@ -43,8 +43,10 @@ The microphone's device state remains separate from the active request. It can b
 
 ```mermaid
 flowchart TD
-    A["One microphone stream"] --> B["Local activity detector"]
+    A["One microphone stream"] --> B["Silero V5 speech detector"]
+    B -. "init failure only" .-> X["Calibrated detector fallback"]
     B --> C["Wake and follow-up gate"]
+    X --> C
     C --> D["Local Whisper"]
     D --> E["Turn assembler"]
     E --> F["KAI turn session"]
@@ -55,6 +57,12 @@ flowchart TD
     J --> K["Speaker"]
 ```
 
+`ui/mascot-vad.js` owns this detector boundary. It lazily loads the bundled Silero v5 model and reuses KAI's existing ONNX Runtime with one WASM inference lane. `@ricky0123/vad-web` receives the microphone stream and `AudioContext` KAI already opened, so successful Silero startup creates no second `getUserMedia` request and no second capture worklet. Its output is a bounded 16 kHz speech segment; raw microphone audio still never leaves the computer.
+
+The Voice & listening panel reports either **Silero VAD · local speech detection active** or the calibrated compatibility fallback. The fallback begins only after Silero initialization fails, so the two worklets never run together. Quiet, Everyday room and TV nearby now map to Silero probability thresholds, while Quick, Natural and Patient retain their existing trailing-pause behavior. Wake gating, Whisper, echo rejection, follow-up state and guarded “KAI” interruption still run after that boundary and are unchanged.
+
+Core serves six exact, allowlisted local asset routes rather than exposing `node_modules` or a resources directory. Installer builds copy only the VAD bundle, worklet and 2.3 MB model; they reuse the ONNX Runtime already packaged for KAI's speech systems instead of shipping vad-web's second runtime.
+
 The listener passes local capture, transcription and endpoint timing into the KAI turn. The turn then records first model token, first TTS work, first audible playback, model completion and speech completion. `window.kaiLiveDiagnostics.summary()` provides session p50/p95 measurements; `recent()` provides bounded per-turn stage timelines. These are development diagnostics and never include text.
 
 First-response and stream-stall watchdogs recover a turn instead of leaving KAI indefinitely busy. Tool activity refreshes the watchdog. Native approval pauses the watchdog so a person is never timed out while reviewing an action.
@@ -63,10 +71,9 @@ First-response and stream-stall watchdogs recover a turn instead of leaving KAI 
 
 The turn contract is deliberately independent of a VAD, STT, turn detector or TTS vendor. The next test-only revisions can therefore replace one stage at a time:
 
-1. Add Silero as the primary `speech / not speech` detector, retaining the current calibrated detector as a fallback until hardware coverage passes.
-2. Add local Smart-Turn after Whisper for `finished / continuing`, with manual Send and the bounded silence policy as fallbacks.
-3. Add KAI Eyes as optional camera and screen producers. Keep a small low-resolution rolling buffer and attach only the freshest approved frame to the current turn; use a separate high-resolution `look` action when necessary.
-4. Move audio output to one gap-free, AEC-visible playback clock after Pocket/Windows/Kokoro parity is verified.
+1. Add local Smart-Turn after Whisper for `finished / continuing`, with manual Send and the bounded silence policy as fallbacks.
+2. Add KAI Eyes as optional camera and screen producers. Keep a small low-resolution rolling buffer and attach only the freshest approved frame to the current turn; use a separate high-resolution `look` action when necessary.
+3. Move audio output to one gap-free, AEC-visible playback clock after Pocket/Windows/Kokoro parity is verified.
 
 Each migration must preserve Hey KAI, wake-guarded interruption, the shared app profile, Local-Only behavior, model capability checks, visible capture indicators, approval boundaries and packaged Windows verification.
 
@@ -75,4 +82,6 @@ Each migration must preserve Hey KAI, wake-guarded interruption, the shared app 
 - `core/test/mascot-live.test.js` checks shared cancellation, late-event rejection, stage watchdogs, completion barriers and content-free diagnostics.
 - `core/test/mascot-speech.test.js` checks that old scoped text and audio cannot cross a turn boundary.
 - `core/test/mascot-turns.test.js` checks that listening timing reaches the shared turn.
+- `core/test/mascot-vad.test.js` checks one-stream ownership, threshold mapping, pause/flush serialization, 16 kHz handoff and calibrated fallback.
+- `core/test/live-senses-assets.test.js` runs the real Silero model with KAI's pinned ONNX Runtime and checks exact asset routing. Chromium also compiles the browser runtime/model pair where the CI browser is available.
 - Existing deterministic, browser, native Windows and packaged voice checks remain required.

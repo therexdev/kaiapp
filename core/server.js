@@ -394,6 +394,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
   // The desktop UI is plain web content served by the gateway itself — the
   // Electron shell just opens a window onto it, and a browser works too.
   const uiDir = path.join(__dirname, "..", "ui");
+  const { liveSensesAssets } = require("./lib/live-senses-assets");
   const { ChatStore } = require("./lib/chats");
 
   // ---- unified tool layer: ONE policy point for everything a model can do
@@ -586,6 +587,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     keys,
     onEvent: events,
     uiDir: require("fs").existsSync(uiDir) ? uiDir : null,
+    staticAssets: liveSensesAssets(),
     earn,
     network,
     voice,

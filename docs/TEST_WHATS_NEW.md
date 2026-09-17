@@ -1,9 +1,16 @@
+## Silero listening for KAI Live Senses
+
+- KAI now uses local Silero VAD v5 as its primary `speech / not speech` detector. It reuses the microphone stream and ONNX runtime KAI already owns, with one capture worklet and one inference lane rather than a parallel audio stack.
+- Quiet room, Everyday room and TV nearby now tune speech probability instead of raw loudness. Conversation pause choices, Hey KAI, the 60-second follow-up window, local Whisper, echo rejection and the spoken “KAI” interruption rule stay in place.
+- If Silero cannot initialize on a computer, listening starts with KAI's previous calibrated detector instead. Voice & listening shows which detector is active so Test feedback can distinguish the two paths.
+- The Silero model, runtime code and worklet are bundled locally. Microphone audio is not sent to a VAD service, no CDN is used, and the installer reuses KAI's existing ONNX runtime instead of including a duplicate copy.
+
 ## KAI Live Senses architecture foundation
 
 - KAI's listening, model work, tools, streamed text, voice synthesis and playback now share one turn identity and cancellation boundary. Stop, a wake-guarded interruption, or a newer request retires the whole old turn so late text or audio cannot reappear.
 - Spoken replies remain active until both the model and the scoped audio queue finish. Voice failures leave the text answer intact, and tool approvals pause recovery timers while you review them.
 - New local, content-free timing diagnostics measure capture, speech recognition/endpointing, first model text, first audible speech and total turn time. First-response and stream-stall watchdogs recover KAI instead of leaving the companion indefinitely busy.
-- This is the first architecture revision. Existing Hey KAI, local Whisper and calibrated activity detection remain unchanged for this build; Silero VAD, Smart-Turn endpointing and optional camera/screen senses will migrate onto this boundary in later Test revisions.
+- This is the shared turn/session boundary underneath Silero listening. Smart-Turn endpointing and optional camera/screen senses will migrate onto it in later Test revisions.
 
 ## Verified Windows releases
 

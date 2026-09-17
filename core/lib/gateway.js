@@ -14,6 +14,9 @@ const MIME = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".wasm": "application/wasm",
+  ".onnx": "application/octet-stream",
   ".svg": "image/svg+xml",
   ".png": "image/png",
   ".wav": "audio/wav",
@@ -98,7 +101,7 @@ function hasImageParts(messages) {
 }
 
 class Gateway {
-  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, earn, network, feedback, chats, docs, voice, speech, tools, memory, mcp, nodeRuntime, email, calendar, koinos, koinosNode, teams, account, dev, bench, agents, code, onEvent }) {
+  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, staticAssets, earn, network, feedback, chats, docs, voice, speech, tools, memory, mcp, nodeRuntime, email, calendar, koinos, koinosNode, teams, account, dev, bench, agents, code, onEvent }) {
     this.tools = tools || null; // unified tool registry (agents/MCP/memory/…)
     this.memory = memory || null; // cross-chat memory store
     this.mcp = mcp || null; // MCP server manager
@@ -127,6 +130,10 @@ class Gateway {
     this.keys = keys; // ApiKeys
     this.coreInfo = coreInfo || (() => ({}));
     this.uiDir = uiDir || null; // when set, serves the desktop UI at /
+    // Large local browser runtimes stay out of ui/ and git. Only these exact
+    // routes are readable; this is not a second static directory or a path
+    // resolver over node_modules.
+    this.staticAssets = staticAssets instanceof Map ? staticAssets : new Map(Object.entries(staticAssets || {}));
     this.onEvent = onEvent || (() => {});
     this.server = null;
     this._ensureJob = null; // background model-load kicked off by the UI
@@ -1593,6 +1600,10 @@ class Gateway {
       });
     }
 
+    if (req.method === "GET" && this.staticAssets.has(path)) {
+      return this._staticFile(this.staticAssets.get(path), res);
+    }
+
     if (this.uiDir && req.method === "GET" && !path.startsWith("/core/")) {
       return this._static(path, res);
     }
@@ -2029,12 +2040,17 @@ class Gateway {
     if (!file.startsWith(nodePath.normalize(this.uiDir + nodePath.sep))) {
       return this._json(res, 404, { error: { message: "Not found", type: "invalid_request_error" } });
     }
+    return this._staticFile(file, res);
+  }
+
+  _staticFile(file, res) {
     fs.readFile(file, (err, data) => {
       if (err) return this._json(res, 404, { error: { message: "Not found", type: "invalid_request_error" } });
       res.writeHead(200, {
         "content-type": MIME[nodePath.extname(file)] || "application/octet-stream",
         "content-length": data.length,
         "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
       });
       res.end(data);
     });
