@@ -45,10 +45,10 @@
         <p id="natural-status">Try Cute KAI with Bella. Hear a hello instantly, then download the local voice once for conversations.</p>
         <div class="voice-divider"></div>
         <strong>Just say “Hey KAI”</strong>
-        <p>Tap the mic and talk, or turn on Hey KAI and say your question. Pause to send. Keep talking after KAI answers—you have a minute for follow-ups.</p>
+        <p>Tap the mic and talk, or turn on Hey KAI and say your question. KAI listens for a finished thought before sending. Keep talking after KAI answers—you have a minute for follow-ups.</p>
         <label for="turn-pause">Conversation pauses</label>
         <select id="turn-pause"><option value="quick">Quick · short pauses</option><option value="natural" selected>Natural · room to pause</option><option value="patient">Patient · more time to think</option></select>
-        <p>KAI waits for a quiet pause before sending your question. If you continue while it is recognizing your words, it keeps them together. Tap the mic to send sooner. Saying “KAI” during a reply still stops it as soon as the name is recognized.</p>
+        <p>KAI combines a quiet pause with local semantic turn detection, so a breath in the middle of a thought is less likely to cut you off. If it waits, keep talking or tap the mic to send now. Saying “KAI” during a reply still stops it as soon as the name is recognized.</p>
         <label for="mic-sensitivity">Microphone sensitivity</label>
         <select id="mic-sensitivity"><option value="tv">TV nearby · less sensitive</option><option value="balanced">Everyday room · balanced</option><option value="quiet">Quiet room · more sensitive</option></select>
         <div class="mic-meter"><meter id="mic-level" min="0" max="1" value="0" aria-label="Microphone level"></meter><span id="mic-level-label">Microphone off</span></div>
@@ -129,6 +129,7 @@
   <script src="mascot-tools.js"></script>
   <script src="mascot-speech.js"></script>
   <script src="mascot-pocket.js"></script>
+  <script src="mascot-turn.js"></script>
   <script src="mascot-vad.js"></script>
   <script src="mascot-wake.js"></script>
   <script src="mascot-live.js"></script>

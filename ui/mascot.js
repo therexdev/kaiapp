@@ -31,7 +31,7 @@
   }
   const labels = {
     idle: "Here when you need me", greeting: "Hey! I'm KAI.", thinking: "Thinking it through…", searching: "Looking it up…",
-    listening: "Listening…", transcribing: "Got it · one moment…",
+    listening: "Listening…", transcribing: "Got it · one moment…", holding: "Waiting for you · tap the mic to send",
     speaking: "KAI is speaking", voicing: "Getting my reply ready…", error: "Let's try that again",
   };
   let replyPose = false;
@@ -43,11 +43,12 @@
     const engaged = wakeListener?.engaged;
     if (wakePhase === "capturing" && engaged && ((!busy && !speaking) || speech.held)) value = "listening";
     else if (wakePhase === "transcribing" && engaged && !busy && !speaking) value = "transcribing";
+    else if (wakePhase === "holding" && engaged && !busy && !speaking) value = "listening";
     // Status and microphone updates often repeat the same mood. Keep the rig's
     // animation timeline intact, and end a greeting before a work pose begins.
     if (value !== "idle") { clearTimeout(waveTimer); document.body.classList.remove("waving"); }
     if (document.body.dataset.state !== value) document.body.dataset.state = value;
-    $("mood-label").textContent = wakePhase === "calibrating" ? "Getting microphone ready…" :
+    $("mood-label").textContent = wakePhase === "calibrating" ? "Getting microphone ready…" : wakePhase === "holding" ? labels.holding :
       value === "idle" && wakeEnabled && !engaged ? "Say “Hey KAI” · mic on" :
       value === "idle" && wakeEnabled && engaged ? "Your turn · mic on" : labels[value] || labels.idle;
     wake();
@@ -65,6 +66,7 @@
     },
     onMetric: (metrics, turn) => {
       const parts = [metrics.sttEndpointMs != null ? "stt+endpoint " + Math.round(metrics.sttEndpointMs) + "ms" : null,
+        metrics.semanticMs != null ? "smart-turn " + Math.round(metrics.semanticMs) + "ms" : null,
         metrics.modelFirstTokenMs != null ? "model " + Math.round(metrics.modelFirstTokenMs) + "ms" : null,
         metrics.ttsFirstAudioMs != null ? "tts " + Math.round(metrics.ttsFirstAudioMs) + "ms" : null,
         metrics.voiceToVoiceMs != null ? "voice-to-voice " + Math.round(metrics.voiceToVoiceMs) + "ms" : null].filter(Boolean);
@@ -586,6 +588,28 @@
     if (turn) turn.cancel("interrupted");
     else { chatAbort?.abort(); bridge?.cancelAction?.(); stopSpeech(); }
   }
+  let vadEngineStatus = null, endpointEngineStatus = null;
+  function listeningEngineUI() {
+    const vad = vadEngineStatus?.id === "silero-v5" ? "Silero VAD" : vadEngineStatus?.id ? "Calibrated detector" : "Local speech detection";
+    const endpoint = endpointEngineStatus?.id === "smart-turn-v3" ? "Smart-Turn v3" : endpointEngineStatus?.id === "loading" ?
+      "Smart-Turn loading" : endpointEngineStatus?.id === "silence" ? "silence endpoint fallback" : "semantic endpoint pending";
+    $("listening-engine").textContent = `${vad} + ${endpoint} · local listening active.`;
+  }
+  const turnDetector = new KaiTurn.Detector({
+    warm: signal => json("/core/turn/warm", { method: "POST", signal }),
+    analyze: (wav, signal) => json("/core/turn", { method: "POST", signal,
+      headers: { "content-type": "audio/wav" }, body: wav }),
+    encode: KaiWav.encodeWav16kMono,
+    onStatus: status => {
+      endpointEngineStatus = status;
+      document.body.dataset.turnEngine = status.id;
+      listeningEngineUI();
+      if (status.fallback && status.reason) console.debug("[kai:live] endpoint fallback · " + status.reason);
+    },
+    onResult: result => {
+      if (result.available) console.debug("[kai:live] smart-turn " + result.probability.toFixed(3) + " · " + Math.round(result.ms) + "ms");
+    },
+  });
   const wakeListener = new KaiWake.Listener({
     wakeRequest: api.wakeRequest,
     sensitivity: read("kai-mascot-sensitivity", "tv"),
@@ -597,12 +621,12 @@
       $("mic-level-label").textContent = !threshold ? "Microphone off" : rms >= threshold ? "Above listening level" : "Below listening level";
     },
     onEngine: status => {
+      vadEngineStatus = status;
       document.body.dataset.vadEngine = status.id;
-      $("listening-engine").textContent = status.id === "silero-v5" ?
-        "Silero VAD · local speech detection active." :
-        "Calibrated detector · compatibility fallback active.";
+      listeningEngineUI();
       console.debug("[kai:live] listener " + status.id + (status.fallback && status.reason ? " · " + status.reason : ""));
     },
+    turnDetector,
     transcribe: (samples, rate, signal) => json("/core/transcribe", { method: "POST", signal,
       headers: { "content-type": "audio/wav" }, body: KaiWav.encodeWav16kMono(samples, rate) }),
     onState: phase => {
@@ -703,6 +727,7 @@
   function toggleWake() { return wakeEnabled || wakeStarting ? stopWake() : startListening(false); }
   async function mic() {
     notice("");
+    if (wakeListener.holding()) return wakeListener.commitPending();
     if (wakePhase === "capturing" && !busy && !speaking) return wakeListener.flush();
     interruptResponse();
     // A manual interruption must not submit the movie candidate that happened

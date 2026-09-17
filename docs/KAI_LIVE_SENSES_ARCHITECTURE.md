@@ -25,7 +25,7 @@ stateDiagram-v2
     Speaking --> Idle: barge-in or Stop
 ```
 
-The microphone's device state remains separate from the active request. It can be waiting for “Hey KAI,” capturing, transcribing or paused without inventing a second model turn.
+The microphone's device state remains separate from the active request. It can be waiting for “Hey KAI,” capturing, transcribing, holding an incomplete thought or paused without inventing a second model turn.
 
 ## Required invariants
 
@@ -48,20 +48,26 @@ flowchart TD
     B --> C["Wake and follow-up gate"]
     X --> C
     C --> D["Local Whisper"]
-    D --> E["Turn assembler"]
-    E --> F["KAI turn session"]
-    F --> G["Brain, tools, connections"]
-    G --> H["Streamed model reply"]
-    H --> I["Scoped sentence queue"]
-    I --> J["Pocket, Windows or Kokoro voice"]
-    J --> K["Speaker"]
+    C --> E["Smart-Turn v3.2"]
+    E -. "model unavailable" .-> X2["Bounded silence fallback"]
+    D --> F["Turn assembler"]
+    E --> F
+    X2 --> F
+    F --> G["KAI turn session"]
+    G --> H["Brain, tools, connections"]
+    H --> I["Streamed model reply"]
+    I --> J["Scoped sentence queue"]
+    J --> K["Pocket, Windows or Kokoro voice"]
+    K --> L["Speaker"]
 ```
 
 `ui/mascot-vad.js` owns this detector boundary. It lazily loads the bundled Silero v5 model and reuses KAI's existing ONNX Runtime with one WASM inference lane. `@ricky0123/vad-web` receives the microphone stream and `AudioContext` KAI already opened, so successful Silero startup creates no second `getUserMedia` request and no second capture worklet. Its output is a bounded 16 kHz speech segment; raw microphone audio still never leaves the computer.
 
-The Voice & listening panel reports either **Silero VAD · local speech detection active** or the calibrated compatibility fallback. The fallback begins only after Silero initialization fails, so the two worklets never run together. Quiet, Everyday room and TV nearby now map to Silero probability thresholds, while Quick, Natural and Patient retain their existing trailing-pause behavior. Wake gating, Whisper, echo rejection, follow-up state and guarded “KAI” interruption still run after that boundary and are unchanged.
+The Voice & listening panel reports both detector stages: **Silero VAD + Smart-Turn v3** when the primary path is active, or the exact calibrated/silence fallback in use. The calibrated detector begins only after Silero initialization fails, so the two capture worklets never run together. Quiet, Everyday room and TV nearby map to Silero probability thresholds. Quick, Natural and Patient now control a cohesive turn policy: trailing silence, Smart-Turn confidence and a 2.5/4/6-second maximum semantic hold. Wake gating, Whisper, echo rejection, follow-up state and guarded “KAI” interruption remain after that boundary.
 
-Core serves six exact, allowlisted local asset routes rather than exposing `node_modules` or a resources directory. Installer builds copy only the VAD bundle, worklet and 2.3 MB model; they reuse the ONNX Runtime already packaged for KAI's speech systems instead of shipping vad-web's second runtime. The mascot CSP grants `wasm-unsafe-eval` solely for local WASM compilation and does not grant general JavaScript `unsafe-eval`.
+Core serves six exact, allowlisted local VAD asset routes rather than exposing `node_modules` or a resources directory. Installer builds copy only the VAD bundle, worklet, 2.3 MB Silero model and pinned 8.7 MB Smart-Turn model. Smart-Turn is not browser-addressable: a lazy isolated local worker reuses KAI's existing Transformers.js feature extractor and native ONNX Runtime. This avoids another inference stack, keeps model work off Core's event loop and releases the worker after two idle minutes. The mascot CSP grants `wasm-unsafe-eval` solely for local VAD WASM compilation and does not grant general JavaScript `unsafe-eval`.
+
+Whisper transcribes only the newest speech segment while Smart-Turn analyzes the accumulated current turn in parallel. The renderer retains at most the newest eight seconds of PCM, matching the model's training contract, and sends each audio buffer only to loopback Core. Smart-Turn returns a probability, never a transcript. A low score or narrow trailing-phrase guard holds the assembled question; continued speech reruns the model with updated context. Tap-to-send bypasses the model, a 20-second conversational bound prevents indefinite capture, and inference/model errors immediately preserve the prior silence-only behavior.
 
 The listener passes local capture, transcription and endpoint timing into the KAI turn. The turn then records first model token, first TTS work, first audible playback, model completion and speech completion. `window.kaiLiveDiagnostics.summary()` provides session p50/p95 measurements; `recent()` provides bounded per-turn stage timelines. These are development diagnostics and never include text.
 
@@ -71,9 +77,8 @@ First-response and stream-stall watchdogs recover a turn instead of leaving KAI 
 
 The turn contract is deliberately independent of a VAD, STT, turn detector or TTS vendor. The next test-only revisions can therefore replace one stage at a time:
 
-1. Add local Smart-Turn after Whisper for `finished / continuing`, with manual Send and the bounded silence policy as fallbacks.
-2. Add KAI Eyes as optional camera and screen producers. Keep a small low-resolution rolling buffer and attach only the freshest approved frame to the current turn; use a separate high-resolution `look` action when necessary.
-3. Move audio output to one gap-free, AEC-visible playback clock after Pocket/Windows/Kokoro parity is verified.
+1. Add KAI Eyes as optional camera and screen producers. Keep a small low-resolution rolling buffer and attach only the freshest approved frame to the current turn; use a separate high-resolution `look` action when necessary.
+2. Move audio output to one gap-free, AEC-visible playback clock after Pocket/Windows/Kokoro parity is verified.
 
 Each migration must preserve Hey KAI, wake-guarded interruption, the shared app profile, Local-Only behavior, model capability checks, visible capture indicators, approval boundaries and packaged Windows verification.
 
@@ -83,5 +88,7 @@ Each migration must preserve Hey KAI, wake-guarded interruption, the shared app 
 - `core/test/mascot-speech.test.js` checks that old scoped text and audio cannot cross a turn boundary.
 - `core/test/mascot-turns.test.js` checks that listening timing reaches the shared turn.
 - `core/test/mascot-vad.test.js` checks one-stream ownership, threshold mapping, pause/flush serialization, 16 kHz handoff and calibrated fallback.
-- `core/test/live-senses-assets.test.js` runs the real Silero model with KAI's pinned ONNX Runtime and checks exact asset routing. Chromium also compiles the browser runtime/model pair where the CI browser is available.
+- `core/test/mascot-turn.test.js` checks audio-window ownership, policy thresholds, text guards and silence fallback.
+- `core/test/smart-turn.test.js` runs the real pinned Smart-Turn model in the isolated worker and exercises its loopback gateway boundary.
+- `core/test/live-senses-assets.test.js` runs the real Silero model with KAI's pinned ONNX Runtime, verifies the Smart-Turn hash and checks exact asset routing. Chromium also compiles the browser runtime/model pair where the CI browser is available.
 - Existing deterministic, browser, native Windows and packaged voice checks remain required.

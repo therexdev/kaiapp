@@ -394,7 +394,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
   // The desktop UI is plain web content served by the gateway itself — the
   // Electron shell just opens a window onto it, and a browser works too.
   const uiDir = path.join(__dirname, "..", "ui");
-  const { liveSensesAssets } = require("./lib/live-senses-assets");
+  const { liveSensesAssets, smartTurnModelPath } = require("./lib/live-senses-assets");
   const { ChatStore } = require("./lib/chats");
 
   // ---- unified tool layer: ONE policy point for everything a model can do
@@ -580,6 +580,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     onEvent: events,
   });
   const speech = new (require("./lib/speech").SpeechManager)({ speechDir: path.join(dataDir, "voice", "kokoro") });
+  const turn = new (require("./lib/smart-turn").SmartTurnManager)({ modelPath: smartTurnModelPath() });
   const gateway = new Gateway({
     port: port ?? Number(process.env.KAI_CORE_PORT || release.port),
     runtime,
@@ -592,6 +593,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     network,
     voice,
     speech,
+    turn,
     tools: registry,
     memory,
     mcp,
@@ -651,6 +653,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     settings,
     account,
     speech,
+    turn,
     state,
     hardware: hw,
     keys,
@@ -732,6 +735,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     async stop() {
       this.remote?.stop();
       speech.close();
+      turn.close();
       if (this._policyTimer) clearInterval(this._policyTimer);
       producerReporter.stop();
       this.tasks?.stop();

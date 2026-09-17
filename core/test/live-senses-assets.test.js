@@ -3,12 +3,14 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("fs");
+const crypto = require("crypto");
 const os = require("os");
 const path = require("path");
 const { Gateway } = require("../lib/gateway");
-const { ROUTES, liveSensesAssets } = require("../lib/live-senses-assets");
+const { ROUTES, liveSensesAssets, smartTurnModelPath } = require("../lib/live-senses-assets");
+const smartTurn = require("../runtimes/smart-turn.json");
 
-test("Packaging copies only VAD assets and keeps vad-web's duplicate runtime out of production dependencies", () => {
+test("Packaging copies the two pinned Live Senses models and keeps vad-web's duplicate runtime out of production dependencies", () => {
   const pkg = require("../../package.json");
   assert.equal(pkg.devDependencies["@ricky0123/vad-web"], "0.0.29");
   assert.equal(pkg.dependencies["@ricky0123/vad-web"], undefined);
@@ -16,6 +18,7 @@ test("Packaging copies only VAD assets and keeps vad-web's duplicate runtime out
     "live-senses/vad/bundle.min.js",
     "live-senses/vad/vad.worklet.bundle.min.js",
     "live-senses/vad/silero_vad_v5.onnx",
+    "live-senses/turn/smart-turn-v3.2-cpu.onnx",
     "live-senses/LICENSE.txt",
   ]);
 });
@@ -27,6 +30,13 @@ test("Live Senses resolves six pinned local assets and never selects vad-web's d
     assert.ok(fs.statSync(file).size > (route.endsWith(".onnx") ? 2_000_000 : 1_000), route);
     if (route.startsWith("/live-senses/vad/ort")) assert.doesNotMatch(file, /@ricky0123[/\\]vad-web[/\\]node_modules/);
   }
+});
+
+test("Smart-Turn resolves from the prepared cache with its pinned size and hash", () => {
+  const file = smartTurnModelPath();
+  assert.equal(fs.statSync(file).size, smartTurn.file.sizeBytes);
+  assert.equal(crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex"), smartTurn.file.sha256);
+  assert.doesNotMatch(file, /live-senses[/\\]vad/);
 });
 
 test("KAI's existing ONNX runtime executes one real Silero v5 frame", async () => {

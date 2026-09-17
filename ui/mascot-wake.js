@@ -6,7 +6,10 @@
   "use strict";
   const FOLLOW_UP_MS = 60000;
   const clock = () => typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
-  const TURN_PAUSES = Object.freeze({ quick: 500, natural: 900, patient: 1400 });
+  const turnApi = root.KaiTurn || (typeof require === "function" ? require("./mascot-turn") : null);
+  const TURN_PAUSES = Object.freeze(Object.fromEntries(Object.entries(turnApi?.POLICIES || {
+    quick: { silenceMs: 500 }, natural: { silenceMs: 900 }, patient: { silenceMs: 1400 },
+  }).map(([name, value]) => [name, value.silenceMs])));
   const SENSITIVITY = Object.freeze({
     quiet: { level: .004, ratio: 1.8, voiceMs: 180 },
     balanced: { level: .012, ratio: 2.2, voiceMs: 240 },
@@ -86,8 +89,8 @@
     }
   }
   class Listener {
-    constructor({ transcribe, wakeRequest, onCommand, onState, onError, onInterrupt = () => {}, onResume = () => {}, onEnd = () => {}, onLevel = () => {}, onEngine = () => {}, createVAD = null, sensitivity = "tv", turnPause = "natural", interruptWithWake = false, followUpMs = FOLLOW_UP_MS, interruptMs = 8000, transcribeMs = 30000 }) {
-      Object.assign(this, { transcribe, wakeRequest, onCommand, onState, onError, onInterrupt, onResume, onEnd, onLevel, onEngine, createVAD, sensitivity, interruptWithWake, followUpMs, interruptMs, transcribeMs });
+    constructor({ transcribe, wakeRequest, onCommand, onState, onError, onInterrupt = () => {}, onResume = () => {}, onEnd = () => {}, onLevel = () => {}, onEngine = () => {}, createVAD = null, turnDetector = null, sensitivity = "tv", turnPause = "natural", interruptWithWake = false, followUpMs = FOLLOW_UP_MS, interruptMs = 8000, transcribeMs = 30000 }) {
+      Object.assign(this, { transcribe, wakeRequest, onCommand, onState, onError, onInterrupt, onResume, onEnd, onLevel, onEngine, createVAD, turnDetector, sensitivity, interruptWithWake, followUpMs, interruptMs, transcribeMs });
       this.turnPause = Object.hasOwn(TURN_PAUSES, turnPause) ? turnPause : "natural";
       this.epoch = 0; this.active = false; this.paused = false; this.engaged = false;
       this.queue = []; this.output = []; this.responding = false; this.serial = 0; this.wakeSerial = null; this.playback = false; this.failures = 0; this.rejectedInterruptions = 0;
@@ -145,13 +148,19 @@
         this.active = true; this.startAbort = null;
         this.onEngine({ id: this.captureMode, fallback: this.captureMode !== "silero-v5",
           reason: sileroError ? String(sileroError.message || sileroError) : null });
+        // Prime the tiny semantic model while the person begins speaking. It
+        // never blocks microphone startup; failure leaves the existing
+        // bounded silence endpoint fully operational.
+        this.turnWarmAbort?.abort();
+        this.turnWarmAbort = new AbortController();
+        this.turnDetector?.warm?.(this.turnWarmAbort.signal).catch?.(() => {});
         if (engaged) this.engage(); this.state();
       } catch (error) { if (epoch === this.epoch) { await this.stop(); throw error; } }
     }
     capturing() { return !!(this.segment || this.activity?.frames.length); }
     state() {
       const value = !this.active ? "off" : this.paused ? "paused" : this.activity?.calibrating ? "calibrating" : this.segment?.started ? "capturing" :
-        this.processing ? "transcribing" : this.engaged ? "listening" : "waiting";
+        this.processing ? "transcribing" : this.pendingTurn?.waiting ? "holding" : this.engaged ? "listening" : "waiting";
       if (value !== this.phase) { this.phase = value; this.onState(value); }
     }
     engage() {
@@ -229,12 +238,17 @@
       });
       this.abort?.abort(); this.releaseInterruption(); this.state();
     }
-    clearTurn() { clearTimeout(this.turnTimer); this.pendingTurn = null; }
+    clearSemanticHold() {
+      clearTimeout(this.semanticTimer); this.semanticTimer = null;
+      if (this.pendingTurn) { this.pendingTurn.waiting = false; this.pendingTurn.holdUntil = 0; }
+    }
+    clearTurn() { clearTimeout(this.turnTimer); this.clearSemanticHold(); this.pendingTurn = null; }
     cancelTurn() { const wasPaused = this.paused; this.pause(true); this.pause(wasPaused); }
     collect(command, item, epoch) {
       if (!this.pendingTurn) {
         this.pendingTurn = { text: "", serial: item.serial, epoch, segments: 0,
-          timing: { captureMs: 0, sttMs: 0, lastSpeechEndedAt: 0, lastRecognizedAt: 0 } };
+          audio: null, waiting: false, holdUntil: 0,
+          timing: { captureMs: 0, sttMs: 0, semanticMs: 0, lastSpeechEndedAt: 0, lastRecognizedAt: 0 } };
         this.turnTimer = setTimeout(() => {
           if (!this.pendingTurn || epoch !== this.epoch) return;
           this.cancelTurn();
@@ -247,20 +261,55 @@
         this.cancelTurn(); this.onError(new Error("Please ask a shorter question."), { recoverable: true }); return;
       }
       this.pendingTurn.text = text;
+      if (item.turnAudio) this.pendingTurn.audio = item.turnAudio;
       this.pendingTurn.segments++;
       this.pendingTurn.timing.captureMs += item.audio.length / item.sampleRate * 1000;
       this.pendingTurn.timing.sttMs += item.transcribeMs || 0;
+      this.pendingTurn.timing.semanticMs += item.semanticMs || 0;
       this.pendingTurn.timing.lastSpeechEndedAt = Math.max(this.pendingTurn.timing.lastSpeechEndedAt, item.speechEndedAt || 0);
       this.pendingTurn.timing.lastRecognizedAt = Math.max(this.pendingTurn.timing.lastRecognizedAt, item.recognizedAt || 0);
+      const decision = item.force ? { complete: true } : this.turnDetector?.decide?.(item.turnResult, text, this.turnPause) || { complete: true };
+      // Smart-Turn's context window is eight seconds; twenty seconds is the
+      // hard conversational bound. Never let a classifier keep a live turn
+      // open indefinitely, and always honor explicit tap-to-send.
+      if (decision.complete || this.pendingTurn.timing.captureMs >= 20000) this.clearSemanticHold();
+      else this.scheduleSemanticHold(epoch, decision.holdMs);
     }
-    async deliverTurn(epoch = this.epoch) {
+    scheduleSemanticHold(epoch, holdMs) {
+      clearTimeout(this.semanticTimer);
+      const turn = this.pendingTurn;
+      if (!turn || turn.epoch !== epoch) return;
+      const delay = Math.max(250, Math.min(8000, Number(holdMs) || 4000));
+      turn.waiting = true; turn.holdUntil = Date.now() + delay;
+      const finish = () => {
+        if (!this.pendingTurn || this.pendingTurn !== turn || epoch !== this.epoch) return;
+        // Speech may have begun just as the bound expired. Poll briefly until
+        // capture/recognition settles, then let that newer evidence decide.
+        if (this.capturing() || this.processing || this.queue.length) {
+          this.semanticTimer = setTimeout(finish, 250); this.semanticTimer.unref?.(); return;
+        }
+        turn.waiting = false; turn.holdUntil = 0; this.semanticTimer = null;
+        this.deliverTurn(epoch, true);
+      };
+      this.semanticTimer = setTimeout(finish, delay);
+      this.semanticTimer.unref?.();
+      this.state();
+    }
+    holding() { return !!this.pendingTurn?.waiting; }
+    commitPending() {
+      if (!this.pendingTurn) return;
+      this.clearSemanticHold();
+      return this.deliverTurn(this.epoch, true);
+    }
+    async deliverTurn(epoch = this.epoch, force = false) {
       if (this.processing || this.delivering || !this.pendingTurn || this.queue.length || this.capturing() ||
-          !this.active || this.paused || epoch !== this.epoch) return;
+          !this.active || this.paused || epoch !== this.epoch || (this.pendingTurn.waiting && !force)) return;
       const turn = this.pendingTurn;
       this.clearTurn();
       if (turn.epoch !== epoch) return;
       this.delivering = true;
       const timing = { captureMs: turn.timing.captureMs, sttMs: turn.timing.sttMs,
+        semanticMs: turn.timing.semanticMs,
         endpointMs: Math.max(0, clock() - (turn.timing.lastRecognizedAt || clock())) };
       try { await this.onCommand(turn.text, { source: "voice", serial: turn.serial, segments: turn.segments, timing }); this.releaseInterruption(turn.serial); }
       catch (error) { if (epoch === this.epoch && !this.paused) this.onError(error, { recoverable: true }); }
@@ -338,6 +387,8 @@
     }
     flush() {
       if (!this.active || this.paused) return;
+      if (this.pendingTurn?.waiting && !this.capturing()) return this.commitPending();
+      if (this.segment) this.segment.force = true;
       if (this.captureEngine) return this.captureEngine.flush().catch(error => this.onError(error, { recoverable: true }));
       const audio = this.activity.finish();
       if (audio) return this.submit(audio, this.epoch);
@@ -360,7 +411,9 @@
       let timer, cancelled;
       const startedAt = clock();
       try {
-        const result = await Promise.race([
+        const previousAudio = this.pendingTurn?.audio || null;
+        item.turnAudio = this.turnDetector?.append?.(previousAudio, item.audio, item.sampleRate) || null;
+        const stt = Promise.race([
           this.transcribe(item.audio, item.sampleRate, abort.signal),
           new Promise((resolve, reject) => {
             cancelled = () => reject(abort.signal.reason || new Error("Listening cancelled."));
@@ -371,6 +424,11 @@
             }, this.transcribeMs);
           }),
         ]);
+        const endpoint = item.force || !item.turnAudio || !this.turnDetector?.analyze ? Promise.resolve(null) :
+          this.turnDetector.analyze(item.turnAudio.samples, item.turnAudio.sampleRate, abort.signal);
+        const [result, turnResult] = await Promise.all([stt, endpoint]);
+        item.turnResult = turnResult;
+        item.semanticMs = turnResult?.ms || 0;
         item.recognizedAt = clock();
         return result;
       } finally {
@@ -439,6 +497,7 @@
       this.epoch++; this.clearTurn(); this.active = false; this.processing = false; this.delivering = false; this.paused = false;
       this.engaged = false; this.wakeSerial = null; this.responding = false; this.playback = false; this.interruptBlocked = false; this.segment = null; this.queue = []; this.output = [];
       clearTimeout(this.timer); this.abort?.abort(); this.abort = null; this.startAbort?.abort(); this.startAbort = null;
+      this.turnWarmAbort?.abort(); this.turnWarmAbort = null;
       const captureEngine = this.captureEngine; this.captureEngine = null; this.captureMode = null;
       this.capture?.disconnect(); this.source?.disconnect();
       if (this.capture) this.capture.port.onmessage = null;

@@ -6,7 +6,10 @@
   "use strict";
 
   const ASSET_BASE = "/live-senses/vad/";
-  const PAUSES = Object.freeze({ quick: 500, natural: 900, patient: 1400 });
+  const turn = root.KaiTurn || (typeof require === "function" ? require("./mascot-turn") : null);
+  const PAUSES = Object.freeze(Object.fromEntries(Object.entries(turn?.POLICIES || {
+    quick: { silenceMs: 500 }, natural: { silenceMs: 900 }, patient: { silenceMs: 1400 },
+  }).map(([name, value]) => [name, value.silenceMs])));
   const PROFILES = Object.freeze({
     quiet: { threshold: .35, minSpeechMs: 180 },
     balanced: { threshold: .5, minSpeechMs: 240 },

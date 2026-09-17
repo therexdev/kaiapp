@@ -39,7 +39,7 @@ test("One turn identity cancels every registered subsystem and rejects late work
 test("A spoken turn completes only after both the model and scoped speech drain", () => {
   const f = fixture();
   const turn = f.session.begin({ source: "voice", expectSpeech: true,
-    preflight: { captureMs: 800, sttMs: 320, endpointMs: 80 } });
+    preflight: { captureMs: 800, sttMs: 320, semanticMs: 45, endpointMs: 80 } });
   f.advance(600); turn.mark("first_token");
   f.advance(240); turn.mark("tts_started");
   f.advance(160); turn.mark("playback_started"); turn.setPhase("speaking");
@@ -52,12 +52,14 @@ test("A spoken turn completes only after both the model and scoped speech drain"
   assert.deepEqual(saved.metrics, {
     captureMs: 800,
     sttEndpointMs: 400,
+    semanticMs: 45,
     modelFirstTokenMs: 600,
     ttsFirstAudioMs: 400,
     voiceToVoiceMs: 1400,
     totalMs: 2900,
   });
   assert.deepEqual(f.session.summary().voiceToVoice, { samples: 1, p50: 1400, p95: 1400 });
+  assert.deepEqual(f.session.summary().semantic, { samples: 1, p50: 45, p95: 45 });
 });
 
 test("Stage watchdogs reset on activity and fail one turn with a useful stage", () => {

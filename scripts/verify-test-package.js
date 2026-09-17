@@ -1,10 +1,12 @@
 "use strict";
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const assert = require("assert/strict");
 const asar = require("@electron/asar");
 const yaml = require("js-yaml");
 const { TEST_FEED } = require("../core/lib/release-channel");
+const smartTurn = require("../core/runtimes/smart-turn.json");
 
 const archives = fs.readdirSync("dist", { recursive: true }).filter(p => path.basename(p) === "app.asar");
 assert.ok(archives.length, "No packaged app found");
@@ -27,8 +29,8 @@ for (const archive of archives) {
   for (const required of ["ui/workflows.js", "ui/workflows.css", "ui/workflow-model.js", "electron/workflow-engine.js", "electron/workflow-events.js", "electron/workflow-assistant.js", "electron/workflow-values.js", "electron/workflow-schedules.js", "core/lib/composio-triggers.js", "electron/pocket-voice.js", "electron/pocket-voice-worker.js", "ui/mascot-pocket.js", "ui/pocket-credits.html", "core/runtimes/pocket.json", "electron/computer-highlight.js", "electron/computer-control.js", "electron/native-computer.js", "ui/computer-tools.js", "electron/providers.js", "electron/provider-http.js", "ui/desktop-providers.js", "electron/mascot.js", "electron/mascot-layout.js", "electron/windows-voice.js", "electron/mascot-preload.js", "ui/mascot.html",
     "ui/brand.js", "ui/brand-mark.svg", "ui/kai-character.css", "ui/assets/kai-character.png", "ui/assets/kai-voice-hello.wav", "ui/node-brand.css",
     "ui/mascot.js", "ui/mascot-client.js", "ui/mascot.css", "ui/kai-robot.svg", "ui/mascot-launcher.js",
-    "ui/mascot-speech.js", "ui/mascot-vad.js", "ui/mascot-wake.js", "ui/mascot-live.js", "ui/mascot-audio-worklet.js", "ui/mascot-tools.js", "ui/app-navigation.js", "core/lib/app-tools.js", "core/lib/live-senses-assets.js", "electron/tool-approval.js",
-    "electron/desktop-actions.js", "core/lib/speech.js", "core/lib/speech-worker.js", "core/lib/speech-wasm.js", "core/lib/speech-wasm-runtime.mjs", "core/runtimes/kokoro.json"]) {
+    "ui/mascot-speech.js", "ui/mascot-turn.js", "ui/mascot-vad.js", "ui/mascot-wake.js", "ui/mascot-live.js", "ui/mascot-audio-worklet.js", "ui/mascot-tools.js", "ui/app-navigation.js", "core/lib/app-tools.js", "core/lib/live-senses-assets.js", "electron/tool-approval.js",
+    "electron/desktop-actions.js", "core/lib/speech.js", "core/lib/speech-worker.js", "core/lib/speech-wasm.js", "core/lib/speech-wasm-runtime.mjs", "core/lib/smart-turn.js", "core/lib/smart-turn-worker.js", "core/runtimes/kokoro.json", "core/runtimes/smart-turn.json"]) {
     try {
       // ASAR's directory walker splits on the host separator. Forward slashes
       // happen to work at one level on Windows, but fail for core/lib/*.js.
@@ -48,6 +50,9 @@ for (const archive of archives) {
   for (const [asset, minimum] of [["vad/bundle.min.js", 50000], ["vad/vad.worklet.bundle.min.js", 2000], ["vad/silero_vad_v5.onnx", 2000000], ["LICENSE.txt", 1000]]) {
     assert.ok(fs.statSync(path.join(liveSenses, asset)).size > minimum, "Missing packaged Live Senses asset: " + asset);
   }
+  const turnModel = path.join(liveSenses, "turn", smartTurn.file.path);
+  assert.equal(fs.statSync(turnModel).size, smartTurn.file.sizeBytes, "Packaged Smart-Turn model has the wrong size");
+  assert.equal(crypto.createHash("sha256").update(fs.readFileSync(turnModel)).digest("hex"), smartTurn.file.sha256, "Packaged Smart-Turn model failed its pin");
   if (process.platform === "win32") {
     const native = path.join(file + ".unpacked", "node_modules/sherpa-onnx-win-x64");
     for (const asset of ["sherpa-onnx.node", "onnxruntime.dll", "onnxruntime_providers_shared.dll", "sherpa-onnx-c-api.dll", "sherpa-onnx-cxx-api.dll"]) assert.ok(fs.statSync(path.join(native, asset)).size > 0, "Missing Pocket native runtime: " + asset);

@@ -18,7 +18,9 @@
     "code": "node cli/koinos-code.js",
     "test": "node --test --test-concurrency=2 \"core/test/*.test.js\"",
     "start": "node scripts/run-test.js",
-    "predist": "node scripts/build-windows-helpers.js",
+    "live-senses:prepare": "node scripts/prepare-live-senses.js",
+    "postinstall": "node scripts/prepare-live-senses.js",
+    "predist": "node scripts/prepare-live-senses.js && node scripts/build-windows-helpers.js",
     "dist": "electron-builder",
     "dist:mac": "electron-builder --mac --x64 --arm64 --publish never",
     "version:set": "node core/scripts/set-version.js",
@@ -66,6 +68,10 @@
       {
         "from": "node_modules/@ricky0123/vad-web/dist/silero_vad_v5.onnx",
         "to": "live-senses/vad/silero_vad_v5.onnx"
+      },
+      {
+        "from": "node_modules/.cache/kai-live-senses/turn/smart-turn-v3.2-cpu.onnx",
+        "to": "live-senses/turn/smart-turn-v3.2-cpu.onnx"
       },
       {
         "from": "docs/licenses/KAI-LIVE-SENSES.txt",

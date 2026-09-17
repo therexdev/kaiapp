@@ -2,6 +2,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const smartTurn = require("../runtimes/smart-turn.json");
 
 const ROUTES = Object.freeze({
   "/live-senses/vad/ort.min.js": "ort.wasm.min.js",
@@ -37,4 +38,11 @@ function liveSensesAssets({ rootDir = path.join(__dirname, "..", ".."), resource
   return assets;
 }
 
-module.exports = { ROUTES, liveSensesAssets };
+/** Resolve the bundled semantic endpoint model without serving it over HTTP. */
+function smartTurnModelPath({ rootDir = path.join(__dirname, "..", ".."), resourcesPath = process.resourcesPath } = {}) {
+  const packaged = resourcesPath ? path.join(resourcesPath, "live-senses", "turn", smartTurn.file.path) : "";
+  if (packaged && fs.existsSync(packaged)) return packaged;
+  return path.join(rootDir, "node_modules", ".cache", "kai-live-senses", "turn", smartTurn.file.path);
+}
+
+module.exports = { ROUTES, liveSensesAssets, smartTurnModelPath };

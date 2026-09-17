@@ -2,6 +2,7 @@
 const { test } = require("node:test"), assert = require("node:assert/strict");
 const { Listener, Activity, TURN_PAUSES } = require("../../ui/mascot-wake");
 const { wakeRequest } = require("../../ui/mascot-client");
+const { Detector } = require("../../ui/mascot-turn");
 const tick = () => new Promise(r => setImmediate(r));
 function fixture(t, options = {}) {
   const commands = [], pending = [], errors = [];
@@ -39,6 +40,44 @@ test("Continuing during transcription joins the question instead of starting and
   const second = f.frames(9); f.pending.shift()({ text: "in Seattle?" }); await second;
   assert.deepEqual(f.commands, ["What is the weather tomorrow in Seattle?"]);
   assert.equal(f.listener.pendingTurn, null); assert.deepEqual(f.errors, []);
+});
+test("Smart-Turn holds a mid-thought pause and rechecks the accumulated continuation", async t => {
+  const outcomes = [
+    { available: true, probability: .12, ms: 7 },
+    { available: true, probability: .91, ms: 8 },
+  ];
+  const detector = new Detector({ encode: audio => audio, analyze: async () => outcomes.shift() });
+  const f = fixture(t, { turnDetector: detector });
+  let job = f.say(); f.pending.shift()({ text: "Can you open my" }); await job;
+  assert.deepEqual(f.commands, []); assert.equal(f.listener.holding(), true); assert.equal(f.listener.phase, "holding");
+  job = f.say(); f.pending.shift()({ text: "calendar?" }); await job;
+  assert.deepEqual(f.commands, ["Can you open my calendar?"]);
+  assert.equal(f.listener.holding(), false);
+});
+test("A held semantic turn can be sent now and always expires at its bounded fallback", async t => {
+  const detector = {
+    append: (_prior, samples, sampleRate) => ({ samples, sampleRate }),
+    analyze: async () => ({ available: true, probability: .1, ms: 2 }),
+    decide: () => ({ complete: false, semantic: true, holdMs: 20 }),
+  };
+  const manual = fixture(t, { turnDetector: detector });
+  let job = manual.say(); manual.pending.shift()({ text: "Let me think" }); await job;
+  assert.equal(manual.listener.holding(), true);
+  await manual.listener.commitPending();
+  assert.deepEqual(manual.commands, ["Let me think"]);
+
+  const bounded = fixture(t, { turnDetector: detector });
+  job = bounded.say(); bounded.pending.shift()({ text: "A fragment" }); await job;
+  assert.equal(bounded.listener.holding(), true);
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.deepEqual(bounded.commands, ["A fragment"]);
+});
+test("Smart-Turn failure preserves the existing silence endpoint instead of losing speech", async t => {
+  const detector = new Detector({ encode: audio => audio, analyze: async () => { throw new Error("model unavailable"); } });
+  const f = fixture(t, { turnDetector: detector });
+  const job = f.say(); f.pending.shift()({ text: "Use the safe fallback." }); await job;
+  assert.deepEqual(f.commands, ["Use the safe fallback."]);
+  assert.deepEqual(f.errors, []);
 });
 test("A guarded KAI cue stays quick, cancels before a continued question, and cannot authorize movie dialogue on the next reply", async t => {
   let stopped = 0;
@@ -92,5 +131,6 @@ test("Completed voice commands carry local capture and transcription timing into
   assert.equal(delivered[0].detail.segments, 1);
   assert.ok(delivered[0].detail.timing.captureMs > 0);
   assert.ok(delivered[0].detail.timing.sttMs >= 0);
+  assert.ok(delivered[0].detail.timing.semanticMs >= 0);
   assert.ok(delivered[0].detail.timing.endpointMs >= 0);
 });

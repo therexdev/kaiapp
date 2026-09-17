@@ -46,6 +46,7 @@
       this.preflight = {
         captureMs: safeNumber(options.preflight?.captureMs),
         sttMs: safeNumber(options.preflight?.sttMs),
+        semanticMs: safeNumber(options.preflight?.semanticMs),
         endpointMs: safeNumber(options.preflight?.endpointMs),
       };
       this.meta = options.meta && typeof options.meta === "object" ? options.meta : {};
@@ -226,6 +227,7 @@
         metrics: Object.freeze({
           captureMs: turn.source === "voice" ? turn.preflight.captureMs : null,
           sttEndpointMs,
+          semanticMs: turn.source === "voice" ? turn.preflight.semanticMs : null,
           modelFirstTokenMs: modelMs,
           ttsFirstAudioMs: ttsMs,
           voiceToVoiceMs,
@@ -245,6 +247,7 @@
         failed: turns.filter(turn => turn.status === "failed").length,
         capture: metric(values("captureMs")),
         sttEndpoint: metric(values("sttEndpointMs")),
+        semantic: metric(values("semanticMs")),
         modelFirstToken: metric(values("modelFirstTokenMs")),
         ttsFirstAudio: metric(values("ttsFirstAudioMs")),
         voiceToVoice: metric(values("voiceToVoiceMs")),

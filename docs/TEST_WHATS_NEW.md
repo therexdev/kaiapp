@@ -1,3 +1,10 @@
+## Smart-Turn semantic listening
+
+- KAI now distinguishes a quiet pause from a finished thought with the local Smart-Turn v3.2 acoustic model. A breath after “Can you help me…” can stay part of the same question instead of being sent early.
+- Smart-Turn runs in parallel with local Whisper inside an isolated worker and reuses KAI's existing ONNX/Transformers runtime. Audio stays on the computer, the worker releases after idle time, and no second heavyweight inference stack was added.
+- Quick, Natural and Patient now tune the complete turn policy: trailing pause, semantic confidence and a bounded 2.5/4/6-second wait. Keep speaking to continue, or tap the mic to send immediately.
+- If the semantic model cannot start, KAI visibly falls back to the proven silence endpoint. Wake phrases, the one-minute follow-up window, guarded “KAI” interruption and local transcription are unchanged.
+
 ## Silero listening for KAI Live Senses
 
 - KAI now uses local Silero VAD v5 as its primary `speech / not speech` detector. It reuses the microphone stream and ONNX runtime KAI already owns, with one capture worklet and one inference lane rather than a parallel audio stack.
@@ -10,7 +17,7 @@
 - KAI's listening, model work, tools, streamed text, voice synthesis and playback now share one turn identity and cancellation boundary. Stop, a wake-guarded interruption, or a newer request retires the whole old turn so late text or audio cannot reappear.
 - Spoken replies remain active until both the model and the scoped audio queue finish. Voice failures leave the text answer intact, and tool approvals pause recovery timers while you review them.
 - New local, content-free timing diagnostics measure capture, speech recognition/endpointing, first model text, first audible speech and total turn time. First-response and stream-stall watchdogs recover KAI instead of leaving the companion indefinitely busy.
-- This is the shared turn/session boundary underneath Silero listening. Smart-Turn endpointing and optional camera/screen senses will migrate onto it in later Test revisions.
+- This is the shared turn/session boundary underneath Silero and Smart-Turn listening. Optional camera/screen senses will migrate onto it in later Test revisions.
 
 ## Verified Windows releases
 

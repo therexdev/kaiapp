@@ -101,7 +101,7 @@ function hasImageParts(messages) {
 }
 
 class Gateway {
-  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, staticAssets, earn, network, feedback, chats, docs, voice, speech, tools, memory, mcp, nodeRuntime, email, calendar, koinos, koinosNode, teams, account, dev, bench, agents, code, onEvent }) {
+  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, staticAssets, earn, network, feedback, chats, docs, voice, speech, turn, tools, memory, mcp, nodeRuntime, email, calendar, koinos, koinosNode, teams, account, dev, bench, agents, code, onEvent }) {
     this.tools = tools || null; // unified tool registry (agents/MCP/memory/…)
     this.memory = memory || null; // cross-chat memory store
     this.mcp = mcp || null; // MCP server manager
@@ -118,6 +118,7 @@ class Gateway {
     this.code = code || null; // Koinos Code in the app (task #60 v3) — approval-carded coding agent
     this.voice = voice || null; // local speech-to-text (whisper)
     this.speech = speech || null;
+    this.turn = turn || null; // local acoustic end-of-turn classifier
     this.feedback = feedback || null; // relay to the project's feedback inbox
     this.chats = chats || null; // local chat history store
     this.docs = docs || null; // local documents store
@@ -794,6 +795,39 @@ class Gateway {
       } catch (e) {
         const msg = String(e.message);
         if (!res.destroyed) return this._json(res, /not set up|busy/.test(msg) ? 503 : 400, { ok: false, error: msg });
+      } finally { res.removeListener("close", cancel); }
+      return;
+    }
+    // Smart-Turn runs beside Whisper but remains a separate stage: the
+    // renderer sends the accumulated current turn here while /core/transcribe
+    // handles only the newest segment. Both stay on loopback and run in
+    // parallel; a detector failure is recoverable silence-only endpointing.
+    if (this.turn && path === "/core/turn" && req.method === "GET") {
+      return this._json(res, 200, { ok: true, ...this.turn.status() });
+    }
+    if (this.turn && path === "/core/turn/warm" && req.method === "POST") {
+      const abort = new AbortController();
+      const cancel = () => { if (!res.writableEnded) abort.abort(); };
+      res.on("close", cancel);
+      try {
+        const result = await this.turn.warm({ signal: abort.signal });
+        if (!res.destroyed) return this._json(res, 200, { ok: true, ...result });
+      } catch (e) {
+        if (!res.destroyed) return this._json(res, 503, { ok: false, error: String(e.message) });
+      } finally { res.removeListener("close", cancel); }
+      return;
+    }
+    if (this.turn && path === "/core/turn" && req.method === "POST") {
+      const abort = new AbortController();
+      const cancel = () => { if (!res.writableEnded) abort.abort(); };
+      res.on("close", cancel);
+      try {
+        const wav = await this._readBody(req);
+        const result = await this.turn.analyze(wav, { signal: abort.signal });
+        if (!res.destroyed) return this._json(res, 200, { ok: true, ...result });
+      } catch (e) {
+        const message = String(e.message);
+        if (!res.destroyed) return this._json(res, /unavailable|busy|timed out|stopped/i.test(message) ? 503 : 400, { ok: false, error: message });
       } finally { res.removeListener("close", cancel); }
       return;
     }
