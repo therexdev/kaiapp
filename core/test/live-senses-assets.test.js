@@ -65,11 +65,18 @@ test("Gateway serves only explicitly mapped Live Senses files with browser-safe 
   assert.equal((await fetch(`http://127.0.0.1:${port}/live-senses/vad/package.json`)).status, 404);
 });
 
+test("Mascot CSP permits local WASM compilation without enabling JavaScript eval", () => {
+  const html = fs.readFileSync(path.join(__dirname, "../../ui/mascot.html"), "utf8");
+  const policy = html.match(/http-equiv="Content-Security-Policy"[^>]+content="([^"]+)"/)?.[1] || "";
+  assert.match(policy, /script-src[^;]*'wasm-unsafe-eval'/);
+  assert.doesNotMatch(policy, /(?:^|\s)'unsafe-eval'(?:\s|;|$)/);
+});
+
 const CHROMIUM = process.env.KAI_TEST_CHROMIUM || "/opt/pw-browsers/chromium";
 test("Chromium compiles the packaged ONNX runtime and Silero v5 model together", { skip: !fs.existsSync(CHROMIUM), timeout: 30000 }, async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-live-browser-"));
   fs.copyFileSync(path.join(__dirname, "../../ui/mascot-vad.js"), path.join(dir, "mascot-vad.js"));
-  fs.writeFileSync(path.join(dir, "index.html"), '<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src \'self\'; script-src \'self\'; connect-src \'self\'"><script src="mascot-vad.js"></script>');
+  fs.writeFileSync(path.join(dir, "index.html"), '<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src \'self\'; script-src \'self\' \'wasm-unsafe-eval\'; connect-src \'self\'"><script src="mascot-vad.js"></script>');
   const gateway = new Gateway({ port: 0, uiDir: dir, staticAssets: liveSensesAssets() });
   const port = await gateway.listen();
   let browser;

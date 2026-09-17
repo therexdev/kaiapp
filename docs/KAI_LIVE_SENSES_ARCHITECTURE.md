@@ -61,7 +61,7 @@ flowchart TD
 
 The Voice & listening panel reports either **Silero VAD · local speech detection active** or the calibrated compatibility fallback. The fallback begins only after Silero initialization fails, so the two worklets never run together. Quiet, Everyday room and TV nearby now map to Silero probability thresholds, while Quick, Natural and Patient retain their existing trailing-pause behavior. Wake gating, Whisper, echo rejection, follow-up state and guarded “KAI” interruption still run after that boundary and are unchanged.
 
-Core serves six exact, allowlisted local asset routes rather than exposing `node_modules` or a resources directory. Installer builds copy only the VAD bundle, worklet and 2.3 MB model; they reuse the ONNX Runtime already packaged for KAI's speech systems instead of shipping vad-web's second runtime.
+Core serves six exact, allowlisted local asset routes rather than exposing `node_modules` or a resources directory. Installer builds copy only the VAD bundle, worklet and 2.3 MB model; they reuse the ONNX Runtime already packaged for KAI's speech systems instead of shipping vad-web's second runtime. The mascot CSP grants `wasm-unsafe-eval` solely for local WASM compilation and does not grant general JavaScript `unsafe-eval`.
 
 The listener passes local capture, transcription and endpoint timing into the KAI turn. The turn then records first model token, first TTS work, first audible playback, model completion and speech completion. `window.kaiLiveDiagnostics.summary()` provides session p50/p95 measurements; `recent()` provides bounded per-turn stage timelines. These are development diagnostics and never include text.
 
