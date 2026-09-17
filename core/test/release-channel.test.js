@@ -8,7 +8,7 @@ const semver = require("semver");
 const yaml = require("js-yaml");
 const { channelConfig, configureDesktop, configureUpdater, TEST_FEED } = require("../lib/release-channel");
 const { prepare } = require("../../scripts/prepare-test-build");
-const { stableCompatibility, findTestRelease } = require("../../scripts/publish-test-build");
+const { stableCompatibility, findTestRelease, purgeIncompleteAssets, uploadReleaseAssets } = require("../../scripts/publish-test-build");
 const { GitHubProvider } = require("electron-updater/out/providers/GitHubProvider");
 const { GenericProvider } = require("electron-updater/out/providers/GenericProvider");
 
@@ -102,10 +102,10 @@ test("Compatibility feeds reject a prerelease version or untrusted asset path", 
 
 test("Release lookup requests only the rolling release and bounds its response", () => {
   const result = findTestRelease((...args) => {
-    assert.deepEqual(args, ["api", "repos/therexdev/kaiapp/releases/tags/test-build", "--jq", "{prerelease,draft}"]);
-    return '{"prerelease":true,"draft":false}';
+    assert.deepEqual(args, ["api", "repos/therexdev/kaiapp/releases/tags/test-build", "--jq", "{id,prerelease,draft}"]);
+    return '{"id":42,"prerelease":true,"draft":false}';
   });
-  assert.deepEqual(result, { prerelease: true, draft: false });
+  assert.deepEqual(result, { id: 42, prerelease: true, draft: false });
 });
 
 test("Only a confirmed missing release permits creation; authentication errors propagate", () => {
@@ -113,4 +113,31 @@ test("Only a confirmed missing release permits creation; authentication errors p
   assert.equal(findTestRelease(failure(404)), null);
   assert.throws(() => findTestRelease(failure(403)), /GitHub failed/);
   assert.throws(() => findTestRelease(() => { throw new Error("network unavailable"); }), /network unavailable/);
+});
+
+test("Test publication removes only incomplete assets and retries one transient upload at a time", () => {
+  const calls = []; let listings = 0, uploads = 0;
+  const gh = (...args) => {
+    calls.push(args);
+    if (args[0] === "api" && args[1] === "--paginate") {
+      listings++;
+      return listings === 1 ? [
+        '{"id":1,"name":"old-good.exe","state":"uploaded"}',
+        '{"id":2,"name":"broken.AppImage","state":"starter"}',
+      ].join("\n") : listings === 2 ? '{"id":3,"name":"new.AppImage","state":"starter"}' : "";
+    }
+    if (args[0] === "release") {
+      uploads++;
+      if (uploads === 1) throw Object.assign(new Error("upload failed"), { stderr: "HTTP 500: Error saving asset" });
+    }
+    return "";
+  };
+  assert.deepEqual(purgeIncompleteAssets(gh, 42), ["broken.AppImage"]);
+  const waits = [];
+  uploadReleaseAssets(gh, 42, ["/tmp/new.AppImage", "/tmp/feed.yml"], { wait: ms => waits.push(ms) });
+  assert.deepEqual(waits, [5000]);
+  assert.equal(uploads, 3, "the failed file is retried, then the next file uploads once");
+  assert.ok(calls.some(args => args.join(" ").includes("releases/assets/2")));
+  assert.ok(calls.some(args => args.join(" ").includes("releases/assets/3")));
+  assert.ok(calls.filter(args => args[0] === "release").every(args => args.filter(value => /\.(?:AppImage|yml)$/.test(value)).length === 1));
 });

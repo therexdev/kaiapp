@@ -12,12 +12,55 @@ const REPO = "therexdev/kaiapp";
 
 function findTestRelease(gh) {
   try {
-    return JSON.parse(gh("api", `repos/${REPO}/releases/tags/${TAG}`, "--jq", "{prerelease,draft}"));
+    return JSON.parse(gh("api", `repos/${REPO}/releases/tags/${TAG}`, "--jq", "{id,prerelease,draft}"));
   } catch (error) {
     // A missing first release is expected. Auth/network failures must stop
     // publication, rather than being mistaken for permission to create one.
     if (error.status === 1 && /HTTP 404/.test(String(error.stderr))) return null;
     throw error;
+  }
+}
+
+function releaseAssets(gh, releaseId) {
+  const output = gh("api", "--paginate", `repos/${REPO}/releases/${releaseId}/assets?per_page=100`,
+    "--jq", ".[] | {id,name,state}").trim();
+  return output ? output.split(/\r?\n/).map(line => JSON.parse(line)) : [];
+}
+
+function purgeIncompleteAssets(gh, releaseId, name = null) {
+  const removed = [];
+  for (const asset of releaseAssets(gh, releaseId)) {
+    if (asset.state === "uploaded" || (name && asset.name !== name)) continue;
+    gh("api", "-X", "DELETE", `repos/${REPO}/releases/assets/${asset.id}`);
+    removed.push(asset.name);
+  }
+  return removed;
+}
+
+function retryableUpload(error) {
+  const detail = String(error?.stderr || error?.message || error);
+  return /HTTP (?:429|5\d\d)|ECONNRESET|ETIMEDOUT|timeout|connection reset|remote end closed/i.test(detail);
+}
+
+function uploadReleaseAssets(gh, releaseId, files, { attempts = 3, wait = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms) } = {}) {
+  // An interrupted GitHub upload leaves a non-downloadable `starter` record.
+  // Remove only incomplete records; versioned, successfully uploaded binaries
+  // remain available for clients already downloading an older Test build.
+  purgeIncompleteAssets(gh, releaseId);
+  for (const file of files) {
+    const name = path.basename(file);
+    for (let attempt = 1; ; attempt++) {
+      try {
+        // One file per request prevents a single large Linux image failure
+        // from replaying every Windows/Linux artifact in the release.
+        gh("release", "upload", TAG, "--repo", REPO, file, "--clobber");
+        break;
+      } catch (error) {
+        if (attempt >= attempts || !retryableUpload(error)) throw error;
+        purgeIncompleteAssets(gh, releaseId, name);
+        wait(attempt * 5000);
+      }
+    }
   }
 }
 
@@ -78,18 +121,20 @@ function publish(dir) {
     const whatsNew = fs.readFileSync(path.join(__dirname, "../docs/TEST_WHATS_NEW.md"), "utf8").trim();
     const setup = binaries.find(n => /^Koinos-AI-Test-Setup-.*\.exe$/.test(n));
     fs.writeFileSync(body, `## Koinos AI Test ${version}\n\n[Download the Windows test installer](https://github.com/${REPO}/releases/download/${TAG}/${setup})\n\n${whatsNew}\n\nUses your existing live Koinos AI chats, settings, wallet, models and node-data location. Test updates stay on this channel; other users stay on Live. Local API: port 41100.\n\nBefore switching, choose **Quit Koinos AI** from the running app’s tray menu (closing the window may only hide it), then install and open Test. Only one version can open the shared profile at a time. The saved wallet session and earning preference are reused; unlock your existing wallet if prompted and check node/earning status after the restart. Test backs up configuration and encrypted wallet/session files before first opening the profile for each version. Your existing live network and node database remain in use. Older isolated Test profiles are left untouched.\n\nSource commit: ${process.env.GITHUB_SHA}\nBuild: https://github.com/${REPO}/actions/runs/${process.env.GITHUB_RUN_ID}\n\nThe rolling tag identifies this download channel. The versioned build JSON and checksums identify each build's exact source and files. Older versioned binaries remain here for in-flight downloads. The latest*.yml files are compatibility pointers to live ${latest.tag_name}, never test installers.\n`);
-    const existing = findTestRelease(gh);
+    let existing = findTestRelease(gh);
     if (!existing) {
       gh("release", "create", TAG, "--repo", REPO, "--target", process.env.GITHUB_SHA,
         "--draft", "--prerelease", "--latest=false", "--title", "Koinos AI Test", "--notes-file", body);
+      existing = findTestRelease(gh);
+      if (!existing) throw new Error("Created Test release could not be read back");
     } else if (!existing.prerelease) {
       throw new Error("test-build must remain a prerelease");
     }
     // Binaries first, feeds last. Retain old versioned binaries so an app
     // already downloading a previous build can finish during publication.
-    gh("release", "upload", TAG, "--repo", REPO, ...binaries.map(n => path.join(dir, n)), checksum, provenance, path.join(dir, windows.reportFile), "--clobber");
-    gh("release", "upload", TAG, "--repo", REPO, ...compatibility, "--clobber");
-    gh("release", "upload", TAG, "--repo", REPO, ...feeds.map(n => path.join(dir, n)), "--clobber");
+    uploadReleaseAssets(gh, existing.id, [...binaries.map(n => path.join(dir, n)), checksum, provenance, path.join(dir, windows.reportFile)]);
+    uploadReleaseAssets(gh, existing.id, compatibility);
+    uploadReleaseAssets(gh, existing.id, feeds.map(n => path.join(dir, n)));
     gh("release", "edit", TAG, "--repo", REPO, "--draft=false", "--prerelease", "--latest=false",
       "--title", `Koinos AI Test ${version}`, "--notes-file", body);
     console.log(`Published Test ${version}; live remains ${latest.tag_name}`);
@@ -97,4 +142,4 @@ function publish(dir) {
 }
 
 if (require.main === module) publish(path.resolve(process.argv[2] || "artifacts"));
-module.exports = { stableCompatibility, findTestRelease };
+module.exports = { stableCompatibility, findTestRelease, releaseAssets, purgeIncompleteAssets, retryableUpload, uploadReleaseAssets };
