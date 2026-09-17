@@ -86,7 +86,9 @@ function usage() {
       "options:",
       "  --dir <path>        project directory (default: current directory)",
       "  --url <base>        Core gateway (default: $KAI_CODE_URL or http://127.0.0.1:41100)",
-      "  --model <alias>     model to use (default: first model the gateway lists)",
+      "  --model <alias>     model to use (default: the app's running ready model,",
+      "                      else the first ready model). Subscription brains",
+      "                      (cli:*) are available only in the Koinos Code panel.",
       "  --key <secret>      API key, if you created keys in the app ($KAI_API_KEY)",
       "  -y, --yes           pre-approve file edits (commands still ask)",
       "  --allow-commands    let run_cmd execute without a prompt (for CI)",
@@ -465,10 +467,32 @@ async function gw(opts, pathname, body) {
   return j;
 }
 
+/**
+ * Model precedence for the terminal CLI (mirrors the in-app gateway):
+ * explicit --model → live running ready alias → first ready alias.
+ * Subscription brains (cli:*) are refused here — they only work in
+ * /core/code/run inside the app.
+ */
 async function pickModel(opts) {
-  if (opts.model) return opts.model;
+  const wanted = String(opts.model || "").trim();
+  if (wanted) {
+    if (wanted.startsWith("cli:")) {
+      throw new Error("subscription models (cli:*) are available only inside Koinos Code in the app — pick a local model here");
+    }
+    return wanted;
+  }
+  // Prefer /core/models: it has ready status and the live runtime alias.
+  try {
+    const j = await gw(opts, "/core/models");
+    const ready = (j.aliases || []).filter((a) => a.status === "ready").map((a) => a.alias).filter((id) => !String(id).startsWith("cli:"));
+    const live = j.runtime?.activeAlias;
+    if (live && j.runtime?.runtime?.running && ready.includes(live)) return live;
+    if (ready[0]) return ready[0];
+  } catch {
+    /* older gateway or gated — fall through to /v1/models */
+  }
   const j = await gw(opts, "/v1/models");
-  const ids = (j.data || []).map((d) => d.id);
+  const ids = (j.data || []).map((d) => d.id).filter((id) => !String(id).startsWith("cli:"));
   if (!ids.length) throw new Error("the gateway lists no models — download one in the Koinos AI app first");
   return ids[0];
 }
@@ -654,7 +678,7 @@ async function main() {
   closeRl();
 }
 
-module.exports = { parseArgs, jailed, unifiedDiff, makeTools, projectContext, runTeam, PREAMBLE };
+module.exports = { parseArgs, pickModel, jailed, unifiedDiff, makeTools, projectContext, runTeam, PREAMBLE };
 
 if (require.main === module) {
   main().catch((e) => {

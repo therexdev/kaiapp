@@ -3,6 +3,25 @@
 - **Settings → Check for updates** now contacts the installed app's actual Test update feed instead of only re-reading its packaged/source status.
 - The row says whether Test is current, an installer is downloading, or the update service could not be reached. Automatic startup and four-hour checks continue unchanged, and source checkouts keep their existing git-based check.
 
+## Subscription coding harnesses in Settings
+
+- Settings → Desktop AI connections now separates **API connections** (OpenAI / Anthropic keys) from **subscription coding harnesses** (Codex, Claude Code, Grok Build). Each harness shows installed / signed-in / enabled status, privacy guidance, and an enable toggle. Enabling one makes it available in the Koinos Code model selector. Under Local-Only a harness cannot be turned **on**, and one that is already on reads as “Enabled, but blocked by Local-Only” and can still be turned **off**. On Windows a harness is only detected when the vendor ships a real `.exe`: these CLIs are started without a shell, so a `.cmd`/`.ps1` shim shows as “Not installed”. The app never starts a vendor login.
+- Koinos Code’s Subscriptions… entry is a shortcut to that Settings section, with a read-only status summary — not a second full management panel.
+
+## Koinos Code composer, thinking level, and honest session outcomes
+
+- The Koinos Code composer now follows the main chat layout: the task box stays full width while Stop is visible, with Send/Stop in a stable action row. Model and thinking level sit below as compact selectors. Plan first, Tools, and Subscriptions live behind a gear in the project header.
+- Thinking level (Default / Low / Medium / High) applies to subscription brains only: Codex via `model_reasoning_effort`, Claude Code via `--effort`, Grok Build via `--reasoning-effort`. Default adds no vendor flag. Local models ignore it.
+- After a declined edit or a Stop, the session always stores a human-readable assistant outcome — never a dangling user turn, and never the raw `{"answer":true}` protocol marker. Plan mode is held to the same rule: a plan run that closes on the marker now says so in prose instead of showing it. The “nothing was written to disk” correction is applied once, never twice, however many times the answer passes through.
+
+## Koinos Code model defaults and subscription brains
+
+- Koinos Code no longer falls back to a catalog alias that is not installed. Precedence is: the model you pick for this run, a usable project pin, the model that is actually loaded and running, then the first ready local model. The browser panel, gateway, and terminal `koinos-code` CLI all follow that order.
+- Optional subscription brains for Koinos Code only: Codex (ChatGPT), Claude Code (Anthropic), and Grok Build (Grok). Enable them in Settings → Desktop AI connections → Subscription coding harnesses (the Code gear’s Subscriptions… entry is only a status/shortcut). They supply the model reply only; Koinos Code still shows every write and command for your approval. Prompt and file content leave this machine to that vendor. Local-Only blocks them. Sign-in is never started by the app — use the vendor CLI in a terminal if needed.
+- `cli:*` models work only inside Koinos Code. Ordinary chat, teams, KAI, scheduled tasks, and `/v1/models` refuse them.
+- **Grok Build is verified, not trusted.** Grok's tool-disable flags were measured against the installed CLI and two of the three documented ones fail open, so every Grok reply is now checked against the toolset that session actually had. If Grok reports any tool of its own — including MCP tools pulled in from configuration — the reply is refused rather than used. Expect a clear refusal instead of a silently unconfined run. That check runs *after* the reply arrives, so what it protects is the reply being believed; the layers that stop Grok doing anything in the first place are the ones below.
+- **Grok Build runs from a throwaway profile.** Each Grok run gets its own scratch `~` *and* its own scratch `GROK_HOME` containing nothing but a copy of your sign-in credential, deleted when the run ends. Your `config.toml`, hooks, plugins, skills, agents, MCP servers, rules and memory are not loaded into it, and the run cannot attach to a Grok leader process already running on your machine. Your real Grok profile is only read, never modified, and a harness run will not auto-update the Grok CLI.
+
 ## Smart-Turn semantic listening
 
 - KAI now distinguishes a quiet pause from a finished thought with the local Smart-Turn v3.2 acoustic model. A breath after “Can you help me…” can stay part of the same question instead of being sent early.

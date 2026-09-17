@@ -114,10 +114,76 @@ const NOT_WRITTEN =
   "\n\n_Nothing was written to disk — no file in this project was created or changed. " +
   "Any file named above does not exist yet._";
 
-/** The answer as the person should see it: never a write that did not happen. */
-function truthfulAnswer(answer, wrote) {
-  const a = String(answer || "");
-  return !wrote && claimsAWrite(a) ? a.trimEnd() + NOT_WRITTEN : a;
+/*
+ * The agent protocol marker {"answer":true} (and done/final variants) must
+ * never be shown to a person or stored as a session turn. After a declined
+ * write, a subscription model sometimes repeats the marker instead of prose —
+ * that is what landed in the field transcript as the "answer".
+ */
+function isProtocolMarker(text) {
+  const t = String(text || "").trim();
+  if (!t) return true;
+  if (/^\{[\s\S]*\}$/.test(t)) {
+    try {
+      const j = JSON.parse(t);
+      if (j && typeof j === "object" && !Array.isArray(j)) {
+        if (j.answer === true || j.done === true || j.final === true) return true;
+        if (Object.keys(j).length === 1 && ("answer" in j || "done" in j || "final" in j)) return true;
+      }
+    } catch {
+      /* not JSON — fall through */
+    }
+  }
+  return /^\{\s*"(?:answer|done|final)"\s*:\s*true\s*\}\s*$/i.test(t);
+}
+
+/** Honest closing prose when the model gave no usable final text. */
+function fallbackAnswer({ wrote, reason }) {
+  if (reason === "stopped") {
+    return wrote
+      ? "Stopped. Earlier approved changes in this run were already written; nothing further was done."
+      : "Stopped. Nothing was written to disk.";
+  }
+  if (reason === "budget") {
+    return wrote
+      ? "Step budget exhausted before a closing summary. Earlier approved changes were written; the task may be incomplete."
+      : "Step budget exhausted before finishing. Nothing was written to disk.";
+  }
+  return wrote
+    ? "Done."
+    : "Nothing was written to disk — edits were declined or none were made.";
+}
+
+/** The answer as the person should see it: never a write that did not happen,
+ *  and never a raw protocol marker.
+ *
+ *  IDEMPOTENT ON PURPOSE. The run loop corrects its own answer in finish(), and
+ *  then the gateway corrects it again through sessionAnswer() before storing the
+ *  session turn. Without the already-corrected check the person gets the "nothing
+ *  was written" paragraph twice in the same message. */
+function truthfulAnswer(answer, wrote, reason = "answered") {
+  const a = String(answer || "").trim();
+  if (!a || isProtocolMarker(a)) return fallbackAnswer({ wrote, reason });
+  if (wrote || !claimsAWrite(a)) return a;
+  return a.includes(NOT_WRITTEN.trim()) ? a : a.trimEnd() + NOT_WRITTEN;
+}
+
+/** Plan mode's outcome. It proposes; it never writes. But it closes through the
+ *  same protocol as a normal run, so it can still end on a bare {"answer":true}
+ *  — which must never reach a person as the "plan". */
+function planAnswer(answer) {
+  const a = String(answer || "").trim();
+  if (!a || isProtocolMarker(a)) {
+    return "No plan was produced — the run ended before the model wrote one. Nothing was changed on disk.";
+  }
+  return a;
+}
+
+/** Session / UI outcome for a finished run — always human-readable. */
+function sessionAnswer(result) {
+  if (!result) return fallbackAnswer({ wrote: false, reason: "stopped" });
+  if (result.reason === "planned") return planAnswer(result.answer);
+  return truthfulAnswer(result.answer, result.wrote === true, result.reason);
 }
 
 /*
@@ -218,12 +284,22 @@ class CodeAgent {
   /** Stop a run (the panel's Stop button). A run blocked on an approval
    *  resolves that card as declined immediately. */
   stop(runId) {
-    const r = this._runs.get(String(runId || ""));
+    const id = String(runId || "");
+    const r = this._runs.get(id);
     if (!r) return false;
     r.aborted = true;
-    for (const [id, p] of this._pending) {
-      if (p.runId === runId) {
-        this._pending.delete(id);
+    // A model call in flight (a subscription CLI process) is cancelled too,
+    // and so are a helper's, whose cards already belong to this run.
+    r.controller?.abort();
+    for (const child of this._runs.values()) {
+      if (child.parentRunId === id && !child.aborted) {
+        child.aborted = true;
+        child.controller?.abort();
+      }
+    }
+    for (const [pid, p] of this._pending) {
+      if (p.runId === id) {
+        this._pending.delete(pid);
         clearTimeout(p.timer);
         p.resolve({ approved: false, reason: "the run was stopped" });
       }
@@ -259,7 +335,7 @@ class CodeAgent {
    * Returns {runId, answer, steps, reason} — reason "answered" | "stopped" |
    * "budget" (step budget exhausted).
    */
-  async run({ dir, task, model = "", maxSteps, history = [], mode = "act", plan = "", tools: allowTools = [], depth = 0, io: parentIo = null, parentRunId = null, onTrace = () => {} }) {
+  async run({ dir, task, model = "", effort = "", maxSteps, history = [], mode = "act", plan = "", tools: allowTools = [], depth = 0, io: parentIo = null, parentRunId = null, onTrace = () => {} }) {
     const q = String(task || "").trim();
     if (!q) throw new Error("give the agent a task");
     const root = path.resolve(String(dir || ""));
@@ -275,8 +351,27 @@ class CodeAgent {
     if (path.parse(root).root === root) throw new Error("refusing to use a filesystem root as the project directory — pick the project folder itself");
 
     const runId = crypto.randomBytes(8).toString("hex");
-    const run = { aborted: false };
+    const run = { aborted: false, controller: new AbortController(), parentRunId };
     this._runs.set(runId, run);
+    // One model call. The signal lets Stop kill a call that is still thinking;
+    // whatever the call throws after a Stop, the run's answer is "stopped".
+    const think = async (messages) => {
+      try {
+        return String(
+          (await this.chatFn({
+            model,
+            messages,
+            maxTokens: MAX_TOKENS_PER_CALL,
+            signal: run.controller.signal,
+            // Subscription CLIs may honour effort; local models ignore it.
+            effort: effort || "",
+          })) ?? ""
+        );
+      } catch (e) {
+        if (run.aborted) return null;
+        throw e;
+      }
+    };
     const budget = Math.max(1, Math.min(HARD_MAX_STEPS, Number(maxSteps) || DEFAULT_MAX_STEPS));
 
     // A child reuses its parent's io, so its approval cards belong to the
@@ -320,6 +415,7 @@ class CodeAgent {
                     dir: root,
                     task: t,
                     model,
+                    effort,
                     maxSteps: SUBAGENT_MAX_STEPS,
                     depth: depth + 1,
                     // The child answers through the PARENT's cards: a person is
@@ -390,10 +486,24 @@ class CodeAgent {
       }
       convo.push({ role: "user", content: q });
       let nudges = 0;
+      const finish = (partial) => {
+        const reason = partial.reason;
+        const steps = partial.steps;
+        if (reason === "planned") {
+          return { runId, answer: planAnswer(partial.answer), steps, reason, wrote };
+        }
+        return {
+          runId,
+          answer: truthfulAnswer(partial.answer, wrote, reason),
+          steps,
+          reason,
+          wrote,
+        };
+      };
       for (let step = 0; step < budget; step++) {
-        if (run.aborted) return { runId, answer: "", steps: step, reason: "stopped", wrote };
-        const out = String((await this.chatFn({ model, messages: trimConvo(convo), maxTokens: MAX_TOKENS_PER_CALL })) ?? "");
-        if (run.aborted) return { runId, answer: "", steps: step, reason: "stopped", wrote };
+        if (run.aborted) return finish({ answer: "", steps: step, reason: "stopped" });
+        const out = await think(trimConvo(convo));
+        if (out === null || run.aborted) return finish({ answer: "", steps: step, reason: "stopped" });
         // Strict first. Then salvage, which recovers the call a small model
         // could not escape — a whole file's content in a JSON string is the
         // case it gets wrong, and the case that matters most.
@@ -440,13 +550,40 @@ class CodeAgent {
             });
             continue;
           }
-          return { runId, answer: truthfulAnswer(out.trim(), wrote), steps: step, reason: planning ? "planned" : "answered", wrote };
+          // A bare protocol marker as "prose" is not an answer — ask once more
+          // for plain text, then fall back to an honest summary.
+          if (isProtocolMarker(out) && nudges < MAX_NUDGES) {
+            nudges++;
+            convo.push({ role: "assistant", content: out });
+            convo.push({
+              role: "user",
+              content:
+                "Do not reply with JSON. Write one short plain-text summary of what happened for the person " +
+                "(whether anything was written, declined, or still needed).",
+            });
+            continue;
+          }
+          return finish({
+            answer: out.trim(),
+            steps: step,
+            reason: planning ? "planned" : "answered",
+          });
         }
         if (action.answer) {
           convo.push({ role: "assistant", content: out });
-          convo.push({ role: "user", content: "Give the final answer to the task now, as plain text." });
-          const fin = String((await this.chatFn({ model, messages: trimConvo(convo), maxTokens: MAX_TOKENS_PER_CALL })) ?? "");
-          return { runId, answer: truthfulAnswer(fin.trim(), wrote), steps: step, reason: planning ? "planned" : "answered", wrote };
+          convo.push({
+            role: "user",
+            content:
+              "Give the final answer to the task now as plain text only — not JSON, not {\"answer\": true}. " +
+              "Say clearly whether anything was written or declined.",
+          });
+          const fin = await think(trimConvo(convo));
+          if (fin === null || run.aborted) return finish({ answer: "", steps: step, reason: "stopped" });
+          return finish({
+            answer: fin.trim(),
+            steps: step,
+            reason: planning ? "planned" : "answered",
+          });
         }
         const tool = tools.find((t) => t.name === action.tool);
         onTrace({ type: "tool", name: action.tool, args: JSON.stringify(action.args || {}).slice(0, 200) });
@@ -465,7 +602,7 @@ class CodeAgent {
         convo.push({ role: "assistant", content: out });
         convo.push({ role: "user", content: `Observation:\n${obs}\n\nContinue with the task. Use another tool, or reply {"answer": true} when done.` });
       }
-      return { runId, answer: "", steps: budget, reason: "budget", wrote };
+      return finish({ answer: "", steps: budget, reason: "budget" });
     } finally {
       this.stop(runId); // clears any orphaned approval cards
       this._runs.delete(runId);
@@ -473,4 +610,18 @@ class CodeAgent {
   }
 }
 
-module.exports = { CodeAgent, registryTools, looksLikeToolCall, answeredWithCode, claimsAWrite, truthfulAnswer, MAX_EXTRA_TOOLS, SUBAGENT_MAX_STEPS, SUBAGENT_LIMIT };
+module.exports = {
+  CodeAgent,
+  registryTools,
+  looksLikeToolCall,
+  answeredWithCode,
+  claimsAWrite,
+  truthfulAnswer,
+  planAnswer,
+  isProtocolMarker,
+  sessionAnswer,
+  fallbackAnswer,
+  MAX_EXTRA_TOOLS,
+  SUBAGENT_MAX_STEPS,
+  SUBAGENT_LIMIT,
+};

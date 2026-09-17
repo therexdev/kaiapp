@@ -1280,6 +1280,36 @@ class Gateway {
         }
       }
     }
+    /*
+     * Subscription harness opt-in lives in Settings as well as Koinos Code.
+     * Enablement only flips a setting and never spawns a vendor CLI, so it is
+     * available even while the Code sidebar switch is off — otherwise Settings
+     * could not manage the harnesses before Code is turned on. Runs still go
+     * through /core/code/run, which stays behind the Code switch.
+     */
+    if (this.code && this.code.cliProviders && path === "/core/code/providers") {
+      if (!this.coreToken && FORWARDED_HEADERS.some((h) => req.headers[h])) {
+        return this._json(res, 403, {
+          ok: false,
+          error:
+            "Koinos Code refuses proxied requests unless KAI_CORE_TOKEN is set. This endpoint changes subscription harness enablement settings, so a forwarded caller must prove itself.",
+        });
+      }
+      const privacyMode = this.network ? this.network.status().privacyMode : "local-only";
+      if (req.method === "GET") return this._json(res, 200, { ok: true, providers: this.code.cliProviders.list(), privacyMode });
+      if (req.method === "POST") {
+        try {
+          const b = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+          return this._json(res, 200, {
+            ok: true,
+            providers: this.code.cliProviders.setEnabled(String(b.provider || ""), b.enabled === true),
+            privacyMode,
+          });
+        } catch (e) {
+          return this._json(res, 400, { ok: false, error: String(e.message) });
+        }
+      }
+    }
     if (this.code && path.startsWith("/core/code/")) {
       // Koinos Code has its own switch now (task #72): it is its own sidebar
       // item, and its capability is a different question from the developer
@@ -1490,7 +1520,18 @@ class Gateway {
         let project = null;
         let sessionId = String(body.sessionId || "");
         let history = [];
-        let staleModel = ""; // a pinned model that is no longer installed
+        let staleModel = ""; // a pinned model that is no longer usable
+        let staleWhy = "";
+        const cliUnavailable = (id) => (this.code.cliProviders ? this.code.cliProviders.unavailable(id) : "subscription models are not available here");
+        // Precedence: explicit request → usable project pin → live running
+        // ready alias → first ready alias. An explicit cli:* that cannot run
+        // (Local-Only, not enabled, not installed) fails before the stream
+        // opens and long before anything could spawn.
+        const requested = String(body.model || "").trim();
+        if (requested.startsWith("cli:")) {
+          const why = cliUnavailable(requested);
+          if (why) return this._json(res, 400, { ok: false, error: why });
+        }
         try {
           if (body.projectId) {
             project = this.code.projects.get(String(body.projectId));
@@ -1502,27 +1543,27 @@ class Gateway {
             /*
              * A project may pin its own model. An explicit model in the
              * request still wins — the picker in the composer is the live
-             * choice — and a pin that no longer resolves is IGNORED rather
-             * than fatal: models get deleted, and a project must not become
-             * unopenable because one did. An alias the caller named on this
-             * request is a different matter and still fails loudly.
+             * choice — and a pin that is no longer usable is IGNORED rather
+             * than fatal: models get deleted or Local-Only turns on, and a
+             * project must not become unopenable because one did.
              */
-            if (!String(body.model || "").trim() && project.model) {
-              try {
-                this.models.resolveAlias(project.model);
+            if (!requested && project.model) {
+              if (this._codeModelUsable(project.model)) {
                 body.model = project.model;
-              } catch {
+              } else {
                 staleModel = project.model;
-                // Fall back to whatever the app is actually serving, so the
-                // project still opens and works while the pin is stale.
-                const live = this.runtime?.status?.().activeAlias;
-                if (live) body.model = live;
+                staleWhy = project.model.startsWith("cli:")
+                  ? cliUnavailable(project.model) || `${project.model} is not available`
+                  : "";
               }
             }
           }
         } catch (e) {
           return this._json(res, 400, { ok: false, error: String(e.message) });
         }
+        // No explicit choice and no usable pin: the model that is loaded and
+        // running, not whatever alias the catalog happens to list first.
+        if (!String(body.model || "").trim()) body.model = this._codeDefaultModel();
 
         /*
          * Slash commands expand BEFORE the stream opens, so an unknown command
@@ -1540,19 +1581,32 @@ class Gateway {
             task = expanded.task;
           }
         }
+        // Thinking level for subscription CLIs only — whitelist before the
+        // stream opens so a bad value is an ordinary 400, never argv-raw.
+        const { normalizeEffort } = require("./code-cli-providers");
+        let effort = "";
+        try {
+          effort = normalizeEffort(body.effort);
+        } catch (e) {
+          return this._json(res, 400, { ok: false, error: String(e.message) });
+        }
 
         // SSE with approval-request events: the run PAUSES on every write
         // and command until /core/code/approve answers that card.
         res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
         const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
         if (commandName) send({ trace: { type: "note", text: `/${commandName}` } });
-        if (staleModel) send({ trace: { type: "note", text: `${staleModel} is not installed — using the app's model instead` } });
+        if (staleModel) {
+          const using = body.model ? `using ${body.model} instead` : "using the app's model instead";
+          send({ trace: { type: "note", text: staleWhy ? `${staleWhy} — ${using}` : `${staleModel} is not installed — ${using}` } });
+        }
         if (project && sessionId) send({ session: { projectId: project.id, sessionId } });
         try {
           const r = await this.code.run({
             dir,
             task,
             model: String(body.model || ""),
+            effort,
             maxSteps: body.maxSteps,
             history,
             // "plan" reads and proposes; "act" (the default) does the work.
@@ -1562,12 +1616,17 @@ class Gateway {
             onTrace: (e) => send({ trace: e }),
           });
           // Record the exchange AFTER it happens, and never let a bookkeeping
-          // failure swallow a result the person is waiting for.
+          // failure swallow a result the person is waiting for. Stopped and
+          // empty-answer runs still get an honest assistant turn so the
+          // session never ends on a dangling user message.
           if (project && sessionId && r.reason !== "planned") {
             try {
+              const { sessionAnswer } = require("./code-agent");
+              const outcome = sessionAnswer(r);
               this.code.projects.appendTurn(project.id, sessionId, { role: "user", content: task });
-              if (r.answer) this.code.projects.appendTurn(project.id, sessionId, { role: "assistant", content: r.answer });
+              this.code.projects.appendTurn(project.id, sessionId, { role: "assistant", content: outcome });
               this.code.projects.touch(project.id);
+              r.answer = outcome;
             } catch {
               /* the run stands even if the session could not be written */
             }
@@ -1584,7 +1643,11 @@ class Gateway {
     // ----- OpenAI-compatible surface -----
     if (path === "/v1/models" && req.method === "GET") {
       if (!this._authed(req, res)) return;
-      const data = this.models.aliases().map((a) => ({ id: a.alias, object: "model", owned_by: "koinos-ai" }));
+      // Subscription brains (cli:*) are Code-only — never advertised here.
+      const data = this.models
+        .aliases()
+        .filter((a) => !String(a.alias || "").startsWith("cli:"))
+        .map((a) => ({ id: a.alias, object: "model", owned_by: "koinos-ai" }));
       if (this.network) {
         const { privacyMode, schedulerUrl } = this.network.status();
         if (privacyMode !== "local-only" && schedulerUrl) {
@@ -1667,6 +1730,11 @@ class Gateway {
     // loading or overflow so even a headless caller cannot route these models.
     if (alias.startsWith("desktop:")) return this._json(res, 403, { error: {
       message: "Private provider models are available only in desktop chat and KAI.", type: "desktop_only",
+    } });
+    // Subscription CLIs are the coding agent's brain only (/core/code/run).
+    // Every other lane — public API, chat, teams, tasks, KAI — lands here.
+    if (alias.startsWith("cli:")) return this._json(res, 403, { error: {
+      message: "Subscription models (cli:*) are available only inside Koinos Code.", type: "code_only",
     } });
 
     /*
@@ -2220,6 +2288,41 @@ class Gateway {
       runtime: this.runtime.status(),
       models: { ok: true, ...this.models.storageUsage() },
     };
+  }
+
+  /*
+   * Can Koinos Code actually use this model right now?
+   * Local: alias is installed (status ready). Subscription: not Local-Only,
+   * enabled, and the vendor CLI is present. resolveAlias alone is not enough
+   * — catalog aliases resolve even when the weights are missing.
+   */
+  _codeModelUsable(id) {
+    const s = String(id || "").trim();
+    if (!s) return false;
+    if (s.startsWith("cli:")) {
+      return !(this.code?.cliProviders ? this.code.cliProviders.unavailable(s) : "unavailable");
+    }
+    try {
+      const a = (this.models?.aliases?.() || []).find((x) => x.alias === s);
+      return !!(a && a.status === "ready");
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Default model for a Koinos Code run with no explicit choice and no usable
+   * pin: the alias that is loaded and running, else the first ready alias.
+   * Never a catalog name that is not on disk, and never cli:*.
+   */
+  _codeDefaultModel() {
+    const ready = (this.models?.aliases?.() || [])
+      .filter((a) => a.status === "ready" && !String(a.alias || "").startsWith("cli:"))
+      .map((a) => a.alias);
+    const st = this.runtime?.status?.() || {};
+    const live = st.activeAlias;
+    if (live && ready.includes(live) && st.runtime?.running) return live;
+    return ready[0] || "";
   }
 }
 
