@@ -137,7 +137,7 @@ function updatePrivacyNote(mode) {
   el.dataset.mode = mode;
   el.innerHTML =
     mode === "local-only"
-      ? "Your chats never leave this machine.<br />(Earning, if on, serves network jobs.)"
+      ? "Your chats never leave this machine.<br />(Node and earning use their own network controls.)"
       : mode === "local-first"
         ? "Local when possible. If this machine<br />can't serve a chat, it overflows to<br />Koinos Network — and says so."
         : "Network mode on — chats sent to<br />Koinos Network leave this machine.";
@@ -1703,11 +1703,7 @@ async function walletRpc(channel, payload) {
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok || !j.ok) {
-    throw new Error(
-      j.localOnly
-        ? "Privacy is set to Local-Only, so nothing reaches the chain. Switch to Local-First or Network in Settings to use the wallet."
-        : j.error || `HTTP ${r.status}`
-    );
+    throw new Error(j.error || `HTTP ${r.status}`);
   }
   return j.data;
 }

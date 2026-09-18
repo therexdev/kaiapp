@@ -266,22 +266,16 @@ class Gateway {
     return ours.has(String(origin));
   }
 
-  /*
-   * §7 egress gate. Local-Only means nothing leaves this machine — it is the
-   * promise printed in the sidebar, so a feature that quietly reaches the
-   * internet in that mode is a broken promise, not a missing nicety.
-   *
-   * Deliberately ONE function rather than a seventh independently retyped
-   * copy of the same `if (mode === "local-only")` block. Returns true when it
-   * has already answered the request.
-   */
+  /* AI/account egress follows AI privacy. The separately enabled Koinos
+   * node and explicit wallet actions use their own lifecycle and password
+   * controls; running a blockchain node does not enable online AI. */
   _blockedByPrivacy(res, feature) {
     const mode = this.network ? this.network.status().privacyMode : "local-only";
     if (mode !== "local-only") return false;
     this._json(res, 403, {
       ok: false,
       localOnly: true,
-      error: `${feature} needs to read the Koinos network, and Privacy is set to Local-Only. Switch to Local-First or Network to use it.`,
+      error: `${feature} needs network access, and AI Privacy is set to Local-Only. Switch to Local-First or Network to use it.`,
     });
     return true;
   }
@@ -558,9 +552,9 @@ class Gateway {
     // never builds a Provider or touches the network.
     if (this.koinos && path === "/core/koinos" && req.method === "GET") {
       const mode = this.network ? this.network.status().privacyMode : "local-only";
-      // Advertised, not discovered: the panel greys its chain cards out and
-      // says why, rather than showing buttons that 403.
-      return this._json(res, 200, { ...(await this.koinos.status()), chainReadsAllowed: mode !== "local-only", privacyMode: mode });
+      // The node opt-in is independent of AI privacy. Report the AI mode
+      // unchanged so enabling a node can never silently enable online AI.
+      return this._json(res, 200, { ...(await this.koinos.status()), chainReadsAllowed: this.koinos.enabled(), privacyMode: mode });
     }
     if (this.koinos && path === "/core/koinos/config" && req.method === "POST") {
       const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
@@ -574,7 +568,6 @@ class Gateway {
       }
     }
     if (this.koinos && path === "/core/koinos/balances" && req.method === "GET") {
-      if (this._blockedByPrivacy(res, "Looking up a Koinos address")) return;
       // Any address, not just the user's own: that is what makes this useful
       // on a machine that cannot run a node but wants to watch one elsewhere.
       const address = url.searchParams.get("address") || "";
@@ -589,9 +582,11 @@ class Gateway {
     // channels: docker node lifecycle, guided WSL/Docker setup, wallet, burn,
     // producer registration, rewards, the onramp, the bridge and the swap
     // path). Hand-writing 64 routes would have been 64 chances to drop one.
+    // Node networking is independent of AI privacy, including the local
+    // app:info call that boots its UI. Explicit wallet actions also work
+    // without a running node. Password and control-plane guards still apply.
     // Money still moves only where the password is proved — see koinos-node.js.
     if (this.koinosNode && path === "/core/koinos/rpc" && req.method === "POST") {
-      if (this._blockedByPrivacy(res, "The Koinos node")) return;
       const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
       try {
         return this._json(res, 200, { ok: true, data: await this.koinosNode.call(body.channel, body.payload) });
@@ -620,7 +615,6 @@ class Gateway {
     // call, because core/server.js resumes an unlocked wallet at boot from an
     // OS-held secret — "unlocked" never means a human is at the keyboard.
     if (this.koinos && path === "/core/koinos/burn" && req.method === "POST") {
-      if (this._blockedByPrivacy(res, "Burning KOIN")) return;
       const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
       try {
         return this._json(res, 200, { ok: true, ...(await this.koinos.burn(body)) });
@@ -629,7 +623,6 @@ class Gateway {
       }
     }
     if (this.koinos && path === "/core/koinos/register-key" && req.method === "POST") {
-      if (this._blockedByPrivacy(res, "Registering a producer key")) return;
       const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
       try {
         return this._json(res, 200, { ok: true, ...(await this.koinos.registerKey(body)) });
@@ -639,7 +632,6 @@ class Gateway {
     }
 
     if (this.koinos && path === "/core/koinos/node" && req.method === "GET") {
-      if (this._blockedByPrivacy(res, "Checking your Koinos node")) return;
       try {
         return this._json(res, 200, { ok: true, ...(await this.koinos.nodeProbe()) });
       } catch (e) {

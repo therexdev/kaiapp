@@ -1,3 +1,9 @@
+## Koinos Node with Local-Only AI
+
+- Enabling Koinos Node now opens its UI while AI Privacy stays Local-Only. Node synchronization, production and explicit wallet actions use their own controls without requiring online AI.
+- AI web tools, cloud connections and account access still follow AI Privacy. Wallet password checks and local API access controls remain enforced.
+- Settings now explain the separate node networking behavior instead of directing node operators to enable online AI.
+
 ## Continuous voice playback clock
 
 - Pocket, Windows and Kokoro/native WAV replies now share one turn-scoped Web Audio clock instead of opening a new player for each sentence. When the next sentence is ready, it is scheduled directly after the current one with no artificial media-element or audio-device gap.

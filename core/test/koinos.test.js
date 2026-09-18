@@ -133,7 +133,7 @@ test("koinos: the requirements are DATA, so a hardware fact is one edit", () => 
   assert.match(NODE_REQUIREMENTS.verifiedOn, /^\d{4}-\d{2}-\d{2}$/);
 });
 
-/* ---------------- §7: Local-Only must mean local ---------------- */
+/* ---------------- Node networking is independent of AI privacy ---------------- */
 
 const { Gateway } = require("../lib/gateway");
 const { ModelManager } = require("../lib/model-manager");
@@ -177,57 +177,78 @@ async function withFetchTrap(fn) {
   }
 }
 
-test("koinos: Local-Only means LOCAL — the chain is never reached", async () => {
-  const { gw, base } = await gatewayWith("local-only");
-  gw.koinosNode = { call() { throw new Error("Producer reader must not be called in Local-Only"); } };
-  try {
-    await withFetchTrap(async (calls) => {
-      const bal = await fetch(`${base}/core/koinos/balances?address=1K1AUovu5NjjPcaTxmde6wPB8Y8PQGFV3E`);
-      assert.strictEqual(bal.status, 403, "an address lookup is refused, not attempted");
-      const b = await bal.json();
-      assert.strictEqual(b.localOnly, true);
-      assert.match(b.error, /Local-Only/, "and it says WHY, so the user can fix it");
-
+test("koinos: enabling node tools allows chain reads in every AI privacy mode", async () => {
+  for (const mode of ["local-only", "local-first", "network"]) {
+    const { gw, base } = await gatewayWith(mode, { enabled: false });
+    try {
+      const enabled = await fetch(`${base}/core/koinos/config`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ enabled: true }),
+      });
+      assert.strictEqual((await enabled.json()).enabled, true);
+      const s = await (await fetch(`${base}/core/koinos`)).json();
+      assert.strictEqual(s.chainReadsAllowed, true);
+      assert.strictEqual(s.privacyMode, mode, "node opt-in never changes AI privacy");
+      const calls = [];
+      gw.koinos._chain = {
+        balances: async address => { calls.push("balances"); return { address, koin: "1" }; },
+        headInfo: async () => { calls.push("head"); return { height: "10" }; },
+        probeNode: async () => { calls.push("probe"); return { connected: true }; },
+      };
+      const bal = await fetch(`${base}/core/koinos/balances?address=fixture`);
+      assert.strictEqual(bal.status, 200);
+      assert.strictEqual((await bal.json()).koin, "1");
       const node = await fetch(`${base}/core/koinos/node`);
-      assert.strictEqual(node.status, 403, "so is probing a node");
-
-      const producers = await fetch(`${base}/core/koinos/rpc`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ channel: "network:producers" }) });
-      assert.strictEqual(producers.status, 403);
-      assert.deepStrictEqual(calls, [], "nothing left this machine — the promise in the sidebar");
-    });
-  } finally {
-    await gw.close();
+      assert.strictEqual(node.status, 200);
+      assert.strictEqual((await node.json()).connected, true);
+      assert.deepStrictEqual(calls, ["balances", "head", "probe"]);
+    } finally { await gw.close(); }
   }
 });
 
-test("koinos: status still answers in Local-Only, and says the cards are off", async () => {
+test("koinos: full node UI loads in Local-Only; AI egress and wallet guards still apply", async () => {
   const { gw, base } = await gatewayWith("local-only");
+  const { createKoinosNode } = require("../lib/koinos-node");
+  const { WalletService } = require("../lib/wallet");
+  const wallet = new WalletService(path.join(gw.koinos.dataDir, "wallet"));
+  wallet.create({ password: "node privacy fixture password" });
+  const node = createKoinosNode({ dataDir: gw.koinos.dataDir, wallet, appVersion: "privacy-fixture" });
+  gw.koinosNode = node;
+  gw.account = { status() { throw new Error("Account client must not be called"); } };
+  const rpc = (channel, payload = {}, headers = {}) => fetch(`${base}/core/koinos/rpc`, {
+    method: "POST", headers: { "content-type": "application/json", ...headers },
+    body: JSON.stringify({ channel, payload }),
+  });
   try {
-    // Status is local: settings, hardware, a filesystem probe. It must keep
-    // working, or the panel cannot EXPLAIN the refusal — it just looks broken.
-    const s = await (await fetch(`${base}/core/koinos`)).json();
-    assert.strictEqual(s.ok, true);
-    assert.strictEqual(s.enabled, true);
-    assert.strictEqual(s.chainReadsAllowed, false, "advertised up front, not discovered by a 403");
-    assert.strictEqual(s.privacyMode, "local-only");
-    assert.ok(s.capability, "the hardware verdict is local and still useful");
-  } finally {
-    await gw.close();
-  }
-});
-
-test("koinos: outside Local-Only the chain routes are allowed through", async () => {
-  const { gw, base } = await gatewayWith("local-first");
-  try {
-    const s = await (await fetch(`${base}/core/koinos`)).json();
-    assert.strictEqual(s.chainReadsAllowed, true);
-    // Not asserting a successful chain read — that would need the network.
-    // What matters is that the PRIVACY gate is not what stops it.
-    const bal = await fetch(`${base}/core/koinos/balances?address=not-an-address`);
-    assert.notStrictEqual(bal.status, 403, "refused on the address, not on privacy");
-  } finally {
-    await gw.close();
-  }
+    await withFetchTrap(async calls => {
+      const info = await rpc("app:info");
+      assert.strictEqual(info.status, 200, "the request that used to crash the node UI");
+      assert.strictEqual((await info.json()).data.version, "privacy-fixture");
+      assert.strictEqual((await rpc("wallet:status")).status, 200);
+      for (const password of [undefined, "wrong password"]) {
+        const sent = await rpc("chain:send", { to: wallet.address, amount: "1", token: "koin", password });
+        assert.strictEqual(sent.status, 400);
+        assert.match((await sent.json()).error, /password|does not match/i);
+      }
+      assert.strictEqual((await rpc("app:info", {}, { origin: "https://other.example" })).status, 403);
+      gw.coreToken = "node-fixture-token";
+      assert.strictEqual((await rpc("app:info")).status, 401);
+      assert.strictEqual((await rpc("app:info", {}, { authorization: "Bearer node-fixture-token" })).status, 200);
+      gw.coreToken = null;
+      for (const route of ["search", "fetch"]) {
+        const res = await fetch(`${base}/core/${route}`, {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ q: "test", url: "https://example.com" }),
+        });
+        assert.strictEqual(res.status, 403, "AI web access stays blocked");
+      }
+      const account = await fetch(`${base}/core/account`);
+      assert.strictEqual(account.status, 403);
+      assert.strictEqual((await account.json()).localOnly, true);
+      assert.strictEqual(gw.network.status().privacyMode, "local-only");
+      assert.deepStrictEqual(calls, [], "no live network or transaction needed for this regression");
+    });
+  } finally { node.stop(); await gw.close(); }
 });
 
 test("koinos: switched off, every mode answers the same inert shape", async () => {
@@ -236,6 +257,13 @@ test("koinos: switched off, every mode answers the same inert shape", async () =
     try {
       const s = await (await fetch(`${base}/core/koinos`)).json();
       assert.strictEqual(s.enabled, false, `${mode}: off`);
+      assert.strictEqual(s.chainReadsAllowed, false);
+      for (const route of ["balances?address=fixture", "node"]) {
+        const res = await fetch(`${base}/core/koinos/${route}`);
+        assert.strictEqual(res.status, 400);
+        assert.match((await res.json()).error, /switched off/);
+      }
+      assert.strictEqual(gw.koinos._chain, null, "disabled tools never construct a chain client");
       assert.strictEqual(s.capability, undefined, `${mode}: nothing else is computed or leaked`);
       assert.strictEqual(s.companion, undefined, `${mode}: no filesystem probe either`);
     } finally {
@@ -325,19 +353,23 @@ test("stage 2: still no way to send KOIN anywhere", () => {
   assert.ok(!/koinos\/send/.test(gw), "and no route offers it");
 });
 
-test("stage 2: writes are refused in Local-Only, like the reads", async () => {
+test("stage 2: Local-Only preserves password checks on explicit node writes", async () => {
   const { gw, base } = await gatewayWith("local-only");
+  const { wallet } = walletWith();
+  gw.koinos.wallet = wallet;
   try {
-    for (const p of ["/core/koinos/burn", "/core/koinos/register-key"]) {
-      const r = await fetch(`${base}${p}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ amountKoin: "1", publicKey: "abcdefghijklmnopqrstuvwx", password: PASSWORD }),
-      });
-      assert.strictEqual(r.status, 403, `${p} is gated`);
-      assert.strictEqual((await r.json()).localOnly, true);
-    }
-  } finally {
-    await gw.close();
-  }
+    await withFetchTrap(async calls => {
+      for (const p of ["/core/koinos/burn", "/core/koinos/register-key"]) {
+        for (const password of [undefined, "wrong password"]) {
+          const r = await fetch(`${base}${p}`, {
+            method: "POST", headers: { "content-type": "application/json" },
+            body: JSON.stringify({ amountKoin: "1", publicKey: "abcdefghijklmnopqrstuvwx", password }),
+          });
+          assert.strictEqual(r.status, 400);
+          assert.match((await r.json()).error, /password|does not match/i);
+        }
+      }
+      assert.deepStrictEqual(calls, [], "password refusal happens before chain access");
+    });
+  } finally { await gw.close(); }
 });

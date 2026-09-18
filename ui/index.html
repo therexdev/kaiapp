@@ -660,7 +660,7 @@
               <b>Run Koinos Node</b>
               <div class="hint" id="koinos-toggle-hint">
                 Runs a real Koinos node on this machine, with a wallet, funding, swaps and
-                block-production rewards. Uses your existing Koinos AI wallet.
+                block-production rewards. Uses your existing Koinos AI wallet. Node networking is independent of AI Privacy; Local-Only can stay on.
               </div>
             </div>
             <button id="btn-koinos-toggle" class="switch" role="switch" aria-checked="false" aria-label="Run Koinos node">
@@ -709,11 +709,11 @@
           <p class="lede">Point any OpenAI SDK or tool at this machine. No cloud, no per-token bill.</p>
           <pre id="api-snippet" class="snippet"></pre>
           <h2>Network &amp; privacy</h2>
-          <p class="hint">Local-Only is the default: requests can never leave this machine. Local-First and Network unlock the “Koinos Network” model — requests overflow to network providers through the scheduler.
+          <p class="hint">Local-Only is the default: AI requests stay on this machine. Koinos Node and explicit wallet actions use the blockchain independently. Local-First and Network unlock the “Koinos Network” model — requests overflow to network providers through the scheduler.
             <b>Network requests run on other people's computers: the provider serving your request can read what it contains</b> — nothing is stored by the serving path, but treat anything sent off this machine as visible to that provider.</p>
           <div class="form-row">
             <select id="privacy-pick">
-              <option value="local-only">Local-Only (nothing leaves this machine)</option>
+              <option value="local-only">Local-Only (AI requests stay on this machine)</option>
               <option value="local-first">Local-First (local when possible, network when needed — first 25k tokens/epoch free)</option>
               <option value="network">Network</option>
             </select>

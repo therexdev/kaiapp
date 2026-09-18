@@ -16,7 +16,7 @@
   if (!toggle) return; // markup absent: do nothing rather than throw
 
   var POLL_MS = 10000;
-  var state = { enabled: false, chainReads: true, timer: null };
+  var state = { enabled: false, timer: null };
 
   function jget(path) { return fetch(path).then(function (r) { return r.json(); }); }
   function jpost(path, body) {
@@ -44,25 +44,10 @@
     if (!state.enabled && onKoinosView() && typeof activateView === "function") activateView("settings");
   }
 
-  /* Local-Only means nothing leaves the machine, and a node is nothing but
-   * network. Say so on the switch rather than letting every screen answer 403
-   * and look like a bug. */
-  function paintPrivacy(s) {
-    var hint = $("koinos-toggle-hint");
-    if (!hint) return;
-    state.chainReads = s.chainReadsAllowed !== false;
-    hint.textContent = state.chainReads
-      ? "Runs a real Koinos node on this machine, with a wallet, funding, swaps and " +
-        "block-production rewards. Uses your existing Koinos AI wallet."
-      : "Privacy is set to Local-Only, so Koinos AI will not reach the chain and the node " +
-        "screens will not load. Switch to Local-First or Network in Settings to use it.";
-  }
-
   function loadStatus() {
     return jget("/core/koinos").then(function (s) {
       state.enabled = Boolean(s && s.enabled);
       paintToggle();
-      paintPrivacy(s || {});
       return s;
     });
   }
