@@ -565,6 +565,32 @@ async function renderUpdateStatus({ fetchRemote = false } = {}) {
   const say = (text) => { host.innerHTML = esc(text) + notes; };
 
   if (s.kind === "packaged") {
+    if (fetchRemote) {
+      if (!window.koinosShell?.checkForUpdates) {
+        say(`${version} — the desktop updater isn't available in this copy.`);
+        return;
+      }
+      let checked;
+      try {
+        checked = await window.koinosShell.checkForUpdates();
+        if (!checked || typeof checked.kind !== "string") throw new Error("Invalid updater response");
+      } catch {
+        say(`${version} — couldn't contact the desktop updater. Restart the app and try again.`);
+        return;
+      }
+      if (checked.kind === "current") {
+        say(`${version} — up to date. Checked just now.`);
+      } else if (checked.kind === "downloading") {
+        say(`Koinos AI ${checked.version || "update"} is available — downloading it now. You'll be asked before restarting.`);
+      } else if (checked.kind === "downloaded") {
+        say(`Koinos AI ${checked.version || "update"} is ready and will install when you close the app.`);
+      } else if (checked.kind === "available") {
+        say(`Koinos AI ${checked.version || "update"} is available and ready to download.`);
+      } else {
+        say(`${version} — ${checked.reason || "couldn't check for updates."}`);
+      }
+      return;
+    }
     say(`${version} — updates install themselves.`);
     return;
   }

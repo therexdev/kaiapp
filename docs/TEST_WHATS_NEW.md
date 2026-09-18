@@ -1,3 +1,8 @@
+## Working manual update checks
+
+- **Settings → Check for updates** now contacts the installed app's actual Test update feed instead of only re-reading its packaged/source status.
+- The row says whether Test is current, an installer is downloading, or the update service could not be reached. Automatic startup and four-hour checks continue unchanged, and source checkouts keep their existing git-based check.
+
 ## Smart-Turn semantic listening
 
 - KAI now distinguishes a quiet pause from a finished thought with the local Smart-Turn v3.2 acoustic model. A breath after “Can you help me…” can stay part of the same question instead of being sent early.

@@ -36,6 +36,9 @@ contextBridge.exposeInMainWorld("koinosShell", {
   // the shell knows if there is a tray at all, so Settings has to ask.
   windowPrefs: () => ipcRenderer.invoke("shell:window-prefs"),
   setCloseToTray: (on) => ipcRenderer.invoke("shell:set-close-to-tray", on),
+  // Packaged builds check their signed installer feed in Electron. The page
+  // receives only a small status object, never the updater capability itself.
+  checkForUpdates: () => ipcRenderer.invoke("shell:check-for-updates"),
   launchMascot: options => ipcRenderer.invoke("mascot:launch", options),
   onMascotOpenView: callback => {
     const listener = (_event, view) => callback(view);

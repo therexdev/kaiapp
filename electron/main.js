@@ -26,6 +26,9 @@ let tray = null;
 let mascot = null;
 let providers = null;
 let companionHub = null;
+// Assigned only after electron-updater has been configured for this build's
+// release channel. The Settings IPC below cannot reach the updater directly.
+let checkDesktopUpdates = null;
 // Set the moment a real quit begins, so the close handler below knows the
 // difference between "the user pressed X" and "the app is going down".
 let quitting = false;
@@ -326,6 +329,17 @@ async function start() {
     winState.set("closeToTray", !!on && !!tray);
     return { trayAvailable: !!tray, closeToTray: closeHidesWindow() };
   });
+  ipcMain.handle("shell:check-for-updates", event => {
+    requireMain(event);
+    if (!checkDesktopUpdates) {
+      return {
+        kind: app.isPackaged ? "unavailable" : "source",
+        currentVersion: app.getVersion(),
+        reason: app.isPackaged ? "The desktop updater isn't available in this copy of Koinos AI." : undefined,
+      };
+    }
+    return checkDesktopUpdates();
+  });
 
   // Any external link opens in the system browser, never inside the shell.
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -398,7 +412,13 @@ async function start() {
       configureUpdater(autoUpdater, release);
       autoUpdater.autoDownload = true;
       autoUpdater.autoInstallOnAppQuit = true;
+      const { checkForDesktopUpdate } = require("./update-check");
+      let downloadedVersion = null;
+      checkDesktopUpdates = () => downloadedVersion
+        ? Promise.resolve({ kind: "downloaded", currentVersion: app.getVersion(), version: downloadedVersion })
+        : checkForDesktopUpdate(autoUpdater, { currentVersion: app.getVersion(), logger: console });
       autoUpdater.on("update-downloaded", async (info) => {
+        downloadedVersion = String(info.version || "");
         if (!win) return;
         const { response } = await dialog.showMessageBox(win, {
           type: "info",
@@ -424,13 +444,10 @@ async function start() {
        * function. Still non-fatal — an unreachable update feed must never
        * block the app — but now it leaves a trace.
        */
-      const check = () =>
-        autoUpdater.checkForUpdates().catch((e) => {
-          console.error("[update] check failed:", String(e?.message || e));
-        });
-      check();
-      setInterval(check, 4 * 3600 * 1000);
-    } catch {
+      void checkDesktopUpdates();
+      setInterval(() => { void checkDesktopUpdates(); }, 4 * 3600 * 1000);
+    } catch (error) {
+      console.error("[update] updater unavailable:", String(error?.message || error));
       /* updater unavailable (e.g. unpacked build) — never block the app */
     }
   } else {
