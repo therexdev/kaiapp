@@ -59,7 +59,7 @@ test("real HTTP RPC supports koilib, browser CORS and producer routes on the sam
   assert.equal(options.status, 204); assert.equal(options.headers.get("access-control-allow-origin"), "*");
   const response = await f.post(request("chain.get_account_rc", { account: ADDRESS }, "wallet-1"), "/rpc", { origin: "https://koinvault.app", cookie: "private=do-not-forward", authorization: "Bearer do-not-forward", host: "api.koinosai.com" });
   assert.equal((await response.json()).id, "wallet-1");
-  const forwarded = f.state.calls.at(-1); assert.equal(forwarded.headers.cookie, undefined); assert.equal(forwarded.headers.authorization, undefined);
+  const forwarded = f.state.calls.find(c => c.input.id === "wallet-1"); assert.equal(forwarded.headers.cookie, undefined); assert.equal(forwarded.headers.authorization, undefined);
   assert.equal((await fetch(f.url + "/healthz/rpc")).status, 200);
   assert.equal(await hostRequest(f.url, "api.koinosai.com"), 200);
   for (let i = 0; i < 100 && !f.api.payload; i++) await new Promise(r => setTimeout(r, 5));
@@ -83,7 +83,7 @@ test("signed transaction is relayed once unchanged and chain rejection details s
 });
 
 test("public RPC refuses admin methods, unsafe system calls, malformed parameters and oversized work", async t => {
-  const f = await fixture(t), before = f.state.calls.length;
+  const f = await fixture(t);
   const forbidden = ["chain.submit_block", "chain.propose_block", "block_store.add_block", "wallet:revealWif", "node:start", "distribution:configure", "constructor", "__proto__"];
   for (const method of forbidden) assert.equal((await (await f.post(request(method))).json()).error.code, -32601);
   for (const [method, params] of [
@@ -95,7 +95,9 @@ test("public RPC refuses admin methods, unsafe system calls, malformed parameter
     ["chain.get_account_rc", { account: "invalid" }],
     ["block_store.get_blocks_by_height", { head_block_id: hash(3), ancestor_start_height: "1", num_blocks: 101 }],
   ]) assert.equal((await (await f.post(request(method, params))).json()).error.code, -32602);
-  assert.equal(f.state.calls.length, before);
+  // Health/index probes have ID 1 and may finish at any time. None of the
+  // rejected public requests (ID 7) may reach the upstream node.
+  assert.equal(f.state.calls.filter(c => c.input.id === 7).length, 0);
   assert.equal((await f.post(request("chain.get_chain_id"), "/core/koinos/rpc")).status, 404);
   assert.equal(await hostRequest(f.url, "rebound.example"), 403);
   assert.equal((await f.post(request("chain.get_chain_id"), "/", { "content-type": "text/plain" })).status, 415);
