@@ -310,7 +310,7 @@
   // listener receives its exact audible/tail state instead of inferring echo
   // from separate media-element events.
   const playbackClock = new KaiPlayback.Clock({ onState: playbackState });
-  const primePlayback = () => { if (voiceReplies && !suspended) playbackClock.prime().catch(() => {}); };
+  const primePlayback = () => { if (!suspended) playbackClock.prime().catch(() => {}); };
   document.addEventListener("pointerdown", primePlayback, { capture: true });
   document.addEventListener("keydown", primePlayback, { capture: true });
   let warmRequest = null;
@@ -754,7 +754,8 @@
     squeakUI(); voiceEngineUI(); regions();
   });
   $("voice-squeak").addEventListener("input", () => {
-    stopSpeech(); voicePitch = Number($("voice-squeak").value); write("kai-mascot-voice-squeak", String(voicePitch)); squeakUI();
+    const pitch = Number($("voice-squeak").value);
+    stopSpeech(); voicePitch = pitch; write("kai-mascot-voice-squeak", String(voicePitch)); squeakUI();
   });
   $("speech-start").value = speechStart;
   $("speech-start").addEventListener("change", () => {

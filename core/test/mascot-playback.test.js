@@ -21,7 +21,8 @@ class FakeContext {
 function clockFixture() {
   const context = new FakeContext(), states = []; let pulse;
   const clock = new Clock({ contextFactory: () => context, onState: state => states.push(state), now: () => 10000,
-    timer: fn => { pulse = fn; return { unref() {} }; }, clearTimer() {} });
+    timer: function (fn) { assert.equal(this, undefined, "browser timer adapters are never rebound to the clock"); pulse = fn; return { unref() {} }; },
+    clearTimer: function () { assert.equal(this, undefined, "browser clear-timer adapters are never rebound to the clock"); } });
   const advance = seconds => {
     context.currentTime = seconds; pulse?.();
     for (const record of [...clock.records]) if (record.end <= seconds) record.source.onended?.();

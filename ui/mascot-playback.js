@@ -26,7 +26,7 @@
   // audio device boundary between them.
   class Clock {
     constructor({ contextFactory = () => new AudioContext(), onState = () => {}, leadMs = 25, tailMs = 1200,
-      timer = setInterval, clearTimer = clearInterval, now = () => Date.now() } = {}) {
+      timer = (fn, ms) => setInterval(fn, ms), clearTimer = id => clearInterval(id), now = () => Date.now() } = {}) {
       Object.assign(this, { contextFactory, onState, leadMs, tailMs, timer, clearTimer, now });
       this.scope = null; this.context = null; this.cursor = 0; this.records = new Set(); this.generation = 0;
       this.stats = { scheduled: 0, gaps: 0, gapMs: 0, maxGapMs: 0 };
@@ -46,7 +46,8 @@
       if (!this.context) this.prime();
       if (this.scope === null) {
         this.scope = scope;
-        this.interval = this.timer(() => this.emit(), 15); this.interval?.unref?.();
+        const startTimer = this.timer;
+        this.interval = startTimer(() => this.emit(), 15); this.interval?.unref?.();
       }
       return this.context;
     }
@@ -113,7 +114,7 @@
         try { record.source.stop(); } catch {}
         record.source.disconnect?.(); if (!record.started) record.startedResolve({ cancelled: true }); record.resolve({ cancelled: true });
       }
-      if (this.interval) this.clearTimer(this.interval);
+      if (this.interval) { const stopTimer = this.clearTimer; stopTimer(this.interval); }
       this.interval = null; const context = this.context;
       this.context = null; this.scope = null; this.cursor = 0; this.echoUntil = this.now() + this.tailMs; this.lastState = "";
       context?.close?.().catch?.(() => {});
