@@ -88,6 +88,7 @@ test("KAI Eyes keeps capture visible, sends one ephemeral frame privately and st
   assert.equal(await page.locator("#conversation").evaluate(element => element.hidden), true);
   assert.equal(await page.locator("#eyes-indicator").evaluate(element => element.hidden), false, "capture indicator remains visible in compact mode");
   await page.click("#toggle-chat");
+  await page.click("#close-eyes-options");
   await page.fill("#question", "What can you see in the current view?");
   await page.click("#send");
   await page.waitForFunction(() => document.querySelector("#messages").textContent.includes("What are you working on today"));
