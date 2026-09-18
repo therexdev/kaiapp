@@ -628,6 +628,7 @@ $("btn-update-check")?.addEventListener("click", async (e) => {
 
 function renderSettings() {
   KaiProviders.renderSettings();
+  window.KaiCodeHarnesses?.renderSettings?.();
   renderUpdateStatus();
   renderAccount?.();
   renderDev();

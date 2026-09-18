@@ -137,6 +137,9 @@ test("truthfulAnswer appends the correction only when nothing was written", () =
   assert.strictEqual(truthfulAnswer(lie, true), lie); // it really did write
   const plain = "The project has three files.";
   assert.strictEqual(truthfulAnswer(plain, false), plain);
+  // Protocol markers are never shown as the answer.
+  assert.ok(!/\{\s*"answer"\s*:\s*true\s*\}/.test(truthfulAnswer('{"answer":true}', false)));
+  assert.match(truthfulAnswer("", false, "stopped"), /Stopped/);
 });
 
 /* --------------------------------------------------------- end to end --- */

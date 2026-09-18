@@ -296,6 +296,56 @@ test("HTTP: the SECOND run in a session actually carries the first — that is t
   }
 });
 
+test("HTTP: a stopped run still records an honest assistant turn (no dangling user)", async () => {
+  const dataDir = coreDir();
+  const project = tmp("kai-stop-hist-");
+  // Hang on an approval card so the client can Stop mid-run.
+  const { core, base } = await startCore(dataDir, ['{"tool":"run_cmd","args":{"cmd":"echo hi"}}']);
+  try {
+    await j(base, "/core/code-switch", { method: "POST", body: JSON.stringify({ enabled: true }) });
+    const pid = (await j(base, "/core/code/projects", { method: "POST", body: JSON.stringify({ dir: project }) })).body.project.id;
+
+    const resp = await fetch(`${base}/core/code/run`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ projectId: pid, task: "run something", model: "dev-tiny" }),
+    });
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    let runId = null;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf("\n\n")) !== -1) {
+        const line = buf.slice(0, idx).trim();
+        buf = buf.slice(idx + 2);
+        if (!line.startsWith("data: ")) continue;
+        const ev = JSON.parse(line.slice(6));
+        if (ev.trace?.type === "start") runId = ev.trace.runId;
+        if (ev.trace?.type === "approval-request") {
+          await j(base, "/core/code/stop", { method: "POST", body: JSON.stringify({ runId }) });
+        }
+      }
+    }
+
+    const sessions = await j(base, `/core/code/projects/${pid}/sessions`);
+    const sid = sessions.body.sessions[0].id;
+    const full = await j(base, `/core/code/projects/${pid}/sessions/${sid}`);
+    const turns = full.body.session.turns;
+    assert.ok(turns.length >= 2, `expected user+assistant, got ${JSON.stringify(turns)}`);
+    assert.strictEqual(turns[turns.length - 2].role, "user");
+    assert.strictEqual(turns[turns.length - 1].role, "assistant");
+    assert.match(turns[turns.length - 1].content, /Stopped/i);
+    assert.ok(!/\{\s*"answer"\s*:\s*true\s*\}/.test(turns[turns.length - 1].content));
+  } finally {
+    delete process.env.FAKE_LLAMA_SCRIPT;
+    await core.stop();
+  }
+});
+
 test("HTTP: a bare dir still works — the CLI and older scripts are untouched", async () => {
   const dataDir = coreDir();
   const project = tmp("kai-bare-");

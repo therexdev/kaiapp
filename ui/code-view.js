@@ -37,6 +37,9 @@
     commands: [],
     commandsDir: "",
     models: [], // local aliases that are actually on this machine
+    providers: [], // subscription brains (cli:*) — opt-in, off by default
+    privacyMode: "local-only",
+    liveAlias: "", // runtime.activeAlias when the engine is running
   };
 
   /** Does the app shell offer the OS folder window? Electron yes, browser no. */
@@ -49,7 +52,25 @@
     return j;
   }
 
-  const status = (t) => { $("kc-status").textContent = t || ""; };
+  const status = (t) => {
+    const el = $("kc-status");
+    if (!el) return;
+    const msg = String(t || "").trim();
+    el.textContent = msg;
+    el.hidden = !msg;
+  };
+
+  function setSettingsOpen(open) {
+    const panel = $("kc-settings-panel");
+    const btn = $("btn-kc-settings");
+    if (!panel || !btn) return;
+    panel.hidden = !open;
+    btn.setAttribute("aria-expanded", open ? "true" : "false");
+    if (!open) {
+      $("kc-tools-panel").hidden = true;
+      $("kc-subs-panel").hidden = true;
+    }
+  }
   function startError(msg) {
     const el = $("kc-start-error");
     el.textContent = msg || "";
@@ -275,7 +296,7 @@
       renderToolsSummary();
       renderModelPick();
       await loadCommands();
-      $("kc-tools-panel").hidden = true;
+      setSettingsOpen(false);
       $("kc-cmd-hints").hidden = true;
     } catch (e) {
       status(e.message);
@@ -760,6 +781,11 @@
     return run(task, { mode: $("kc-plan").checked ? "plan" : "act" });
   }
 
+  function chosenEffort() {
+    const el = $("kc-effort");
+    return el ? String(el.value || "") : "";
+  }
+
   async function run(task, { mode = "act", plan = "" } = {}) {
     const p = currentProject();
     if (!p) return;
@@ -775,6 +801,7 @@
           sessionId: kc.sessionId || "",
           task,
           model: chosenModel(),
+          effort: chosenEffort(),
           mode,
           plan,
           tools: allowedTools(),
@@ -972,8 +999,15 @@
     }
   }
 
+  $("btn-kc-settings").addEventListener("click", () => {
+    const open = $("kc-settings-panel").hidden;
+    setSettingsOpen(open);
+  });
+  $("btn-kc-settings-close").addEventListener("click", () => setSettingsOpen(false));
+
   $("btn-kc-tools").addEventListener("click", async () => {
     const panel = $("kc-tools-panel");
+    $("kc-subs-panel").hidden = true;
     if (!panel.hidden) {
       panel.hidden = true;
       return;
@@ -983,6 +1017,100 @@
     panel.hidden = false;
   });
   $("btn-kc-tools-close").addEventListener("click", () => { $("kc-tools-panel").hidden = true; });
+
+  // -------------------------------------------------- subscription harnesses
+
+  /*
+   * Management lives in Settings → Desktop AI connections (shared module).
+   * This gear entry is a concise shortcut plus a read-only status summary so
+   * the model selector stays honest without duplicating the full toggles.
+   */
+  async function loadProviders() {
+    try {
+      if (window.KaiCodeHarnesses?.refresh) {
+        const j = await window.KaiCodeHarnesses.refresh();
+        kc.providers = j.providers || [];
+        kc.privacyMode = j.privacyMode || "local-only";
+        return;
+      }
+      const j = await api("/core/code/providers");
+      kc.providers = j.providers || [];
+      kc.privacyMode = j.privacyMode || "local-only";
+    } catch {
+      kc.providers = [];
+    }
+  }
+
+  function renderSubsPanel() {
+    const host = $("kc-subs-summary");
+    if (!host) return;
+    host.innerHTML = "";
+    const localOnly = kc.privacyMode === "local-only";
+    $("kc-subs-note").textContent = localOnly
+      ? "Privacy mode is Local-Only: subscription harnesses stay blocked. Manage them in Settings after switching to Local-First or Network under Local API."
+      : "Harnesses are managed in Settings → Desktop AI connections. Enabling one there makes it available in this model selector. Prompt and file content leave this machine to that vendor.";
+    if (!kc.providers.length) {
+      const empty = document.createElement("div");
+      empty.className = "kc-tool-row";
+      empty.textContent = "Could not load harness status.";
+      host.appendChild(empty);
+      return;
+    }
+    for (const p of kc.providers) {
+      const row = document.createElement("div");
+      row.className = "kc-tool-row";
+      const name = document.createElement("b");
+      name.textContent = `${p.label} (${p.plan})`;
+      const sub = document.createElement("span");
+      sub.className = "kc-sub";
+      sub.textContent = window.KaiCodeHarnesses?.statusLine?.(p) || [
+        p.installed ? "installed" : "not installed",
+        p.loggedIn ? "signed in" : "not signed in",
+        p.enabled ? "enabled" : "disabled",
+      ].join(" · ");
+      const wrap = document.createElement("span");
+      wrap.append(name, sub);
+      row.appendChild(wrap);
+      host.appendChild(row);
+    }
+  }
+
+  $("btn-kc-subs").addEventListener("click", async () => {
+    const panel = $("kc-subs-panel");
+    $("kc-tools-panel").hidden = true;
+    if (!panel.hidden) {
+      panel.hidden = true;
+      return;
+    }
+    await loadProviders();
+    renderSubsPanel();
+    panel.hidden = false;
+  });
+  $("btn-kc-subs-close").addEventListener("click", () => { $("kc-subs-panel").hidden = true; });
+  $("btn-kc-subs-settings").addEventListener("click", () => {
+    setSettingsOpen(false);
+    if (window.KaiCodeHarnesses?.focusSettings) window.KaiCodeHarnesses.focusSettings();
+    else if (typeof activateView === "function") activateView("settings");
+  });
+  window.addEventListener("kai-code-harnesses-changed", async () => {
+    await loadProviders();
+    renderModelPick();
+    if (!$("kc-subs-panel").hidden) renderSubsPanel();
+  });
+
+  try {
+    const savedEffort = localStorage.getItem("kai-code-effort") || "";
+    if ($("kc-effort") && ["", "low", "medium", "high"].includes(savedEffort)) $("kc-effort").value = savedEffort;
+  } catch {
+    /* storage off */
+  }
+  $("kc-effort")?.addEventListener("change", () => {
+    try {
+      localStorage.setItem("kai-code-effort", $("kc-effort").value || "");
+    } catch {
+      /* storage off */
+    }
+  });
 
   // ------------------------------------------------------------ the model
 
@@ -995,33 +1123,47 @@
    * project because a big repository and a scratch folder do not want the same
    * model.
    *
-   * LOCAL MODELS ONLY, deliberately, and unlike Chat: the coding agent reads
-   * your project's files into every prompt it sends. Routing that to volunteer
-   * machines on the Koinos Network would put private source on other people's
-   * computers as a side effect of picking a faster box — a decision nobody
-   * would expect from a model dropdown. Chat offers the network because the
-   * person types what goes into it; here the agent decides, so it stays home.
+   * Ready local models by default. Enabled subscription harnesses (cli:*) appear
+   * only after an explicit opt-in in Settings → Desktop AI connections — they
+   * are never the silent app default. The Koinos Network is never offered here:
+   * the agent reads project files into every prompt.
    */
   async function loadModels() {
     try {
       const r = await fetch("/core/models", { headers: { "content-type": "application/json" } });
       const j = await r.json();
       kc.models = (j.aliases || [])
-        .filter((a) => a.status === "ready")
+        .filter((a) => a.status === "ready" && !String(a.alias || "").startsWith("cli:"))
         .map((a) => ({ v: a.alias, label: String(a.label || a.alias).split(" (")[0] }));
+      kc.liveAlias = j.runtime?.runtime?.running && j.runtime.activeAlias ? j.runtime.activeAlias : "";
     } catch {
-      kc.models = []; // Core unreachable: fall through to "app default"
+      kc.models = [];
+      kc.liveAlias = "";
+    }
+    try {
+      await loadProviders();
+    } catch {
+      kc.providers = [];
     }
     renderModelPick();
+  }
+
+  function usableModelOptions() {
+    const local = kc.models.slice();
+    const subs = (kc.providers || [])
+      .filter((p) => p.enabled && p.installed && kc.privacyMode !== "local-only")
+      .map((p) => ({ v: p.id, label: `${p.label} · ${p.plan}` }));
+    return [...local, ...subs];
   }
 
   function renderModelPick() {
     const pick = $("kc-model");
     const chosen = currentProject()?.model || "";
-    const appDefault = kc.models.find((m) => m.v === (typeof state === "object" ? state.alias : null));
+    const usable = usableModelOptions();
+    const appDefault = usable.find((m) => m.v === kc.liveAlias) || usable.find((m) => !String(m.v).startsWith("cli:")) || null;
     const options = [
       { v: "", label: appDefault ? `App default — ${appDefault.label}` : "App default" },
-      ...kc.models,
+      ...usable,
     ];
     const sig = options.map((o) => o.v).join(",");
     if (pick.dataset.sig !== sig) {
@@ -1034,12 +1176,12 @@
       }
       pick.dataset.sig = sig;
     }
-    // A pinned model that is no longer on the machine must not silently
-    // vanish into "App default" — name it, so the mismatch is visible.
+    // A pinned model that is no longer usable must not silently vanish into
+    // "App default" — name it, so the mismatch is visible.
     if (chosen && !options.some((o) => o.v === chosen)) {
       const el = document.createElement("option");
       el.value = chosen;
-      el.textContent = `${chosen} — not installed`;
+      el.textContent = `${chosen} — not available`;
       pick.appendChild(el);
       pick.dataset.sig = "";
     }
@@ -1063,9 +1205,13 @@
     }
   });
 
-  /** What this run should ask for: the project's pin, else the app's model. */
+  /** What this run should ask for. Empty = app default (gateway picks live
+   *  running ready, else first ready). Unusable pins are not sent as an
+   *  explicit request — that would skip the gateway's pin fallback. */
   function chosenModel() {
-    return $("kc-model").value || (typeof state === "object" && state.alias) || "";
+    const v = $("kc-model").value;
+    if (v && usableModelOptions().some((m) => m.v === v)) return v;
+    return "";
   }
 
   async function render() {

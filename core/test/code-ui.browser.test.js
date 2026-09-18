@@ -220,8 +220,11 @@ test("plan mode: reads, proposes, changes nothing — then the approved plan doe
     await page.click("#btn-kc-browse-use");
     await page.waitForSelector("#kc-chat:not([hidden])");
 
-    // Plan first.
+    // Plan first (behind the Code settings gear).
+    await page.click("#btn-kc-settings");
+    await page.waitForSelector("#kc-settings-panel:not([hidden])");
     await page.check("#kc-plan");
+    await page.click("#btn-kc-settings-close");
     await page.fill("#kc-task", "make it log 2");
     await page.click("#btn-kc-run");
 

@@ -489,7 +489,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
   // One loopback completion through the gateway's own chat lane — teams AND
   // bench inherit every routing rule (privacy modes, budgets, kill switch)
   // instead of re-implementing any of it.
-  const loopbackChat = async ({ model, messages, maxTokens }) => {
+  const loopbackChat = async ({ model, messages, maxTokens, signal }) => {
     const r = await fetch(`http://127.0.0.1:${gateway.port}/core/chat/completions`, {
       method: "POST",
       headers: {
@@ -499,6 +499,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
         ...(process.env.KAI_CORE_TOKEN ? { authorization: `Bearer ${process.env.KAI_CORE_TOKEN}` } : {}),
       },
       body: JSON.stringify({ model, messages, stream: false, max_tokens: maxTokens }),
+      signal,
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j?.error?.message || `chat failed (${r.status})`);
@@ -560,7 +561,16 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
       return codeSwitch.status();
     },
   };
-  const code = new CodeAgent({ chatFn: loopbackChat, registry, onEvent: events });
+  /*
+   * Subscription CLIs (Codex, Claude Code, Grok) as the coding agent's brain.
+   * `cli:*` reaches them ONLY through this chatFn: the gateway's chat lane
+   * refuses those ids, so teams, tasks, KAI and the public API cannot use them.
+   */
+  const { CliProviders, isCliModel } = require("./lib/code-cli-providers");
+  const cliProviders = new CliProviders({ settings, privacyMode: () => network.status().privacyMode });
+  const codeChat = (req) => (isCliModel(req.model) ? cliProviders.chat(req) : loopbackChat(req));
+  const code = new CodeAgent({ chatFn: codeChat, registry, onEvent: events });
+  code.cliProviders = cliProviders;
   code.projects = new CodeProjects(dataDir);
   code.switch = codeSwitch;
   // GitHub for Koinos Code (task #73): clone a repo into a project, and push

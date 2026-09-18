@@ -529,44 +529,66 @@
           <p class="lede">Your account, and the parts of the app that are off until you turn them on.</p>
 
 
-          <section id="desktop-providers" hidden>
+          <section id="desktop-ai-connections">
             <h2>Desktop AI connections</h2>
-            <p class="hint">Use your own OpenAI or Anthropic API account in chat and desktop KAI.
-              Chats, attachments and relevant app tool results go directly to your chosen provider.
-              API usage is billed by that provider. Keys are encrypted on this computer and are never offered to the Koinos Network.</p>
-            <p id="provider-privacy" class="hint" role="status"></p>
-            <div id="provider-openai" class="provider-card" data-provider="openai">
-              <div class="provider-heading"><h3>OpenAI</h3><span class="hint" data-provider-state>Not connected</span></div>
-              <label for="provider-openai-key">API key</label>
-              <input id="provider-openai-key" type="password" autocomplete="off" spellcheck="false" maxlength="4096" placeholder="Paste your API key" />
-              <label for="provider-openai-model">Model ID <span class="hint">(optional — or refresh models after saving)</span></label>
-              <input id="provider-openai-model" data-provider-model autocomplete="off" spellcheck="false" maxlength="180" placeholder="A model ID from your provider account" />
-              <div class="provider-buttons">
-                <button class="primary small" data-provider-action="save">Save connection</button>
-                <button class="small" data-provider-action="refresh">Test &amp; refresh models</button>
-                <button class="small" data-provider-action="use">Use in chat</button>
-                <button class="small" data-provider-action="remove">Remove</button>
-                <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">Get an API key ↗</a>
+            <p class="hint">Two kinds of connection, kept separate on purpose:</p>
+            <ul class="hint connection-type-list">
+              <li><b>API connections</b> — your OpenAI or Anthropic API key for chat and desktop KAI.</li>
+              <li><b>Subscription coding harnesses</b> — Codex, Claude Code, or Grok Build as the brain for Koinos Code only (vendor CLIs you already pay for).</li>
+            </ul>
+
+            <section id="desktop-providers" hidden>
+              <h3>API connections</h3>
+              <p class="hint">Use your own OpenAI or Anthropic API account in chat and desktop KAI.
+                Chats, attachments and relevant app tool results go directly to your chosen provider.
+                API usage is billed by that provider. Keys are encrypted on this computer and are never offered to the Koinos Network.</p>
+              <p id="provider-privacy" class="hint" role="status"></p>
+              <div id="provider-openai" class="provider-card" data-provider="openai">
+                <div class="provider-heading"><h3>OpenAI</h3><span class="hint" data-provider-state>Not connected</span></div>
+                <label for="provider-openai-key">API key</label>
+                <input id="provider-openai-key" type="password" autocomplete="off" spellcheck="false" maxlength="4096" placeholder="Paste your API key" />
+                <label for="provider-openai-model">Model ID <span class="hint">(optional — or refresh models after saving)</span></label>
+                <input id="provider-openai-model" data-provider-model autocomplete="off" spellcheck="false" maxlength="180" placeholder="A model ID from your provider account" />
+                <div class="provider-buttons">
+                  <button class="primary small" data-provider-action="save">Save connection</button>
+                  <button class="small" data-provider-action="refresh">Test &amp; refresh models</button>
+                  <button class="small" data-provider-action="use">Use in chat</button>
+                  <button class="small" data-provider-action="remove">Remove</button>
+                  <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">Get an API key ↗</a>
+                </div>
+                <p class="hint" data-provider-result role="status" aria-live="polite"></p>
               </div>
-              <p class="hint" data-provider-result role="status" aria-live="polite"></p>
-            </div>
-            <div id="provider-anthropic" class="provider-card" data-provider="anthropic">
-              <div class="provider-heading"><h3>Anthropic</h3><span class="hint" data-provider-state>Not connected</span></div>
-              <label for="provider-anthropic-key">API key</label>
-              <input id="provider-anthropic-key" type="password" autocomplete="off" spellcheck="false" maxlength="4096" placeholder="Paste your API key" />
-              <label for="provider-anthropic-model">Model ID <span class="hint">(optional — or refresh models after saving)</span></label>
-              <input id="provider-anthropic-model" data-provider-model autocomplete="off" spellcheck="false" maxlength="180" placeholder="A model ID from your provider account" />
-              <div class="provider-buttons">
-                <button class="primary small" data-provider-action="save">Save connection</button>
-                <button class="small" data-provider-action="refresh">Test &amp; refresh models</button>
-                <button class="small" data-provider-action="use">Use in chat</button>
-                <button class="small" data-provider-action="remove">Remove</button>
-                <a href="https://platform.claude.com/settings/keys" target="_blank" rel="noopener noreferrer">Get an API key ↗</a>
+              <div id="provider-anthropic" class="provider-card" data-provider="anthropic">
+                <div class="provider-heading"><h3>Anthropic</h3><span class="hint" data-provider-state>Not connected</span></div>
+                <label for="provider-anthropic-key">API key</label>
+                <input id="provider-anthropic-key" type="password" autocomplete="off" spellcheck="false" maxlength="4096" placeholder="Paste your API key" />
+                <label for="provider-anthropic-model">Model ID <span class="hint">(optional — or refresh models after saving)</span></label>
+                <input id="provider-anthropic-model" data-provider-model autocomplete="off" spellcheck="false" maxlength="180" placeholder="A model ID from your provider account" />
+                <div class="provider-buttons">
+                  <button class="primary small" data-provider-action="save">Save connection</button>
+                  <button class="small" data-provider-action="refresh">Test &amp; refresh models</button>
+                  <button class="small" data-provider-action="use">Use in chat</button>
+                  <button class="small" data-provider-action="remove">Remove</button>
+                  <a href="https://platform.claude.com/settings/keys" target="_blank" rel="noopener noreferrer">Get an API key ↗</a>
+                </div>
+                <p class="hint" data-provider-result role="status" aria-live="polite"></p>
               </div>
-              <p class="hint" data-provider-result role="status" aria-live="polite"></p>
-            </div>
-            <p class="hint">Available in desktop chat, Research, Agent and KAI. Teams, scheduled tasks,
-              the local API and network earning continue using their existing models. Stop cancels an active provider reply.</p>
+              <p class="hint">Available in desktop chat, Research, Agent and KAI. Teams, scheduled tasks,
+                the local API and network earning continue using their existing models. Stop cancels an active provider reply.</p>
+            </section>
+
+            <section id="code-cli-harnesses">
+              <h3>Subscription coding harnesses</h3>
+              <p class="hint">Currently available to <b>Koinos Code</b>. Enabling a harness makes it appear in that panel’s model selector.
+                The vendor CLI only supplies the model reply; Koinos Code still shows every write and command for your approval.
+                This app never starts a vendor login and never asks for subscription credentials.</p>
+              <p class="hint">On <b>Windows</b>, a harness is only detected when the vendor ships a real <code>.exe</code>. Koinos AI starts these
+                CLIs without a shell, which is what keeps a path from ever being parsed as a command — and that same choice means a
+                <code>.cmd</code> or <code>.ps1</code> shim cannot be launched. If a vendor installs only a shim, its harness shows as “Not installed”.</p>
+              <p id="code-cli-harness-note" class="hint" role="status"></p>
+              <div id="code-cli-harness-list"></div>
+              <p id="code-cli-harness-result" class="hint" role="status" aria-live="polite"></p>
+            </section>
           </section>
 
           <h2>Version</h2>
@@ -691,7 +713,9 @@
                 choose. Worth knowing exactly what it can do — inside a project you add, it can
                 write files and run commands as you. It never does either without showing you the
                 change or the exact command first and waiting for your yes, and it never touches
-                anything outside that folder.
+                anything outside that folder. Optional subscription coding harnesses (Codex,
+                Claude Code, Grok Build) are managed above under Desktop AI connections; they
+                send prompt and file content to the vendor, and Local-Only blocks them.
               </div>
             </div>
             <button id="btn-code-toggle" class="switch" role="switch" aria-checked="false" aria-label="Koinos Code">
@@ -844,6 +868,9 @@
                 <div class="kc-head-actions">
                   <span id="kc-branch" class="kc-branch" hidden></span>
                   <button id="btn-kc-git" class="small" hidden>Git</button>
+                  <button id="btn-kc-settings" class="kc-gear" type="button" title="Code settings — plan mode, tools, subscriptions" aria-label="Code settings" aria-expanded="false" aria-controls="kc-settings-panel">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 13a7.8 7.8 0 0 0 .1-2l2-1.5-2-3.5-2.4 1a8 8 0 0 0-1.7-1L15 3h-4l-.4 2.5a8 8 0 0 0-1.7 1l-2.4-1-2 3.5 2 1.5a7.8 7.8 0 0 0 0 2l-2 1.5 2 3.5 2.4-1a8 8 0 0 0 1.7 1L11 21h4l.4-2.5a8 8 0 0 0 1.7-1l2.4 1 2-3.5-2-1.5Z"/></svg>
+                  </button>
                   <button id="btn-kc-rename" class="small">Rename</button>
                   <button id="btn-kc-forget" class="small">Forget</button>
                 </div>
@@ -873,27 +900,64 @@
               <div id="kc-trace" class="kc-transcript"></div>
 
               <div id="kc-cmd-hints" class="kc-browse-list kc-cmd-hints" hidden></div>
-              <div class="kc-composer">
-                <textarea id="kc-task" rows="1" placeholder="What should it do? (Enter to send, Shift+Enter for a new line)"></textarea>
-                <button id="btn-kc-run" class="primary small">Send</button>
-                <button id="btn-kc-stop" class="small" hidden>Stop</button>
-              </div>
-              <div class="kc-composer-opts">
-                <label class="check kc-opt"><input type="checkbox" id="kc-plan" /> Plan first</label>
-                <label class="kc-opt" for="kc-model">Model</label>
-                <select id="kc-model" title="Which model does the work. Koinos Code runs on this machine only — the agent reads your project's files into the prompt, and those do not leave the computer."></select>
-                <button id="btn-kc-tools" class="kc-link">Tools…</button>
-                <span id="kc-tools-summary" class="meta"></span>
-              </div>
-              <div id="kc-tools-panel" class="kc-panel" hidden>
+              <div id="kc-settings-panel" class="kc-panel kc-settings-panel" hidden>
                 <div class="kc-panel-head">
-                  <b>Tools this project may use</b>
-                  <button id="btn-kc-tools-close" class="kc-x" aria-label="Close">✕</button>
+                  <b>Code settings</b>
+                  <button id="btn-kc-settings-close" class="kc-x" aria-label="Close">✕</button>
                 </div>
-                <p class="kc-choice-sub" id="kc-tools-note"></p>
-                <div id="kc-tools-list" class="kc-browse-list"></div>
+                <label class="check kc-opt kc-settings-row"><input type="checkbox" id="kc-plan" /> Plan first — read-only pass, then approve before any edit</label>
+                <div class="kc-settings-actions">
+                  <button id="btn-kc-tools" class="kc-link" type="button">Tools…</button>
+                  <button id="btn-kc-subs" class="kc-link" type="button">Subscriptions…</button>
+                  <span id="kc-tools-summary" class="meta"></span>
+                </div>
+                <div id="kc-tools-panel" class="kc-panel" hidden>
+                  <div class="kc-panel-head">
+                    <b>Tools this project may use</b>
+                    <button id="btn-kc-tools-close" class="kc-x" aria-label="Close">✕</button>
+                  </div>
+                  <p class="kc-choice-sub" id="kc-tools-note"></p>
+                  <div id="kc-tools-list" class="kc-browse-list"></div>
+                </div>
+                <div id="kc-subs-panel" class="kc-panel" hidden>
+                  <div class="kc-panel-head">
+                    <b>Subscription harnesses</b>
+                    <button id="btn-kc-subs-close" class="kc-x" aria-label="Close">✕</button>
+                  </div>
+                  <p class="kc-choice-sub" id="kc-subs-note">
+                    Codex, Claude Code, and Grok Build are managed in Settings → Desktop AI connections.
+                    Enabling one there makes it available in this model selector.
+                  </p>
+                  <div id="kc-subs-summary" class="kc-browse-list"></div>
+                  <div class="kc-settings-actions">
+                    <button id="btn-kc-subs-settings" class="primary small" type="button">Manage in Settings</button>
+                  </div>
+                </div>
               </div>
-              <div class="kc-statusline"><span id="kc-status" class="meta"></span></div>
+              <div class="kc-composer" id="kc-composer">
+                <div id="kc-status" class="kc-run-status meta" role="status" aria-live="polite" aria-atomic="true" hidden></div>
+                <div class="kc-composer-shell">
+                  <div class="kc-composer-entry">
+                    <label class="sr-only" for="kc-task">Task for Koinos Code</label>
+                    <textarea id="kc-task" rows="1" placeholder="What should it do? (Enter to send, Shift+Enter for a new line)"></textarea>
+                    <div class="kc-composer-buttons">
+                      <button id="btn-kc-run" class="primary small" type="button">Send</button>
+                      <button id="btn-kc-stop" class="small" type="button" hidden>Stop</button>
+                    </div>
+                  </div>
+                  <div class="kc-composer-options">
+                    <label class="sr-only" for="kc-model">Model for Koinos Code</label>
+                    <select id="kc-model" title="Which model does the work. Local models stay on this machine. Subscription harnesses send prompt and file content to the vendor you enable in Settings → Desktop AI connections."></select>
+                    <label class="sr-only" for="kc-effort">Thinking level</label>
+                    <select id="kc-effort" title="Thinking level for subscription brains (Codex, Claude Code, Grok Build). Local models ignore this.">
+                      <option value="">Thinking · Default</option>
+                      <option value="low">Thinking · Low</option>
+                      <option value="medium">Thinking · Medium</option>
+                      <option value="high">Thinking · High</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
             </div>
           </main>
         </div>
@@ -1052,6 +1116,7 @@
   <script src="connection-profiles.js"></script>
   <script src="companion-client.js"></script>
   <script src="desktop-providers.js"></script>
+  <script src="code-cli-harnesses.js"></script>
   <template id="chat-welcome-template">
           <div id="chat-empty" class="chat-empty">
             <div class="welcome-hero">

@@ -123,7 +123,95 @@ test("stop while blocked on a card ends the run; the stale card answers 404-styl
   });
   const r = await done;
   assert.strictEqual(r.reason, "stopped");
+  assert.match(r.answer, /Stopped/i, "stop leaves a human-readable outcome, not an empty string");
+  assert.ok(!/\{\s*"answer"\s*:\s*true\s*\}/.test(r.answer), "stop must not surface protocol JSON");
   assert.strictEqual(agent.provideApproval(staleId, true), false, "the card died with the run");
+});
+
+test("after declined writes, a protocol-marker closing reply becomes honest prose", async () => {
+  const { isProtocolMarker, truthfulAnswer } = require("../lib/code-agent");
+  assert.strictEqual(isProtocolMarker('{"answer":true}'), true);
+  assert.strictEqual(isProtocolMarker('{"answer": true}'), true);
+  assert.strictEqual(isProtocolMarker("All done."), false);
+  assert.match(truthfulAnswer('{"answer":true}', false), /Nothing was written/i);
+  assert.ok(!/\{\s*"answer"\s*:\s*true\s*\}/.test(truthfulAnswer('{"answer":true}', false)));
+
+  const dir = tmpProject();
+  const { chatFn } = scriptedChat([
+    '{"tool": "write_file", "args": {"path": "hello.txt", "content": "hi\\n"}}',
+    '{"answer": true}',
+    '{"answer":true}',
+  ]);
+  const agent = new CodeAgent({ chatFn });
+  const r = await agent.run({
+    dir,
+    task: "create hello.txt",
+    onTrace: (e) => {
+      if (e.type === "approval-request") agent.provideApproval(e.approvalId, false);
+    },
+  });
+  assert.strictEqual(r.reason, "answered");
+  assert.strictEqual(fs.existsSync(path.join(dir, "hello.txt")), false);
+  assert.ok(!isProtocolMarker(r.answer), `answer must not be protocol JSON: ${r.answer}`);
+  assert.match(r.answer, /Nothing was written|declined|not written/i);
+});
+
+/*
+ * The run loop corrects its own answer, and then the gateway corrects it again
+ * through sessionAnswer() before storing the session turn. The correction has
+ * to be idempotent or the person reads "Nothing was written to disk" twice in
+ * one message — which reads like two separate failures.
+ */
+test("the nothing-written correction is idempotent across both correction points", () => {
+  const { truthfulAnswer, sessionAnswer } = require("../lib/code-agent");
+  const claim = "I created hello.txt for you.";
+
+  const once = truthfulAnswer(claim, false, "answered");
+  const twice = truthfulAnswer(once, false, "answered");
+  const thrice = truthfulAnswer(twice, false, "answered");
+  const count = (s) => s.split("Nothing was written to disk").length - 1;
+  assert.strictEqual(count(once), 1, "the correction must appear once");
+  assert.strictEqual(count(twice), 1, "re-correcting an already-corrected answer must not append again");
+  assert.strictEqual(twice, once);
+  assert.strictEqual(thrice, once);
+
+  // The real double-correction path: finish() then the gateway's sessionAnswer().
+  const stored = sessionAnswer({ answer: once, wrote: false, reason: "answered" });
+  assert.strictEqual(count(stored), 1, "gateway storage must not append a second correction");
+  assert.strictEqual(stored, once);
+
+  // A run that really did write is left alone.
+  assert.strictEqual(truthfulAnswer(claim, true, "answered"), claim);
+});
+
+/*
+ * Plan mode closes through the same protocol as a normal run, so it can end on
+ * a bare {"answer":true}. That must never be shown as "the plan".
+ */
+test("plan mode never shows a raw protocol marker", () => {
+  const { planAnswer, sessionAnswer, isProtocolMarker } = require("../lib/code-agent");
+  for (const marker of ['{"answer":true}', '{"answer": true}', '{"done":true}', "  ", ""]) {
+    const out = planAnswer(marker);
+    assert.ok(!isProtocolMarker(out), `plan output must not be a marker: ${out}`);
+    assert.ok(!/\{\s*"(?:answer|done|final)"/.test(out), `plan output must not contain protocol JSON: ${out}`);
+    assert.match(out, /No plan was produced/i);
+    assert.ok(!/Nothing was written to disk —/.test(out), "plan mode never claims declined edits");
+  }
+  // A real plan passes through untouched.
+  const plan = "1. Edit src/a.js — add the guard.\n2. Edit test/a.test.js — cover it.";
+  assert.strictEqual(planAnswer(plan), plan);
+  assert.strictEqual(sessionAnswer({ reason: "planned", answer: plan, wrote: false }), plan);
+  assert.match(sessionAnswer({ reason: "planned", answer: '{"answer":true}', wrote: false }), /No plan was produced/i);
+});
+
+test("a plan-mode run that closes on a marker returns readable prose", async () => {
+  const dir = tmpProject();
+  const { chatFn } = scriptedChat(['{"answer":true}']);
+  const agent = new CodeAgent({ chatFn });
+  const r = await agent.run({ dir, task: "plan a change", mode: "plan" });
+  assert.strictEqual(r.reason, "planned");
+  assert.ok(!/\{\s*"answer"\s*:\s*true\s*\}/.test(r.answer), `plan answer leaked protocol JSON: ${r.answer}`);
+  assert.match(r.answer, /No plan was produced/i);
 });
 
 test("an approved command runs in the project directory", async () => {
