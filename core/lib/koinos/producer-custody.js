@@ -10,7 +10,7 @@ const externalMode = settings => { requireHealthySettings(settings); return sett
 const producerAddress = (settings, wallet) => externalMode(settings) ? settings.get(`producer.addresses.${settings.get("network", "mainnet")}`, "") : wallet.address;
 
 class ProducerCustody {
-  constructor({ settings, state, wallet, chain, nodeMgr, rewards }) { Object.assign(this, { settings, state, wallet, chain, nodeMgr, rewards }); }
+  constructor({ settings, state, wallet, chain, nodeMgr, rewards, distribution }) { Object.assign(this, { settings, state, wallet, chain, nodeMgr, rewards, distribution }); }
   config() { const health = settingsHealth(this.settings); if (!health.ok) return { mode: "unresolved", address: null, localWalletAddress: this.wallet.address || null, settingsHealth: health }; return { mode: externalMode(this.settings) ? "external" : "local", address: producerAddress(this.settings, this.wallet), localWalletAddress: this.wallet.address || null, settingsHealth: health }; }
   requireExternal() { requireHealthySettings(this.settings); if (!externalMode(this.settings)) throw new Error("Select External/cold producer wallet first."); if (!this.config().address) throw new Error("Set a watch-only producer address for this network."); }
   requireLocal() { requireHealthySettings(this.settings); if (externalMode(this.settings)) throw new Error("External producer mode never signs with the earning wallet. Use External signing in Node setup."); }
@@ -27,7 +27,7 @@ class ProducerCustody {
     throw new Error("Hot key files are missing or inconsistent. Stop the node and use Generate hot key to restore the public file from its private key.");
   }
   async stopped() {
-    if (this.rewards._busy) throw new Error("Wait for the current reward operation to finish.");
+    if (this.rewards._busy || this.distribution?._busy) throw new Error("Wait for the current reward operation to finish.");
     const s = await this.nodeMgr.status(this.chain.network().id);
     if (!s.docker?.ok || s.isRunning || s.op?.running || this.nodeMgr._op?.running || this.nodeMgr._desiredRunning) throw new Error("Stop the node and wait for it to finish before changing producer custody or keys. Docker must be available to verify it is stopped.");
   }
@@ -37,8 +37,9 @@ class ProducerCustody {
     if (mode === "external" && !this.chain.isValidAddress(address)) throw new Error("Enter a valid watch-only Koinos address.");
     if (mode === "external" && address === this.wallet.address) throw new Error("This address already has a private key in the local earning wallet. Choose a separately controlled external address.");
     await this.stopped();
-    if (this.rewards._busy) throw new Error("Wait for the current reward operation to finish.");
+    if (this.rewards._busy || this.distribution?._busy) throw new Error("Wait for the current reward operation to finish.");
     this.rewards.configure({ enabled: false });
+    this.distribution?.configure({ enabled: false });
     const addresses = { ...this.settings.get("producer.addresses", {}), ...(mode === "external" ? { [this.chain.network().id]: address } : {}) };
     this.settings.set("producer", { mode, addresses });
     // Do not report success from in-memory state alone. Re-open the settings

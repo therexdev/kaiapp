@@ -6,7 +6,7 @@ const os = require("os");
 const path = require("path");
 const semver = require("semver");
 const yaml = require("js-yaml");
-const { channelConfig, configureDesktop, configureUpdater, TEST_FEED } = require("../lib/release-channel");
+const { channelConfig, configureDesktop, configureUpdater, TEST_FEED, MASTER_FEED } = require("../lib/release-channel");
 const { prepare } = require("../../scripts/prepare-test-build");
 const { stableCompatibility, findTestRelease, purgeIncompleteAssets, uploadReleaseAssets } = require("../../scripts/publish-test-build");
 const { GitHubProvider } = require("electron-updater/out/providers/GitHubProvider");
@@ -51,7 +51,7 @@ test("Packaging Test separates installer identity and does not claim the live CL
   fs.writeFileSync(path.join(root, "core/package.json"), JSON.stringify(require("../package.json")));
   const version = prepare(root, "12", "2");
   const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json")));
-  assert.equal(pkg.version, `${semver.inc(source.version, "patch")}-test.12.2`);
+  assert.equal(pkg.version, `${semver.inc(source.version.split("-")[0], "patch")}-test.12.2`);
   assert.equal(pkg.version, version);
   assert.equal(pkg.name, "koinos-ai-test");
   assert.equal(pkg.build.appId, "io.koinosai.desktop.test");
@@ -67,19 +67,31 @@ test("Packaging Test separates installer identity and does not claim the live CL
 
 const stableFeed = yaml.dump({ version: "0.54.1", files: [{ url: "Koinos-AI-Setup-0.54.1.exe", sha512: "stable-hash", size: 123 }], path: "Koinos-AI-Setup-0.54.1.exe", sha512: "stable-hash" });
 
-test("A legacy live GitHub updater seeing test-build resolves only the original stable installer", async () => {
+for (const releaseTag of ["test-build", "master-build"]) test(`A legacy live GitHub updater seeing ${releaseTag} resolves only the original stable installer`, async () => {
   const compatibility = stableCompatibility(stableFeed, "v0.54.1");
   const requested = [];
   const updater = { allowPrerelease: true, currentVersion: new semver.SemVer("0.54.0"), fullChangelog: false };
   const executor = { request: async (options) => { requested.push(options.path); return compatibility; } };
   const provider = new GitHubProvider({ provider: "github", owner: "therexdev", repo: "kaiapp" }, updater, { executor, platform: "win32", isUseMultipleRangeRequest: false });
-  provider.httpRequest = async () => '<feed><entry><title>Test</title><link href="https://github.com/therexdev/kaiapp/releases/tag/test-build"/><content>Test channel</content></entry></feed>';
+  provider.httpRequest = async () => `<feed><entry><title>App channel</title><link href="https://github.com/therexdev/kaiapp/releases/tag/${releaseTag}"/><content>Separate channel</content></entry></feed>`;
   const latest = await provider.getLatestVersion();
   assert.equal(latest.version, "0.54.1");
-  assert.ok(requested.every(p => p.endsWith("/test-build/latest.yml")));
+  assert.ok(requested.every(p => p.endsWith(`/${releaseTag}/latest.yml`)));
   const [file] = provider.resolveFiles(latest);
   assert.equal(file.url.href, "https://github.com/therexdev/kaiapp/releases/download/v0.54.1/Koinos-AI-Setup-0.54.1.exe");
   assert.equal(file.info.sha512, "stable-hash");
+});
+
+test("Master's generic provider reads only master.yml from master-build", async () => {
+  const updater = { channel: "master", isAddNoCacheQuery: false };
+  const provider = new GenericProvider({ provider: "generic", url: MASTER_FEED, channel: "master" }, updater, { executor: {}, platform: "win32", isUseMultipleRangeRequest: false });
+  provider.httpRequest = async url => {
+    assert.equal(url.href, `${MASTER_FEED}master.yml`);
+    return yaml.dump({ version: "0.54.9-master.1", files: [{ url: "Master-Koinos-AI-Node-Setup-0.54.9-master.1-x64.exe", sha512: "master-hash" }] });
+  };
+  const latest = await provider.getLatestVersion();
+  assert.equal(latest.version, "0.54.9-master.1");
+  assert.equal(provider.resolveFiles(latest)[0].url.href, `${MASTER_FEED}Master-Koinos-AI-Node-Setup-0.54.9-master.1-x64.exe`);
 });
 
 test("Test's generic provider reads test.yml and resolves only Test binaries", async () => {
@@ -140,4 +152,24 @@ test("Test publication removes only incomplete assets and retries one transient 
   assert.ok(calls.some(args => args.join(" ").includes("releases/assets/2")));
   assert.ok(calls.some(args => args.join(" ").includes("releases/assets/3")));
   assert.ok(calls.filter(args => args[0] === "release").every(args => args.filter(value => /\.(?:AppImage|yml)$/.test(value)).length === 1));
+});
+
+
+test("Master isolates profile, Core port, app identity and updater from Test and Alpha", () => {
+  const master = channelConfig("master"), stable = channelConfig("stable"), test = channelConfig("test");
+  for (const other of [stable, test]) for (const field of ["appId", "productName", "port", "homeDirName"])
+    assert.notEqual(master[field], other[field], field);
+  const paths = { appData: path.join(os.tmpdir(), "app-data"), userData: "original" };
+  let name;
+  configureDesktop({ getPath: k => paths[k], setPath: (k,v) => paths[k]=v, setName: n => name=n, setAppUserModelId() {} }, master);
+  assert.equal(paths.userData, path.join(paths.appData, "Master Koinos AI Node"));
+  assert.equal(paths.sessionData, paths.userData); assert.equal(name, master.productName);
+  const updater = { setFeedURL(v) { this.feed=v; } };
+  configureUpdater(updater, master);
+  assert.deepEqual(updater.feed, { provider: "generic", url: MASTER_FEED, channel: "master" });
+  assert.equal(updater.allowDowngrade, false);
+  const pkg = require("../../package.json");
+  assert.equal(pkg.build.appId, master.appId);
+  assert.equal(pkg.build.nsis.include, undefined);
+  assert.ok(pkg.build.extraResources.some(r => r.to === "licenses/FREE-KOINOS-NODE.txt"));
 });

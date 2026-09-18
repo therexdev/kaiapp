@@ -1,0 +1,39 @@
+name: Master KAI verification
+on:
+  push:
+    branches: [master-kaiapp]
+  pull_request:
+    branches: [master-kaiapp]
+  workflow_dispatch:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      - name: Install browser
+        run: |
+          npx playwright-core install chromium
+          echo "KAI_TEST_CHROMIUM=$(node -e 'process.stdout.write(require("playwright-core").chromium.executablePath())')" >> "$GITHUB_ENV"
+      - run: npm test
+        env:
+          KAI_SCHEDULER_URL: http://127.0.0.1:9/scheduler
+          KAI_RELAY_URL: http://127.0.0.1:9
+          KAI_FEEDBACK_URL: http://127.0.0.1:9/feedback
+          KAI_MASCOT_QA_DIR: mascot-qa
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: master-ui-checks
+          path: mascot-qa/*
+          if-no-files-found: ignore

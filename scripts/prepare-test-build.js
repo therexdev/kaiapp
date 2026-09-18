@@ -11,7 +11,7 @@ function prepare(rootDir, buildNumber, attempt = "1") {
   const file = path.join(rootDir, "package.json");
   const pkg = JSON.parse(fs.readFileSync(file, "utf8"));
   if (pkg.kaiChannel === "test") throw new Error("Already prepared; use a fresh checkout");
-  const [major, minor, patch] = pkg.version.split(".").map(Number);
+  const [major, minor, patch] = pkg.version.split("-")[0].split(".").map(Number);
   const version = `${major}.${minor}.${patch + 1}-test.${buildNumber}.${attempt}`;
   pkg.version = version;
   pkg.name = "koinos-ai-test";

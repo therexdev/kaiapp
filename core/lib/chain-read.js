@@ -1,6 +1,7 @@
 "use strict";
 
-const { Provider, Contract, utils } = require("koilib");
+const { Contract, utils } = require("koilib");
+const { createProvider, rpcUrlsForNetwork } = require("./koinos-rpc");
 const { NETWORKS, SATS_PER_KOIN } = require("./chain-constants");
 const POB_ABI = require("./abi/pob-abi.json");
 const TOKEN_ABI = require("./abi/token-abi.json");
@@ -75,16 +76,13 @@ class ChainRead {
     return NETWORKS[this.settings.get("koinos.network", "mainnet")] ?? NETWORKS.mainnet;
   }
 
-  /** A node the user pointed us at wins over the public RPC — that is the
-   *  whole value of running one. */
+  /** A custom node is primary, followed by this network's public backups. */
   rpcUrls() {
-    const custom = String(this.settings.get("koinos.rpcUrl", "") || "").trim();
-    if (/^https?:\/\//.test(custom)) return [custom];
-    return this.network().rpcUrls;
+    return rpcUrlsForNetwork(this.network(), this.settings.get("koinos.rpcUrl", ""));
   }
 
   provider(urls) {
-    return new Provider(urls ?? this.rpcUrls());
+    return createProvider(urls ?? this.rpcUrls());
   }
 
   isValidAddress(address) {

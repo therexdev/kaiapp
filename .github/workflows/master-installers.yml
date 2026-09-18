@@ -1,0 +1,108 @@
+name: Master KAI release
+on:
+  push:
+    branches: [master-kaiapp]
+  workflow_dispatch:
+concurrency:
+  group: master-kai-release
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  signing:
+    if: github.ref == 'refs/heads/master-kaiapp' && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[release]'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check Windows signing credentials are available
+        env:
+          AZURE_SIGNING_ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          AZURE_SIGNING_PROFILE: ${{ secrets.AZURE_SIGNING_PROFILE }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: |
+          node - <<'NODE'
+          const keys = ['AZURE_SIGNING_ACCOUNT', 'AZURE_SIGNING_PROFILE', 'AZURE_TENANT_ID', 'AZURE_CLIENT_ID', 'AZURE_CLIENT_SECRET'];
+          const missing = keys.filter(key => !String(process.env[key] || '').trim());
+          if (missing.length) throw new Error('Required kaiapp Actions secrets are missing: ' + missing.join(', '));
+          console.log('Required Windows signing credentials are available.');
+          NODE
+  verify:
+    needs: signing
+    uses: ./.github/workflows/master-ci.yml
+  linux:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run dist -- --linux --x64 --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: master-linux-installer
+          path: |
+            dist/*.AppImage
+            dist/master-linux*.yml
+          if-no-files-found: error
+  windows:
+    needs: verify
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - name: Require the established Azure publisher
+        run: node scripts/configure-windows-signing.js
+        env:
+          AZ_ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          AZ_PROFILE: ${{ secrets.AZURE_SIGNING_PROFILE }}
+          AZ_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      - run: npm run dist -- --win --publish never
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      - run: node scripts/verify-windows-signatures.js dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: master-windows-installers
+          path: |
+            dist/*.exe
+            dist/*.blockmap
+            dist/*yml
+            dist/windows-signatures-*.json
+          if-no-files-found: error
+  publish:
+    needs: [linux, windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --ignore-scripts
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: master-*-installer*
+          path: artifacts
+          merge-multiple: true
+      - name: Verify artifacts and publish the Master release
+        run: node scripts/publish-master-build.js artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}

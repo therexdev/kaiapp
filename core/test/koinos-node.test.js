@@ -234,7 +234,7 @@ test("node UI: the bridge's password gate covers exactly Core's outbound channel
   // six call sites: bridgeStart, routeCStart, ethSend, usdtSend, vkoinSend,
   // and the returns destination added for FIND-KOI-001.
   const gated = coreSrc.match(/requirePassword\(password\)/g)?.length ?? 0;
-  assert.strictEqual(gated, 6, "Core still gates six channels via requirePassword");
+  assert.strictEqual(gated, 7, "Core gates the original six channels plus distribution settings");
   assert.match(coreSrc, /chain\.transfer\(wallet\.signerFor\(password\)/, "and chain:send proves the password via signerFor");
 
   /*
@@ -267,7 +267,7 @@ test("node UI: the switch reveals every node menu, and the embedded app is wired
   const navs = [...html.matchAll(/class="nav-item koinos-nav" data-view="([^"]+)"/g)].map((m) => m[1]);
   assert.deepStrictEqual(navs, ["koinos"], "one sidebar entry for the whole node");
   const rail = [...html.matchAll(/data-knode="([^"]+)"/g)].map((m) => m[1]);
-  assert.strictEqual(rail.length, 7, "seven screens on the rail");
+  assert.strictEqual(rail.length, 9, "original screens plus Distribution and Node API");
   assert.strictEqual(rail[0], "koinos", "Dashboard is first");
   for (const v of rail) assert.ok(hostView.includes(`"${v}"`), `${v} maps to an embedded view`);
   // Every embedded view stays reachable — a rail that lost one would strand it.

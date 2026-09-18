@@ -2,6 +2,7 @@
 
 const POB_ABI = require("./pob-abi.json");
 const TOKEN_ABI = require("./token-abi.json");
+const { MAINNET_RPC_URLS } = require("../koinos-rpc");
 
 const KOIN_DECIMALS = 8;
 const SATS_PER_KOIN = 100000000n;
@@ -22,7 +23,7 @@ const NETWORKS = {
     label: "Mainnet",
     tokenSymbol: "KOIN",
     // Public RPC endpoints tried in order.
-    rpcUrls: ["https://api.koinos.io"],
+    rpcUrls: [...MAINNET_RPC_URLS],
     // Match the current koinos/koinos env.example default. 8080 is commonly
     // occupied by local development servers and caused the packaged Mac node
     // to stop after its other services had already started.
@@ -141,6 +142,26 @@ const DEFAULT_SETTINGS = {
     minReturnKoin: "1",   // don't act below this many KOIN
     maxReturnKoin: "0",   // cap per run ("0" = no cap); large pending is chunked
     pollMinutes: 10,
+  },
+  masterApi: { enabled: false, port: 41110, rpcUrl: "http://127.0.0.1:8085" },
+  distribution: {
+    enabled: false,
+    // "participation" pays each node in proportion to the rewards it was
+    // qualifying for as they were earned, so a node appearing at the last
+    // minute cannot collect a full share of a day's (or a rolled-over week's)
+    // rewards. "even" is a flat split within each pool.
+    weighting: "participation",
+    reburnPct: 0,             // % of profit compounded back into VHP
+    // % of profit paid to each pool. null until set — migrated on first read
+    // from the requireVhpMinimum/requireAiNode gates this replaces, so an
+    // upgrade never changes who gets paid (migrateDistributionConfig()).
+    sharePct: null,           // { ai, producing, both }
+    recipients: [],           // [{ address, label, pct }] direct % of profit
+    minVhpKoin: "10000",      // VHP a producer needs to count; "0" = any producer
+    aiRosterUrl: "",          // where the live Koinos AI Node roster is read
+    payoutHourUtc: 0,         // close the daily cycle at this UTC hour
+    minPayoutKoin: "0.5",     // skip a share below this; it carries instead
+    pollMinutes: 10,          // engine check interval (snapshots + queue draining)
   },
   keepLiquidKoin: "10",   // liquid KOIN kept as a balance buffer for mana
 };

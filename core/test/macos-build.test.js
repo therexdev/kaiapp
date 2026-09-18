@@ -55,7 +55,7 @@ test("engine shared-library path is platform-specific", () => {
 });
 
 test("macOS CI cross-builds both architectures without implicit publication", () => {
-  const workflow = fs.readFileSync(path.join(root, ".github", "workflows", "ci.yml"), "utf8");
+  const workflow = fs.readFileSync(path.join(root, "docs", "upstream-workflows", "ci.yml"), "utf8");
   assert.match(workflow, /build-macos:/);
   assert.match(workflow, /runs-on:\s+macos-latest/);
   assert.match(workflow, /Install Chromium for macOS browser tests/);

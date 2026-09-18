@@ -1,4 +1,11 @@
-# KAI development and releases
+# Master Koinos AI Node
+
+## Master repository override
+
+The owner corrected the destination: Master belongs on `therexdev/kaiapp:master-kaiapp`, sharing repository signing settings. Work only on that branch. Do not push to Test, Alpha or free-koinos-node. The earlier standalone `therexdev/master-kaiapp` repository is superseded and must not receive further updates. Master keeps its own profile, app identity, Core port and `master-build` update feed; the upstream profile-sharing and promotion rules below do not apply to Master. The non-semver Master release includes legacy `latest*.yml` compatibility pointers to stable Alpha, never Master binaries. Preserve remaining privacy/wallet/companion safeguards. Distribution requires explicit local wallet-password authorization. Never expose Core, wallet, signing or node control through the public read-only API. Never run migration, transfers or change a running node without the owner initiating that operation. Run tests and update docs/MASTER_NODE.md. Never relax the Windows signing gates. Upstream workflows are archived; only Master workflows may run on this branch.
+
+## Upstream rules, subject to the override
+
 
 - Primary development branch: `test`. Begin from its latest pushed commit.
 - Live desktop release branch: `claude/koinos-ai-takeover-co25fw`. The repository's default branch is historical; do not base new work on it.

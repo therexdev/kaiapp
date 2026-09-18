@@ -1,6 +1,7 @@
 "use strict";
 
-const { Provider, Contract, Transaction, utils } = require("koilib");
+const { Contract, Transaction, utils } = require("koilib");
+const { createProvider, rpcUrlsForNetwork } = require("../koinos-rpc");
 const { NETWORKS, POB_ABI, TOKEN_ABI, BURN_MANA_CUSHION } = require("./constants");
 const { cmpSats, subSats, formatAmount } = require("./format");
 
@@ -92,12 +93,11 @@ class ChainService {
   rpcUrls() {
     const net = this.network();
     const custom = this.settings.get(`customRpc.${net.id}`, "");
-    if (custom && /^https?:\/\//.test(custom)) return [custom];
-    return net.rpcUrls.length > 0 ? net.rpcUrls : [net.localRpcUrl];
+    return rpcUrlsForNetwork(net, custom);
   }
 
   provider(urls) {
-    return new Provider(urls ?? this.rpcUrls());
+    return createProvider(urls ?? this.rpcUrls());
   }
 
   isValidAddress(address) {
@@ -341,6 +341,64 @@ class ChainService {
     } catch (e) {
       throw rpcError(e);
     }
+  }
+
+  async blockHeaders(fromHeight, toHeight) {
+    const provider = this.provider();
+    const CHUNK = 100;
+    try {
+      const head = await provider.getHeadInfo();
+      const headId = head.head_topology?.id;
+      const headHeight = Number(head.head_topology?.height ?? 0);
+      const from = Math.max(1, Number(fromHeight));
+      const to = Math.min(Number(toHeight), headHeight);
+      const headers = [];
+      for (let start = from; start <= to; start += CHUNK) {
+        const num = Math.min(CHUNK, to - start + 1);
+        const res = await provider.call("block_store.get_blocks_by_height", {
+          head_block_id: headId,
+          ancestor_start_height: String(start),
+          num_blocks: num,
+          return_block: true,
+          return_receipt: false,
+        });
+        for (const item of res?.block_items ?? []) {
+          const h = item.block?.header;
+          if (!h) continue;
+          headers.push({
+            height: Number(item.block_height ?? h.height ?? 0),
+            timestamp: Number(h.timestamp ?? 0),
+            signer: h.signer ?? null,
+          });
+        }
+      }
+      return { headHeight, headers };
+    } catch (e) {
+      throw rpcError(e);
+    }
+  }
+
+  // VHP balances for many addresses, fetched with bounded concurrency.
+  // Returns { [address]: vhpSat }; individual failures resolve to null so one
+  // bad address doesn't sink the whole eligibility check.
+  async vhpBalances(addresses, { concurrency = 8 } = {}) {
+    const provider = this.provider();
+    const vhp = await this._contract("vhp", { provider });
+    const out = {};
+    const queue = [...new Set(addresses)];
+    const worker = async () => {
+      while (queue.length > 0) {
+        const address = queue.shift();
+        try {
+          const r = await vhp.functions.balance_of({ owner: address });
+          out[address] = r?.result?.value ?? "0";
+        } catch {
+          out[address] = null;
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, worker));
+    return out;
   }
 
   async registeredPublicKey(producer, { strict = false } = {}) {

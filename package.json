@@ -1,7 +1,7 @@
 {
-  "name": "koinos-ai",
-  "productName": "Koinos AI",
-  "version": "0.54.9",
+  "name": "master-koinos-ai",
+  "productName": "Master Koinos AI Node",
+  "version": "0.54.9-master.1",
   "private": true,
   "description": "Koinos AI Core — local-first AI with a self-hosted OpenAI-compatible API",
   "license": "MIT",
@@ -17,7 +17,7 @@
     "core": "node core/server.js",
     "code": "node cli/koinos-code.js",
     "test": "node --test --test-concurrency=2 \"core/test/*.test.js\"",
-    "start": "node scripts/run-test.js",
+    "start": "electron .",
     "live-senses:prepare": "node scripts/prepare-live-senses.js",
     "postinstall": "node scripts/prepare-live-senses.js",
     "predist": "node scripts/prepare-live-senses.js && node scripts/build-windows-helpers.js",
@@ -26,7 +26,8 @@
     "version:set": "node core/scripts/set-version.js",
     "start:live": "electron .",
     "core:test": "node scripts/run-test.js core",
-    "promote:test": "node scripts/promote-test.js"
+    "promote:test": "node scripts/promote-test.js",
+    "migrate:free-node": "node scripts/migrate-free-node.js"
   },
   "bin": {
     "koinos-code": "cli/koinos-code.js"
@@ -40,8 +41,9 @@
   },
   "main": "electron/main.js",
   "build": {
-    "appId": "io.koinosai.desktop",
-    "productName": "Koinos AI",
+    "generateUpdatesFilesForAllChannels": false,
+    "appId": "io.koinosai.desktop.master",
+    "productName": "Master Koinos AI Node",
     "directories": {
       "output": "dist"
     },
@@ -76,6 +78,10 @@
       {
         "from": "docs/licenses/KAI-LIVE-SENSES.txt",
         "to": "live-senses/LICENSE.txt"
+      },
+      {
+        "from": "docs/licenses/FREE-KOINOS-NODE.txt",
+        "to": "licenses/FREE-KOINOS-NODE.txt"
       }
     ],
     "asarUnpack": [
@@ -107,7 +113,7 @@
       "oneClick": true,
       "perMachine": false,
       "deleteAppDataOnUninstall": false,
-      "include": "build/installer.nsh"
+      "artifactName": "Master-Koinos-AI-Node-Setup-${version}-${arch}.${ext}"
     },
     "mac": {
       "target": [
@@ -138,9 +144,11 @@
         "provider": "github",
         "owner": "therexdev",
         "repo": "kaiapp",
-        "releaseType": "release"
+        "channel": "master",
+        "releaseType": "prerelease"
       }
-    ]
+    ],
+    "artifactName": "Master-Koinos-AI-Node-${version}-${os}-${arch}.${ext}"
   },
   "dependencies": {
     "@huggingface/transformers": "3.5.1",
@@ -161,5 +169,6 @@
   "overrides": {
     "protobufjs": "7.6.6",
     "sharp": "0.35.4"
-  }
+  },
+  "kaiChannel": "master"
 }

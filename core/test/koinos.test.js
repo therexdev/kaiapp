@@ -110,9 +110,9 @@ test("chain-read: address validation and amount formatting", () => {
 test("chain-read: a user's own node wins over the public RPC", () => {
   const s = store();
   const c = new ChainRead(s);
-  assert.deepStrictEqual(c.rpcUrls(), ["https://api.koinos.io"], "public by default");
+  assert.deepStrictEqual(c.rpcUrls(), ["https://api.koinosblocks.com", "https://api.koinos.io"], "public primary and backup by default");
   s.set("koinos.rpcUrl", "http://127.0.0.1:8080");
-  assert.deepStrictEqual(c.rpcUrls(), ["http://127.0.0.1:8080"], "…their node when they point at one");
+  assert.deepStrictEqual(c.rpcUrls(), ["http://127.0.0.1:8080", "https://api.koinosblocks.com", "https://api.koinos.io"], "their node first, with public backups");
 });
 
 test("chain-read: an unreachable node is an ANSWER, not an exception", async () => {

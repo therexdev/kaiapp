@@ -11,6 +11,8 @@ const { ChainService } = require("./koinos/chain");
 const { NodeManager } = require("./koinos/node-manager");
 const dataMove = require("./koinos/data-move");
 const { SetupService } = require("./koinos/setup");
+const { DistributionEngine } = require("./koinos/distribution");
+const { MasterNodeApi } = require("./koinos/master-api");
 const { RewardEngine } = require("./koinos/rewards");
 const { createProducerCache } = require("./koinos/network-producers");
 const { ProducerStats } = require("./koinos/producer-stats");
@@ -67,11 +69,11 @@ const { compareRoutes, descriptor } = require("./koinos/fund-routes");
 const DEFAULT_ONRAMP_ENDPOINT = "https://koinos-node.vercel.app/api/session";
 const ONRAMP_APP_KEY = "kkapp_71854dc40591df1aeb8811a514e3dbc302bb382f";
 
-function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards, stats, bridge, routeC, userData, appVersion, defaultNodeData = null, priceCache: injectedPriceCache = null, producerCache: injectedProducerCache = null, vaultRequest = undefined, onEvent = () => {} }) {
+function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards, distribution, masterApi, stats, bridge, routeC, userData, appVersion, defaultNodeData = null, priceCache: injectedPriceCache = null, producerCache: injectedProducerCache = null, vaultRequest = undefined, onEvent = () => {} }) {
   const channels = new Map();
   const handle = (channel, fn) => channels.set(channel, fn);
   const { ProducerCustody } = require("./koinos/producer-custody");
-  const custody = new ProducerCustody({ settings, state, wallet, chain, nodeMgr, rewards });
+  const custody = new ProducerCustody({ settings, state, wallet, chain, nodeMgr, rewards, distribution });
   const { ProducerVault } = require("./koinos/producer-vault");
   const vault = new ProducerVault({ custody, chain, request: vaultRequest });
   handle("producer:vaultConnect", () => vault.connect());
@@ -129,11 +131,12 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
     platform: process.platform,
     userData,
     networks: publicNetworks,
-    settings: settings.all(),
+    settings: { ...settings.all(), ...(distribution ? { distribution: distribution.config() } : {}) },
     minPasswordLength: MIN_PASSWORD_LENGTH,
   }));
 
   handle("settings:update", ({ network, customRpc, keepLiquidKoin, onrampEndpoint }) => {
+    if (distribution?._busy) throw new Error("Wait for the current distribution operation.");
     if (network !== undefined) {
       if (!NETWORKS[network]) throw new Error(`Unknown network: ${network}`);
       settings.set("network", network);
@@ -451,7 +454,9 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
   handle("node:quickSync", () => nodeMgr.quickSync(chain.network().id));
   handle("node:quickSyncCancel", () => nodeMgr.cancelQuickSync());
 
-  handle("network:producers", () => injectedProducerCache
+  handle("network:producers", () => masterApi?.config().enabled && chain.network().id === "mainnet"
+    ? masterApi.producerSummary()
+    : injectedProducerCache
     ? injectedProducerCache.get(chain.network().id)
     : { network: chain.network().id, available: false, error: "Producer reader unavailable" });
 
@@ -585,9 +590,34 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
       }
       requirePassword(password);
     }
-    return rewards.configure(settingsPatch);
+    if (distribution?._busy) throw new Error("Wait for the current distribution operation.");
+    const result = rewards.configure(settingsPatch);
+    if (result.enabled) distribution?.configure({ enabled: false });
+    return result;
   });
   handle("rewards:runNow", () => { custody.requireLocal(); return rewards.tick("manual"); });
+
+  if (distribution) {
+    handle("distribution:status", () => distribution.status());
+    handle("distribution:configure", (input = {}) => {
+      if (distribution._busy || rewards._busy) throw new Error("Wait for the current reward/distribution operation.");
+      const { password, ...patch } = input;
+      const disableOnly = patch.enabled === false && Object.keys(patch).length === 1;
+      if (!disableOnly) { custody.requireLocal(); if (!password) throw new Error("Enter your wallet password to authorize distribution settings."); requirePassword(password); }
+      const config = distribution.configure(patch);
+      if (config.enabled) {
+        rewards.configure({ enabled: false });
+        settings.set("distributionAuthorization", { address: wallet.address, network: chain.network().id });
+      }
+      return config;
+    });
+    handle("distribution:runNow", () => { custody.requireLocal(); return distribution.tick("manual"); });
+    handle("distribution:distributeNow", () => { custody.requireLocal(); return distribution.tick("manual", { forceClose: true }); });
+  }
+  if (masterApi) {
+    handle("masterApi:status", () => masterApi.status());
+    handle("masterApi:configure", input => masterApi.configure(input));
+  }
 
   // ----- fund node (Ethereum on-ramp — Phase 1) -----
   // Shared, app-hosted Coinbase Onramp endpoint. Every install uses this by
@@ -873,8 +903,9 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
   // Serialize custody/network/node mutations so asynchronous RPC checks cannot
   // authorize a start, rotation or draft against a different producer context.
   let producerMutation = false;
-  for (const name of ["producer:vaultConnect", "producer:vaultUse", "producer:vaultPrepare", "producer:vaultSend", "producer:vaultDisconnect", "producer:vaultStatus", "producer:configure", "producer:key", "producer:prepare", "producer:broadcast", "producer:register", "settings:update", "node:start", "node:stop", "chain:burn", "chain:send", "rewards:runNow", "rewards:configure"]) {
+  for (const name of ["distribution:configure", "distribution:runNow", "distribution:distributeNow", "producer:vaultConnect", "producer:vaultUse", "producer:vaultPrepare", "producer:vaultSend", "producer:vaultDisconnect", "producer:vaultStatus", "producer:configure", "producer:key", "producer:prepare", "producer:broadcast", "producer:register", "settings:update", "node:start", "node:stop", "chain:burn", "chain:send", "rewards:runNow", "rewards:configure"]) {
     const fn = channels.get(name);
+    if (!fn) continue;
     channels.set(name, async input => {
       if (producerMutation) throw new Error("Wait for the current producer operation to finish.");
       producerMutation = true;
@@ -916,6 +947,7 @@ function createKoinosNode({ dataDir, wallet, appVersion, onEvent = () => {} }) {
     dataRoot: chosenNodeData || defaultNodeData,
     onEvent,
     autoRecover: settings.get("node.autoRecover", true),
+    accountHistory: settings.get("node.accountHistory", false),
     probeHead: async () => {
       const s = await chain.headInfo([chain.network().localRpcUrl]).catch(() => null);
       const h = s?.height;
@@ -934,6 +966,18 @@ function createKoinosNode({ dataDir, wallet, appVersion, onEvent = () => {} }) {
   const stats = new ProducerStats({ chain, state });
   const rewards = new RewardEngine({ chain, wallet, settings, state, stats, onEvent });
   rewards.start(); // auto-reburn; signs with the unlocked wallet, sends nothing away
+
+  const distribution = new DistributionEngine({ chain, wallet, settings, state, stats, onEvent,
+    authorize: () => {
+      const grant = settings.get("distributionAuthorization", {});
+      if (!settings.health().ok || settings.get("producer.mode", "local") !== "local") throw new Error("Local producer custody is required.");
+      if (grant.address !== wallet.address || grant.network !== chain.network().id) throw new Error("Save distribution settings with the wallet password for this wallet/network.");
+      if (rewards.config().enabled || rewards._busy) throw new Error("Reward returns must be disabled.");
+    },
+  });
+  distribution.start();
+  const masterApi = new MasterNodeApi({ root, settings });
+  masterApi.start().catch(e => onEvent({ type: "masterApi", level: "error", message: e.message }));
 
   const bridge = new BridgeOrchestrator({
     wallet,
@@ -972,8 +1016,8 @@ function createKoinosNode({ dataDir, wallet, appVersion, onEvent = () => {} }) {
   const priceCache = createPriceCache();
   const producerCache = createProducerCache();
   const channels = buildChannels({
-    settings, state, wallet, chain, nodeMgr, setup, rewards, stats, bridge, routeC,
-    userData: root, appVersion, defaultNodeData, priceCache, producerCache,
+    settings, state, wallet, chain, nodeMgr, setup, rewards, distribution, masterApi, stats, bridge, routeC,
+    userData: root, appVersion, defaultNodeData, priceCache, producerCache, onEvent,
   });
 
   return {
@@ -992,6 +1036,8 @@ function createKoinosNode({ dataDir, wallet, appVersion, onEvent = () => {} }) {
       return [...channels.keys()].sort();
     },
     stop() {
+      distribution.stop();
+      void masterApi.stop();
       producerCache.stop();
       clearInterval(bridgeTimer);
       clearInterval(routeCTimer);

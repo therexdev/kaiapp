@@ -43,13 +43,13 @@ test("Signature gate rejects unsigned, untrusted, untimestamped, wrong-publisher
   assert.doesNotThrow(() => assertSignature({ ...signature("app.exe"), subject: PUBLISHER.replace("S=", "ST=") }));
 });
 
-function releaseFixture(t) {
-  const dir = tempDir(t), version = "0.54.9";
-  const names = ["Koinos AI Setup 0.54.9.exe", "Koinos AI 0.54.9.exe", "Koinos AI Setup 0.54.9.exe.blockmap", "latest.yml"].sort();
+function releaseFixture(t, feedName = "latest.yml", version = "0.54.9") {
+  const dir = tempDir(t);
+  const names = ["Koinos AI Setup 0.54.9.exe", "Koinos AI 0.54.9.exe", "Koinos AI Setup 0.54.9.exe.blockmap", feedName].sort();
   for (const name of names) fs.writeFileSync(path.join(dir, name), `fixture:${name}`);
   const setup = names.find(n => n.includes(" Setup ") && n.endsWith(".exe"));
   const checksum = hash(path.join(dir, setup), "sha512", "base64");
-  fs.writeFileSync(path.join(dir, "latest.yml"), yaml.dump({ version, path: setup.replace(/ /g, "-"), sha512: checksum,
+  fs.writeFileSync(path.join(dir, feedName), yaml.dump({ version, path: setup.replace(/ /g, "-"), sha512: checksum,
     files: [{ url: setup.replace(/ /g, "-"), sha512: checksum, size: fs.statSync(path.join(dir, setup)).size }] }));
   const report = { schemaVersion: 1, version, publisher: PUBLISHER, commit: "source", workflowRun: "123",
     signatures: names.filter(n => n.endsWith(".exe")).map(signature), artifacts: names.map(name => ({ name, sha256: hash(path.join(dir, name)) })) };
@@ -101,13 +101,13 @@ test("Test helper resource copies invoke the builder signing transformer and exc
   assert.equal(fs.existsSync(path.join(dir, "output/bin/koinos-code.cmd")), false);
 });
 
-test("Both release workflows verify before any Windows artifact upload", () => {
-  for (const [file, job] of [["ci.yml", "build-windows"], ["test-release.yml", "windows"]]) {
+test("Master installer workflow verifies before Windows artifact upload", () => {
+  for (const [file, job] of [["master-installers.yml", "windows"]]) {
     const workflow = yaml.load(fs.readFileSync(path.join(__dirname, "../../.github/workflows", file), "utf8"));
     const steps = workflow.jobs[job].steps;
     const build = steps.findIndex(s => s.run?.includes("npm run dist -- --win --publish never"));
     const gate = steps.findIndex(s => s.run?.includes("node scripts/verify-windows-signatures.js"));
-    const upload = steps.findIndex(s => s.uses?.startsWith("actions/upload-artifact") && /^(kai-test-windows|koinos-ai-windows)$/.test(s.with?.name));
+    const upload = steps.findIndex(s => s.uses?.startsWith("actions/upload-artifact") && s.with?.name === "master-windows-installers");
     assert.ok(build >= 0 && gate > build && upload > gate);
     const publish = steps.findIndex(s => s.run?.includes("node scripts/publish-windows-release.js"));
     if (job === "build-windows") assert.ok(publish > gate);
@@ -125,4 +125,12 @@ test("Native Windows inspection rejects an unsigned executable and a different p
   assert.equal(records[0].status, "NotSigned");
   assert.equal(records[1].status, "Valid", "Windows must trust its own PowerShell binary for this integration check");
   for (const record of records) assert.throws(() => assertSignature(record));
+});
+
+
+test("Master feeds pass the same signature, timestamp and byte checks", t => {
+  const f = releaseFixture(t, "master.yml", "0.54.9-master.1");
+  assert.equal(readVerifiedArtifacts(f.dir, f.identity).report.version, "0.54.9-master.1");
+  f.report.signatures[0].timestampThumbprint = null; f.write();
+  assert.throws(() => readVerifiedArtifacts(f.dir, f.identity), /timestamp/);
 });

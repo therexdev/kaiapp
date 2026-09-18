@@ -53,18 +53,18 @@ function hash(file, algorithm = "sha256", encoding = "hex") {
 }
 
 function artifactFiles(dir) {
-  const names = fs.readdirSync(dir).filter(n => /\.(exe|blockmap)$/.test(n) || /^(latest|test)\.yml$/.test(n)).sort();
+  const names = fs.readdirSync(dir).filter(n => /\.(exe|blockmap)$/.test(n) || /^(latest|test|master)\.yml$/.test(n)).sort();
   const executables = names.filter(n => n.endsWith(".exe"));
   if (executables.length !== 2 || executables.filter(n => /[ -]Setup[ -]/.test(n)).length !== 1) {
     throw new Error("Expected exactly one Windows Setup installer and one portable executable");
   }
-  if (names.filter(n => /^(latest|test)\.yml$/.test(n)).length !== 1) throw new Error("Expected exactly one Windows update feed");
+  if (names.filter(n => /^(latest|test|master)\.yml$/.test(n)).length !== 1) throw new Error("Expected exactly one Windows update feed");
   if (!names.some(n => n.endsWith(".exe.blockmap"))) throw new Error("Missing installer blockmap");
   return names;
 }
 
 function reportName(version) {
-  if (!/^\d+\.\d+\.\d+(?:-test\.\d+\.\d+)?$/.test(version)) throw new Error("Invalid Windows release version");
+  if (!/^\d+\.\d+\.\d+(?:-test\.\d+\.\d+|-master\.\d+)?$/.test(version)) throw new Error("Invalid Windows release version");
   return `windows-signatures-${version}.json`;
 }
 
@@ -72,7 +72,7 @@ function reportName(version) {
 // workflow evidence, not a replacement for an Authenticode signature.
 function readVerifiedArtifacts(dir, identity) {
   const names = artifactFiles(dir);
-  const feed = yaml.load(fs.readFileSync(path.join(dir, names.find(n => /^(latest|test)\.yml$/.test(n))), "utf8"));
+  const feed = yaml.load(fs.readFileSync(path.join(dir, names.find(n => /^(latest|test|master)\.yml$/.test(n))), "utf8"));
   const file = reportName(feed.version);
   const report = JSON.parse(fs.readFileSync(path.join(dir, file), "utf8"));
   if (!identity.commit || !identity.workflowRun || report.schemaVersion !== 1 || report.version !== feed.version ||

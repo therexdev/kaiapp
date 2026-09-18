@@ -1,0 +1,13 @@
+# Replace this placeholder only when deploying on the chosen node host.
+node-api.example.com {
+    @publicData {
+        method GET
+        path /healthz /v1/status /v1/token-tracker/producers
+    }
+    handle @publicData {
+        reverse_proxy 127.0.0.1:41110
+    }
+    handle {
+        respond "Not found" 404
+    }
+}

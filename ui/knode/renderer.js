@@ -267,11 +267,12 @@ function patchDashboardView() {
   const matching = np?.network === d.network.id;
   const available = matching && np.available;
   const value = key => available ? esc(Number(np[key]).toLocaleString()) : "—";
+  const localIndex = np?.trackedScope === "producers-in-finalized-window";
   $("#d-producer-counts").innerHTML = tile("Active producers · ~24h", value("activeApprox24h"), "Produced within the last 28,800 blocks")
     + tile("Recent producers · 2h", value("recent2h"), "Produced within 2 hours · green status")
-    + tile("Tracked producer accounts", value("totalTracked"), "Recent producers plus VHP holders");
+    + tile(localIndex ? "Observed producer accounts" : "Tracked producer accounts", value("totalTracked"), localIndex ? "This node's finalized window · excludes inactive VHP holders" : "Recent producers plus VHP holders");
   $("#d-producer-source").textContent = available
-    ? np.stale ? "Last known data · refresh unavailable" : ""
+    ? np.stale ? "Last known data · refresh unavailable" : np.source || ""
     : matching && np.unsupported ? "Mainnet only"
     : np ? "Counts unavailable · retrying…" : "Loading counts…";
 
@@ -2879,7 +2880,7 @@ function renderSettingsView() {
             (n) => `<label class="row" style="gap:8px">
           <input type="radio" name="set-net" value="${n.id}" ${s.network === n.id ? "checked" : ""} style="width:auto">
           <b>${esc(n.label)}</b>
-          <span class="muted small">${n.rpcUrls[0] ?? "local node RPC"} · token ${esc(n.tokenSymbol)}</span></label>`
+          <span class="muted small">${esc(n.rpcUrls.join(" → ") || "local node RPC")} · token ${esc(n.tokenSymbol)}</span></label>`
           )
           .join("")}
       </div>
@@ -2887,6 +2888,7 @@ function renderSettingsView() {
     </div>
     <div class="card">
       <h2>🔌 Custom RPC (optional)</h2>
+      <p class="hint">A custom mainnet RPC becomes the primary. Koinos Blocks and api.koinos.io remain backups, in that order. Leave it blank to use Koinos Blocks first.</p>
       ${networks
         .map(
           (n) => `<label class="field"><span>${esc(n.label)} RPC URL</span>
@@ -3000,6 +3002,8 @@ function switchView(view) {
   $$(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${view}`));
   if (view === "dashboard") refreshDashboard();
   if (view === "node") refreshNode();
+  if (view === "distribution") refreshDistribution();
+  if (view === "master-api") refreshMasterApi();
   if (view === "returns") refreshRewards();
   if (view === "fund") refreshFund();
   if (view === "wallet" || view === "burn") refreshBalances();
@@ -3011,6 +3015,8 @@ async function heartbeat() {
     if (S.view === "dashboard") await refreshDashboard();
     if (S.view === "wallet" || S.view === "burn") await refreshBalances();
     if (S.view === "node") await refreshNode();
+    if (S.view === "distribution") await refreshDistribution();
+    if (S.view === "master-api") await refreshMasterApi();
     if (S.view === "returns") await refreshRewards();
     if (S.view === "fund") await refreshFund();
   } catch { /* keep ticking */ }
@@ -3036,6 +3042,8 @@ async function init() {
   await refreshWallet();
   renderDashboardView();
   renderNodeView();
+  if (typeof renderDistributionView === "function") renderDistributionView();
+  if (typeof renderMasterApiView === "function") renderMasterApiView();
   renderReturnsView();
   renderFundView();
   renderSettingsView();

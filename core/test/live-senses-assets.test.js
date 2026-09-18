@@ -14,7 +14,7 @@ test("Packaging copies the two pinned Live Senses models and keeps vad-web's dup
   const pkg = require("../../package.json");
   assert.equal(pkg.devDependencies["@ricky0123/vad-web"], "0.0.29");
   assert.equal(pkg.dependencies["@ricky0123/vad-web"], undefined);
-  assert.deepEqual(pkg.build.extraResources.map(item => item.to), [
+  assert.deepEqual(pkg.build.extraResources.filter(item => item.to.startsWith("live-senses/")).map(item => item.to), [
     "live-senses/vad/bundle.min.js",
     "live-senses/vad/vad.worklet.bundle.min.js",
     "live-senses/vad/silero_vad_v5.onnx",

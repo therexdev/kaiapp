@@ -4,7 +4,7 @@
   else root.KaiAppNavigation = api;
 })(typeof window !== "undefined" ? window : globalThis, function () {
   "use strict";
-  const views = Object.freeze(["chat", "brain", "workflows", "connections", "docs", "compare", "models", "tasks", "tools", "api", "earn", "code", "devtools", "settings", "network", "koinos", "koinos-wallet", "koinos-fund", "koinos-burn", "koinos-node", "koinos-returns", "koinos-settings"]);
+  const views = Object.freeze(["chat", "brain", "workflows", "connections", "docs", "compare", "models", "tasks", "tools", "api", "earn", "code", "devtools", "settings", "network", "koinos", "koinos-wallet", "koinos-fund", "koinos-burn", "koinos-node", "koinos-distribution", "koinos-master-api", "koinos-returns", "koinos-settings"]);
   const valid = view => typeof view === "string" && views.includes(view);
   function request(text) {
     const match = String(text).trim().match(/^(?:(?:hey[ ,]+kai)[ ,.!]*\s*)?(?:(?:please|can you|could you|would you)\s+)?(?:open(?: up)?|show|bring up|take me to)\s+(?:(?:my|the)\s+)?(?:(?:main|full)\s+)?(app|application|koinos ai|chat|brain|workflows|connections|models|wallet|earnings|earn|settings|tools|documents|docs|tasks|network|node|koinos code)(?:\s+(?:screen|page|tab))?(?:\s+(?:for me|please))?[.!?]*$/i);

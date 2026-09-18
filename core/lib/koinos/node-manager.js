@@ -29,7 +29,8 @@ const MAX_BACKOFF_MS = 15 * 60 * 1000;
 // docker-compose.yml plus generated .env and config files, and drives it
 // through `docker compose`.
 class NodeManager {
-  constructor({ templateRoot, dataRoot, onEvent, autoRecover = true, probeHead = null, platform = process.platform }) {
+  constructor({ templateRoot, dataRoot, onEvent, autoRecover = true, probeHead = null, accountHistory = false, platform = process.platform }) {
+    this.accountHistory = accountHistory;
     this.templateRoot = templateRoot;
     this.dataRoot = dataRoot;
     this.platform = platform;
@@ -75,7 +76,7 @@ class NodeManager {
 
     fs.writeFileSync(path.join(d.config, "config.yml"), buildConfigYml(net, producerAddress));
     if (this.platform === "darwin") stageMacosConfig(d);
-    fs.writeFileSync(path.join(d.root, ".env"), buildEnv(net, d.basedir, !!producerAddress, opts.memorySaver));
+    fs.writeFileSync(path.join(d.root, ".env"), buildEnv(net, d.basedir, !!producerAddress, opts.memorySaver, this.accountHistory));
     return d;
   }
 
@@ -1060,7 +1061,7 @@ function stageMacosConfig(d) {
   );
 }
 
-function buildEnv(net, basedirAbs, producing, memorySaver) {
+function buildEnv(net, basedirAbs, producing, memorySaver, accountHistory = false) {
   // Memory-saver drops the optional API tier (jsonrpc/grpc/rest/…) so a
   // low-memory PC only runs the core services (+ the block producer if minting),
   // which is what keeps a small machine from running out of memory.
@@ -1082,7 +1083,7 @@ function buildEnv(net, basedirAbs, producing, memorySaver) {
     `GRPC_PORT=${net.ports.grpc}`,
     `REST_PORT=${net.ports.rest}`,
     "",
-    `COMPOSE_PROFILES=${profiles}`,
+    `COMPOSE_PROFILES=${profiles}${accountHistory && !memorySaver ? ",account_history" : ""}`,
     "",
     ...Object.entries(net.imageTags).map(([k, v]) => `${k}=${v}`),
     "",

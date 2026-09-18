@@ -22,6 +22,8 @@
     "koinos-fund": "fund",
     "koinos-burn": "burn",
     "koinos-node": "node",
+    "koinos-distribution": "distribution",
+    "koinos-master-api": "master-api",
     "koinos-returns": "returns",
     "koinos-settings": "settings",
   };

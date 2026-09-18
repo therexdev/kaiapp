@@ -229,7 +229,7 @@ test("team mode: 'Write & review' runs through the real engine and lands a final
  * feature look like most of the app, and stayed in the way when only one was
  * ever in use.
  */
-test("koinos node: one sidebar entry, seven screens on a rail, Dashboard first", { skip: !available, timeout: 120000 }, async () => {
+test("koinos node: one sidebar entry, all Master screens on a rail, Dashboard first", { skip: !available, timeout: 120000 }, async () => {
   const { chromium } = require("playwright-core");
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-nodenav-"));
   fs.mkdirSync(path.join(dir, "models"), { recursive: true });
@@ -258,7 +258,10 @@ test("koinos node: one sidebar entry, seven screens on a rail, Dashboard first",
     const rail = await page.$$eval("#kn-rail [data-knode]", (els) =>
       els.map((e) => ({ v: e.dataset.knode, label: e.textContent.trim(), on: e.classList.contains("on") }))
     );
-    assert.strictEqual(rail.length, 7, "all seven screens reachable");
+    assert.deepStrictEqual(rail.map(item => item.v), [
+      "koinos", "koinos-wallet", "koinos-fund", "koinos-burn", "koinos-node",
+      "koinos-distribution", "koinos-master-api", "koinos-returns", "koinos-settings",
+    ], "all nine Master screens reachable, including Distribution and Node API");
     assert.strictEqual(rail[0].label, "Dashboard", "Dashboard is first");
     assert.strictEqual(rail[0].on, true, "and selected on arrival");
 
