@@ -55,6 +55,19 @@ test("Long conversations retain recent complete turns without losing the current
   assert.ok(messages.length < history.length);
 });
 
+test("KAI Eyes frames attach only to the current model request and never mutate saved history", () => {
+  const history = [{ role: "user", content: "What am I holding?" }];
+  const image = "data:image/jpeg;base64,/9j/AAAA";
+  const messages = messagesFor(history, 4096, "", [{ source: "camera", dataUrl: image }]);
+  assert.equal(history[0].content, "What am I holding?", "ephemeral pixels never enter chat history");
+  assert.ok(Array.isArray(messages.at(-1).content));
+  assert.equal(messages.at(-1).content[0].text, "What am I holding?");
+  assert.match(messages.at(-1).content[1].text, /camera frame/);
+  assert.equal(messages.at(-1).content[2].image_url.url, image);
+  const unsafe = messagesFor(history, 4096, "", [{ source: "camera", dataUrl: "https://example.com/camera.jpg" }]);
+  assert.equal(unsafe.at(-1).content, "What am I holding?", "remote image URLs cannot cross the sensory boundary");
+});
+
 test("Streaming replies survive split UTF-8, CRLF and a final frame without a newline", async () => {
   const raw = new TextEncoder().encode('data: {"choices":[{"delta":{"content":"Hello 🤖"}}]}\r\n\r\ndata: {"choices":[{"delta":{"content":" KAI"}}]}\n\ndata: [DONE]');
   const response = new Response(new ReadableStream({ start(controller) {

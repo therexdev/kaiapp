@@ -91,10 +91,11 @@ test("Drag rejects foreign frames and migrates to the cursor monitor even with n
   win.destroy(); await f.controller.launch(); assert.equal(f.pose().pose, "perched");
 });
 
-test("Every desktop control IPC requires the exact companion document and main frame", async t => {
+test("Every desktop control and KAI Eyes IPC requires the exact companion document and main frame", async t => {
   const f = nativeFixture(t); await f.controller.launch();
   assert.equal(typeof f.ipcMain.handles.get("mascot:computer-status")(f.event()).available, "boolean");
-  for (const channel of ["computer-status", "computer-begin", "computer-call", "computer-end", "open-website"]) {
+  for (const channel of ["computer-status", "computer-begin", "computer-call", "computer-end", "open-website",
+    "eyes-model", "eyes-enable", "eyes-validate", "eyes-capture", "eyes-stop"]) {
     const call = f.ipcMain.handles.get("mascot:" + channel), e = f.event();
     assert.throws(() => call({ ...e, sender: {} }), /Untrusted/);
     assert.throws(() => call({ ...e, senderFrame: { url: e.senderFrame.url } }), /Untrusted/);

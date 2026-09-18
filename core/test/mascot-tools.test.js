@@ -124,6 +124,28 @@ test("Companion shares web and connected tools, cites real URLs and asks for mis
   assert.match(offline.context, /Web tools are disabled/); assert.match(offline.context, /never invent a forecast/);
 });
 
+test("KAI Eyes can request one turn-bound high-detail look without exposing pixels to tools or network overflow", async () => {
+  const low = { source: "screen", detail: "context", capturedAt: 1, width: 640, height: 360, dataUrl: "data:image/jpeg;base64,/9j/TE9X" };
+  const high = { source: "screen", detail: "look", capturedAt: 2, width: 1600, height: 900, dataUrl: "data:image/jpeg;base64,/9j/SElHSA==" };
+  let requests = 0, looks = 0;
+  const out = await run({
+    question: "What is on my screen?", history: [{ role: "user", content: "What is on my screen?" }], visuals: [low],
+    json: async path => path === "/core/tools" ? { tools: [] } : assert.fail("KAI Eyes must not call a Core tool"),
+    look: async source => { looks++; assert.equal(source, "screen"); return high; },
+    askModel: async (messages, _signal, options) => {
+      requests++; assert.equal(options.privateVisual, true); assert.equal(options.privateDesktop, false);
+      const content = messages.at(-1).content;
+      assert.ok(Array.isArray(content));
+      assert.equal(content.some(part => part.image_url?.url === (requests === 1 ? low.dataUrl : high.dataUrl)), true);
+      return JSON.stringify(requests === 1 ? { tool: "kai_look", args: { source: "screen" } } : { answer: true });
+    },
+  });
+  assert.equal(looks, 1);
+  assert.equal(out.privateVisual, true);
+  assert.equal(out.visuals[0].dataUrl, high.dataUrl);
+  assert.doesNotMatch(out.context, /data:image|SElHSA/, "pixels remain request-only and never enter text observations");
+});
+
 test("Explicit connected requests discover enabled accounts and correct a small model's generic refusal", async () => {
   const calls = [], outputs = [
     JSON.stringify({ answer: true }),

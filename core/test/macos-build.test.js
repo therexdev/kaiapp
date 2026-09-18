@@ -18,6 +18,7 @@ test("macOS package configuration ships updater-compatible arm64 and x64 artifac
   assert.strictEqual(pkg.build.mac.entitlements, "build/entitlements.mac.plist");
   assert.strictEqual(pkg.build.mac.entitlementsInherit, "build/entitlements.mac.inherit.plist");
   assert.match(pkg.build.mac.extendInfo.NSMicrophoneUsageDescription, /microphone/i);
+  assert.match(pkg.build.mac.extendInfo.NSCameraUsageDescription, /camera/i);
 
   const icon = fs.readFileSync(path.join(root, pkg.build.mac.icon));
   assert.strictEqual(icon.subarray(0, 4).toString("ascii"), "icns", "macOS icon is a real ICNS container");

@@ -4,6 +4,15 @@ See the [expanded Brain and Awareness guide](KAI_BRAIN_AWARENESS.md) for the new
 
 This update adds three entries near the top of KAI's sidebar. It uses the same Koinos AI Test profile and node. Quit the running app from its tray before installing an update; then reopen Test.
 
+## Let KAI see the current moment
+
+1. Launch desktop KAI and choose a brain labeled **vision**, or a compatible private OpenAI/Anthropic model.
+2. Open **KAI Eyes**, turn on **Screen** and/or **Camera**, and review the destination named in the native confirmation.
+3. Keep the orange capture indicator in view. Ask “What is this error?” for the current screen or “What am I holding?” for the camera. KAI attaches only the freshest in-memory frame to that turn and can take one closer look when needed.
+4. Turn a source Off when finished. Hiding KAI, returning to the main app, changing brains or quitting also stops capture and discards all rolling frames.
+
+KAI Eyes does not save frames in chat history or grant desktop control. Screen/camera context cannot use a Koinos Network model. Local visual turns cannot overflow to network workers; a private provider receives frames only through its direct desktop connection, and Local-Only blocks that egress.
+
 ## Give KAI context
 
 1. Open **Brain → Add a note**. Add a useful fact, preference, project, or person. Give it a clear title and optional tags. Pin only the facts that should stay prominent.

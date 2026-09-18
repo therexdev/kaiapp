@@ -168,7 +168,8 @@ async function start() {
   const providerService = new DesktopProviders({ dataDir, safeStorage: require("electron").safeStorage,
     privacyMode: () => core.settings.get("network.privacyMode", "local-only") });
   mascot = require("./mascot").createMascotController({
-    BrowserWindow, screen: require("electron").screen, ipcMain, shell, app, dialog: require("electron").dialog,
+    BrowserWindow, screen: require("electron").screen, desktopCapturer: require("electron").desktopCapturer,
+    ipcMain, shell, app, dialog: require("electron").dialog,
     prefs: winState, origin: "http://127.0.0.1:" + port, getMainWindow: () => win, hasTray: () => !!tray,
     globalShortcut: require("electron").globalShortcut,
     describeModel: model => {

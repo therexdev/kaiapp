@@ -1,3 +1,11 @@
+## KAI Eyes · screen and camera context
+
+- KAI can now see the screen he is sitting on or a camera you explicitly enable. Open **KAI Eyes**, choose Screen and/or Camera, approve the session, then ask naturally: “What is this error?” or “What am I holding?”
+- A visible orange indicator stays on whenever either source is active. Capture is session-only and stops on Off, hide, return to the app, quit or a brain change.
+- Each source keeps only six small frames in memory at about one frame per second. Only the freshest frame is attached to the current turn; frames are not saved in chat history or written to a video/image archive.
+- KAI can take one fresh higher-detail look when small text or an object needs closer inspection. Looking does not grant permission to click, type or control the desktop; those approvals remain separate.
+- Eyes works only with an installed local vision model or a configured private OpenAI/Anthropic vision model. Network/text-only models are blocked, Local-Only still blocks private-provider egress, and local visual turns cannot overflow to Koinos Network workers.
+
 ## Working manual update checks
 
 - **Settings → Check for updates** now contacts the installed app's actual Test update feed instead of only re-reading its packaged/source status.

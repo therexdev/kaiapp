@@ -12,7 +12,7 @@ async function startMascotServer(dataDir) {
     let raw = Buffer.alloc(0);
     for await (const chunk of req) raw = Buffer.concat([raw, chunk]);
     if (url.pathname === "/core/models" && state.modelsDelay) await new Promise(resolve => setTimeout(resolve, state.modelsDelay));
-    if (url.pathname === "/core/models") return output({ aliases: [{ alias: "tiny-live", label: "Koinos Fast", status: "ready", contextSize: 4096 }], runtime: { activeAlias: "tiny-live" } });
+    if (url.pathname === "/core/models") return output({ aliases: [{ alias: "tiny-live", label: "Koinos Fast", status: "ready", contextSize: 4096, vision: true }], runtime: { activeAlias: "tiny-live" } });
     if (url.pathname === "/core/tools") return output({ ok: true, tools: state.tools || [] });
     if (url.pathname === "/core/tools/call") {
       const body = JSON.parse(raw); (state.toolCalls ||= []).push(body);

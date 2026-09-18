@@ -74,6 +74,17 @@
     },
   });
   window.kaiLiveDiagnostics = liveSession.diagnostics();
+  let eyesCapability = { available: !!bridge, vision: false, reason: "Choose a vision-capable brain." }, eyesCapabilitySerial = 0;
+  const eyesBusy = new Set();
+  const eyes = new KaiEyes.Controller({ bridge,
+    onChange: () => { eyesUI(); regions(); },
+    onError: (error, source) => {
+      const blocked = source === "camera" && error.name === "NotAllowedError"
+        ? "Camera access is blocked. Allow Koinos AI in system settings, then try again."
+        : error.message;
+      notice(blocked);
+    },
+  });
 
   function wake() {
     document.body.classList.remove("asleep");
@@ -141,6 +152,61 @@
     $("preview-voice").disabled = (busy && !speaking) || voicePending;
     pauseWake();
   }
+  function eyesUI(value = eyes.snapshot()) {
+    const active = new Map(value.sources.map(item => [item.source, item]));
+    for (const source of KaiEyes.SOURCES) {
+      const button = $(source + "-eyes"), on = active.has(source);
+      button.setAttribute("aria-pressed", String(on));
+      button.querySelector("b").textContent = eyesBusy.has(source) ? "Starting…" : on ? "On" : "Off";
+      button.disabled = eyesBusy.has(source) || !value.available || (!on && !eyesCapability.vision);
+    }
+    const names = [active.has("screen") ? "Screen" : null, active.has("camera") ? "Camera" : null].filter(Boolean);
+    $("eyes-indicator").hidden = !names.length;
+    $("eyes-indicator-copy").textContent = names.join(" + ") + (names.length > 1 ? " are on" : " is on");
+    $("eyes-options").classList.toggle("eyes-on", !!names.length);
+    $("eyes-options").setAttribute("aria-label", names.length ? "KAI Eyes active: " + names.join(" and ") : "KAI Eyes");
+    const target = value.sources[0];
+    $("eyes-status").textContent = names.length
+      ? `${names.join(" and ")} vision ${names.length > 1 ? "are" : "is"} active for ${target.label || "this brain"}. ` +
+        (target.destination === "local" ? "Frames stay on this computer." : "Fresh frames go only to your private provider when you ask KAI.")
+      : !value.available ? "KAI Eyes needs the installed desktop app."
+      : eyesCapability.vision ? `Ready for ${eyesCapability.label || "this vision brain"}. Choose a source to begin.`
+      : eyesCapability.reason || "Choose a vision-capable brain, then turn on a source.";
+  }
+  async function refreshEyesCapability(model = $("model").value) {
+    const serial = ++eyesCapabilitySerial;
+    eyesCapability = await eyes.capability(model);
+    if (serial !== eyesCapabilitySerial) return;
+    eyesUI();
+  }
+  function eyesOptions(open) {
+    $("eyes-options-panel").hidden = !open;
+    $("eyes-options").setAttribute("aria-expanded", String(open));
+    if (open) {
+      $("voice-options-panel").hidden = true;
+      $("voice-options").setAttribute("aria-expanded", "false");
+      $("eyes-options-panel").scrollTop = 0;
+      refreshEyesCapability();
+    }
+    regions();
+  }
+  async function toggleEyes(source) {
+    const active = eyes.snapshot().sources.some(item => item.source === source);
+    eyesBusy.add(source); eyesUI(); notice("");
+    try {
+      if (active) await eyes.disable(source);
+      else {
+        const model = $("model").value;
+        if (!model) throw new Error("Choose a vision-capable brain before turning on KAI Eyes.");
+        await eyes.enable(source, model);
+      }
+    } catch (error) {
+      if (error.name !== "AbortError") notice(error.name === "NotAllowedError"
+        ? "Camera access is blocked. Allow Koinos AI in system settings, then try again." : error.message);
+    } finally {
+      eyesBusy.delete(source); await refreshEyesCapability(); eyesUI(); regions();
+    }
+  }
   function message(role, text = "") {
     const element = document.createElement("article"); element.className = "message " + role;
     const author = document.createElement("div"); author.className = "author"; author.textContent = role === "user" ? "You" : "KAI";
@@ -187,7 +253,7 @@
       const choice = KaiProviders.isModel(wanted) ? wanted : api.chooseModel(data.aliases || [], data.runtime?.activeAlias, hint || requestedModel, $("model").value || read("kai-mascot-model", ""));
       $("model").replaceChildren();
       for (const a of aliases.filter(a => a.status === "ready")) {
-        const option = document.createElement("option"); option.value = a.alias; option.textContent = a.label || a.alias; $("model").append(option);
+        const option = document.createElement("option"); option.value = a.alias; option.textContent = (a.label || a.alias) + (a.vision ? " · vision" : ""); $("model").append(option);
       }
       if (unavailableProvider) {
         const option = document.createElement("option"); option.value = wanted; option.textContent = KaiProviders.label(wanted) + " — check Settings / Privacy";
@@ -206,7 +272,7 @@
         $("model").value = choice;
         $("connection").textContent = KaiProviders.isModel(choice) ? (unavailableProvider ? "Provider unavailable — check Settings and Privacy" : "Private desktop connection · " + KaiProviders.label(choice)) : choice.startsWith("koinos-network") ? "Using your Koinos Network selection" : "Connected to your running app";
       }
-      controls();
+      controls(); await refreshEyesCapability(choice);
     } catch {
       $("connection").textContent = "Reconnecting to your app…";
       notice("KAI cannot reach the app right now. Open the full app to check its status.");
@@ -543,7 +609,10 @@
   }
   function voiceOptions(open) {
     $("voice-options-panel").hidden = !open; $("voice-options").setAttribute("aria-expanded", String(open));
-    if (open) { $("voice-options-panel").scrollTop = 0; $("pocket-card").hidden = true; }
+    if (open) {
+      $("eyes-options-panel").hidden = true; $("eyes-options").setAttribute("aria-expanded", "false");
+      $("voice-options-panel").scrollTop = 0; $("pocket-card").hidden = true;
+    }
     regions();
   }
   async function installNatural() {
@@ -762,6 +831,10 @@
       routingNotice = "Using " + label + " privately for this connected-app request.";
       $("connection").textContent = model.startsWith("desktop:") ? "Private desktop connection · " + KaiProviders.label(model) : "Connected to your running app";
     }
+    if (eyes.snapshot().sources.some(item => item.model !== model)) {
+      await eyes.stopAll();
+      routingNotice = [routingNotice, "KAI Eyes turned off because this request changed brains. Turn it on again to approve the new visual destination."].filter(Boolean).join(" ");
+    }
     if (!model && !folder && !destination && !website) {
       notice("Open the full app to choose a chat model so KAI can answer, then try again."); mood("error"); return;
     }
@@ -782,7 +855,7 @@
     const userBubble = message("user", text), reply = message("assistant");
     reply.element.classList.add("streaming");
     controls(); scroll();
-    let content = "", served = null, lastPaint = 0, completed = false, phase = null;
+    let content = "", served = null, lastPaint = 0, completed = false, phase = null, visuals = [];
     const observations = [];
     const trace = document.createElement("div"); trace.className = "tool-trace"; trace.setAttribute("role", "status"); reply.element.prepend(trace);
     const open = bridge?.navigate ? view => bridge.navigate(view) : null;
@@ -811,6 +884,8 @@
           "Opening folders is available in the installed KAI desktop companion.";
       } else {
         const contextSize = aliases.find(a => a.alias === model)?.contextSize || 4096;
+        visuals = await eyes.context(model, turn.signal);
+        if (visuals.length) turn.mark("visual_context", { sources: visuals.map(frame => frame.source) });
         if (!chatId) await saveChat();
         phase = await KaiMascotTools.run({ question: text, history, chatId, contextSize, signal: chatAbort.signal, json: window.KaiCompanionClient?.toolJSON(model, toolJson, chatAbort.signal, { question: text, conversationId: chatId || "mascot-new", host: trace.parentElement,
           onPrivateTool: active => {
@@ -826,7 +901,7 @@
             }
             controls();
           },
-        }) || toolJson, open,
+        }) || toolJson, open, visuals, look: (source, signal) => eyes.look(source, model, signal),
           computer: computerAvailable && !model.startsWith("koinos-network") ? { begin: () => bridge.computerBegin({ task: text, model }), call: (token, name, args) => bridge.computerCall(token, name, args) } : null,
           confirm: async (name, args) => {
             // Pause capture while a human reviews a mutation. Background audio
@@ -853,7 +928,7 @@
           askModel: async (messages, signal, options = {}) => {
             turn.touch("planner_request");
             const response = await KaiProviders.chatFetch("/core/chat/completions", { method: "POST", headers: { "content-type": "application/json" }, signal,
-              body: JSON.stringify({ model, stream: false, max_tokens: KaiProviders.isModel(model) ? 4096 : 900, messages, ...(options.privateDesktop ? { kai_private_desktop: true } : {}) }) });
+              body: JSON.stringify({ model, stream: false, max_tokens: KaiProviders.isModel(model) ? 4096 : 900, messages, ...(options.privateDesktop || options.privateVisual ? { kai_private_desktop: true } : {}) }) });
             let output = ""; for await (const delta of api.completion(response)) { output += delta.content; turn.touch(); }
             turn.touch("planner_response"); return output;
           },
@@ -866,8 +941,8 @@
           turn.touch("answer_request");
           const response = await KaiProviders.chatFetch("/core/chat/completions", {
             method: "POST", headers: { "content-type": "application/json" }, signal: chatAbort.signal,
-            body: JSON.stringify({ model, stream: true, ...(phase.privateDesktop ? { kai_private_desktop: true } : {}),
-              messages: api.messagesFor(history, contextSize, phase.context) }),
+            body: JSON.stringify({ model, stream: true, ...(phase.privateDesktop || phase.privateVisual ? { kai_private_desktop: true } : {}),
+              messages: api.messagesFor(history, contextSize, phase.context, phase.visuals || visuals) }),
           });
           for await (const delta of api.completion(response)) {
             if (!turn.active()) throw turn.signal.reason || new DOMException("Stopped", "AbortError");
@@ -973,7 +1048,7 @@
     if (suspended) {
       clearTimeout(pocketTimer); bridge?.releasePocket?.(); endDrag({ type: "pointercancel" }); clearTimeout(landingTimer); document.body.classList.remove("landing", "perch-target");
       if (cancelTask) interruptResponse(false);
-      stopWake();
+      stopWake(); eyes.stopAll().catch(() => {});
       if (!cancelTask) stopSpeech();
     }
     else { pocketAutoAttempted = false; wake(); loadPocket(); warmSpeech(); }
@@ -994,6 +1069,12 @@
   $("voice-options").onclick = () => voiceOptions($("voice-options-panel").hidden);
   $("close-voice-options").onclick = () => voiceOptions(false);
   $("menu-voice").onclick = async () => { await expand(true); voiceOptions(true); };
+  $("eyes-options").onclick = () => eyesOptions($("eyes-options-panel").hidden);
+  $("close-eyes-options").onclick = () => eyesOptions(false);
+  $("screen-eyes").onclick = () => toggleEyes("screen");
+  $("camera-eyes").onclick = () => toggleEyes("camera");
+  $("menu-eyes").onclick = async () => { $("mascot-menu").hidden = true; await expand(true); eyesOptions(true); };
+  $("eyes-indicator").onclick = async () => { await expand(true); eyesOptions(true); };
   $("voice-choice").onchange = () => { stopSpeech(); bridge?.releasePocket?.(); voiceChoice = $("voice-choice").value; write("kai-mascot-pocket-default-v1", "1"); write("kai-mascot-voice-choice", voiceChoice); voiceReplyUI(); voiceEngineUI(); ensureNatural(); loadPocket(); warmSpeech(); };
   $("setup-pocket").onclick = installPocket;
   $("compact-pocket").onclick = () => pocketStatus?.available ? previewPocket() : installPocket();
@@ -1039,7 +1120,11 @@
     stopSpeech(); history = []; chatId = ""; write("kai-mascot-chat-id", "");
     $("messages").replaceChildren(); $("question").value = ""; notice(""); controls(); mood("idle"); $("question").focus(); wave();
   };
-  $("model").onchange = () => { requestedModel = $("model").value; write("kai-mascot-model", requestedModel); controls(); };
+  $("model").onchange = async () => {
+    requestedModel = $("model").value; write("kai-mascot-model", requestedModel);
+    if (eyes.snapshot().active) { await eyes.stopAll(); notice("KAI Eyes turned off because you changed brains. Turn it on again to approve the new visual destination."); }
+    await refreshEyesCapability(requestedModel); controls();
+  };
   $("read-aloud").onclick = () => {
     voiceReplies = !voiceReplies; write("kai-mascot-voice", voiceReplies ? "1" : "0"); voiceReplyUI();
     if (!voiceReplies) { bridge?.releasePocket?.(); stopSpeech(); if (!busy) mood("idle"); }
@@ -1069,6 +1154,7 @@
       if (voicePending || wakePhase === "capturing") stopWake();
       else if (busy || speaking) { wakeListener.cancelTurn(); interruptResponse(false); }
       else if (!$("voice-options-panel").hidden) voiceOptions(false);
+      else if (!$("eyes-options-panel").hidden) eyesOptions(false);
       else if (!$("mascot-menu").hidden) { $("mascot-menu").hidden = true; regions(); }
       else expand(false);
     }

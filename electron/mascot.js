@@ -11,7 +11,7 @@ function trustedFrame(event, window, origin) {
 
 // A second view of the same running Core. Hiding either window never stops the
 // node, changes the wallet, or creates another model/runtime process.
-function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, dialog, prefs, origin, getMainWindow, hasTray = () => true, globalShortcut, describeModel = () => null }) {
+function createMascotController({ BrowserWindow, screen, desktopCapturer, ipcMain, shell, app, dialog, prefs, origin, getMainWindow, hasTray = () => true, globalShortcut, describeModel = () => null }) {
   const actions = app && dialog ? require("./desktop-actions").createFolderActions({ app, dialog, shell }) : null;
   const approval = dialog ? require("./tool-approval").createToolApproval({ dialog }) : null;
   const navigation = require("../ui/app-navigation");
@@ -27,6 +27,8 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, di
   const computer = new (require("./computer-control").ComputerControl)({ dialog, shell, globalShortcut,
     getWindow: () => window, describeModel, onEvent: value => send("computer", value),
     highlight: (view, args) => require("./computer-highlight").highlight({ BrowserWindow, screen }, view, args) });
+  const eyes = new (require("./mascot-eyes").MascotEyes)({ desktopCapturer, screen, dialog,
+    getWindow: () => window, describeModel });
   function savePosition() {
     if (!window || window.isDestroyed()) return;
     const b = window.getBounds();
@@ -117,12 +119,12 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, di
           if (/^https?:\/\//i.test(url) && new URL(url).origin !== origin) shell.openExternal(url);
         }
       });
-      created.on("hide", () => { computer.cancel(); actions?.cancel(); approval?.cancel(); windowsVoice.cancel(); pocketVoice.close(); finishDrag(true); pose(); send("suspend", true); });
+      created.on("hide", () => { eyes.stop(); computer.cancel(); actions?.cancel(); approval?.cancel(); windowsVoice.cancel(); pocketVoice.close(); finishDrag(true); pose(); send("suspend", true); });
       created.on("blur", () => { if (dragging) finishDrag(true); });
       created.on("show", () => send("suspend", false));
-      created.webContents.on("render-process-gone", () => { computer.cancel(); windowsVoice.cancel(); pocketVoice.close(); showMain(); });
+      created.webContents.on("render-process-gone", () => { eyes.stop(); computer.cancel(); windowsVoice.cancel(); pocketVoice.close(); showMain(); });
       created.on("closed", () => {
-        computer.cancel();
+        eyes.stop(); computer.cancel();
         windowsVoice.cancel(); pocketVoice.close(); clearInterval(timer); timer = null;
         window = null; loading = null; dragging = null; regions = []; ignored = false; shaped = false;
       });
@@ -172,6 +174,11 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, di
   handle("mascot:computer-call", () => window, (token, name, args) => computer.call(token, name, args), true);
   handle("mascot:computer-end", () => window, () => computer.cancel("Desktop task finished."), true);
   handle("mascot:open-website", () => window, text => computer.openWebsite(text), true);
+  handle("mascot:eyes-model", () => window, model => eyes.modelInfo(model), true);
+  handle("mascot:eyes-enable", () => window, (source, model) => eyes.enable(source, model), true);
+  handle("mascot:eyes-validate", () => window, (source, model) => eyes.validate(source, model), true);
+  handle("mascot:eyes-capture", () => window, (model, detail) => eyes.capture(model, detail), true);
+  handle("mascot:eyes-stop", () => window, source => eyes.stop(source), true);
   handle("mascot:expand", () => window, open => { resize(open); return { expanded }; });
   handle("mascot:open-folder", () => window, folder => {
     if (!actions) throw new Error("Desktop actions are unavailable in this window.");
@@ -265,7 +272,7 @@ function createMascotController({ BrowserWindow, screen, ipcMain, shell, app, di
     hide() { if (window && !window.isDestroyed()) { savePosition(); window.hide(); } },
     dispose() {
       if (disposed) return;
-      disposed = true; computer.cancel(); actions?.cancel(); approval?.cancel(); windowsVoice.close(); pocketVoice.close(); clearInterval(timer);
+      disposed = true; eyes.stop(); computer.cancel(); actions?.cancel(); approval?.cancel(); windowsVoice.close(); pocketVoice.close(); clearInterval(timer);
       screen.removeListener("display-removed", onDisplayChange);
       screen.removeListener("display-metrics-changed", onDisplayChange);
       for (const channel of handles) ipcMain.removeHandler(channel);

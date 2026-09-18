@@ -122,7 +122,8 @@
       "entitlementsInherit": "build/entitlements.mac.inherit.plist",
       "artifactName": "${name}-${version}-${arch}.${ext}",
       "extendInfo": {
-        "NSMicrophoneUsageDescription": "Koinos AI uses the microphone when you start voice input or enable Hey KAI listening."
+        "NSMicrophoneUsageDescription": "Koinos AI uses the microphone when you start voice input or enable Hey KAI listening.",
+        "NSCameraUsageDescription": "Koinos AI uses the camera only while you explicitly enable Camera in KAI Eyes."
       }
     },
     "linux": {

@@ -1,6 +1,6 @@
 "use strict";
 const path = require("path");
-const { app, BrowserWindow, screen, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, screen, desktopCapturer, ipcMain, shell } = require("electron");
 const { JsonStore } = require("../../core/lib/store");
 const { createMascotController } = require("../../electron/mascot");
 const { startMascotServer } = require("../../core/test/fixtures/mascot-server");
@@ -28,8 +28,8 @@ app.whenReady().then(async () => {
     if (key === "getCursorScreenPoint") return () => globalThis.__kaiCursor || screen.getCursorScreenPoint();
     return typeof target[key] === "function" ? target[key].bind(target) : target[key];
   } });
-  const controller = createMascotController({ BrowserWindow, screen: fixtureScreen, ipcMain, app,
-    globalShortcut: require("electron").globalShortcut, describeModel: () => ({ kind: "local", vision: false }),
+  const controller = createMascotController({ BrowserWindow, screen: fixtureScreen, desktopCapturer, ipcMain, app,
+    globalShortcut: require("electron").globalShortcut, describeModel: () => ({ kind: "local", label: "Koinos Fast", vision: true }),
     shell: { ...shell, openExternal: async target => { (globalThis.__openedSites ||= []).push(target); }, openPath: async target => { globalThis.__openedFolders.push(target); return ""; } },
     dialog: { showMessageBox: async (_win, options) => { globalThis.__folderApprovals.push(options); return { response: globalThis.__approveFolder ? 1 : 0 }; } },
     prefs: new JsonStore(path.join(dir, "window.json"), {}), origin: fixture.origin, getMainWindow: () => main });

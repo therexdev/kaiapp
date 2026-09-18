@@ -55,6 +55,56 @@ test("Cute KAI: instant local preview before setup, persistent tuning and visibl
   assert.deepEqual(errors, []);
 });
 
+test("KAI Eyes keeps capture visible, sends one ephemeral frame privately and stops on hide", { skip: !fs.existsSync(CHROMIUM), timeout: 45000 }, async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-eyes-ui-")), fixture = await startMascotServer(dir);
+  const { chromium } = require("playwright-core");
+  const browser = await chromium.launch({ executablePath: CHROMIUM, args: ["--no-sandbox"] });
+  t.after(async () => { await browser.close(); await fixture.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+  const page = await browser.newPage({ viewport: { width: 660, height: 560 } }), errors = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await page.addInitScript(() => {
+    window.__eyesStops = []; window.__eyesCaptures = [];
+    window.kaiDesktop = {
+      regions() {}, startDrag() {}, endDrag() {},
+      expand: async value => { window.__kaiEvent?.({ type: "expanded", value }); return { expanded: value }; },
+      eyesModel: async model => ({ kind: "local", label: model, vision: true }),
+      eyesEnable: async (source, model) => ({ enabled: true, source, model, destination: "local", label: "Koinos Fast" }),
+      eyesValidate: async () => ({ enabled: true }),
+      eyesCapture: async (_model, detail) => {
+        const value = { source: "screen", detail, capturedAt: Date.now(), width: detail === "look" ? 1600 : 640,
+          height: detail === "look" ? 900 : 360, dataUrl: "data:image/jpeg;base64,/9j/AAAA" };
+        window.__eyesCaptures.push(value); return value;
+      },
+      eyesStop: async source => { window.__eyesStops.push(source ?? "all"); return { ok: true }; },
+      onEvent: callback => { window.__kaiEvent = callback; },
+    };
+  });
+  await page.goto(fixture.origin + "/mascot.html");
+  await page.waitForFunction(() => document.querySelector("#model").value === "tiny-live");
+  await page.click("#toggle-chat"); await page.click("#eyes-options"); await page.click("#screen-eyes");
+  await page.waitForSelector("#eyes-indicator:not([hidden])");
+  assert.equal(await page.getAttribute("#screen-eyes", "aria-pressed"), "true");
+  await page.click("#collapse");
+  assert.equal(await page.locator("#conversation").evaluate(element => element.hidden), true);
+  assert.equal(await page.locator("#eyes-indicator").evaluate(element => element.hidden), false, "capture indicator remains visible in compact mode");
+  await page.click("#toggle-chat");
+  await page.fill("#question", "What can you see in the current view?");
+  await page.click("#send");
+  await page.waitForFunction(() => document.querySelector("#messages").textContent.includes("What are you working on today"));
+  const request = fixture.state.requests.at(-1), current = request.messages.at(-1);
+  assert.equal(request.kai_private_desktop, true, "sensory turns cannot overflow to the network");
+  assert.ok(Array.isArray(current.content));
+  assert.equal(current.content[0].text, "What can you see in the current view?");
+  assert.ok(current.content.some(part => part.image_url?.url === "data:image/jpeg;base64,/9j/AAAA"));
+  const saved = fixture.chats.get(fixture.chats.list()[0].id);
+  assert.equal(typeof saved.messages.find(message => message.role === "user").content, "string", "saved history remains text-only");
+  assert.equal(saved.messages.some(message => message.images?.length), false);
+  await page.evaluate(() => window.__kaiEvent({ type: "suspend", value: true }));
+  await page.waitForSelector("#eyes-indicator", { state: "hidden" });
+  assert.ok((await page.evaluate(() => window.__eyesStops)).length > 0);
+  assert.deepEqual(errors, []);
+});
+
 test("KAI UI: natural default, compact voice, follow-ups, barge-in context, history and microphone cleanup", { skip: !fs.existsSync(CHROMIUM), timeout: 90000 }, async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-mascot-ui-"));
   const fixture = await startMascotServer(dir);

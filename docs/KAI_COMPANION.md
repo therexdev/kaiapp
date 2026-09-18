@@ -1,6 +1,6 @@
 # KAI desktop companion
 
-The realtime request lifecycle is defined in [KAI Live Senses architecture](KAI_LIVE_SENSES_ARCHITECTURE.md). One scoped turn now spans listening output, model and tool work, streamed text, speech synthesis and playback; later sensory stages can be replaced independently without changing KAI's Brain or approval boundaries.
+The realtime request lifecycle is defined in [KAI Live Senses architecture](KAI_LIVE_SENSES_ARCHITECTURE.md). One scoped turn now spans listening, optional screen/camera context, model and tool work, streamed text, speech synthesis and playback; each sensory stage can be replaced independently without changing KAI's Brain or approval boundaries.
 
 Choose **Launch KAI** in the app's left sidebar. The main window moves out of the way and the same Core, wallet and earning node keep running. KAI appears above your desktop as a small animated robot. The tray menu also offers **Launch KAI companion** and **Hide KAI companion**.
 
@@ -8,6 +8,7 @@ Choose **Launch KAI** in the app's left sidebar. The main window moves out of th
 - Type a question and press Enter. Shift+Enter adds a line. Replies stream from the selected model. KAI starts with the model selected in the main app and offers other downloaded models in the Brain menu.
 - Tap the microphone, wait for the brief microphone-ready check, and speak without a wake phrase. A brief pause sends the question; a second tap can finish it sooner. Voice works with the chat closed. On Windows, the first use offers the existing local speech-engine download (about 156 MB). Audio is transcribed on this computer. If there is already a typed draft, voice is appended to that draft for review before sending.
 - Voice mode turns spoken replies on. The footer's **Voice replies** button toggles playback. On supported Windows/Linux x64 desktops, **Azelma Pocket** is the default for new profiles and profiles using the former Bella default. Its pinned voice pack (about 201 MB) downloads automatically when KAI opens with Azelma selected; compact setup shows progress and retry. Existing files and alternative/later voice selections are preserved. **Voice & listening** also offers other Pocket presets, optional Kokoro natural voices, and installed computer voices. Unsupported computers keep their existing setup. **Voice character** defaults to **Cute KAI**; Classic and Natural remain available. No silent engine fallback occurs. Microphone and voice-reply toggles retain their existing settings. Stop interrupts generation or playback. Escape cancels a recording or response before collapsing the panel.
+- Open **KAI Eyes** to explicitly enable the current screen, camera, or both for this session. A capture indicator stays visible even when chat is collapsed. Eyes requires a vision-capable local/private brain and turns off when KAI hides or the brain changes.
 - Conversations are saved in the existing app history with a **KAI** title. The plus button starts a new conversation without deleting the old one.
 - Minimize the conversation to leave the robot on the desktop. **Open full app** returns to the normal app. The robot's three-dot menu offers a greeting, an animation toggle, and hiding to the tray.
 
@@ -109,6 +110,18 @@ The SVG rig reuses the bundled texture with separate masked torso, upper arms, f
 `electron/mascot-layout.js` computes drag placement in Electron screen DIP coordinates, choosing the display nearest the cursor. The intended bottom-right anchor is separate from the clamped native window bounds; native bounds never cross the work area. Edge snap uses 24 DIP. A perched robot tolerates 28 DIP of vertical jitter before lifting; a bounded artwork offset keeps the head under the hand while the lower body emerges. Release samples the final cursor, settles the pose and saves it. Blur, pointer cancellation, hiding and display changes end the drag. Native hit shapes are temporarily cleared for pointer capture and rebuilt from viewport-clipped interactive regions afterward.
 
 Pure geometry/controller tests cover negative and stacked monitors, release sampling, perch persistence, lift continuity, cancellation and untrusted frames. Browser CI records articulated free/perched/pickup/activity poses, checks real tool-to-search transitions, click-versus-drag, audio-mouth separation, hit regions and reduced motion. Windows CI uses the real sandboxed preload and native windows with a fixture DIP cursor to check bottom drops, horizontal sliding, lifting and chat anchoring.
+
+## KAI Eyes
+
+Screen and camera vision are passive, session-only senses on the shared Live Senses turn bus. Both start Off. The user chooses **Screen** and/or **Camera** in KAI Eyes and reviews a native confirmation naming the selected local model or private provider. An orange capture pill remains visible in compact and expanded modes. Turning a source off, hiding KAI, returning to the main app, changing brains, renderer loss or quit revokes its grant and discards its frames.
+
+Each active source samples at about one frame per second and holds no more than six 640-pixel JPEG frames in memory. Only the newest frame from each source is attached to a typed or spoken turn. The persisted chat remains text-only, and frames are not written to disk, Brain, tool observations, diagnostics, public APIs, network jobs or a media archive. Screen capture selects the display containing KAI through bounded main-process `desktopCapturer` IPC. Camera capture uses a video-only renderer stream; it does not acquire another microphone.
+
+The grant is bound to the exact model. Installed local models need `vision:true`; private provider models use the existing encrypted direct OpenAI/Anthropic transport. Text-only and Koinos Network models are refused. Local visual requests set the existing private-desktop egress opt-out so a local failure cannot overflow screen/camera pixels to network workers. Local-Only blocks private-provider validation and active egress. Changing the selected model always turns Eyes off instead of silently moving visual data to a new destination.
+
+The private planner may use `kai_look` for one fresh image up to 1600 pixels when the rolling frame lacks readable detail. It can inspect only an already enabled source for the current model. The high-detail image is scoped to that turn and never enters the rolling buffer. `kai_look` is observation only; desktop control remains a distinct per-task grant, and sensitive clicks/typing retain their existing native review.
+
+Validation: `core/test/mascot-eyes.test.js` covers frame bounds, freshness, model changes, late cancellation, screen selection, local/private disclosures and camera cleanup. Multimodal, provider, companion-tool and browser checks cover request-only content-parts, local network-overflow blocking, compact indicators, text-only history and hide cleanup.
 
 ## Fast Windows character speech
 

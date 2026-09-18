@@ -54,6 +54,8 @@ flowchart TD
     E --> F
     X2 --> F
     F --> G["KAI turn session"]
+    M["Optional camera / screen"] --> N["Six-frame local buffers"]
+    N --> G
     G --> H["Brain, tools, connections"]
     H --> I["Streamed model reply"]
     I --> J["Scoped sentence queue"]
@@ -73,12 +75,23 @@ The listener passes local capture, transcription and endpoint timing into the KA
 
 First-response and stream-stall watchdogs recover a turn instead of leaving KAI indefinitely busy. Tool activity refreshes the watchdog. Native approval pauses the watchdog so a person is never timed out while reviewing an action.
 
+## KAI Eyes
+
+`ui/mascot-eyes.js` adds optional screen and camera producers to the same turn boundary. Both sources are off at launch and require a direct session toggle plus a native confirmation bound to the exact selected model. The compact companion keeps an orange capture indicator visible for the entire session. Off, hide, return to the main app, renderer loss, quit or a model change stops capture, releases camera tracks and deletes buffered frames.
+
+Each enabled source samples at about 1 FPS and retains at most six 640-pixel JPEG frames in renderer memory. A completed typed or spoken turn receives only the freshest frame from each enabled source. These content-parts exist only in the model request: the chat store continues to save the user's text and KAI's answer without image data. Cancelled turns reject late capture results through the same turn `AbortSignal` and the source generation guard.
+
+Screen capture stays in Electron's main process. `electron/mascot-eyes.js` selects the display containing KAI, uses a bounded `desktopCapturer` thumbnail and exposes it only through exact companion-window/main-frame/`/mascot.html` IPC. Camera capture uses a video-only `getUserMedia` stream in the sandboxed renderer; it never opens another audio stream. Neither path creates a Core capture route, model tool available to workers, file archive or background sensing service.
+
+Only an installed local vision model or a recognized private OpenAI/Anthropic vision model can receive frames. A source grant records that destination and is revalidated before a turn. Network models and text-only models are refused. Local visual requests set `kai_private_desktop: true`, which is an egress opt-out: Core strips it before local inference and disables both network overflow paths. Private-provider frames use the existing encrypted direct desktop transport, and Local-Only can revoke that route at any time.
+
+When the current 640-pixel frame is insufficient, the private planner can call `kai_look` for one fresh screen or camera image up to 1600 pixels. The action works only for an already enabled source and the same model. It grants no click, typing or desktop-control authority; those remain behind their separate per-task and per-action approvals. High-detail frames are turn-scoped and never enter the rolling buffer, tool observations, diagnostics or chat history.
+
 ## Next migrations on this boundary
 
 The turn contract is deliberately independent of a VAD, STT, turn detector or TTS vendor. The next test-only revisions can therefore replace one stage at a time:
 
-1. Add KAI Eyes as optional camera and screen producers. Keep a small low-resolution rolling buffer and attach only the freshest approved frame to the current turn; use a separate high-resolution `look` action when necessary.
-2. Move audio output to one gap-free, AEC-visible playback clock after Pocket/Windows/Kokoro parity is verified.
+1. Move audio output to one gap-free, AEC-visible playback clock after Pocket/Windows/Kokoro parity is verified.
 
 Each migration must preserve Hey KAI, wake-guarded interruption, the shared app profile, Local-Only behavior, model capability checks, visible capture indicators, approval boundaries and packaged Windows verification.
 
@@ -91,4 +104,6 @@ Each migration must preserve Hey KAI, wake-guarded interruption, the shared app 
 - `core/test/mascot-turn.test.js` checks audio-window ownership, policy thresholds, text guards and silence fallback.
 - `core/test/smart-turn.test.js` runs the real pinned Smart-Turn model in the isolated worker and exercises its loopback gateway boundary.
 - `core/test/live-senses-assets.test.js` runs the real Silero model with KAI's pinned ONNX Runtime, verifies the Smart-Turn hash and checks exact asset routing. Chromium also compiles the browser runtime/model pair where the CI browser is available.
+- `core/test/mascot-eyes.test.js` checks bounded rolling frames, ephemeral high-detail looks, model-bound grants, screen selection, camera cleanup, late-result rejection and local/private/network capability gates.
+- Companion/tool/browser checks verify image content-parts, network-overflow opt-out, visible compact capture status, text-only chat persistence and hide cleanup.
 - Existing deterministic, browser, native Windows and packaged voice checks remain required.
