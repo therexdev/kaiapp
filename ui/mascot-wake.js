@@ -188,9 +188,15 @@
       this.syncCaptureOptions();
     }
     setPlayback(value) {
-      if (this.playback && !value) this.echoUntil = Date.now() + 1200;
-      this.playback = !!value;
+      const state = typeof value === "object" && value ? value : { active: !!value, audible: !!value };
+      const wasAudible = this.playback;
+      this.playback = !!state.audible; this.speakerActive = !!state.active;
+      this.playbackClock = { scope: state.scope ?? null, queuedMs: Math.max(0, Number(state.queuedMs) || 0),
+        gaps: Math.max(0, Number(state.gaps) || 0), maxGapMs: Math.max(0, Number(state.maxGapMs) || 0) };
+      if (Number.isFinite(state.echoUntil)) this.echoUntil = Math.max(this.echoUntil || 0, state.echoUntil);
+      if (wasAudible && !this.playback) this.echoUntil = Math.max(this.echoUntil || 0, Date.now() + 1200);
     }
+    speakerEchoing() { return this.playback || Date.now() < (this.echoUntil || 0); }
     configure({ sensitivity, interruptWithWake, turnPause = this.turnPause }) {
       this.sensitivity = Object.hasOwn(SENSITIVITY, sensitivity) ? sensitivity : "tv";
       this.interruptWithWake = !!interruptWithWake;
@@ -209,6 +215,8 @@
     }
     echoText() { return this.output.filter(o => Date.now() - o.at < 30000).map(o => o.text).join(" "); }
     interrupt(segment) {
+      // The AEC tail stays echo-marked, but only currently audible output may
+      // be paused. Residual speaker audio must never hold a later follow-up.
       if (segment.guarded || this.holdSerial != null || this.interruptBlocked || !this.playback) return;
       this.holdSerial = segment.serial; this.onInterrupt();
       this.holdTimer = setTimeout(() => {
@@ -318,11 +326,12 @@
     segmentStart() {
       return { serial: ++this.serial, armed: this.engaged,
         guarded: this.responding && this.interruptWithWake, replySerial: this.replySerial,
-        echo: this.playback || Date.now() < (this.echoUntil || 0) ? this.echoText() : "", started: false, captureStartedAt: clock() };
+        echo: this.speakerEchoing() ? this.echoText() : "", started: false, captureStartedAt: clock(),
+        playback: this.playbackClock ? { ...this.playbackClock } : null };
     }
     vadFrame(probabilities, _frame, epoch = this.epoch) {
       if (!this.active || this.paused || epoch !== this.epoch) return;
-      if (this.playback && this.segment) this.segment.echo = this.echoText();
+      if (this.speakerEchoing() && this.segment) this.segment.echo = this.echoText();
       if (Date.now() - (this.levelAt || 0) >= 100) {
         this.levelAt = Date.now();
         const probability = Math.max(0, Math.min(1, Number(probabilities?.isSpeech) || 0));
@@ -332,7 +341,7 @@
     vadSpeechStart(epoch = this.epoch) {
       if (!this.active || this.paused || epoch !== this.epoch || this.segment) return;
       this.segment = this.segmentStart();
-      if (this.playback) this.segment.echo = this.echoText();
+      if (this.speakerEchoing()) this.segment.echo = this.echoText();
     }
     vadSpeechRealStart(epoch = this.epoch) {
       if (!this.active || this.paused || epoch !== this.epoch) return;
@@ -361,13 +370,14 @@
       if (!this.active || this.paused || epoch !== this.epoch || !this.activity) return;
       if (!this.activity.frames.length) this.segment = { serial: ++this.serial, armed: this.engaged,
         guarded: this.responding && this.interruptWithWake, replySerial: this.replySerial,
-        echo: this.playback || Date.now() < (this.echoUntil || 0) ? this.echoText() : "", started: false, captureStartedAt: clock() };
+        echo: this.speakerEchoing() ? this.echoText() : "", started: false, captureStartedAt: clock(),
+        playback: this.playbackClock ? { ...this.playbackClock } : null };
       // Output can start after capture began; retain that overlap for echo
       // rejection instead of treating KAI's first audible sentence as a user.
-      if (this.playback) this.segment.echo = this.echoText();
+      if (this.speakerEchoing()) this.segment.echo = this.echoText();
       // A single spoken "KAI" may be shorter than normal conversational speech.
       // It still has to pass the room's loudness threshold and name recognition.
-      const audio = this.activity.push(data, { adapt: !this.playback, voiceMs: this.segment.guarded ? 120 : this.activity.profile.voiceMs,
+      const audio = this.activity.push(data, { adapt: !this.speakerEchoing(), voiceMs: this.segment.guarded ? 120 : this.activity.profile.voiceMs,
         // Name recognition stays quick during a reply. Outside a reply, a
         // brief pause is part of the same question, not an instruction to send.
         silenceMs: this.segment.guarded ? 500 : TURN_PAUSES[this.turnPause] });
@@ -495,7 +505,7 @@
     }
     async stop() {
       this.epoch++; this.clearTurn(); this.active = false; this.processing = false; this.delivering = false; this.paused = false;
-      this.engaged = false; this.wakeSerial = null; this.responding = false; this.playback = false; this.interruptBlocked = false; this.segment = null; this.queue = []; this.output = [];
+      this.engaged = false; this.wakeSerial = null; this.responding = false; this.playback = false; this.speakerActive = false; this.playbackClock = null; this.interruptBlocked = false; this.segment = null; this.queue = []; this.output = [];
       clearTimeout(this.timer); this.abort?.abort(); this.abort = null; this.startAbort?.abort(); this.startAbort = null;
       this.turnWarmAbort?.abort(); this.turnWarmAbort = null;
       const captureEngine = this.captureEngine; this.captureEngine = null; this.captureMode = null;

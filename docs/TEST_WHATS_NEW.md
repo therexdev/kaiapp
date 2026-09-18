@@ -1,3 +1,11 @@
+## Continuous voice playback clock
+
+- Pocket, Windows and Kokoro/native WAV replies now share one turn-scoped Web Audio clock instead of opening a new player for each sentence. When the next sentence is ready, it is scheduled directly after the current one with no artificial media-element or audio-device gap.
+- Quick start remains quick: KAI still begins with the first complete sentence. The queue can now place one prepared sentence ahead on the same clock while retaining one synthesis job and bounded audio memory.
+- Listening receives the clock's exact audible window, queued duration and 1.2-second acoustic tail. Speaker echo remains marked during that tail, while only currently audible speech can be paused by a barge-in candidate.
+- Stop, hide, turn replacement and wake-guarded interruption cancel the complete clock and discard scheduled or late audio by turn identity. System browser voices retain their native playback path and the existing local-only/no-fallback rules.
+- Pocket diagnostics now report both synthesis-buffer underruns and output-clock gaps, helping distinguish a slow voice engine from a playback scheduler problem.
+
 ## KAI Eyes · screen and camera context
 
 - KAI can now see the screen he is sitting on or a camera you explicitly enable. Open **KAI Eyes**, choose Screen and/or Camera, approve the session, then ask naturally: “What is this error?” or “What am I holding?”

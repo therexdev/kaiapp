@@ -118,35 +118,35 @@
     value.finished.catch(() => {});
     return first;
   }
-  function play(value, { onAudible, onMetric, contextFactory = () => new AudioContext({ sampleRate: 24000 }) }) {
-    const context = contextFactory(), tone = new Tone(24000, value.tone, value.pitch);
+  function play(value, { clock, scope, onStart = () => {}, onMetric, contextFactory = () => new AudioContext({ sampleRate: 24000 }) }) {
+    const owned = !clock;
+    if (!clock) {
+      const Playback = root.KaiPlayback || (typeof require === "function" ? require("./mascot-playback") : null);
+      clock = new Playback.Clock({ contextFactory });
+    }
+    const tone = new Tone(24000, value.tone, value.pitch);
     const jitter = new PlaybackBuffer(24000);
-    let next = 0, closed = false, ended = false, held = false, unsubscribe, interval;
-    const sources = new Set(); let resolve, reject;
+    let closed = false, ended = false, unsubscribe, started = false;
+    const scheduled = []; let resolve, reject;
     const finished = new Promise((yes, no) => { resolve = yes; reject = no; });
-    let audible = false;
-    const setAudible = v => { if (v !== audible) { audible = v; onAudible(v); } };
     function close(error) {
-      if (closed) return; closed = true; unsubscribe?.(); clearInterval(interval);
-      for (const s of sources) { s.onended = null; s.stop(); } sources.clear(); setAudible(false);
-      context.close().catch(() => {}); error ? reject(error) : resolve();
+      if (closed) return; closed = true; unsubscribe?.();
+      if (owned) clock.cancel(scope);
+      error ? reject(error) : resolve();
     }
     const check = () => {
-      if (closed) return;
-      setAudible(!held && context.state === "running" && [...sources].some(s => context.currentTime >= s.kaiStart && context.currentTime < s.kaiEnd));
-      if (ended && !sources.size && !jitter.samples) { onMetric?.({ ...value.stats, firstPlaybackMs: value.firstPlaybackMs, pauses: jitter.pauses }); close(); }
+      if (!closed && ended && !jitter.samples) Promise.all(scheduled.map(item => item.finished)).then(() => {
+        onMetric?.({ ...value.stats, firstPlaybackMs: value.firstPlaybackMs, pauses: jitter.pauses, ...clock.metrics() }); close();
+      }, close);
     };
     function schedule(samples, final = false) {
-      samples = jitter.push(samples, { ended: final, nowMs: performance.now(), audioNow: context.currentTime, next });
+      const context = clock.context, audioNow = context?.currentTime || 0, next = clock.cursor || 0;
+      samples = jitter.push(samples, { ended: final, nowMs: performance.now(), audioNow, next });
       if (!samples) return;
       if (!samples.length) return;
-      const now = context.currentTime;
-      const at = Math.max(next, now + .015);
-      if (value.firstPlaybackMs == null) value.firstPlaybackMs = performance.now() - value.start + (at - now) * 1000;
-      const buffer = context.createBuffer(1, samples.length, 24000); buffer.copyToChannel(samples, 0);
-      const source = context.createBufferSource(); source.buffer = buffer; source.connect(context.destination);
-      source.kaiStart = at; source.kaiEnd = next = at + buffer.duration; sources.add(source);
-      source.onended = () => { sources.delete(source); source.disconnect(); check(); }; source.start(at);
+      const item = clock.schedule(samples, 24000, { scope, text: value.text }); scheduled.push(item);
+      if (value.firstPlaybackMs == null) value.firstPlaybackMs = performance.now() - value.start + Math.max(0, item.start - (clock.context?.currentTime || 0)) * 1000;
+      if (!started) { started = true; item.started.then(result => { if (!result?.cancelled) onStart(); }); }
     }
     unsubscribe = value.subscribe(chunk => {
       if (closed) return;
@@ -156,8 +156,7 @@
         else schedule(tone.push(chunk.samples));
       } catch (error) { close(error); }
     });
-    if (!closed) { interval = setInterval(check, 15); context.resume().catch(close); }
-    return { finished, cancel: () => close(), hold: v => { held = v; if (v) { setAudible(false); context.suspend().catch(close); } else context.resume().catch(close); } };
+    return { finished, cancel: () => close(), hold: value => clock.hold(value) };
   }
   return { Tone, PlaybackBuffer, prepare, play };
 });

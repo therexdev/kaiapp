@@ -60,7 +60,8 @@ flowchart TD
     H --> I["Streamed model reply"]
     I --> J["Scoped sentence queue"]
     J --> K["Pocket, Windows or Kokoro voice"]
-    K --> L["Speaker"]
+    K --> P["Turn playback clock"]
+    P --> L["Speaker + AEC timing"]
 ```
 
 `ui/mascot-vad.js` owns this detector boundary. It lazily loads the bundled Silero v5 model and reuses KAI's existing ONNX Runtime with one WASM inference lane. `@ricky0123/vad-web` receives the microphone stream and `AudioContext` KAI already opened, so successful Silero startup creates no second `getUserMedia` request and no second capture worklet. Its output is a bounded 16 kHz speech segment; raw microphone audio still never leaves the computer.
@@ -75,6 +76,14 @@ The listener passes local capture, transcription and endpoint timing into the KA
 
 First-response and stream-stall watchdogs recover a turn instead of leaving KAI indefinitely busy. Tool activity refreshes the watchdog. Native approval pauses the watchdog so a person is never timed out while reviewing an action.
 
+## Continuous playback clock
+
+`ui/mascot-playback.js` owns one Web Audio context and one monotonic output cursor for the current turn. Pocket PCM and validated 16-bit WAV output from Windows/Kokoro enter that timeline directly. The speech queue may schedule one prepared sentence ahead, so a completed next sentence begins at the prior sentence's exact end instead of reopening an HTML media element or audio device. Synthesis remains single-flight, the ready/scheduled window stays bounded and Quick start still begins after the first complete sentence.
+
+The clock publishes only timing state: turn scope, audible state, queued milliseconds, scheduled block count and gap measurements. The listener uses the exact audible window plus a 1.2-second acoustic tail for echo marking and noise-floor adaptation. The tail never pauses a later follow-up; only currently audible output can be held while interruption recognition runs. Existing AEC remains enabled on the single microphone stream, and recognized “KAI” is still required to interrupt a reply.
+
+Stop, hide, a replacement turn or a recognized interruption closes the clock and stops every scheduled source. Its scope check and the queue's turn/epoch checks prevent a cancelled source or late synthesis result from reviving playback. Installed browser voices keep their OS-native path because they do not expose PCM scheduling, but they retain the same scoped queue, cancellation and no-online-fallback rules.
+
 ## KAI Eyes
 
 `ui/mascot-eyes.js` adds optional screen and camera producers to the same turn boundary. Both sources are off at launch and require a direct session toggle plus a native confirmation bound to the exact selected model. The compact companion keeps an orange capture indicator visible for the entire session. Off, hide, return to the main app, renderer loss, quit or a model change stops capture, releases camera tracks and deletes buffered frames.
@@ -87,18 +96,15 @@ Only an installed local vision model or a recognized private OpenAI/Anthropic vi
 
 When the current 640-pixel frame is insufficient, the private planner can call `kai_look` for one fresh screen or camera image up to 1600 pixels. The action works only for an already enabled source and the same model. It grants no click, typing or desktop-control authority; those remain behind their separate per-task and per-action approvals. High-detail frames are turn-scoped and never enter the rolling buffer, tool observations, diagnostics or chat history.
 
-## Next migrations on this boundary
+## Migration status
 
-The turn contract is deliberately independent of a VAD, STT, turn detector or TTS vendor. The next test-only revisions can therefore replace one stage at a time:
-
-1. Move audio output to one gap-free, AEC-visible playback clock after Pocket/Windows/Kokoro parity is verified.
-
-Each migration must preserve Hey KAI, wake-guarded interruption, the shared app profile, Local-Only behavior, model capability checks, visible capture indicators, approval boundaries and packaged Windows verification.
+The first Live Senses sequence is now complete: shared turn/cancellation, Silero speech detection, Smart-Turn endpointing, KAI Eyes and the continuous playback clock. Future sensory revisions must continue to preserve Hey KAI, wake-guarded interruption, the shared app profile, Local-Only behavior, model capability checks, visible capture indicators, approval boundaries and packaged Windows verification.
 
 ## Verification
 
 - `core/test/mascot-live.test.js` checks shared cancellation, late-event rejection, stage watchdogs, completion barriers and content-free diagnostics.
 - `core/test/mascot-speech.test.js` checks that old scoped text and audio cannot cross a turn boundary.
+- `core/test/mascot-playback.test.js` checks gap-free scheduling, bounded one-sentence look-ahead, WAV decoding, scope-safe Stop and AEC-tail handoff.
 - `core/test/mascot-turns.test.js` checks that listening timing reaches the shared turn.
 - `core/test/mascot-vad.test.js` checks one-stream ownership, threshold mapping, pause/flush serialization, 16 kHz handoff and calibrated fallback.
 - `core/test/mascot-turn.test.js` checks audio-window ownership, policy thresholds, text guards and silence fallback.

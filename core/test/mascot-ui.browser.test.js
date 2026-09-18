@@ -117,13 +117,18 @@ test("KAI UI: natural default, compact voice, follow-ups, barge-in context, hist
   await context.addInitScript(() => {
     if (!localStorage.getItem("kai-mascot-cute-default-v1")) localStorage.setItem("kai-mascot-voice-choice", "system:test");
     window.__spoken = []; window.__streams = []; window.__mainRequests = []; window.__folderRequests = [];
-    window.__audio = []; window.__pauses = 0; window.__toneMedia = true; window.__roomNoise = .008;
-    const NativeAudio = window.Audio;
-    window.Audio = class extends NativeAudio {
-      constructor(...args) { super(...args); window.__audio.push(this); }
-      async play() { if (window.__playDelay) await new Promise(r => setTimeout(r, window.__playDelay)); return super.play(); }
-      pause() { if (!this.paused && !this.ended) window.__pauses++; super.pause(); }
+    window.__kaiSources = []; window.__pauses = 0; window.__toneMedia = true; window.__roomNoise = .008;
+    const createBufferSource = AudioContext.prototype.createBufferSource;
+    AudioContext.prototype.createBufferSource = function () {
+      const context = this, source = createBufferSource.call(context), start = source.start.bind(source), stop = source.stop.bind(source);
+      source.__kaiContext = context; source.__kaiEnded = false;
+      source.addEventListener("ended", () => { source.__kaiEnded = true; });
+      source.start = when => { source.__kaiStart = when; source.__kaiEnd = when + source.buffer.duration; return start(when); };
+      source.stop = (...args) => { if (!source.__kaiEnded) window.__pauses++; return stop(...args); };
+      window.__kaiSources.push(source); return source;
     };
+    window.__kaiAudible = () => window.__kaiSources.some(source => !source.__kaiEnded &&
+      source.__kaiContext.state === "running" && source.__kaiContext.currentTime >= source.__kaiStart && source.__kaiContext.currentTime < source.__kaiEnd);
     const timers = [];
     Object.defineProperty(window, "speechSynthesis", { value: {
       getVoices: () => [{ localService: true, lang: "en-US", voiceURI: "test", name: "Test voice" }],
@@ -216,17 +221,14 @@ test("KAI UI: natural default, compact voice, follow-ups, barge-in context, hist
   assert.equal(await page.inputValue("#voice-tone"), "cute");
   assert.equal(await page.inputValue("#speech-start"), "quick");
   fixture.state.speechDelay = 900; fixture.state.speechSeconds = .6;
-  await page.evaluate(() => { window.__playDelay = 350; });
   const firstSpeech = page.waitForRequest(r => r.url().endsWith("/core/speech") && r.method() === "POST");
   await utterance("Help me plan a trip to Seattle.");
   await firstSpeech;
   await page.waitForTimeout(150);
   assert.equal(await page.getAttribute("body", "data-state"), "voicing", "Text/ASR state changes must not animate an inaudible queued voice");
-  await page.waitForFunction(() => window.__audio.length > 0);
-  assert.notEqual(await page.getAttribute("body", "data-state"), "speaking", "Preparing the audio element is not audible playback");
-  await page.waitForFunction(() => document.body.dataset.state === "speaking" && window.__audio.some(a => !a.paused && !a.ended));
+  await page.waitForFunction(() => window.__kaiSources.length > 0);
+  await page.waitForFunction(() => document.body.dataset.state === "speaking" && window.__kaiAudible());
   fixture.state.speechDelay = 0;
-  await page.evaluate(() => { window.__playDelay = 0; });
   await page.waitForFunction(() => document.querySelector("#messages").textContent.includes("What are you working on today"));
   await idle(); await compact();
   assert.equal(fixture.state.requests.length, 1); assert.ok(fixture.state.speech.some(s => s.voice === "af_bella"));
@@ -244,7 +246,7 @@ test("KAI UI: natural default, compact voice, follow-ups, barge-in context, hist
   fixture.state.delay = 350; fixture.state.speechSeconds = 6;
   fixture.state.reply = "Seattle is a lovely choice. I would start with a few layers for the weather and comfortable shoes for walking. There are several neighborhoods to explore, and I can help you make a plan for each day of your trip. We can spend the first day exploring the waterfront and the market before heading up the hill. There are also museums to visit when the weather turns rainy, with many interesting things to see. Tell me which places interest you most and we will build a comfortable schedule together.";
   await utterance("Tell me more about the neighborhoods.");
-  await page.waitForFunction(() => window.__audio.some(a => !a.paused && !a.ended));
+  await page.waitForFunction(() => window.__kaiAudible());
   assert.ok(await page.locator(".message.streaming").count(), "Voice starts during text streaming");
   const guardedPauses = await page.evaluate(() => window.__pauses);
   await utterance("Get out of the car right now.");
@@ -266,11 +268,11 @@ test("KAI UI: natural default, compact voice, follow-ups, barge-in context, hist
   assert.ok(followup.some(m => m.content.includes("trip to Seattle")));
   assert.ok(followup.some(m => m.role === "assistant" && m.content.includes("Seattle is a lovely choice")), "Partial assistant context survives interruption");
   await compact();
-  await page.waitForFunction(() => window.__audio.some(a => !a.paused && !a.ended));
+  await page.waitForFunction(() => window.__kaiAudible());
   await utterance("KAI.", 180); await idle();
   assert.equal(await page.getAttribute("#quick-mic", "aria-pressed"), "true", "KAI alone stops speaking but keeps the mic on");
   assert.equal(await page.locator(".message.user").count(), 4, "The name alone is not saved as a question");
-  await page.evaluate(() => window.__audio.forEach(a => a.dispatchEvent(new Event("playing"))));
+  await page.evaluate(() => window.__kaiSources.forEach(source => source.dispatchEvent(new Event("ended"))));
   assert.notEqual(await page.getAttribute("body", "data-state"), "speaking", "Late playback events cannot revive stopped animation");
   fixture.state.delay = 10; fixture.state.speechSeconds = .2;
   fixture.state.reply = "Absolutely. What are you working on today?";

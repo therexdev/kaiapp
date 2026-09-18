@@ -147,12 +147,13 @@
     const joined = joinWavs(buffers);
     return characterTone(joined, tone, pitch);
   }
-  // One inference and one playback at most; prepare up to two complete
-  // sentences ahead. Epochs make Stop discard every late result.
+  // Keep one inference active and at most two native playback items scheduled
+  // on the shared clock. Epochs make Stop discard every late result.
   class Queue {
-    constructor({ prepare, play, cancel, holdPlayback = () => {}, onState, onError, buffer = 1, bufferWaitMs = 1800, merge = values => values[0] }) {
-      Object.assign(this, { prepare, play, cancel, holdPlayback, onState, onError, buffer, bufferWaitMs, merge });
-      this.epoch = 0; this.scope = null; this.tasks = []; this.ready = []; this.preparing = false; this.playing = false;
+    constructor({ prepare, play, cancel, holdPlayback = () => {}, onState, onError, buffer = 1, bufferWaitMs = 1800,
+      merge = values => values[0], playAhead = false }) {
+      Object.assign(this, { prepare, play, cancel, holdPlayback, onState, onError, buffer, bufferWaitMs, merge, playAhead });
+      this.epoch = 0; this.scope = null; this.tasks = []; this.ready = []; this.preparing = false; this.playing = false; this.plays = new Set();
     }
     // A scope is KAI's authoritative turn id. The queue still uses a private
     // epoch to cancel in-flight synthesis, but it will never accept text, audio
@@ -203,14 +204,17 @@
         }, this.bufferWaitMs);
       }
       const buffered = complete ? (full || (drained && this.ended)) : this.started || this.ready.length >= target || (drained && (this.ended || this.bufferExpired));
-      if (!this.held && !this.playing && this.ready.length && buffered) {
+      const nextValue = this.ready[0]?.value;
+      const ahead = typeof this.playAhead === "function" ? this.playAhead(nextValue) : this.playAhead;
+      if (!this.held && (!this.playing || (ahead && this.plays.size < 2)) && this.ready.length && buffered) {
         clearTimeout(this.bufferTimer); this.bufferTimer = null;
-        this.started = true; this.playing = true;
+        this.started = true;
         const items = complete ? this.ready.splice(0) : [this.ready.shift()];
         const values = items.map(item => item.value);
+        const token = {}; this.plays.add(token); this.playing = true;
         Promise.resolve().then(() => epoch === this.epoch && scope === this.scope ? this.play(complete ? this.merge(values) : values[0], scope) : null).catch(error => {
           if (epoch === this.epoch) { const failedScope = this.scope; this.stop(failedScope); this.onError(error, failedScope); }
-        }).finally(() => { if (epoch === this.epoch) { this.playing = false; this.pump(); } });
+        }).finally(() => { if (epoch === this.epoch) { this.plays.delete(token); this.playing = this.plays.size > 0; this.pump(); } });
         this.pump(); // Fill the bounded look-ahead buffer.
       }
       this.state();
@@ -218,7 +222,7 @@
     stop(scope) {
       if (scope !== undefined && scope !== this.scope) return false;
       const stoppedScope = this.scope;
-      this.epoch++; this.tasks = []; this.ready = []; this.preparing = false; this.playing = false;
+      this.epoch++; this.tasks = []; this.ready = []; this.preparing = false; this.playing = false; this.plays.clear();
       clearTimeout(this.bufferTimer); this.bufferTimer = null; this.bufferExpired = false; this.started = false; this.ended = false;
       this.abort?.abort(); this.abort = null; this.held = false; this.cancel(stoppedScope); this.state(stoppedScope); this.scope = null;
       return true;

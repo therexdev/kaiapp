@@ -299,12 +299,17 @@
   let helloAudio = null;
   let wakeEnabled = false, wakeStarting = false, wakePhase = "off";
   function playbackState(value) {
-    audible = value;
-    if (value) replyPose = true;
-    document.body.dataset.audible = String(value);
+    const state = typeof value === "object" && value ? value : { active: !!value, audible: !!value, echoUntil: value ? Date.now() + 1200 : Date.now() };
+    audible = !!state.audible;
+    if (audible) replyPose = true;
+    document.body.dataset.audible = String(audible);
     wakeListener.setPlayback(value);
     mood("idle");
   }
+  // Native WAV and Pocket speech share one turn-scoped output clock. The
+  // listener receives its exact audible/tail state instead of inferring echo
+  // from separate media-element events.
+  const playbackClock = new KaiPlayback.Clock({ onState: playbackState });
   let warmRequest = null;
   function warmSpeech() {
     if (!suspended && voiceReplies && voiceChoice.startsWith("pocket:")) { if (pocketStatus?.available) bridge.pocketWarm(voiceChoice.slice(7)).catch(() => {}); return; }
@@ -316,6 +321,7 @@
   }
   const speech = new KaiSpeech.Queue({
     buffer: () => voiceChoice.startsWith("pocket:") ? 1 : speechStart === "complete" ? "complete" : speechStart === "smooth" ? 2 : 1,
+    playAhead: value => !!(value?.wav || value?.pocket),
     merge: values => {
       const text = values.map(v => v.text).join(" ");
       return values.every(v => v.wav) ? { wav: KaiSpeech.joinWavs(values.map(v => v.wav)), text } : { ...values[0], text };
@@ -373,19 +379,23 @@
         turn?.mark("playback_started"); turn?.setPhase("speaking");
       };
       if (value.pocket) {
-        let heard = false;
-        const player = KaiPocket.play(value, { onAudible: active => {
-          if (active && !heard) { heard = true; wakeListener.hearOutput(value.text); playbackStarted(); }
-          playbackState(active);
+        const player = KaiPocket.play(value, { clock: playbackClock, scope, onStart: () => {
+          wakeListener.hearOutput(value.text); playbackStarted();
         }, onMetric: metric => {
           $("pocket-metric").hidden = false;
-          $("pocket-metric").textContent = "Last sentence started in " + (metric.firstPlaybackMs / 1000).toFixed(1) + " s · " + (metric.pauses ? metric.pauses + " buffering pause(s)" : "no buffering pauses") + ".";
+          $("pocket-metric").textContent = "Last sentence started in " + (metric.firstPlaybackMs / 1000).toFixed(1) + " s · " +
+            (metric.pauses ? metric.pauses + " buffering pause(s)" : "no buffering pauses") + " · " +
+            (metric.gaps ? metric.gaps + " output clock gap(s)" : "gap-free output clock") + ".";
         } });
-        cancelPlayback = player.cancel; holdPlayback = player.hold;
-        return player.finished.finally(() => { if (cancelPlayback === player.cancel) { cancelPlayback = null; holdPlayback = null; } });
+        return player.finished;
+      }
+      if (value.wav) {
+        const player = playbackClock.scheduleWav(value.wav, { scope, text: value.text });
+        player.started.then(result => { if (!result?.cancelled) { wakeListener.hearOutput(value.text); playbackStarted(); } });
+        return player.finished;
       }
       return new Promise((resolve, reject) => {
-      let audio, utterance, url, done = false, started = false;
+      let utterance, done = false, started = false;
       const playing = () => {
         if (done || speech.held) return;
         if (!started) { started = true; wakeListener.hearOutput(value.text); playbackStarted(); }
@@ -395,23 +405,14 @@
       const finish = error => {
         if (done) return;
         done = true;
-        if (audio) { audio.onplaying = audio.onpause = audio.onwaiting = audio.onended = audio.onerror = null; audio.pause(); audio.removeAttribute("src"); audio.load(); }
         if (utterance) utterance.onstart = utterance.onresume = utterance.onpause = utterance.onend = utterance.onerror = null;
-        if (url) URL.revokeObjectURL(url);
         if (cancelPlayback === cancel) { cancelPlayback = null; holdPlayback = null; }
         playbackState(false);
         error ? reject(error) : resolve();
       };
       const cancel = () => finish();
       cancelPlayback = cancel;
-      if (value.wav) {
-        url = URL.createObjectURL(new Blob([value.wav], { type: "audio/wav" })); audio = new Audio(url);
-        audio.onplaying = playing; audio.onpause = silent; audio.onwaiting = silent;
-        audio.onended = () => finish(); audio.onerror = () => finish(new Error("KAI could not play the voice. Try again."));
-        holdPlayback = held => { if (held) { audio.pause(); silent(); } else if (!done) audio.play().catch(finish); };
-        if (!speech.held) audio.play().catch(finish);
-      } else {
-        if (!("speechSynthesis" in window)) return finish(new Error("Choose a natural voice to hear KAI on this computer."));
+      if (!("speechSynthesis" in window)) return finish(new Error("Choose a natural voice to hear KAI on this computer."));
         utterance = new SpeechSynthesisUtterance(value.text);
         const voices = speechSynthesis.getVoices().filter(v => v.localService);
         const selected = voices.find(v => "system:" + v.voiceURI === value.voice) ||
@@ -428,11 +429,10 @@
         holdPlayback = held => { if (held) { speechSynthesis.pause(); silent(); } else speechSynthesis.resume(); };
         speechSynthesis.speak(utterance);
         if (speech.held) speechSynthesis.pause();
-      }
     });
     },
-    cancel: () => { window.speechSynthesis?.cancel(); window.speechSynthesis?.resume(); cancelPlayback?.(); },
-    holdPlayback: held => holdPlayback?.(held),
+    cancel: scope => { window.speechSynthesis?.cancel(); window.speechSynthesis?.resume(); cancelPlayback?.(); playbackClock.cancel(scope); },
+    holdPlayback: held => { holdPlayback?.(held); playbackClock.hold(held); },
     onState: (state, scope, detail) => {
       speaking = state !== "idle";
       const turn = liveSession.isCurrent(scope) ? liveSession.current : null;
