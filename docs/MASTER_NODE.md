@@ -13,6 +13,18 @@ Master uses KAI's Docker project names. Free Node has different project names,
 but the migrated chain directory and several ports are shared: never run two
 controllers against the same node directory. Stop Free Node's containers first.
 
+## Node access and AI privacy
+
+Koinos Node works while AI Privacy remains Local-Only. Enable Run Koinos Node
+in Settings, then use its node controls as usual. Loading the node UI, syncing,
+block production and explicit wallet actions do not require enabling online AI.
+The node's own start/stop, reward and Distribution settings govern its activity.
+Wallet password checks and local Core access controls still apply. AI web tools,
+cloud providers and account connections continue to follow AI Privacy.
+
+Version `0.54.9-master.2` fixes the “Failed to start UI” privacy error. The same
+fix is also maintained on `therexdev/kaiapp:test` for its separate Test feed.
+
 ## Distribution
 
 Koinos Node → Distribution includes VHP-restoring reburn, extra compounding,
