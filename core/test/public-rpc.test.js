@@ -70,7 +70,9 @@ test("real HTTP RPC supports koilib, browser CORS and producer routes on the sam
 test("signed transaction is relayed once unchanged and chain rejection details survive", async t => {
   const f = await fixture(t);
   const tx = { id: hash(9), header: { chain_id: MAINNET_CHAIN_ID, payer: ADDRESS, nonce: "KAE=", rc_limit: "100" }, operations: [{ call_contract: { contract_id: ADDRESS, entry_point: 1, args: "" } }], signatures: ["AQIDBA=="] };
-  const params = { transaction: tx, broadcast: true }, rejection = { code: -32000, message: "insufficient rc", data: '{"logs":["mana exceeded"]}' };
+  // A chain rejection must remain HTTP 200 even if its code overlaps a
+  // gateway transport error. Clients must not mistake it for failover advice.
+  const params = { transaction: tx, broadcast: true }, rejection = { code: -32002, message: "insufficient rc", data: '{"logs":["mana exceeded"]}' };
   f.state.custom = (input, res) => res.end(JSON.stringify({ jsonrpc: "2.0", id: input.id, error: rejection }));
   const res = await f.post(request("chain.submit_transaction", params, "signed"));
   assert.equal(res.status, 200); assert.deepEqual((await res.json()).error, rejection);

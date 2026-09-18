@@ -102,7 +102,7 @@ KoinosScan's prepared producer feed is unchanged when the local index is off.
 
 ## Node API
 
-Version `0.54.9-master.3` adds standard JSON-RPC alongside the producer feed.
+Version `0.54.9-master.4` adds standard JSON-RPC alongside the producer feed.
 Fully sync mainnet, then open Koinos Node → Node API. The listener remains off
 by default. Private upstream: `http://127.0.0.1:8085`. API listener:
 `127.0.0.1:41110`. Keep memory-saver mode OFF because it stops JSON-RPC.

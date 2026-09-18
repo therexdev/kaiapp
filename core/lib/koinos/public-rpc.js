@@ -6,6 +6,7 @@ const { utils } = require("koilib");
 const MAINNET_CHAIN_ID = "EiBZK_GGVP0H_fXVAM3j6EAuz3-B-l3ejxRSewi7qIBfSA==";
 const MAX_BODY = 2 * 1024 * 1024, MAX_RESPONSE = 8 * 1024 * 1024;
 const MAX_BATCH = 10, MAX_INFLIGHT = 4, CALLS_PER_SECOND = 30;
+const LOCAL_ERROR = Symbol("local RPC error");
 const SYSTEM_READS = Object.freeze({
   get_head_info: 1, get_chain_id: 12, get_last_irreversible_block: 106,
   get_account_nonce: 107, get_contract_metadata: 112, get_account_rc: 201,
@@ -80,7 +81,8 @@ const VALIDATORS = Object.freeze({
 });
 
 function error(id, code, message, data) {
-  return { jsonrpc: "2.0", id, error: { code, message, ...(data === undefined ? {} : { data }) } };
+  const reply = { jsonrpc: "2.0", id, error: { code, message, ...(data === undefined ? {} : { data }) } };
+  return Object.defineProperty(reply, LOCAL_ERROR, { value: true });
 }
 async function boundedJson(response) {
   if (Number(response.headers.get("content-length")) > MAX_RESPONSE) { await response.body?.cancel(); throw new Error("Oversize RPC response"); }
@@ -159,7 +161,9 @@ class PublicRpc {
         if (responseBytes > MAX_RESPONSE) return { status: 502, data: error(null, -32002, "Batch response exceeded limits") }; replies.push(reply); }
     }
     if (!replies.length) return { status: 204, data: null };
-    const status = !batch && [-32001, -32002, -32005].includes(replies[0].error?.code) ? 503 : 200;
+    // A node's application error may use the same numeric code. Only our
+    // transport/readiness failures should produce HTTP 503 and client failover.
+    const status = !batch && replies[0][LOCAL_ERROR] && [-32001, -32002, -32005].includes(replies[0].error?.code) ? 503 : 200;
     return { status, data: batch ? replies : replies[0] };
   }
 }
