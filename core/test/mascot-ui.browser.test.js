@@ -407,7 +407,10 @@ test("Fast Windows voices apply actual PCM effects, whole replies play once, and
     localStorage.setItem("kai-mascot-cute-default-v1", "1");
     if (!localStorage.getItem("kai-mascot-voice-choice")) localStorage.setItem("kai-mascot-voice-choice", "system:zira");
     window.__voiceRequests = []; window.__clips = []; window.__cancelledWindows = 0; window.__settingsOpened = 0;
-    const createURL = URL.createObjectURL; URL.createObjectURL = value => { window.__clips.push(value); return createURL(value); };
+    const createBufferSource = AudioContext.prototype.createBufferSource;
+    AudioContext.prototype.createBufferSource = function () {
+      const source = createBufferSource.call(this); window.__clips.push(source); return source;
+    };
     const voices = [{ id: "onecore:zira", name: "Microsoft Zira", lang: "en-US" }, { id: "onecore:mark", name: "Microsoft Mark", lang: "en-US" }];
     Object.defineProperty(window, "speechSynthesis", { value: { getVoices: () => [{ localService: true, voiceURI: "zira", name: "Microsoft Zira Desktop", lang: "en-US" }], cancel() {}, resume() {}, speak() { throw new Error("Windows effects must not use browser speech playback"); } } });
     window.kaiDesktop = { expand: async () => ({}), regions() {}, onEvent: fn => { window.__kaiEvent = fn; }, cancelAction() {},
@@ -425,12 +428,12 @@ test("Fast Windows voices apply actual PCM effects, whole replies play once, and
   await page.click("#use-fast-voice"); assert.equal(await page.inputValue("#voice-tone"), "cute");
   assert.equal(await page.inputValue("#speech-start"), "quick");
   await page.click("#preview-voice"); await page.waitForFunction(() => document.body.dataset.state === "speaking");
-  const cute = await page.evaluate(async () => (await window.__clips.at(-1).arrayBuffer()).byteLength);
-  assert.ok(cute < 32044, "Cute KAI applies its real audio resampling, independent of Windows pitch support");
+  const cute = await page.evaluate(() => window.__clips.at(-1).buffer.length);
+  assert.ok(cute < 16000, "Cute KAI applies its real audio resampling, independent of Windows pitch support");
   await page.waitForFunction(() => document.body.dataset.state === "idle");
   await page.selectOption("#voice-tone", "kai"); await page.click("#preview-voice");
   await page.waitForFunction(() => document.body.dataset.state === "speaking");
-  assert.ok(await page.evaluate(async () => (await window.__clips.at(-1).arrayBuffer()).byteLength) > 32044);
+  assert.ok(await page.evaluate(() => window.__clips.at(-1).buffer.length) > 16000);
   await page.waitForFunction(() => document.body.dataset.state === "idle");
   await page.selectOption("#voice-choice", "windows:onecore:mark");
   await page.selectOption("#speech-start", "complete");

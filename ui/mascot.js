@@ -310,6 +310,9 @@
   // listener receives its exact audible/tail state instead of inferring echo
   // from separate media-element events.
   const playbackClock = new KaiPlayback.Clock({ onState: playbackState });
+  const primePlayback = () => { if (voiceReplies && !suspended) playbackClock.prime().catch(() => {}); };
+  document.addEventListener("pointerdown", primePlayback, { capture: true });
+  document.addEventListener("keydown", primePlayback, { capture: true });
   let warmRequest = null;
   function warmSpeech() {
     if (!suspended && voiceReplies && voiceChoice.startsWith("pocket:")) { if (pocketStatus?.available) bridge.pocketWarm(voiceChoice.slice(7)).catch(() => {}); return; }

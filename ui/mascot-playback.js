@@ -32,14 +32,21 @@
       this.stats = { scheduled: 0, gaps: 0, gapMs: 0, maxGapMs: 0 };
       this.lastState = ""; this.echoUntil = 0;
     }
+    prime() {
+      if (!this.context) {
+        this.context = this.contextFactory(); this.cursor = 0;
+        this.stats = { scheduled: 0, gaps: 0, gapMs: 0, maxGapMs: 0 };
+      }
+      const ready = this.context.resume?.() || Promise.resolve();
+      ready.catch?.(error => this.cancel(undefined, error)); return ready;
+    }
     ensure(scope) {
       if (scope == null) throw new Error("Playback needs a turn scope.");
       if (this.scope !== null && this.scope !== scope) this.cancel();
-      if (!this.context) {
-        this.context = this.contextFactory(); this.scope = scope; this.cursor = 0;
-        this.stats = { scheduled: 0, gaps: 0, gapMs: 0, maxGapMs: 0 };
+      if (!this.context) this.prime();
+      if (this.scope === null) {
+        this.scope = scope;
         this.interval = this.timer(() => this.emit(), 15); this.interval?.unref?.();
-        this.context.resume?.().catch?.(error => this.cancel(undefined, error));
       }
       return this.context;
     }
@@ -98,7 +105,7 @@
       action?.then?.(() => this.emit()).catch?.(error => this.cancel(undefined, error));
     }
     cancel(scope, error) {
-      if (scope !== undefined && scope !== this.scope) return false;
+      if (scope !== undefined && this.scope !== null && scope !== this.scope) return false;
       this.generation++;
       const records = [...this.records]; this.records.clear();
       for (const record of records) {

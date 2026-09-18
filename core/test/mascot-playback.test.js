@@ -32,6 +32,7 @@ function clockFixture() {
 
 test("The turn playback clock schedules native sentences on one gap-free timeline", async () => {
   const f = clockFixture(), samples = new Float32Array(24000);
+  await f.clock.prime(); assert.equal(f.clock.scope, null, "a user gesture may unlock output before a turn exists");
   const first = f.clock.schedule(samples, 24000, { scope: 17, text: "First." });
   const second = f.clock.schedule(samples, 24000, { scope: 17, text: "Second." });
   assert.equal(first.start, .025); assert.equal(first.end, second.start);
