@@ -23,7 +23,7 @@ function releaseFiles(dir, env) {
   if (windows.report.version !== version || !windows.names.includes("master.yml")) throw new Error("Windows version/channel mismatch");
   const names = fs.readdirSync(dir);
   if (names.some(name => /^(latest|test).*\.yml$/.test(name))) throw new Error("Foreign update feed in Master release");
-  const images = names.filter(name => /^Master-Koinos-AI-Node-.*-linux-x64\.AppImage$/.test(name));
+  const images = names.filter(name => /^Master-Koinos-AI-Node-.*-linux-(?:x64|x86_64)\.AppImage$/.test(name));
   if (images.length !== 1) throw new Error("Expected one Linux x64 AppImage");
   const feed = yaml.load(fs.readFileSync(path.join(dir, "master-linux.yml"), "utf8"));
   if (feed.version !== version || feed.path !== images[0] || !Array.isArray(feed.files) || feed.files.length !== 1) {

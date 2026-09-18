@@ -13,7 +13,7 @@ function fixture(t) {
   const env = { GITHUB_REPOSITORY: "therexdev/kaiapp", GITHUB_REF: "refs/heads/master-kaiapp", GITHUB_SHA: "fixture-source", GITHUB_RUN_ID: "123" };
   const setup = `Master-Koinos-AI-Node-Setup-${version}-x64.exe`;
   const portable = `Master-Koinos-AI-Node-${version}-win-x64.exe`;
-  const image = `Master-Koinos-AI-Node-${version}-linux-x64.AppImage`;
+  const image = `Master-Koinos-AI-Node-${version}-linux-x86_64.AppImage`;
   for (const name of [setup, portable, setup + ".blockmap", image]) fs.writeFileSync(path.join(dir, name), `fixture ${name}`);
   const feed = (name, artifact) => {
     const file = path.join(dir, artifact), sha512 = hash(file, "sha512", "base64");
