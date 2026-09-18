@@ -1,10 +1,18 @@
-# Replace this placeholder only when deploying on the chosen node host.
-node-api.example.com {
+# Alternative to Cloudflare Tunnel. Do not run both unless intentionally configured.
+# Match the Public HTTPS address saved in Master. Upstream stays loopback-only.
+api.koinosai.com {
     @publicData {
-        method GET
-        path /healthz /v1/status /v1/token-tracker/producers
+        method GET OPTIONS
+        path / /rpc /healthz /healthz/rpc /v1/status /v1/token-tracker/producers
     }
     handle @publicData {
+        reverse_proxy 127.0.0.1:41110
+    }
+    @rpc {
+        method POST
+        path / /rpc
+    }
+    handle @rpc {
         reverse_proxy 127.0.0.1:41110
     }
     handle {

@@ -616,7 +616,12 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
   }
   if (masterApi) {
     handle("masterApi:status", () => masterApi.status());
-    handle("masterApi:configure", input => masterApi.configure(input));
+    handle("masterApi:configure", async input => {
+      const result = await masterApi.configure(input);
+      // Save the next-start profile. No Docker command or running-node restart.
+      nodeMgr.apiServices = result.config.extendedIndexes;
+      return result;
+    });
   }
 
   // ----- fund node (Ethereum on-ramp — Phase 1) -----
@@ -948,6 +953,7 @@ function createKoinosNode({ dataDir, wallet, appVersion, onEvent = () => {} }) {
     onEvent,
     autoRecover: settings.get("node.autoRecover", true),
     accountHistory: settings.get("node.accountHistory", false),
+    apiServices: settings.get("masterApi.extendedIndexes", false),
     probeHead: async () => {
       const s = await chain.headInfo([chain.network().localRpcUrl]).catch(() => null);
       const h = s?.height;

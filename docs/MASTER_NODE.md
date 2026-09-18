@@ -102,44 +102,148 @@ KoinosScan's prepared producer feed is unchanged when the local index is off.
 
 ## Node API
 
-Fully sync mainnet, then open Koinos Node → Node API. It is off by default.
-Private upstream: `http://127.0.0.1:8085`. Listener: `127.0.0.1:41110`.
-Keep memory-saver mode OFF: it stops the node's JSON-RPC service.
+Version `0.54.9-master.3` adds standard JSON-RPC alongside the producer feed.
+Fully sync mainnet, then open Koinos Node → Node API. The listener remains off
+by default. Private upstream: `http://127.0.0.1:8085`. API listener:
+`127.0.0.1:41110`. Keep memory-saver mode OFF because it stops JSON-RPC.
 
-| GET route | Response |
+Enable **API endpoint** and **Allow blockchain RPC and already-signed
+transactions**, set Public HTTPS address to `https://api.koinosai.com`, and save.
+Existing enabled producer APIs also gain RPC unless the RPC checkbox is cleared.
+Saving restarts only the API listener, never Docker or the node.
+
+| Method and route | Response |
 | --- | --- |
-| `/healthz` | 200 only when the full index is fresh; otherwise 503 |
-| `/v1/status` | Public chain ID, head/indexed height and observation time |
-| `/v1/token-tracker/producers` | Observed producer addresses, block counts and last block times |
+| `POST /` or `POST /rpc` | Standard JSON-RPC 2.0 blockchain requests |
+| `GET /` or `GET /v1/status` | Public RPC and producer-index status |
+| `GET /healthz/rpc` | 200 when local Mainnet RPC has a recent head; otherwise 503 |
+| `GET /healthz` | 200 only when the full producer index is fresh; otherwise 503 |
+| `GET /v1/token-tracker/producers` | Producer addresses, block counts and last block times |
+| `OPTIONS` on these routes | Browser CORS preflight, without credentials |
 
-When enabled, Master's dashboard reads this same local index, labels its scope,
-and stops relying on KoinosScan for the displayed producer counts.
+RPC readiness is independent of producer-index backfill. It requires the Mainnet
+chain ID `EiBZK_GGVP0H_fXVAM3j6EAuz3-B-l3ejxRSewi7qIBfSA==`, a head less than
+90 seconds old, and a successful health observation in the last 15 seconds.
 
+The gateway accepts chain/head/fork/resource information, contract reads,
+account nonce/mana, block queries, selected read-only system calls used by
+wallets, and `chain.submit_transaction`. Transactions must already contain
+signatures and the Mainnet chain ID. The node checks their signature, nonce,
+mana and operation validity. Master forwards them unchanged, once, without
+using its own wallet or signing keys. Chain rejection details are preserved.
+A transport timeout can leave submission outcome unknown; clients should check
+the same transaction ID before deciding to retry.
+
+It rejects block submission/proposal, block-store mutation, mutable system
+calls, all Core/wallet/Distribution/node-admin methods, and caller-supplied
+upstream URLs. Cookies, Authorization and other client headers never reach
+the private node. Only the saved public hostname and loopback hosts are accepted.
+The gateway has 2 MiB request and 8 MiB response limits, batches of at most ten,
+block/history queries of at most 100 items, four simultaneous public upstream
+calls, 30 RPC items/second and 60 HTTP requests/second globally. Local upstream
+attempts time out at eight seconds and complete public requests at twelve.
+These are protective limits, not a public throughput commitment. Configure
+per-client limits at Cloudflare as well; the origin does not trust proxy headers
+for client identity. HTTP failures allow clients to try their backup endpoints.
+
+### Optional history and metadata services
+
+For account history, transaction-by-ID lookup and contract metadata, select
+**Enable account history, transaction and contract metadata services on the
+next node start**, save, then use the node's Stop and Start controls when
+convenient. This enables the existing Compose profiles `account_history`,
+`transaction_store` and `contract_meta_store`. Saving alone does not start them.
+They consume additional disk, memory and indexing time. Turning the checkbox
+off blocks these public methods immediately; apply the container change with
+the same manual Stop/Start sequence.
+
+The public methods are `account_history.get_account_history`,
+`transaction_store.get_transactions_by_id`, and
+`contract_meta_store.get_contract_meta`. They return method-unavailable
+(`-32601`) while the option is off, so compatible clients can use backups.
+When enabled, their results depend on the installed services and stored data.
+An enabled setting or RPC-ready status does not prove those indexes are fully
+populated. A quick-sync snapshot does not guarantee complete historical
+records. Verify the required old transactions and contract metadata before
+making this the only source; retain Koinos Blocks and api.koinos.io as backups.
+Restoring or replaying historical service data is a separate node operation.
+
+### Producer index
+
+Master's dashboard reads the enabled local producer index and labels its scope.
 The index covers 28,800 finalized blocks, approximately one day. It is **not**
 a VHP-holder directory or connected-peer count. `tracked_scope` explicitly says
 `producers-in-finalized-window`. Finalization adds reporting delay. Initial
-backfill, stale node data, missing history or upstream errors return 503.
+backfill, stale data, missing history or upstream errors return 503.
 
-The persistent index validates block continuity and canonical checkpoints,
-rebuilds after a rewind, and refuses chain-ID changes. Reads are bounded in
-background batches; public requests only use cached results. Upstream responses
-have time/size limits. The HTTP server exposes only three GET routes, with
-connection/request limits and no wallet, signing, arbitrary-RPC forwarding or
-Core access. No account-history replay is required for this index.
+The persistent index validates continuity and canonical checkpoints, rebuilds
+after a rewind, and refuses chain-ID changes. Bounded background reads update
+cached public results. No account-history replay is required for this index.
+Distribution still uses its configured public/custom account-history RPCs and
+trusted AI roster; the producer feed does not replace either of those sources.
 
-Distribution statistics still use KAI's public/custom account-history RPC
-selection. This API does not replace the account-history service or AI roster.
-Retain a trusted roster URL for AI pools.
+### Windows and Cloudflare Tunnel
 
-For public use, assign a DNS name and run a TLS reverse proxy on the node host
-(example `deploy/master-api.Caddyfile`). Expose only HTTPS 443, plus 80 if needed
-for certificate issuance. Never forward Core 41101, node RPC 8085, AMQP, Docker
-or wallet/admin ports. Behind CGNAT, use a controlled outbound tunnel instead.
-Add per-client rate limits at the edge. Keep the host awake with Master/Docker
-running. No DNS, firewall, tunnel or live-node change is made by this code.
+Install the signed Master update from the `master-build` release. Keep Master,
+Docker Desktop and the node running, with Windows sleep disabled while serving
+requests. First confirm **RPC ready: yes** in Node API. In PowerShell:
 
-After the host/domain is configured and verified, a separate Test app update
-can select this producer-data source with the correct scope and fallback label.
+```powershell
+$endpoint = 'http://127.0.0.1:41110'
+Invoke-RestMethod "$endpoint/healthz/rpc"
+$body = @{ jsonrpc = '2.0'; id = 1; method = 'chain.get_chain_id'; params = @{} } | ConvertTo-Json -Compress
+Invoke-RestMethod -Uri "$endpoint/" -Method Post -ContentType 'application/json' -Body $body
+Invoke-RestMethod "$endpoint/v1/token-tracker/producers"
+```
+
+The first response must have `ready: true`, and the RPC response must contain
+the Mainnet chain ID above. The producer response must have `available: true`.
+
+1. In the Cloudflare dashboard, open **Networking → Tunnels → Create a tunnel**.
+   Name it `master-kai-node` and choose **Windows**. Run the dashboard's Windows
+   installation/service command on the **same Windows computer as Master**,
+   using an Administrator terminal when required. Keep its tunnel token private.
+2. Once connected, choose the tunnel's **Routes → Add route → Published
+   application**. Use the values below, with `koinosai.com` already on Cloudflare.
+3. Save the route. The public root now forwards to Master's API listener.
+   Cloudflare supplies the public HTTPS connection; the local service uses HTTP.
+   No inbound router port forwarding is needed for this tunnel.
+
+| Cloudflare field | Value |
+| --- | --- |
+| Subdomain | `api` |
+| Domain | `koinosai.com` |
+| Path | Leave empty |
+| Service type | `HTTP` |
+| Service URL | `127.0.0.1:41110` (combined URL: `http://127.0.0.1:41110`) |
+
+These instructions follow Cloudflare's
+[dashboard tunnel guide](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/get-started/create-remote-tunnel/).
+Do not set the route to the producer path: the root must carry both RPC and
+producer requests. Do not point it at Core 41101 or raw node RPC 8085. Leave the
+origin HTTP Host override unset (or use `api.koinosai.com`). Do not apply an
+interactive Access login or browser challenge to the public API: wallets need
+JSON responses. Keep caching disabled for these routes, and use edge rate
+limits to control abuse. No Cloudflare credentials or live DNS changes are made
+by the app update. Caddy is an alternative (`deploy/master-api.Caddyfile`),
+not required with Cloudflare Tunnel.
+
+Repeat the PowerShell checks with `$endpoint = 'https://api.koinosai.com'` from
+another Internet connection. A 502 suggests cloudflared cannot reach Master;
+503 from `/healthz/rpc` means the local node is not ready; 403 with Unknown API
+hostname means the public address/Host settings do not match. Confirm CORS with
+the real browser applications and verify the optional history methods they use.
+Do not use a real payment as a connectivity test.
+
+After those checks pass, configure clients in this order:
+
+1. `https://api.koinosai.com` — primary JSON-RPC.
+2. `https://api.koinosblocks.com` — first backup.
+3. `https://api.koinos.io` — second backup.
+
+Use `https://api.koinosai.com/v1/token-tracker/producers` only for producer data.
+This release does not switch other apps to an endpoint that has not yet been
+verified. Master already supports the above priority via its Custom RPC setting.
 
 ## Build and verification
 

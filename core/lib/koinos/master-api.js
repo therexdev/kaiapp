@@ -5,6 +5,7 @@ const http = require("node:http");
 const path = require("node:path");
 const { JsonStore } = require("../store");
 const { utils } = require("koilib");
+const { PublicRpc, MAX_BODY, error: rpcError } = require("./public-rpc");
 const { summarizeProducers } = require("./network-producers");
 const WINDOW = 28800, MAX_AGE = 90000, MAX_BYTES = 8 * 1024 * 1024;
 
@@ -14,7 +15,12 @@ function validateConfig(input = {}) {
   let url;
   try { url = new URL(input.rpcUrl || "http://127.0.0.1:8085"); } catch { throw new Error("Invalid local node RPC URL."); }
   if (url.protocol !== "http:" || !["127.0.0.1", "[::1]"].includes(url.hostname) || url.username || url.password || url.search || url.hash || url.pathname !== "/") throw new Error("Node RPC must be a loopback HTTP URL without credentials or a path.");
-  return { enabled: input.enabled === true, port, rpcUrl: url.origin };
+  if (Number(url.port || 80) === port || [41100, 41101].includes(Number(url.port || 80))) throw new Error("Choose the node RPC port, not a Core or public API port.");
+  let publicUrl;
+  try { publicUrl = new URL(input.publicUrl || "https://api.koinosai.com"); } catch { throw new Error("Invalid public HTTPS URL."); }
+  if (publicUrl.protocol !== "https:" || publicUrl.username || publicUrl.password || publicUrl.search || publicUrl.hash || publicUrl.pathname !== "/" || publicUrl.port || !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(publicUrl.hostname)) throw new Error("Public URL must be an HTTPS hostname without a path or port.");
+  return { enabled: input.enabled === true, port, rpcUrl: url.origin, publicUrl: publicUrl.origin,
+    rpcEnabled: input.rpcEnabled !== false, extendedIndexes: input.extendedIndexes === true };
 }
 
 async function rpc(url, method, params = {}, { fetchImpl = fetch, signal } = {}) {
@@ -105,7 +111,7 @@ class ProducerIndex {
 class MasterNodeApi {
   constructor({ root, settings, fetchImpl = fetch }) {
     Object.assign(this, { root, settings, fetchImpl });
-    this.server = null; this.timer = null; this.controller = null; this.index = null; this.payload = null; this.error = null; this.changing = false; this.active = false;
+    this.publicRpc = null; this.server = null; this.timer = null; this.healthTimer = null; this.controller = null; this.index = null; this.payload = null; this.error = null; this.changing = false; this.active = false;
   }
   config() { return validateConfig(this.settings.get("masterApi", {})); }
   producerSummary() {
@@ -116,12 +122,19 @@ class MasterNodeApi {
       ...(available ? summarizeProducers(p) : {}),
       error: available ? null : this.error || p?.error || "Local producer index is not ready" };
   }
-  status() { return { config: this.config(), listening: !!this.server?.listening, bind: "127.0.0.1", error: this.error, summary: this.payload ? { ...this.payload, producers: undefined } : null, producerUrl: `http://127.0.0.1:${this.config().port}/v1/token-tracker/producers` }; }
+  status() {
+    const cfg = this.config();
+    return { config: cfg, listening: !!this.server?.listening, bind: "127.0.0.1", error: this.error,
+      summary: this.payload ? { ...this.payload, producers: undefined } : null,
+      rpc: this.publicRpc?.status() || { ready: false },
+      rpcUrl: `http://127.0.0.1:${cfg.port}/`, publicRpcUrl: cfg.publicUrl,
+      producerUrl: `http://127.0.0.1:${cfg.port}/v1/token-tracker/producers` };
+  }
   async configure(input) {
     if (this.changing) throw new Error("Wait for the current API operation.");
     this.changing = true;
     try {
-      const cfg = validateConfig(input);
+      const cfg = validateConfig({ ...this.config(), ...input });
       if (cfg.enabled && this.settings.get("network","mainnet") !== "mainnet") throw new Error("Master API requires mainnet.");
       await this.stop(); this.settings.set("masterApi",cfg); await this.start(); return this.status();
     } finally { this.changing = false; }
@@ -129,7 +142,8 @@ class MasterNodeApi {
   async refresh() {
     if (!this.active || !this.index) return;
     if (this.settings.get("network","mainnet") !== "mainnet") { await this.stop(); this.error = "Mainnet selection changed; API stopped."; return; }
-    const index = this.index, value = await index.refresh();
+    const index = this.index;
+    const value = await index.refresh();
     if (this.active && this.index === index) this.payload = value;
   }
   async start() {
@@ -137,28 +151,72 @@ class MasterNodeApi {
     if (this.settings.get("network","mainnet") !== "mainnet") throw new Error("Master API requires mainnet.");
     this.controller = new AbortController(); const signal = this.controller.signal;
     this.index = new ProducerIndex({ store: new JsonStore(path.join(this.root,"master-producer-index.json")), call: (method,params) => rpc(cfg.rpcUrl,method,params,{ fetchImpl: this.fetchImpl, signal }) });
-    let requests = 0, period = Date.now();
-    this.server = http.createServer((req,res) => {
+    this.publicRpc = new PublicRpc({ url: cfg.rpcUrl, fetchImpl: this.fetchImpl, signal,
+      network: () => this.settings.get("network", "mainnet"), optionalServices: () => cfg.extendedIndexes });
+    let requests = 0, period = Date.now(), activeRequests = 0;
+    const rpcPaths = new Set(["/", "/rpc"]), dataPaths = new Set(["/healthz", "/healthz/rpc", "/v1/status", "/v1/token-tracker/producers"]);
+    const hosts = new Set([`127.0.0.1:${cfg.port}`, `localhost:${cfg.port}`, `[::1]:${cfg.port}`, new URL(cfg.publicUrl).host]);
+    const gateway = this.publicRpc;
+    this.server = http.createServer(async (req,res) => {
+      const reply = (code,data) => {
+        if (res.destroyed || res.writableEnded) return;
+        res.writeHead(code, { "Content-Type":"application/json", "Cache-Control":"no-store", "X-Content-Type-Options":"nosniff",
+          "Access-Control-Allow-Origin":"*", Connection:"close" });
+        res.end(data == null ? undefined : JSON.stringify(data));
+      };
+      if (!hosts.has(String(req.headers.host || "").toLowerCase())) return reply(403, { error:"Unknown API hostname" });
       if (Date.now()-period > 1000) { period = Date.now(); requests = 0; }
-      const reply = (code,data) => { res.writeHead(code,{ "Content-Type":"application/json", "Cache-Control":"no-store", "X-Content-Type-Options":"nosniff", Connection:"close" }); res.end(JSON.stringify(data)); };
-      if (++requests > 60) return reply(429,{ error:"Rate limit" });
-      if (req.method !== "GET") return reply(405,{ error:"Read-only API" });
-      if (req.url?.length > 200 || !["/healthz","/v1/status","/v1/token-tracker/producers"].includes(req.url)) return reply(404,{ error:"Unknown endpoint" });
+      if (++requests > 60) return reply(429,rpcError(null,-32005,"API rate limit"));
+      if (req.url?.length > 200 || !rpcPaths.has(req.url) && !dataPaths.has(req.url)) return reply(404,{ error:"Unknown endpoint" });
+      if (req.method === "OPTIONS") {
+        res.setHeader("Access-Control-Allow-Methods", rpcPaths.has(req.url) ? "POST, GET, OPTIONS" : "GET, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type"); res.setHeader("Access-Control-Max-Age", "3600");
+        return reply(204,null);
+      }
+      if (req.method === "POST" && rpcPaths.has(req.url)) {
+        if (!cfg.rpcEnabled) return reply(403,rpcError(null,-32601,"Public RPC is disabled"));
+        if (!/^application\/json(?:\s*;|$)/i.test(req.headers["content-type"] || "")) return reply(415,rpcError(null,-32600,"Use application/json"));
+        if (req.headers["content-encoding"] && req.headers["content-encoding"] !== "identity") return reply(415,rpcError(null,-32600,"Compressed requests are not supported"));
+        if (Number(req.headers["content-length"]) > MAX_BODY) return reply(413,rpcError(null,-32600,"Request exceeds 2 MiB"));
+        if (activeRequests >= 16) return reply(503,rpcError(null,-32005,"API busy"));
+        activeRequests++;
+        const client = new AbortController();
+        const closed = () => { if (!res.writableEnded) client.abort(); };
+        res.on("close",closed); req.once("aborted",closed);
+        const deadline = setTimeout(() => { client.abort(); reply(408,rpcError(null,-32002,"Request timed out")); req.destroy(); },12000);
+        try {
+          const chunks = []; let size = 0;
+          for await (const chunk of req.iterator({ destroyOnReturn: false })) { size += chunk.length; if (size > MAX_BODY) { reply(413,rpcError(null,-32600,"Request exceeds 2 MiB")); return; } chunks.push(chunk); }
+          let body; try { body = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { return reply(400,rpcError(null,-32700,"Parse error")); }
+          const result = await gateway.execute(body, client.signal); return reply(result.status,result.data);
+        } catch { reply(400,rpcError(null,-32600,"Invalid request body")); }
+        finally { clearTimeout(deadline); activeRequests--; res.off("close",closed); req.off("aborted",closed); }
+        return;
+      }
+      if (req.method !== "GET") return reply(405,{ error:"Method not allowed" });
       const p = this.payload, healthy = this.settings.get("network","mainnet") === "mainnet" && !!p?.available && Date.now()-p.updated_at <= MAX_AGE;
+      const rpcStatus = gateway.status(); rpcStatus.ready = cfg.rpcEnabled && rpcStatus.ready;
       if (req.url === "/v1/token-tracker/producers") return reply(healthy ? 200 : 503,{ ...p, available:healthy, stale:!healthy, error:healthy ? null : p?.error || "Producer data unavailable" });
-      return reply(healthy ? 200 : 503,{ ready:healthy, source:"Master Koinos AI Node", chain_id:p?.chain_id || null, head_height:p?.head_height || 0, indexed_height:p?.indexed_height || 0, updated_at:p?.updated_at || null });
+      if (req.url === "/healthz/rpc") return reply(rpcStatus.ready ? 200 : 503,rpcStatus);
+      const data = { ready:healthy, source:"Master Koinos AI Node", chain_id:p?.chain_id || rpcStatus.chain_id,
+        head_height:rpcStatus.head_height || p?.head_height || 0, indexed_height:p?.indexed_height || 0, updated_at:p?.updated_at || null,
+        rpc: rpcStatus, rpc_path:"/", producers_path:"/v1/token-tracker/producers" };
+      return reply(req.url === "/healthz" && !healthy ? 503 : 200,data);
     });
     this.server.requestTimeout = 5000; this.server.headersTimeout = 5000; this.server.maxConnections = 32;
     await new Promise((resolve,reject) => { this.server.once("error",reject); this.server.listen(cfg.port,"127.0.0.1",resolve); }).catch(e => { this.server = null; this.controller.abort(); this.error = `Node API could not listen: ${e.message}`; throw new Error(this.error); });
     this.error = null; this.active = true;
     const loop = async () => { await this.refresh().catch(e => { this.error = e.message; }); if (this.active && !signal.aborted) { this.timer = setTimeout(loop,3000); this.timer.unref?.(); } };
+    // Producer backfill must not delay health checks for normal wallet RPC.
+    const healthLoop = async () => { await gateway.refreshHealth(); if (this.active && !signal.aborted) { this.healthTimer = setTimeout(healthLoop,3000); this.healthTimer.unref?.(); } };
+    void healthLoop();
     void loop();
   }
   async stop() {
-    this.active = false; clearTimeout(this.timer); this.timer = null; this.controller?.abort();
+    this.active = false; clearTimeout(this.timer); clearTimeout(this.healthTimer); this.timer = null; this.healthTimer = null; this.controller?.abort();
     const server = this.server; this.server = null;
     if (server) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
-    this.payload = null;
+    this.payload = null; this.publicRpc = null;
   }
 }
 module.exports = { ProducerIndex, MasterNodeApi, validateConfig, rpc, WINDOW };

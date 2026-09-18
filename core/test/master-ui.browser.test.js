@@ -10,6 +10,8 @@ test("Master Distribution saves recipients, pauses and exposes Node API controls
   const { createCore } = require("../server");
   const core = await createCore({ dataDir: dir, port: 0, onEvent: () => {} });
   const node = core.gateway.koinosNode;
+  const starts = t.mock.method(node.nodeMgr, "start", async () => { throw new Error("API settings must not start Docker"); });
+  const stops = t.mock.method(node.nodeMgr, "stop", async () => { throw new Error("API settings must not stop Docker"); });
   await node.call("wallet:create", { password: "master fixture password" });
   const address = (await node.call("wallet:status")).address;
   const base = "http://127.0.0.1:" + await core.start();
@@ -58,8 +60,18 @@ test("Master Distribution saves recipients, pauses and exposes Node API controls
   await page.evaluate(() => switchView("master-api"));
   assert.equal(await page.isChecked("#ma-enabled"), false);
   await page.fill("#ma-rpc", "http://127.0.0.1:8085");
+  assert.equal(await page.isChecked("#ma-rpc-enabled"), true);
+  await page.fill("#ma-public", "https://api.koinosai.com");
+  await page.check("#ma-indexes");
   await page.fill("#ma-port", "41111"); await page.click("#ma-save");
   await page.waitForFunction(() => document.querySelector("#ma-status").textContent.includes(":41111/"));
   assert.equal((await node.call("masterApi:status")).config.port, 41111);
+  assert.equal((await node.call("masterApi:status")).config.publicUrl, "https://api.koinosai.com");
+  assert.equal(node.nodeMgr.apiServices, true);
+  assert.equal(starts.mock.callCount(), 0); assert.equal(stops.mock.callCount(), 0);
+  await page.reload(); await page.locator("#ma-save").waitFor({ state: "attached" });
+  await page.evaluate(() => switchView("master-api"));
+  assert.equal(await page.isChecked("#ma-indexes"), true);
+  assert.equal(await page.inputValue("#ma-public"), "https://api.koinosai.com");
   assert.deepEqual(errors, []);
 });
