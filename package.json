@@ -1,7 +1,7 @@
 {
   "name": "master-koinos-ai",
   "productName": "Master Koinos AI Node",
-  "version": "0.54.9-master.4",
+  "version": "0.54.9-master.5",
   "private": true,
   "description": "Koinos AI Core — local-first AI with a self-hosted OpenAI-compatible API",
   "license": "MIT",

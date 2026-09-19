@@ -11,6 +11,8 @@ function renderMasterApiView() {
     <label class="field"><span>API port</span><input id="ma-port" type="number" value="${esc(cfg.port || 41110)}"></label>
     <label class="field"><span><input id="ma-indexes" type="checkbox" ${cfg.extendedIndexes ? "checked" : ""}> Enable account history, transaction and contract metadata services on the next node start</span></label>
     <p class="hint">These optional indexes use extra disk and memory. Save, then stop and start the node when convenient. Saving does not restart it. Existing sync snapshots do not guarantee complete historical records; keep backup RPCs until the history you need is verified.</p>
+    <label class="field"><span><input id="ma-metadata-backups" type="checkbox" ${cfg.metadataFallback !== false ? "checked" : ""}> Look up missing contract metadata using backup APIs</span></label>
+    <p class="hint">With the optional services enabled, use local metadata first, then Koinos Blocks and api.koinos.io. Only public contract addresses are sent for these lookups. Account history continues syncing separately.</p>
     <button id="ma-save" class="btn primary">Save API settings</button>
     <p class="hint">In Cloudflare Tunnel, publish this HTTPS hostname to the local API port shown below. The tunnel must run on this computer. This field does not create DNS or a tunnel.</p>
     <p class="hint">Keep memory-saver mode off for API use. Producer counts cover the last 28,800 finalized blocks; initial indexing may take time while the RPC is already ready.</p></div>
@@ -18,7 +20,7 @@ function renderMasterApiView() {
   $("#ma-save").addEventListener("click",async () => { try {
     const previousIndexes = Boolean(S.appInfo.settings.masterApi?.extendedIndexes);
     const saved = await call("masterApi:configure",{ enabled:$("#ma-enabled").checked, rpcEnabled:$("#ma-rpc-enabled").checked,
-      publicUrl:$("#ma-public").value.trim(), extendedIndexes:$("#ma-indexes").checked,
+      publicUrl:$("#ma-public").value.trim(), extendedIndexes:$("#ma-indexes").checked, metadataFallback:$("#ma-metadata-backups").checked,
       rpcUrl:$("#ma-rpc").value.trim(), port:Number($("#ma-port").value) });
     S.appInfo.settings.masterApi = saved.config;
     toast(previousIndexes !== saved.config.extendedIndexes ? "Saved. Stop and start the node when ready to apply the index services." : "Node API settings saved","good");
@@ -29,7 +31,8 @@ function renderMasterApiView() {
 async function refreshMasterApi() {
   const el = $("#ma-status"); if (!el) return;
   try {
-    const s = await call("masterApi:status"), p = s.summary;
-    el.textContent = `${s.listening ? "Listening" : "Stopped"}\nCloudflare service URL: ${s.rpcUrl}\nPublic RPC address: ${s.publicRpcUrl}\nRPC ready: ${s.config.rpcEnabled ? s.rpc?.ready ? "yes" : "no — waiting for a fresh Mainnet node" : "disabled"}\n${s.error || s.rpc?.error || ""}\nProducer feed: ${s.producerUrl}\n${p ? `Indexed ${p.indexed_height} / ${p.finalized_height} finalized · ${p.total_blocks} blocks\nProducer data ready: ${p.available ? "yes" : "no"}\nChain ID: ${p.chain_id}\nUpdated: ${fmtTime(p.updated_at)}` : "Producer index is starting."}`;
+    const s = await call("masterApi:status"), p = s.summary, m = s.rpc?.metadata_fallback, last = m?.last_lookup;
+    const metadataStatus = `Metadata backups: ${m?.enabled ? "enabled — Koinos Blocks → api.koinos.io" : "inactive"}${last ? `\nLast metadata lookup: ${last.outcome === "found" ? last.source === "local" ? "local node" : last.source + (last.cached ? " (cached)" : "") : last.outcome === "not_found" ? "no metadata found" : "unavailable — retry or use a backup RPC"}` : ""}`;
+    el.textContent = `${s.listening ? "Listening" : "Stopped"}\nCloudflare service URL: ${s.rpcUrl}\nPublic RPC address: ${s.publicRpcUrl}\nRPC ready: ${s.config.rpcEnabled ? s.rpc?.ready ? "yes" : "no — waiting for a fresh Mainnet node" : "disabled"}\n${s.error || s.rpc?.error || ""}\n${metadataStatus}\nAccount history completeness must be checked separately.\nProducer feed: ${s.producerUrl}\n${p ? `Indexed ${p.indexed_height} / ${p.finalized_height} finalized · ${p.total_blocks} blocks\nProducer data ready: ${p.available ? "yes" : "no"}\nChain ID: ${p.chain_id}\nUpdated: ${fmtTime(p.updated_at)}` : "Producer index is starting."}`;
   } catch(e) { el.textContent = e.message; }
 }

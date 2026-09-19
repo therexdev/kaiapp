@@ -20,7 +20,8 @@ function validateConfig(input = {}) {
   try { publicUrl = new URL(input.publicUrl || "https://api.koinosai.com"); } catch { throw new Error("Invalid public HTTPS URL."); }
   if (publicUrl.protocol !== "https:" || publicUrl.username || publicUrl.password || publicUrl.search || publicUrl.hash || publicUrl.pathname !== "/" || publicUrl.port || !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(publicUrl.hostname)) throw new Error("Public URL must be an HTTPS hostname without a path or port.");
   return { enabled: input.enabled === true, port, rpcUrl: url.origin, publicUrl: publicUrl.origin,
-    rpcEnabled: input.rpcEnabled !== false, extendedIndexes: input.extendedIndexes === true };
+    rpcEnabled: input.rpcEnabled !== false, extendedIndexes: input.extendedIndexes === true,
+    metadataFallback: input.metadataFallback !== false };
 }
 
 async function rpc(url, method, params = {}, { fetchImpl = fetch, signal } = {}) {
@@ -152,7 +153,8 @@ class MasterNodeApi {
     this.controller = new AbortController(); const signal = this.controller.signal;
     this.index = new ProducerIndex({ store: new JsonStore(path.join(this.root,"master-producer-index.json")), call: (method,params) => rpc(cfg.rpcUrl,method,params,{ fetchImpl: this.fetchImpl, signal }) });
     this.publicRpc = new PublicRpc({ url: cfg.rpcUrl, fetchImpl: this.fetchImpl, signal,
-      network: () => this.settings.get("network", "mainnet"), optionalServices: () => cfg.extendedIndexes });
+      network: () => this.settings.get("network", "mainnet"), optionalServices: () => cfg.extendedIndexes,
+      metadataFallback: () => cfg.rpcEnabled && cfg.metadataFallback });
     let requests = 0, period = Date.now(), activeRequests = 0;
     const rpcPaths = new Set(["/", "/rpc"]), dataPaths = new Set(["/healthz", "/healthz/rpc", "/v1/status", "/v1/token-tracker/producers"]);
     const hosts = new Set([`127.0.0.1:${cfg.port}`, `localhost:${cfg.port}`, `[::1]:${cfg.port}`, new URL(cfg.publicUrl).host]);

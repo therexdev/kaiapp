@@ -3,6 +3,7 @@
 // Public blockchain transport only. This module never receives a wallet,
 // signer, Core route, Docker manager or arbitrary destination URL from callers.
 const { utils } = require("koilib");
+const metadata = require("./metadata-fallback");
 const MAINNET_CHAIN_ID = "EiBZK_GGVP0H_fXVAM3j6EAuz3-B-l3ejxRSewi7qIBfSA==";
 const MAX_BODY = 2 * 1024 * 1024, MAX_RESPONSE = 8 * 1024 * 1024;
 const MAX_BATCH = 10, MAX_INFLIGHT = 4, CALLS_PER_SECOND = 30;
@@ -84,37 +85,66 @@ function error(id, code, message, data) {
   const reply = { jsonrpc: "2.0", id, error: { code, message, ...(data === undefined ? {} : { data }) } };
   return Object.defineProperty(reply, LOCAL_ERROR, { value: true });
 }
-async function boundedJson(response) {
-  if (Number(response.headers.get("content-length")) > MAX_RESPONSE) { await response.body?.cancel(); throw new Error("Oversize RPC response"); }
+async function boundedJson(response, limit = MAX_RESPONSE) {
+  if (Number(response.headers.get("content-length")) > limit) { await response.body?.cancel(); throw new Error("Oversize RPC response"); }
   const reader = response.body.getReader(), chunks = []; let size = 0;
   try {
     for (;;) { const { value, done } = await reader.read(); if (done) break; size += value.byteLength;
-      if (size > MAX_RESPONSE) throw new Error("Oversize RPC response"); chunks.push(Buffer.from(value)); }
+      if (size > limit) throw new Error("Oversize RPC response"); chunks.push(Buffer.from(value)); }
   } finally { await reader.cancel().catch(() => {}); }
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
 class PublicRpc {
-  constructor({ url, fetchImpl = fetch, signal, network, optionalServices = () => false, now = Date.now, timeoutMs = 8000 }) {
+  constructor({ url, fetchImpl = fetch, signal, network, optionalServices = () => false, metadataFallback = () => true, now = Date.now, timeoutMs = 8000 }) {
     Object.assign(this, { url, fetchImpl, signal, network, optionalServices, now, timeoutMs });
     this.health = null; this.inflight = 0; this.windowAt = now(); this.calls = 0;
+    this.metadata = new metadata.MetadataFallback({ now, sameChain,
+      enabled: () => this.optionalServices() && metadataFallback(),
+      call: (url, method, params, signal) => this.upstream(method, params, signal, 1,
+        { url, timeoutMs: Math.min(timeoutMs, metadata.TIMEOUT_MS), limit: metadata.MAX_RESPONSE }) });
   }
   status() {
     const h = this.health;
     return { ready: !!(h?.ready && this.network() === "mainnet" && !this.signal?.aborted && this.now() - h.checked_at < 15000),
       chain_id: h?.chain_id || null, head_height: h?.head_height || 0, checked_at: h?.checked_at || null,
       error: h?.error || null, optional_indexes_enabled: this.optionalServices(),
+      metadata_fallback: this.metadata.status(),
       methods: Object.keys(VALIDATORS).filter(m => !own(OPTIONAL, m) || this.optionalServices()) };
   }
-  async upstream(method, params, signal, id = 1) {
-    const signals = [AbortSignal.timeout(this.timeoutMs), this.signal, signal].filter(Boolean);
-    const res = await this.fetchImpl(this.url, { method: "POST", redirect: "error", signal: AbortSignal.any(signals),
+  async upstream(method, params, signal, id = 1, { url = this.url, timeoutMs = this.timeoutMs, limit = MAX_RESPONSE } = {}) {
+    const signals = [AbortSignal.timeout(timeoutMs), this.signal, signal].filter(Boolean);
+    const res = await this.fetchImpl(url, { method: "POST", redirect: "error", signal: AbortSignal.any(signals),
       headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id, method, params }) });
     if (!res.ok) { await res.body?.cancel(); throw new Error("Local RPC HTTP failure"); }
-    const data = await boundedJson(res);
+    const data = await boundedJson(res, limit);
     if (!plain(data) || data.jsonrpc !== "2.0" || data.id !== id || own(data, "result") === own(data, "error") ||
         (own(data, "error") && (!plain(data.error) || !Number.isInteger(data.error.code) || typeof data.error.message !== "string"))) throw new Error("Invalid RPC response");
     return data;
+  }
+  async contractMetadata(params, signal, id) {
+    const deadline = AbortSignal.any([AbortSignal.timeout(10000), this.signal, signal].filter(Boolean));
+    let local;
+    try {
+      local = await this.upstream(metadata.METHOD, params, deadline, id,
+        { timeoutMs: Math.min(this.timeoutMs, 1800), limit: metadata.MAX_RESPONSE });
+    } catch { /* A missing/unavailable local index can use the read-only backups. */ }
+    deadline.throwIfAborted();
+    if (local && !local.error && metadata.metadataState(local.result) === "found") {
+      this.metadata.forget(params.contract_id); this.metadata.record("local", "found"); return local;
+    }
+    if (!this.metadata.enabled()) {
+      this.metadata.record("local", local && !local.error && metadata.metadataState(local.result) === "empty" ? "not_found" : "unavailable");
+      if (local && (local.error || metadata.metadataState(local.result) === "empty")) return local;
+      throw new Error("Local contract metadata unavailable");
+    }
+    try {
+      const result = await this.metadata.lookup(params.contract_id, deadline);
+      return { jsonrpc: "2.0", id, result };
+    } catch {
+      this.metadata.record(null, "unavailable");
+      return error(id, -32002, "Contract metadata unavailable; retry or use another RPC");
+    }
   }
   async refreshHealth() {
     const checked_at = this.now();
@@ -139,7 +169,7 @@ class PublicRpc {
       if (this.inflight >= MAX_INFLIGHT) return error(id, -32005, "RPC busy; retry later");
       this.inflight++;
       try {
-        const result = await this.upstream(req.method, params, signal, id);
+        const result = req.method === metadata.METHOD ? await this.contractMetadata(params, signal, id) : await this.upstream(req.method, params, signal, id);
         if (!this.status().ready) return error(id, -32001, "Local Mainnet RPC is not ready");
         return result;
       } catch { return error(id, -32002, "Local RPC unavailable or response exceeded limits"); }

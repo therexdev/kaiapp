@@ -139,8 +139,8 @@ calls, all Core/wallet/Distribution/node-admin methods, and caller-supplied
 upstream URLs. Cookies, Authorization and other client headers never reach
 the private node. Only the saved public hostname and loopback hosts are accepted.
 The gateway has 2 MiB request and 8 MiB response limits, batches of at most ten,
-block/history queries of at most 100 items, four simultaneous public upstream
-calls, 30 RPC items/second and 60 HTTP requests/second globally. Local upstream
+block/history queries of at most 100 items, four simultaneous public RPC
+requests, 30 RPC items/second and 60 HTTP requests/second globally. Local upstream
 attempts time out at eight seconds and complete public requests at twelve.
 These are protective limits, not a public throughput commitment. Configure
 per-client limits at Cloudflare as well; the origin does not trust proxy headers
@@ -167,6 +167,64 @@ populated. A quick-sync snapshot does not guarantee complete historical
 records. Verify the required old transactions and contract metadata before
 making this the only source; retain Koinos Blocks and api.koinos.io as backups.
 Restoring or replaying historical service data is a separate node operation.
+
+### Missing contract metadata
+
+Version `0.54.9-master.5` fixes successful-but-empty metadata replies from a
+new or incomplete local metadata database. The upstream contract-meta-store
+v1.1.0 records contract uploads from accepted-block broadcasts; unlike account
+history, it does not automatically backfill older contracts. Waiting for
+account history to finish does not populate that separate metadata database.
+
+**Look up missing contract metadata using backup APIs** is enabled by default
+and takes effect when the existing API/RPC and optional services are enabled.
+Install this update and reopen Master; existing enabled endpoints gain the fix
+without a Docker restart, database reset or Quick Sync. The setting can be
+turned off under Node API. Saving it restarts only the API listener.
+
+For `contract_meta_store.get_contract_meta`, Master checks the local node first
+on every request. A valid nonempty local ABI always wins, including over a
+cached backup. If local metadata is missing, invalid or unavailable, Master
+looks up the public contract address on Koinos Blocks, then api.koinos.io.
+Each backup must identify itself as Koinos Mainnet before its metadata is used.
+The destinations are fixed independently of Custom RPC settings, so changing
+client priorities cannot send the gateway back to itself. This is a backup
+lookup with a temporary cache, not a rebuild of the local metadata database.
+
+Backup results retain the standard JSON-RPC format and the caller's request ID.
+An empty success is returned only if both verified backups report no metadata.
+If no usable result is available and a backup fails, the endpoint returns a
+retryable HTTP 503 instead of silently returning an empty result. When the
+setting is off, the endpoint returns only the local service's result/error.
+Other methods, including account history and transaction submission, keep their
+existing routing and behavior. **RPC ready does not mean account history is
+complete.** Keep the current client primary until that history is verified.
+
+Successful backup metadata is cached for 60 seconds; confirmed absence for 30
+seconds. Thus a backup ABI change may take up to a minute to appear while the
+local record is missing. The in-memory cache holds at most 128 contracts / 4 MiB
+of serialized results. There are at most 60 uncached metadata lookups per minute,
+1 MiB per metadata response, and 512 KiB per ABI. The local metadata attempt
+has a 1.8-second timeout, each backup request seven seconds, and the complete
+metadata operation ten seconds within the existing twelve-second HTTP deadline.
+The two backup chain-ID checks run concurrently to allow cold connections;
+metadata reads remain in priority order. With four public requests, this is at
+most eight outbound metadata/chain-ID requests at once. Unused work is cancelled
+on success, disconnection or API stop. Rate limits and timeouts fail explicitly.
+
+Node API and `/healthz/rpc` / `/v1/status` show whether metadata backups are
+enabled and the last lookup's source, cache use and outcome. They do not claim
+that the local database has been rebuilt. Check recovery without a transaction:
+
+```powershell
+$body = @{ jsonrpc = '2.0'; id = 1; method = 'contract_meta_store.get_contract_meta'; params = @{ contract_id = '19GYjDBVXU7keLbYvMLazsGQn3GTWHjHkK' } } | ConvertTo-Json -Depth 4 -Compress
+$reply = Invoke-RestMethod -Uri 'https://api.koinosai.com/' -Method Post -ContentType 'application/json' -Body $body
+$reply.result.meta.abi
+```
+
+This should print the KOIN contract ABI JSON. No wallet keys, cookies or client
+authorization headers are sent to metadata backups. AI Privacy settings are
+unchanged; these are explicit Koinos Node public blockchain lookups.
 
 ### Producer index
 
