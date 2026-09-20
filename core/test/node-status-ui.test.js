@@ -17,7 +17,7 @@ function painter() {
     producer: { address: "fixture", filePublicKey: "fixture-key", matches: true },
     producerBalances: { vhp: "100000000" }, walletStage: "locked", dashboardRendered: true,
   };
-  const context = vm.createContext({ S, $, ONE: 100000000n, sym: () => "KOIN" });
+  const context = vm.createContext({ KaiI18n: require("../../ui/i18n"), S, $, ONE: 100000000n, sym: () => "KOIN" });
   for (const name of ["esc", "fmtSat", "fmtTime", "fmtPct", "fmtBytes", "tile", "quickSyncStage", "patchNodeView", "patchDashboardView"]) {
     const start = source.indexOf(`function ${name}(`);
     assert.ok(start >= 0, `shipping function ${name} exists`);

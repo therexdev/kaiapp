@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="language-loading">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -7,6 +7,7 @@
         content="default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data:" />
   <title>Koinos AI</title>
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="language.css" />
   <link rel="stylesheet" href="brain.css" />
   <link rel="stylesheet" href="agent-network.css" />
   <link rel="stylesheet" href="workflows.css" />
@@ -529,6 +530,13 @@
           <p class="lede">Your account, and the parts of the app that are off until you turn them on.</p>
 
 
+          <section class="language-setting">
+            <h2>Language</h2>
+            <label for="interface-language">App language</label>
+            <select id="interface-language" aria-describedby="language-setting-note"></select>
+            <p class="hint" id="language-setting-note">Choose the language used for menus, settings, and setup. You can change it at any time.</p>
+            <p class="hint" id="language-setting-status" role="status"></p>
+          </section>
           <section id="desktop-providers" hidden>
             <h2>Desktop AI connections</h2>
             <p class="hint">Use your own OpenAI or Anthropic API account in chat and desktop KAI.
@@ -1046,12 +1054,17 @@
       </div>
     </div>
   </div>
-  <script src="markdown.js"></script>
-  <script src="audio-wav.js"></script>
-  <script src="agents.js"></script>
-  <script src="connection-profiles.js"></script>
-  <script src="companion-client.js"></script>
-  <script src="desktop-providers.js"></script>
+  <dialog id="language-dialog" aria-labelledby="language-title" aria-describedby="language-intro">
+    <div class="language-symbol" aria-hidden="true">◎</div>
+    <p translate="no">Koinos AI</p>
+    <h1 id="language-title">Choose your language</h1>
+    <p id="language-intro">Welcome to Koinos AI. Select your language to get started.</p>
+    <label for="first-language">Language</label>
+    <select id="first-language"></select>
+    <p>You can change this later in Settings.</p>
+    <p id="language-error" class="error" role="alert"></p>
+    <button id="language-continue" class="primary" type="button">Continue</button>
+  </dialog>
   <template id="chat-welcome-template">
           <div id="chat-empty" class="chat-empty">
             <div class="welcome-hero">
@@ -1066,6 +1079,15 @@
             <p class="welcome-footnote">Choose your AI below. Local, network, or your own desktop connection.</p>
           </div>
   </template>
+  <script src="locales/catalogs.js"></script>
+  <script src="i18n.js"></script>
+  <script src="language-settings.js"></script>
+  <script src="markdown.js"></script>
+  <script src="audio-wav.js"></script>
+  <script src="agents.js"></script>
+  <script src="connection-profiles.js"></script>
+  <script src="companion-client.js"></script>
+  <script src="desktop-providers.js"></script>
   <script src="brand.js"></script>
   <script src="app.js"></script>
   <script src="app-navigation.js"></script>

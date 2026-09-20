@@ -104,7 +104,7 @@ test("the preload actually exposes the picker the view depends on", () => {
  */
 test("every card view scrolls itself, so the page never scrolls the sidebar", () => {
   const html = fs.readFileSync(path.join(UI_DIR, "index.html"), "utf8");
-  const css = fs.readFileSync(path.join(UI_DIR, "styles.css"), "utf8");
+  const css = ["styles.css", "language.css"].map(file => fs.readFileSync(path.join(UI_DIR, file), "utf8")).join("\n");
   // Views that are deliberately not scroll-and-pad: onboarding centres itself,
   // chat scrolls #messages, docs/compare/code manage their own inner panes.
   const SELF_MANAGED = new Set(["onboarding", "chat", "docs", "compare", "code", "koinos"]);
@@ -121,7 +121,7 @@ test("every card view scrolls itself, so the page never scrolls the sidebar", ()
 
 test("no markup names a class the stylesheet never defines", () => {
   const html = fs.readFileSync(path.join(UI_DIR, "index.html"), "utf8");
-  const css = fs.readFileSync(path.join(UI_DIR, "styles.css"), "utf8");
+  const css = ["styles.css", "language.css"].map(file => fs.readFileSync(path.join(UI_DIR, file), "utf8")).join("\n");
   const used = new Set();
   for (const m of html.matchAll(/class="([^"]+)"/g)) {
     for (const c of m[1].split(/\s+/)) if (c) used.add(c);

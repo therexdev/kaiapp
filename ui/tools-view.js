@@ -66,7 +66,7 @@
       };
       controls.appendChild(conn);
       const trust = el("label", "tool-flag");
-      trust.innerHTML = `<input type="checkbox" ${s.trusted ? "checked" : ""}/> don't ask before each use`;
+      trust.innerHTML = KaiI18n.html`<input type="checkbox" ${s.trusted ? "checked" : ""}/> don't ask before each use`;
       trust.querySelector("input").onchange = async (e) => {
         await jfetch(`/core/mcp/${s.id}/flags`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ trusted: e.target.checked }) });
         render();
@@ -95,8 +95,8 @@
     const installedNames = new Set((mj.servers || []).map((sv) => sv.name));
     const available = (mj.catalog || []).filter((c) => !installedNames.has(c.name));
     const wanted = available.length
-      ? available.map((c) => `<option value="${esc(c.id)}">${esc(c.name)} — ${esc(c.description)}</option>`).join("")
-      : `<option value="">Everything from the catalog is already added</option>`;
+      ? available.map((c) => KaiI18n.html`<option value="${esc(c.id)}">${esc(c.name)} — ${esc(c.description)}</option>`).join("")
+      : KaiI18n.html`<option value="">Everything from the catalog is already added</option>`;
     if (cat.innerHTML !== wanted) {
       const keep = cat.value;
       cat.innerHTML = wanted;
@@ -122,11 +122,11 @@
       const btn = el("button", "primary small", `Set up tool runtime (~${mb} MB)`);
       btn.onclick = async () => {
         btn.disabled = true;
-        btn.textContent = "Downloading…";
+        KaiI18n.setText(btn, "Downloading…");
         const r = await jfetch("/core/mcp/runtime", { method: "POST" });
         if (!r.ok) {
           btn.disabled = false;
-          btn.textContent = `Set up tool runtime (~${mb} MB)`;
+          KaiI18n.setText(btn, KaiI18n.message`Set up tool runtime (~${mb} MB)`);
           alert(`Couldn't set up the runtime:\n${r.error}`);
         }
         render();
@@ -211,7 +211,7 @@
       return;
     }
     const sel = el("select");
-    sel.innerHTML = cfg.presets.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
+    sel.innerHTML = cfg.presets.map((p) => KaiI18n.html`<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
     const fieldsBox = el("div");
     const drawFields = () => {
       const preset = cfg.presets.find((p) => p.id === sel.value) || cfg.presets[0];
@@ -230,7 +230,7 @@
       save.onclick = async () => {
         const vals = {};
         for (const f of cfg.fields(preset)) vals[f.id] = $(`${cfg.kind}-${f.id}`)?.value || "";
-        save.textContent = "Connecting…";
+        KaiI18n.setText(save, "Connecting…");
         const r = await cfg.save(vals, preset);
         if (!r.ok && r.error) alert(`Couldn't connect: ${r.error}`);
         render();
@@ -299,18 +299,18 @@
       // Compose: three fields and one very human button. This is the ONLY
       // path that sends mail — the model never can.
       const compose = el("details");
-      compose.innerHTML = `<summary class="hint">Write an email</summary>`;
+      compose.innerHTML = KaiI18n.html`<summary class="hint">Write an email</summary>`;
       const to = el("input"); to.placeholder = "To";
       const subj = el("input"); subj.placeholder = "Subject";
       const bodyTa = document.createElement("textarea"); bodyTa.rows = 5; bodyTa.placeholder = "Message (tip: draft it in chat, paste it here)"; bodyTa.style.width = "100%";
       const send = el("button", "primary small", "Send");
       send.onclick = async () => {
         if (!confirm(`Send this email to ${to.value}?`)) return;
-        send.textContent = "Sending…";
+        KaiI18n.setText(send, "Sending…");
         const r = await jfetch("/core/email/send", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ to: to.value, subject: subj.value, text: bodyTa.value }) });
-        send.textContent = r.ok ? "Sent ✓" : "Send";
+        KaiI18n.setText(send, r.ok ? "Sent ✓" : "Send");
         if (!r.ok) alert(r.error || "couldn't send");
-        else { to.value = subj.value = bodyTa.value = ""; setTimeout(() => (send.textContent = "Send"), 1500); }
+        else { to.value = subj.value = bodyTa.value = ""; setTimeout(() => (KaiI18n.setText(send, "Send")), 1500); }
       };
       for (const f of [to, subj]) { const fr = el("div", "form-row"); fr.appendChild(f); compose.appendChild(fr); }
       compose.appendChild(bodyTa);
@@ -336,17 +336,17 @@
       }
       if (!(r.events || []).length) box.appendChild(el("p", "hint", "Nothing in the next two weeks."));
       const add = el("details");
-      add.innerHTML = `<summary class="hint">New event</summary>`;
+      add.innerHTML = KaiI18n.html`<summary class="hint">New event</summary>`;
       const title = el("input"); title.placeholder = "Title";
       const start = el("input"); start.type = "datetime-local";
       const create = el("button", "primary small", "Add to calendar");
       create.onclick = async () => {
         if (!title.value || !start.value) return alert("Give it a title and a start time.");
-        create.textContent = "Adding…";
+        KaiI18n.setText(create, "Adding…");
         const r2 = await jfetch("/core/calendar/create", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ summary: title.value, startIso: new Date(start.value).toISOString() }) });
-        create.textContent = r2.ok ? "Added ✓" : "Add to calendar";
+        KaiI18n.setText(create, r2.ok ? "Added ✓" : "Add to calendar");
         if (!r2.ok) alert(r2.error || "couldn't create it");
-        else { title.value = start.value = ""; setTimeout(() => (create.textContent = "Add to calendar"), 1500); }
+        else { title.value = start.value = ""; setTimeout(() => (KaiI18n.setText(create, "Add to calendar")), 1500); }
       };
       for (const f of [title, start, create]) { const fr = el("div", "form-row"); fr.appendChild(f); add.appendChild(fr); }
       box.appendChild(add);
@@ -362,7 +362,7 @@
     busy = true; // freeze the refresh timer for the whole add
     const chosen = $("mcp-catalog").value; // read BEFORE any await
     btn.disabled = true;
-    btn.textContent = "Checking…";
+    KaiI18n.setText(btn, "Checking…");
     try {
     const mj = await jfetch("/core/mcp");
     const entry = (mj.catalog || []).find((c) => c.id === chosen);
@@ -374,10 +374,10 @@
       const mb = Math.round((mj.node.downloadBytes || 0) / 1e6);
       if (!confirm(`"${entry.name}" needs a small runtime to run (Node.js, about ${mb} MB).\n\nKoinos AI can set it up for you now — it installs inside the app, changes nothing else on your computer, and only needs doing once.\n\nSet it up and continue?`)) return;
       btn.disabled = true;
-      btn.textContent = "Setting up runtime…";
+      KaiI18n.setText(btn, "Setting up runtime…");
       const nr = await jfetch("/core/mcp/runtime", { method: "POST" });
       btn.disabled = false;
-      btn.textContent = "Add";
+      KaiI18n.setText(btn, "Add");
       if (!nr.ok) {
         render();
         return alert(`Couldn't set up the runtime:\n${nr.error}`);
@@ -419,16 +419,16 @@
       // minute+ — an unexplained wait here reads as a hang (Windows CI
       // finding: the handshake outlasted the old 30s budget mid-download).
       btn.disabled = true;
-      btn.textContent = "Downloading & starting… (first time only)";
+      KaiI18n.setText(btn, "Downloading & starting… (first time only)");
       const c = await jfetch(`/core/mcp/${r.server.id}/connect`, { method: "POST" });
       btn.disabled = false;
-      btn.textContent = "Add";
+      KaiI18n.setText(btn, "Add");
       if (!c.ok) alert(`Added, but couldn't start it:\n${c.error}\n\nIt stays in your list — press Connect to try again.`);
     } else alert(r.error || "couldn't add");
     } finally {
       busy = false;
       btn.disabled = false;
-      btn.textContent = "Add";
+      KaiI18n.setText(btn, "Add");
       render({ force: true });
     }
   });

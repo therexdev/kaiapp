@@ -67,14 +67,14 @@ async function refresh() {
   if (models.download) {
     const { pct, done, total } = models.download;
     showProgress(pct, done, total);
-    setStatus("busy", `Downloading model… ${pct ?? "?"}%`);
+    setStatus("busy", KaiI18n.message`Downloading model… ${pct ?? "?"}%`);
   } else if (models.runtimeDownload?.phase === "extracting") {
     showProgress(null);
     setStatus("busy", "Setting up engine… (one time — takes a few minutes, the app stays usable)");
   } else if (models.runtimeDownload) {
     const { pct, done, total } = models.runtimeDownload;
     showProgress(pct, done, total);
-    setStatus("busy", `Downloading engine… ${pct ?? "?"}%`);
+    setStatus("busy", KaiI18n.message`Downloading engine… ${pct ?? "?"}%`);
   } else if (models.ensure?.state === "working") {
     showProgress(null);
     setStatus("busy", "Loading model…");
@@ -84,7 +84,7 @@ async function refresh() {
     // The reason is actionable (engine stderr, missing file, quarantine) —
     // and truncating it hid the second engine's half of the story (field
     // finding). Full text, wrapped; the pane grows.
-    setStatus("err", `Model load failed${reason ? ` — ${reason}` : ""}`);
+    setStatus("err", KaiI18n.message`Model load failed${reason ? ` — ${reason}` : ""}`);
     $("status-pane").title = reason;
   } else if (running) {
     setStatus("ok", "Model loaded");
@@ -93,7 +93,7 @@ async function refresh() {
   } else {
     setStatus("busy", "Setup needed");
   }
-  $("status-model").textContent = entry ? entry.label.split(" (")[0] : "No models in catalog";
+  KaiI18n.setText($("status-model"), entry ? entry.label.split(" (")[0] : "No models in catalog");
   const desktopReady = KaiProviders.models().some(m => m.alias === composedChatModel());
   if (desktopReady && !models.download && !models.ensure?.state) {
     setStatus("ok", "Desktop provider ready");
@@ -117,12 +117,12 @@ async function refresh() {
 async function loadVersion() {
   try {
     const h = await coreGet("/core/health");
-    if (h.version) $("app-version").textContent = `${h.productName || "Koinos AI"} v${h.version}`;
+    if (h.version) KaiI18n.setText($("app-version"), KaiI18n.message`${h.productName || "Koinos AI"} v${h.version}`);
     document.body.dataset.releaseChannel = h.channel || "stable";
     if (h.channel === "test") {
       document.title = "Koinos AI Test";
       const title = document.querySelector(".tb-title");
-      if (title) title.textContent = "Koinos AI Test";
+      if (title) KaiI18n.setText(title, "Koinos AI Test");
     }
   } catch {
     setTimeout(loadVersion, 3000);
@@ -137,10 +137,10 @@ function updatePrivacyNote(mode) {
   el.dataset.mode = mode;
   el.innerHTML =
     mode === "local-only"
-      ? "Your chats never leave this machine.<br />(Node and earning use their own network controls.)"
+      ? KaiI18n.html("Your chats never leave this machine.<br />(Node and earning use their own network controls.)")
       : mode === "local-first"
-        ? "Local when possible. If this machine<br />can't serve a chat, it overflows to<br />Koinos Network — and says so."
-        : "Network mode on — chats sent to<br />Koinos Network leave this machine.";
+        ? KaiI18n.html("Local when possible. If this machine<br />can't serve a chat, it overflows to<br />Koinos Network — and says so.")
+        : KaiI18n.html("Network mode on — chats sent to<br />Koinos Network leave this machine.");
   // Web search is egress by definition, so the toggle only exists outside
   // Local-Only — same contract as network chat, enforced again in Core.
   const webBtn = document.getElementById("btn-web");
@@ -153,7 +153,7 @@ function updatePrivacyNote(mode) {
   const researchOpt = document.querySelector('#mode-pick option[value="research"]');
   if (researchOpt) {
     researchOpt.disabled = mode === "local-only";
-    researchOpt.textContent = mode === "local-only" ? "🔬 Research — needs web (see Privacy)" : "🔬 Research";
+    KaiI18n.setText(researchOpt, mode === "local-only" ? "🔬 Research — needs web (see Privacy)" : "🔬 Research");
     if (mode === "local-only" && getChatMode() === "research") setChatMode("chat");
   }
 }
@@ -350,7 +350,7 @@ async function updateModelPick(aliases) {
     src.innerHTML = "";
     for (const [v, label] of [["local", "This machine"], ...(networkEligible ? [["network", "Koinos Network"]] : [])]) {
       const o = document.createElement("option");
-      o.value = v; o.textContent = label;
+      o.value = v; KaiI18n.setText(o, label);
       src.appendChild(o);
     }
     if (KaiProviders.desktop) for (const p of KaiProviders.status.providers) {
@@ -362,7 +362,7 @@ async function updateModelPick(aliases) {
       // Visible but not selectable — the network exists; here's how to get it.
       const o = document.createElement("option");
       o.disabled = true;
-      o.textContent = `Koinos Network — ${netBlockedWhy}`;
+      KaiI18n.setText(o, KaiI18n.message`Koinos Network — ${netBlockedWhy}`);
       src.appendChild(o);
     }
     if ([...src.options].some((o) => o.value === prevSrc)) src.value = prevSrc;
@@ -442,7 +442,7 @@ function updateProviderNote() {
   const source = $("src-pick").value, note = $("privacy-note");
   if (["openai", "anthropic"].includes(source)) {
     note.dataset.mode = "desktop:" + source;
-    note.textContent = KaiProviders.status.blocked ? "Local-Only blocks this online connection." : `Chat goes directly to ${source === "openai" ? "OpenAI" : "Anthropic"}. Your API account pays for usage.`;
+    KaiI18n.setText(note, KaiProviders.status.blocked ? "Local-Only blocks this online connection." : `Chat goes directly to ${source === "openai" ? "OpenAI" : "Anthropic"}. Your API account pays for usage.`);
   }
 }
 window.addEventListener("kai-providers-changed", () => { $("model-pick").dataset.sig = ""; refresh(); });
@@ -469,7 +469,7 @@ function composedChatModel() {
 
 function setStatus(kind, text) {
   $("status-dot").className = `dot ${kind}`;
-  $("status-text").textContent = text;
+  KaiI18n.setText($("status-text"), text);
 }
 
 // ---------- views ----------
@@ -511,8 +511,8 @@ function showView(name, { navOnly = false } = {}) {
     expandNavGroup(selectedNav.closest(".nav-group").querySelector(".nav-group-label"));
   }
   const heading = headings[phys] || ["Koinos AI", "Think. Build. Grow."];
-  $("workspace-title").textContent = heading[0];
-  $("workspace-caption").textContent = heading[1];
+  KaiI18n.setText($("workspace-title"), heading[0]);
+  KaiI18n.setText($("workspace-caption"), heading[1]);
   for (const v of document.querySelectorAll(".view")) v.hidden = true;
   $(`view-${phys}`).hidden = false;
   // Every navigable thing carries data-view — the full-width nav rows AND
@@ -547,7 +547,7 @@ async function renderUpdateStatus({ fetchRemote = false } = {}) {
   try {
     s = await coreGet(`/core/update${fetchRemote ? "?fetch=1" : ""}`);
   } catch {
-    host.textContent = "Couldn't check — Core is not answering.";
+    KaiI18n.setText(host, "Couldn't check — Core is not answering.");
     return;
   }
   const version = $("app-version")?.textContent || "";
@@ -560,14 +560,14 @@ async function renderUpdateStatus({ fetchRemote = false } = {}) {
    */
   const semver = (/(\d+\.\d+\.\d+)/.exec(version) || [])[1] || "";
   const notes = document.body.dataset.releaseChannel === "test"
-    ? ` <a href="https://github.com/therexdev/kaiapp/releases/tag/test-build" target="_blank" rel="noreferrer">Test builds</a>`
-    : ` <a href="https://koinosai.com/updates${semver ? `#v${semver}` : ""}" target="_blank" rel="noreferrer">What's new</a>`;
-  const say = (text) => { host.innerHTML = esc(text) + notes; };
+    ? KaiI18n.html` <a href="https://github.com/therexdev/kaiapp/releases/tag/test-build" target="_blank" rel="noreferrer">Test builds</a>`
+    : KaiI18n.html` <a href="https://koinosai.com/updates${semver ? `#v${semver}` : ""}" target="_blank" rel="noreferrer">What's new</a>`;
+  const say = (text) => { host.innerHTML = "<span></span>" + notes; KaiI18n.setText(host.firstElementChild, text); };
 
   if (s.kind === "packaged") {
     if (fetchRemote) {
       if (!window.koinosShell?.checkForUpdates) {
-        say(`${version} — the desktop updater isn't available in this copy.`);
+        say(KaiI18n.message`${version} — the desktop updater isn't available in this copy.`);
         return;
       }
       let checked;
@@ -575,27 +575,27 @@ async function renderUpdateStatus({ fetchRemote = false } = {}) {
         checked = await window.koinosShell.checkForUpdates();
         if (!checked || typeof checked.kind !== "string") throw new Error("Invalid updater response");
       } catch {
-        say(`${version} — couldn't contact the desktop updater. Restart the app and try again.`);
+        say(KaiI18n.message`${version} — couldn't contact the desktop updater. Restart the app and try again.`);
         return;
       }
       if (checked.kind === "current") {
-        say(`${version} — up to date. Checked just now.`);
+        say(KaiI18n.message`${version} — up to date. Checked just now.`);
       } else if (checked.kind === "downloading") {
-        say(`Koinos AI ${checked.version || "update"} is available — downloading it now. You'll be asked before restarting.`);
+        say(KaiI18n.message`Koinos AI ${checked.version || "update"} is available — downloading it now. You'll be asked before restarting.`);
       } else if (checked.kind === "downloaded") {
-        say(`Koinos AI ${checked.version || "update"} is ready and will install when you close the app.`);
+        say(KaiI18n.message`Koinos AI ${checked.version || "update"} is ready and will install when you close the app.`);
       } else if (checked.kind === "available") {
-        say(`Koinos AI ${checked.version || "update"} is available and ready to download.`);
+        say(KaiI18n.message`Koinos AI ${checked.version || "update"} is available and ready to download.`);
       } else {
-        say(`${version} — ${checked.reason || "couldn't check for updates."}`);
+        say(KaiI18n.message`${version} — ${checked.reason || "couldn't check for updates."}`);
       }
       return;
     }
-    say(`${version} — updates install themselves.`);
+    say(KaiI18n.message`${version} — updates install themselves.`);
     return;
   }
   if (s.kind !== "source") {
-    say(`${version} — ${s.reason || "update state unknown."}`);
+    say(KaiI18n.message`${version} — ${s.reason || "update state unknown."}`);
     return;
   }
   const where = s.detached ? "not on a branch" : `on ${s.branch}`;
@@ -607,22 +607,21 @@ async function renderUpdateStatus({ fetchRemote = false } = {}) {
         : `${s.reason} Fix it from a terminal, then restart.`)
     );
   } else if (s.canCheck) {
-    say(`${version} — up to date (${where}), installed from source.`);
+    say(KaiI18n.message`${version} — up to date (${where}), installed from source.`);
   } else {
-    say(`${version} — installed from source, ${where}. ${s.reason || ""}`);
+    say(KaiI18n.message`${version} — installed from source, ${where}. ${s.reason || ""}`);
   }
 }
 
 $("btn-update-check")?.addEventListener("click", async (e) => {
   const b = e.currentTarget;
   b.disabled = true;
-  const was = b.textContent;
-  b.textContent = "Checking…";
+  KaiI18n.setText(b, "Checking…");
   try {
     await renderUpdateStatus({ fetchRemote: true });   // the round trip they asked for
   } finally {
     b.disabled = false;
-    b.textContent = was;
+    KaiI18n.setText(b, "Check for updates");
   }
 });
 
@@ -675,7 +674,7 @@ for (const b of document.querySelectorAll("[data-view]")) {
 
 async function renderOnboarding(entry) {
   $("offer-name").textContent = entry.label;
-  $("offer-sub").textContent = `alias “${entry.alias}” · verified download`;
+  KaiI18n.setText($("offer-sub"), KaiI18n.message`alias “${entry.alias}” · verified download`);
   if ($("hw-summary").childElementCount === 0) {
     try {
       const h = await coreGet("/core/health");
@@ -693,7 +692,7 @@ async function renderOnboarding(entry) {
         ["GPU", gpuSummary],
       ];
       $("hw-summary").innerHTML = rows
-        .map(([k, v]) => `<span class="k">${k}</span><span>${esc(v)}</span>`)
+        .map(([k, v]) => KaiI18n.html`<span class="k">${k}</span><span>${esc(v)}</span>`)
         .join("");
     } catch {
       /* health shows up on the next poll */
@@ -721,10 +720,9 @@ function showProgress(pct, done, total) {
   $("download-progress").hidden = false;
   $("btn-download").disabled = true;
   $("bar-fill").style.width = pct != null ? `${pct}%` : "12%";
-  $("bar-label").textContent =
-    pct != null
+  KaiI18n.setText($("bar-label"), pct != null
       ? `${pct}% · ${(done / 1e6).toFixed(0)} / ${(total / 1e6).toFixed(0)} MB`
-      : "Preparing…";
+      : "Preparing…");
 }
 
 function onboardError(msg) {
@@ -779,10 +777,10 @@ function attachMsgActions(bubble) {
   // Read aloud uses the OS voices Chromium ships (speechSynthesis): offline,
   // free, no downloads — hidden only if the platform has no voices at all.
   const canSpeak = "speechSynthesis" in window;
-  bar.innerHTML = `<button type="button" class="msg-act" data-act="copy" title="Copy message">Copy</button>
+  bar.innerHTML = KaiI18n.html`<button type="button" class="msg-act" data-act="copy" title="Copy message">Copy</button>
     <button type="button" class="msg-act" data-act="regen" title="Ask again">Regenerate</button>
     <button type="button" class="msg-act" data-act="remember" title="Remember the key fact from this message across all chats">📌 Remember</button>${
-      canSpeak ? `<button type="button" class="msg-act" data-act="speak" title="Read this reply aloud">🔊 Read</button>` : ""
+      canSpeak ? KaiI18n.html`<button type="button" class="msg-act" data-act="speak" title="Read this reply aloud">🔊 Read</button>` : ""
     }`;
   bubble.appendChild(bar);
 }
@@ -791,17 +789,17 @@ function attachMsgActions(bubble) {
 function speakText(btn, text) {
   const speaking = window.speechSynthesis.speaking;
   window.speechSynthesis.cancel();
-  for (const b of document.querySelectorAll('.msg-act[data-act="speak"]')) b.textContent = "🔊 Read";
+  for (const b of document.querySelectorAll('.msg-act[data-act="speak"]')) KaiI18n.setText(b, "🔊 Read");
   if (speaking && btn.dataset.speaking === "1") {
     delete btn.dataset.speaking;
     return;
   }
   const u = new SpeechSynthesisUtterance(text);
   u.onend = u.onerror = () => {
-    btn.textContent = "🔊 Read";
+    KaiI18n.setText(btn, "🔊 Read");
     delete btn.dataset.speaking;
   };
-  btn.textContent = "⏹ Stop";
+  KaiI18n.setText(btn, "⏹ Stop");
   btn.dataset.speaking = "1";
   window.speechSynthesis.speak(u);
 }
@@ -811,8 +809,8 @@ $("messages").addEventListener("click", async (e) => {
   if (codeBtn) {
     const code = codeBtn.closest(".code-block")?.querySelector("code")?.textContent || "";
     await navigator.clipboard.writeText(code);
-    codeBtn.textContent = "Copied";
-    setTimeout(() => (codeBtn.textContent = "Copy"), 1200);
+    KaiI18n.setText(codeBtn, "Copied");
+    setTimeout(() => (KaiI18n.setText(codeBtn, "Copy")), 1200);
     return;
   }
   const act = e.target.closest(".msg-act");
@@ -824,8 +822,8 @@ $("messages").addEventListener("click", async (e) => {
     const idx = [...$("messages").querySelectorAll(".msg.assistant")].indexOf(bubble);
     const assistants = state.history.filter((m) => m.role === "assistant");
     await navigator.clipboard.writeText(assistants[idx]?.content ?? "");
-    act.textContent = "Copied";
-    setTimeout(() => (act.textContent = "Copy"), 1200);
+    KaiI18n.setText(act, "Copied");
+    setTimeout(() => (KaiI18n.setText(act, "Copy")), 1200);
   }
   if (act.dataset.act === "remember") {
     // Distill the message into ONE short fact worth keeping — the model
@@ -843,11 +841,11 @@ $("messages").addEventListener("click", async (e) => {
       if (!window.kaiCompanionBridge) throw new Error("Open the desktop app to save memories in Brain.");
       const saved = await window.kaiCompanionBridge.manage("note", { text: fact, pinned: true });
       if (!saved?.ok) throw new Error(saved?.error || "Brain could not save this memory.");
-      act.textContent = "📌 Remembered";
-      setTimeout(() => (act.textContent = "📌 Remember"), 1600);
+      KaiI18n.setText(act, "📌 Remembered");
+      setTimeout(() => (KaiI18n.setText(act, "📌 Remember")), 1600);
     } catch (error) {
       alert(error.message || "Brain could not save this memory.");
-      act.textContent = "📌 Remember";
+      KaiI18n.setText(act, "📌 Remember");
     }
   }
   if (act.dataset.act === "regen" && !state.chatting) {
@@ -904,7 +902,7 @@ async function send(replayText) {
   bubble.classList.add("streaming");
   // Three swelling dots until the first token lands — a blank bubble read as
   // "stuck" during model load / network dispatch (field feedback).
-  bubble.innerHTML = '<span class="typing-dots" aria-label="thinking"><i></i><i></i><i></i></span>';
+  bubble.innerHTML = KaiI18n.html('<span class="typing-dots" aria-label="thinking"><i></i><i></i><i></i></span>');
   state.chatting = true;
   $("btn-send").disabled = true;
   $("btn-stop").hidden = false;
@@ -955,13 +953,13 @@ async function send(replayText) {
           buf = buf.slice(idx + 2);
           if (!line.startsWith("data: ")) continue;
           const ev = JSON.parse(line.slice(6));
-          if (ev.trace) trace.textContent = `👥 ${ev.trace.stage}: ${String(ev.trace.detail).slice(0, 140)}`;
+          if (ev.trace) KaiI18n.setText(trace, KaiI18n.message`👥 ${ev.trace.stage}: ${String(ev.trace.detail).slice(0, 140)}`);
           if (ev.done) done = ev;
         }
       }
       if (!done) throw new Error("the team stream ended without an answer");
       if (done.error) throw new Error(done.error);
-      trace.textContent = `👥 team finished in ${done.modelCalls} model calls`;
+      KaiI18n.setText(trace, KaiI18n.message`👥 team finished in ${done.modelCalls} model calls`);
       bubble.innerHTML = mdToHtml(done.answer);
       attachMsgActions(bubble);
       state.history.push({ role: "assistant", content: done.answer });
@@ -970,7 +968,7 @@ async function send(replayText) {
       if (e.name === "AbortError") {
         trace.remove();
         state.history.push({ role: "assistant", content: "(team run stopped)" });
-        bubble.textContent = "(team run stopped)";
+        KaiI18n.setText(bubble, "(team run stopped)");
         saveCurrentChat();
       } else {
         trace.remove();
@@ -1024,7 +1022,7 @@ async function send(replayText) {
         }
       } catch (e) {
         if (e.name === "AbortError") throw e;
-        status.textContent = `⚠ ${String(e.message || e).slice(0, 140)} — answering without tools.`;
+        KaiI18n.setText(status, KaiI18n.message`⚠ ${String(e.message || e).slice(0, 140)} — answering without tools.`);
       } finally {
         if (!status.textContent) status.remove();
       }
@@ -1109,11 +1107,11 @@ async function send(replayText) {
       const cls = servedModel ? state.aliasLabels?.[servedModel] || servedModel : null;
       const tag = document.createElement("div");
       tag.className = "route-tag";
-      tag.textContent = !chatModel.startsWith("koinos-network")
+      KaiI18n.setText(tag, !chatModel.startsWith("koinos-network")
         ? `answered via Koinos Network${cls ? ` (${cls})` : ""} — local model was unavailable`
         : cls
           ? `served by the network's ${cls}`
-          : "";
+          : "");
       if (tag.textContent) bubble.appendChild(tag);
     }
     if (KaiProviders.isModel(chatModel)) {
@@ -1129,7 +1127,7 @@ async function send(replayText) {
       const tokPerSec = acc.length / 4 / genS; // ~4 chars/token estimate
       const meta = document.createElement("div");
       meta.className = "msg-meta";
-      meta.textContent = `first reply in ${firstS.toFixed(1)}s · ~${tokPerSec.toFixed(0)} tok/s`;
+      KaiI18n.setText(meta, KaiI18n.message`first reply in ${firstS.toFixed(1)}s · ~${tokPerSec.toFixed(0)} tok/s`);
       bubble.appendChild(meta);
     }
     state.history.push({ role: "assistant", content: acc, ...(webCitations ? { citations: webCitations } : {}) });
@@ -1212,7 +1210,7 @@ async function renderApi() {
 
     const budget = document.createElement("button");
     budget.className = "linklike";
-    budget.textContent = "budget";
+    KaiI18n.setText(budget, "budget");
     /*
      * An INLINE editor, not prompt(): window.prompt does not exist in Electron
      * — it returns null without showing anything, so this button did nothing
@@ -1233,10 +1231,10 @@ async function renderApi() {
       input.value = k.budgetUsdMonthly ?? "";
       const save = document.createElement("button");
       save.className = "small primary";
-      save.textContent = "Save";
+      KaiI18n.setText(save, "Save");
       const cancel = document.createElement("button");
       cancel.className = "small";
-      cancel.textContent = "Cancel";
+      KaiI18n.setText(cancel, "Cancel");
       const close = () => wrap.remove();
       const commit = async () => {
         const v = input.value.trim();
@@ -1261,7 +1259,7 @@ async function renderApi() {
     });
 
     const del = document.createElement("button");
-    del.textContent = "revoke";
+    KaiI18n.setText(del, "revoke");
     del.addEventListener("click", async () => {
       await fetch(`/core/keys/${k.id}`, { method: "DELETE" });
       renderApi();
@@ -1353,10 +1351,9 @@ async function renderRemote() {
     $("remote-info").hidden = !on;
     if (on) {
       $("remote-base").textContent = r.base || "connecting…";
-      $("remote-state").textContent =
-        r.state === "connected" ? "Connected — this URL works from anywhere your key goes."
+      KaiI18n.setText($("remote-state"), r.state === "connected" ? "Connected — this URL works from anywhere your key goes."
         : r.state === "offline" ? "Reconnecting to koinosai.com…"
-        : "Connecting…";
+        : "Connecting…");
     }
   } catch {
     /* core not up yet — the next renderApi retries */
@@ -1424,9 +1421,9 @@ async function renderEarn() {
   if (!$("earn-unlock").hidden) {
     // Which wallet file is this? If the creation time isn't when you made
     // (or last restored) your wallet, the file is the problem, not the password.
-    $("earn-unlock-hint").textContent = s.wallet.address
+    KaiI18n.setText($("earn-unlock-hint"), s.wallet.address
       ? `Account ${s.wallet.address} — wallet file created ${s.wallet.createdAt ? new Date(s.wallet.createdAt).toLocaleString() : "unknown"}`
-      : "";
+      : "");
   }
 
   if (!$("earn-ready").hidden) {
@@ -1439,22 +1436,22 @@ async function renderEarn() {
     const stateEl = $("earn-state");
     if (!s.worker.running) {
       dot.className = "dot err";
-      stateEl.textContent = "Offline — not earning";
+      KaiI18n.setText(stateEl, "Offline — not earning");
     } else if (s.worker.backoff) {
       // Courtesy pause, not a fault: the load guard saw other applications
       // working the GPU and got out of their way. Without this branch a
       // paused worker renders as silently broken — the next bug report.
       dot.className = "dot busy";
-      stateEl.textContent = "Paused — your computer is busy with other work; earning resumes when it's free";
+      KaiI18n.setText(stateEl, "Paused — your computer is busy with other work; earning resumes when it's free");
     } else if (s.worker.lastError) {
       dot.className = "dot busy";
-      stateEl.textContent = `Online — ${s.worker.lastError}`;
+      KaiI18n.setText(stateEl, KaiI18n.message`Online — ${s.worker.lastError}`);
     } else {
       dot.className = "dot ok pulse";
       const ago = s.worker.lastPollOkAt
         ? Math.max(0, Math.round((Date.now() - new Date(s.worker.lastPollOkAt).getTime()) / 1000))
         : null;
-      stateEl.textContent = `Online — earning${ago != null ? ` · last contact ${ago}s ago` : ""}`;
+      KaiI18n.setText(stateEl, KaiI18n.message`Online — earning${ago != null ? ` · last contact ${ago}s ago` : ""}`);
     }
     // Honest power guidance: if the OS suspended us, say so and name the
     // fix — a silently flapping node looks like our bug, but it's a
@@ -1537,10 +1534,10 @@ async function renderEarn() {
             : s.worker.producerNote || "—",
       ],
     ];
-    $("earn-stats").innerHTML = rows.map(([k, v]) => `<span class="k">${k}</span><span>${esc(v)}</span>`).join("");
+    $("earn-stats").innerHTML = rows.map(([k, v]) => KaiI18n.html`<span class="k">${k}</span><span>${esc(v)}</span>`).join("");
     // The wallet card's receive address — same wallet the worker earns with.
     if ($("wallet-address") && s.wallet.address) $("wallet-address").value = s.wallet.address;
-    $("btn-earn-toggle").textContent = s.worker.running ? "Stop Earning" : "Start Earning";
+    KaiI18n.setText($("btn-earn-toggle"), s.worker.running ? "Stop Earning" : "Start Earning");
     $("btn-earn-toggle").dataset.running = s.worker.running ? "1" : "";
   }
   if (!$("view-earn").hidden) {
@@ -1584,7 +1581,7 @@ document.addEventListener("click", (e) => {
   const inp = document.getElementById(b.dataset.target);
   if (!inp) return;
   inp.type = inp.type === "password" ? "text" : "password";
-  b.textContent = inp.type === "password" ? "show" : "hide";
+  KaiI18n.setText(b, inp.type === "password" ? "show" : "hide");
 });
 
 $("btn-earn-create").addEventListener("click", async () => {
@@ -1643,7 +1640,7 @@ $("btn-earn-deposit").addEventListener("click", async () => {
   if (!(amt > 0)) return earnErr("Enter a positive KAI amount to deposit");
   const btn = $("btn-earn-deposit");
   btn.disabled = true;
-  btn.textContent = "Converting…";
+  KaiI18n.setText(btn, "Converting…");
   try {
     const j = await earnPost("/core/earn/deposit", { amountKai: amt });
     $("earn-deposit-amt").value = "";
@@ -1653,7 +1650,7 @@ $("btn-earn-deposit").addEventListener("click", async () => {
     renderEarn();
   } catch { /* error shown */ } finally {
     btn.disabled = false;
-    btn.textContent = "Add funds";
+    KaiI18n.setText(btn, "Add funds");
   }
 });
 
@@ -1730,7 +1727,7 @@ $("btn-wallet-balances").addEventListener("click", async () => {
       ["VHP", b.formatted?.vhp ?? "0"],
       ["Mana", b.formatted?.mana ?? "0"],
     ];
-    $("wallet-balances").innerHTML = rows.map(([k, v]) => `<span class="k">${k}</span><span>${esc(v)}</span>`).join("");
+    $("wallet-balances").innerHTML = rows.map(([k, v]) => KaiI18n.html`<span class="k">${k}</span><span>${esc(v)}</span>`).join("");
   } catch (e) {
     walletMsg(e.message);
   } finally {
@@ -1806,7 +1803,7 @@ async function renderAccount(force) {
       ["Linked wallets", String(a.wallets?.length ?? 0)],
       ["This wallet", j.thisWalletLinked ? "✓ linked to your account" : "not linked yet"],
     ];
-    $("account-stats").innerHTML = rows.map(([k, v]) => `<span class="k">${k}</span><span>${esc(v)}</span>`).join("");
+    $("account-stats").innerHTML = rows.map(([k, v]) => KaiI18n.html`<span class="k">${k}</span><span>${esc(v)}</span>`).join("");
     $("btn-account-linkwallet").hidden = Boolean(j.thisWalletLinked);
     renderWebAccess(j);
   } else {
@@ -1857,7 +1854,7 @@ $("btn-account-signin").addEventListener("click", async () => {
     if (!r.ok || !j.ok) throw new Error(j.localOnly ? "Privacy is set to Local-Only — switch it in Local API → Network & privacy first." : j.error || `HTTP ${r.status}`);
     $("account-code-row").hidden = false;
     $("account-code").textContent = j.userCode;
-    $("account-poll-status").textContent = "Waiting for approval… this updates by itself.";
+    KaiI18n.setText($("account-poll-status"), "Waiting for approval… this updates by itself.");
     startAccountPoll();
   } catch (e) {
     accountMsg(e.message);
@@ -1920,7 +1917,7 @@ function renderWebAccess(j) {
     ["Expires", days > 1 ? `in ${days} days` : days === 1 ? "tomorrow" : "today"],
   ];
   $("account-grant-stats").innerHTML = rows
-    .map(([k, v]) => `<span class="k">${k}</span><span>${esc(v)}</span>`).join("");
+    .map(([k, v]) => KaiI18n.html`<span class="k">${k}</span><span>${esc(v)}</span>`).join("");
 }
 
 $("btn-account-grant").addEventListener("click", async () => {
@@ -2094,13 +2091,13 @@ $("feedback-overlay").addEventListener("click", (e) => {
 $("btn-feedback-send").addEventListener("click", async () => {
   const message = $("feedback-text").value.trim();
   if (!message) {
-    $("feedback-error").textContent = "Write a sentence or two first.";
+    KaiI18n.setText($("feedback-error"), "Write a sentence or two first.");
     $("feedback-error").hidden = false;
     return;
   }
   const btn = $("btn-feedback-send");
   btn.disabled = true;
-  btn.textContent = "Sending…";
+  KaiI18n.setText(btn, "Sending…");
   try {
     const r = await fetch("/core/feedback", {
       method: "POST",
@@ -2122,7 +2119,7 @@ $("btn-feedback-send").addEventListener("click", async () => {
     $("feedback-error").hidden = false;
   } finally {
     btn.disabled = false;
-    btn.textContent = "Send";
+    KaiI18n.setText(btn, "Send");
   }
 });
 
@@ -2194,12 +2191,12 @@ function renderChatList() {
     (c) => !q || c.title.toLowerCase().includes(q) || (c.searchText || "").toLowerCase().includes(q)
   );
   if (!rows.length) {
-    host.innerHTML = `<div class="chat-list-empty">${q ? "No chats match." : "Chats you start appear here."}</div>`;
+    host.innerHTML = KaiI18n.html`<div class="chat-list-empty">${q ? "No chats match." : "Chats you start appear here."}</div>`;
     return;
   }
   host.innerHTML = rows
     .map(
-      (c) => `<div class="chat-row${c.id === state.chatId ? " active" : ""}${c.pinned ? " pinned" : ""}" data-id="${esc2(c.id)}" title="Double-click to rename">
+      (c) => KaiI18n.html`<div class="chat-row${c.id === state.chatId ? " active" : ""}${c.pinned ? " pinned" : ""}" data-id="${esc2(c.id)}" title="Double-click to rename">
         <button class="chat-pin${c.pinned ? " on" : ""}" data-id="${esc2(c.id)}" title="${c.pinned ? "Unfavorite" : "Favorite"}" aria-label="${c.pinned ? "Unfavorite chat" : "Favorite chat"}">${c.pinned ? "★" : "☆"}</button>
         <span class="chat-row-title">${esc2(c.title)}</span>
         <button class="chat-edit" data-id="${esc2(c.id)}" title="Rename chat" aria-label="Rename chat">✎</button>
@@ -2362,19 +2359,19 @@ async function renderModels() {
       const hopeless = machineRamGb != null && a.minRamGb && machineRamGb < a.minRamGb * 0.75;
       const recommended = a.alias === recommendedAlias;
       let action;
-      if (a.status === "quarantined") action = `<span class="model-badge danger">quarantined</span>`;
+      if (a.status === "quarantined") action = KaiI18n.html`<span class="model-badge danger">quarantined</span>`;
       else if (a.status === "missing") {
-        action = `<span class="model-badge danger">file moved — re-import</span>`;
+        action = KaiI18n.html`<span class="model-badge danger">file moved — re-import</span>`;
       } else if (a.status === "ready") {
         action = inUse
-          ? `<span class="model-badge ok">in use</span>`
-          : `<button class="primary small" data-use="${esc2(a.alias)}">Use</button>`;
+          ? KaiI18n.html`<span class="model-badge ok">in use</span>`
+          : KaiI18n.html`<button class="primary small" data-use="${esc2(a.alias)}">Use</button>`;
       } else if (ensuring === a.alias) {
-        action = `<span class="model-badge">downloading… ${dl?.pct != null ? dl.pct + "%" : ""}</span>`;
+        action = KaiI18n.html`<span class="model-badge">downloading… ${dl?.pct != null ? dl.pct + "%" : ""}</span>`;
       } else if (hopeless) {
-        action = `<span class="model-badge danger">needs ~${a.minRamGb} GB RAM</span>`;
+        action = KaiI18n.html`<span class="model-badge danger">needs ~${a.minRamGb} GB RAM</span>`;
       } else {
-        action = `<button class="primary small" data-get="${esc2(a.alias)}">Download</button>`;
+        action = KaiI18n.html`<button class="primary small" data-get="${esc2(a.alias)}">Download</button>`;
       }
       /*
        * Removing an installed model. Two different things wear the same word,
@@ -2385,24 +2382,24 @@ async function renderModels() {
        * there was no way at all to get those bytes back.
        */
       if (a.custom) {
-        action += ` <button class="card-del" data-remove-custom="${esc2(a.alias)}" title="Remove from the list (your file is not deleted)">×</button>`;
+        action += KaiI18n.html` <button class="card-del" data-remove-custom="${esc2(a.alias)}" title="Remove from the list (your file is not deleted)">×</button>`;
       } else if (a.status === "ready" || a.status === "partial") {
         action += inUse
-          ? ` <button class="card-del" disabled title="This model is loaded — switch to another first">×</button>`
-          : ` <button class="card-del" data-uninstall="${esc2(a.package)}" data-uninstall-name="${esc2(a.label.split(" (")[0])}" title="Remove this model from your disk">×</button>`;
+          ? KaiI18n.html` <button class="card-del" disabled title="This model is loaded — switch to another first">×</button>`
+          : KaiI18n.html` <button class="card-del" data-uninstall="${esc2(a.package)}" data-uninstall-name="${esc2(a.label.split(" (")[0])}" title="Remove this model from your disk">×</button>`;
       }
       const fitNote = tight && !hopeless ? ` · tight fit on this machine (~${a.minRamGb} GB RAM recommended)` : "";
       // The last load failure shows on the card of the model it hit, so a
       // single screenshot of Models carries the whole diagnosis.
       const loadErr = m.runtime?.lastLoadError?.alias === a.alias ? m.runtime.lastLoadError.message : null;
-      return `<div class="model-offer model-row${recommended ? " recommended" : ""}">
+      return KaiI18n.html`<div class="model-offer model-row${recommended ? " recommended" : ""}">
         <div>
-          <div class="model-name">${esc2(a.label.split(" (")[0])}${recommended ? `<span class="chip-star">★ best for this machine</span>` : ""}</div>
+          <div class="model-name">${esc2(a.label.split(" (")[0])}${recommended ? KaiI18n.html`<span class="chip-star">★ best for this machine</span>` : ""}</div>
           <div class="model-sub">${[a.blurb, a.license, !a.blurb && gb, a.status === "ready" && "on this machine"]
             .filter(Boolean)
             .map(esc2)
             .join(" · ")}${esc2(fitNote)}</div>
-          ${loadErr ? `<div class="model-load-err">last load failed: ${esc2(loadErr)}</div>` : ""}
+          ${loadErr ? KaiI18n.html`<div class="model-load-err">last load failed: ${esc2(loadErr)}</div>` : ""}
         </div>
         <div class="model-actions">${action}</div>
       </div>`;
@@ -2412,7 +2409,7 @@ async function renderModels() {
   const imp = $("import-status");
   if (imp && m.importing) {
     imp.hidden = false;
-    imp.textContent = `Verifying ${m.importing.path.split(/[\\/]/).pop()} — ${m.importing.pct}%`;
+    KaiI18n.setText(imp, KaiI18n.message`Verifying ${m.importing.path.split(/[\\/]/).pop()} — ${m.importing.pct}%`);
   } else if (imp && m.importError && !imp.textContent.includes("✓")) {
     imp.hidden = false;
     imp.textContent = m.importError;

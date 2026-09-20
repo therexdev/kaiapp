@@ -123,6 +123,13 @@ async function start() {
   const origin = `http://127.0.0.1:${port}`;
   const requireMain = event => { if (!trustedMainDocument(event, win, origin)) throw new Error("Desktop window access denied"); };
   protectNavigation(win.webContents, origin, url => shell.openExternal(url));
+  require("../ui/locales/catalogs");
+  const nativeI18n = require("../ui/i18n");
+  let refreshLanguageMenu = () => {};
+  const languagePrefs = require("./language").registerLanguage({ ipcMain, app, store: winState,
+    getMainWindow: () => win, getMascotWindow: () => mascot?.getWindow(), origin,
+    onChange: () => refreshLanguageMenu() });
+  const tr = text => nativeI18n.t(text, [], languagePrefs.status().language);
   ipcMain.handle("dialog:pick-gguf", async (event) => {
     requireMain(event);
     const r = await dialog.showOpenDialog(win, {
@@ -243,14 +250,15 @@ async function start() {
 
     tray = new Tray(image);
     tray.setToolTip(release.productName);
-    tray.setContextMenu(Menu.buildFromTemplate([
-      { label: "Open Koinos AI", click: showWindow },
-      { label: "Launch KAI companion", click: () => mascot.launch().catch(error =>
+    refreshLanguageMenu = () => tray?.setContextMenu(Menu.buildFromTemplate([
+      { label: tr("Open Koinos AI"), click: showWindow },
+      { label: tr("Launch KAI companion"), click: () => mascot.launch().catch(error =>
         dialog.showErrorBox("KAI could not open", error.message)) },
-      { label: "Hide KAI companion", click: () => mascot.hide() },
+      { label: tr("Hide KAI companion"), click: () => mascot.hide() },
       { type: "separator" },
-      { label: "Quit Koinos AI", click: () => { quitting = true; app.quit(); } },
+      { label: tr("Quit Koinos AI"), click: () => { quitting = true; app.quit(); } },
     ]));
+    refreshLanguageMenu();
     tray.on("click", showWindow);
     tray.on("double-click", showWindow);
   } catch (e) {

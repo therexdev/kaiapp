@@ -7,11 +7,11 @@
   const featured = [...catalogData.items].sort((a, b) => rank(a.slug) - rank(b.slug) || a.name.localeCompare(b.name));
   const authLabel = t => t.authSchemes?.some(a => /OAUTH/.test(a)) ? "Account sign-in" : t.authSchemes?.includes("NO_AUTH") ? "No account required" : t.authSchemes?.length ? "API credentials" : "Provider setup";
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-  const btn = (label, action, value = "", primary = false) => `<button type="button" class="cn-button${primary ? " cn-primary" : ""}" data-cn="${action}" data-value="${esc(value)}">${esc(label)}</button>`;
-  const check = (name, title, detail, checked, disabled = false) => `<label class="cn-permission"><input type="checkbox" name="${name}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""}><span><strong>${esc(title)}</strong><small>${esc(detail)}</small></span></label>`;
-  const field = (label, content) => `<label class="cn-field"><span>${esc(label)}</span>${content}</label>`;
+  const btn = (label, action, value = "", primary = false) => KaiI18n.html`<button type="button" class="cn-button${primary ? " cn-primary" : ""}" data-cn="${action}" data-value="${esc(value)}" data-i18n="${esc(label)}">${esc(label)}</button>`;
+  const check = (name, title, detail, checked, disabled = false) => KaiI18n.html`<label class="cn-permission"><input type="checkbox" name="${name}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""}><span><strong>${esc(title)}</strong><small>${esc(detail)}</small></span></label>`;
+  const field = (label, content) => KaiI18n.html`<label class="cn-field"><span>${esc(label)}</span>${content}</label>`;
   const logos = new Map(featured.filter(t => bundledLogos.has(t.slug)).map(t => [t.slug, "assets/connections/" + t.slug + ".svg"]));
-  const logo = t => `<span class="cn-logo"><span>${esc(t.name?.slice(0, 1).toUpperCase() || "+")}</span><img alt="" data-cn-logo="${esc(t.slug)}" ${logos.has(t.slug) ? 'src="' + esc(logos.get(t.slug)) + '"' : ""}></span>`;
+  const logo = t => KaiI18n.html`<span class="cn-logo"><span>${esc(t.name?.slice(0, 1).toUpperCase() || "+")}</span><img alt="" data-cn-logo="${esc(t.slug)}" ${logos.has(t.slug) ? 'src="' + esc(logos.get(t.slug)) + '"' : ""}></span>`;
   let epoch = 0, search = "", category = "", auth = "", keyboard;
   const logoJobs = new Set(), logoFailures = new Set();
   const categories = catalogData.categories;
@@ -40,12 +40,12 @@
     }
     function readinessHTML() {
       const hint = readiness();
-      return hint ? `<div class="cn-readiness"><div><strong>${esc(hint[0])}</strong><p>${esc(hint[1])}</p></div>${btn(hint[2], hint[3])}</div>` : "";
+      return hint ? KaiI18n.html`<div class="cn-readiness"><div><strong>${esc(hint[0])}</strong><p>${esc(hint[1])}</p></div>${btn(hint[2], hint[3])}</div>` : "";
     }
     function updateReadiness() {
       for (const el of host.querySelectorAll("[data-cn-readiness]")) el.innerHTML = readinessHTML();
       const managed = host.querySelector("#cn-managed-status");
-      if (managed) managed.textContent = status().managedAvailable == null ? "Checking server availability…" : status().managedAvailable ? status().signedIn ? "Available · KAI account signed in" : "Available · sign in to KAI to continue" : "Waiting for the server administrator to enable it";
+      if (managed) KaiI18n.setText(managed, status().managedAvailable == null ? "Checking server availability…" : status().managedAvailable ? status().signedIn ? "Available · KAI account signed in" : "Available · sign in to KAI to continue" : "Waiting for the server administrator to enable it");
     }
     function imageFallback() {
       for (const img of host.querySelectorAll("img[data-cn-logo]")) { img.addEventListener("error", () => { img.hidden = true; }, { once: true }); if (!img.getAttribute("src")) img.hidden = true; }
@@ -60,16 +60,16 @@
     }
     function draw() {
       if (!alive()) return;
-      host.innerHTML = `<div class="cn-workspace"><div class="cn-notice" role="status" aria-live="polite"></div><div class="cn-main"></div><div class="cn-modal-host"></div></div>`;
+      host.innerHTML = KaiI18n.html`<div class="cn-workspace"><div class="cn-notice" role="status" aria-live="polite"></div><div class="cn-main"></div><div class="cn-modal-host"></div></div>`;
       const out = host.querySelector(".cn-main");
       if (section === "setup") drawSetup(out); else if (section === "connected") drawConnected(out); else drawExplore(out);
       updateReadiness();
       if (drawer) drawDrawer(); imageFallback();
     }
     function drawExplore(out) {
-      out.innerHTML = `<div class="cn-hero"><div><span class="cn-kicker">YOUR WORLD, CONNECTED</span><h2>Bring your everyday apps to KAI.</h2><p>One connection. More useful conversations, a richer Brain, and routines that follow through.</p></div><div class="cn-route"><span class="cn-route-dot"></span>${esc(modeLabel())}${btn("Change", "setup")}</div></div>
+      out.innerHTML = KaiI18n.html`<div class="cn-hero"><div><span class="cn-kicker">YOUR WORLD, CONNECTED</span><h2>Bring your everyday apps to KAI.</h2><p>One connection. More useful conversations, a richer Brain, and routines that follow through.</p></div><div class="cn-route"><span class="cn-route-dot"></span>${esc(modeLabel())}${btn("Change", "setup")}</div></div>
         <div data-cn-readiness></div><div class="cn-searchbar"><span aria-hidden="true">⌕</span><input type="search" id="cn-search" aria-label="Search apps" placeholder="Search apps, tools, or what you want to do…" value="${esc(search)}">${btn("Refresh", "refresh")}</div>
-        <div class="cn-categories"><label class="cn-category-picker">Category<select id="cn-category"><option value="">All apps</option>${categories.map(c => `<option value="${esc(c.id)}" ${c.id === category ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></label><label class="cn-category-picker">Connection type<select id="cn-auth"><option value="">All types</option>${["Account sign-in", "API credentials", "No account required", "Provider setup"].map(a => `<option ${a === auth ? "selected" : ""}>${a}</option>`).join("")}</select></label></div>
+        <div class="cn-categories"><label class="cn-category-picker">Category<select id="cn-category"><option value="">All apps</option>${categories.map(c => KaiI18n.html`<option value="${esc(c.id)}" ${c.id === category ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></label><label class="cn-category-picker">Connection type<select id="cn-auth"><option value="">All types</option>${["Account sign-in", "API credentials", "No account required", "Provider setup"].map(a => KaiI18n.html`<option value="${esc(a)}" data-i18n="${esc(a)}" ${a === auth ? "selected" : ""}>${a}</option>`).join("")}</select></label></div>
         <div class="cn-list-heading"><h3>Explore apps</h3><span id="cn-count"></span></div><div class="cn-app-grid" id="cn-apps"></div><div class="cn-more" id="cn-more"></div>
         <div class="cn-bottom-note">Sign in securely, then choose the actions and data KAI can use. ${btn("Connection settings", "setup")}</div>`;
       drawCards();
@@ -77,8 +77,8 @@
     function drawCards() {
       const out = host.querySelector("#cn-apps"); if (!out) return;
       const shown = items;
-      host.querySelector("#cn-count").textContent = `${shown.length} of ${matches.length.toLocaleString()} apps · ${featured.length.toLocaleString()} in catalog`;
-      out.innerHTML = shown.map(t => { const active = connections().some(c => c.toolkit === t.slug && c.status === "ACTIVE"); return `<button type="button" class="cn-app-card" data-cn="app" data-value="${esc(t.slug)}">${logo(t)}<strong>${esc(t.name)}</strong><span class="cn-auth-label">${esc(authLabel(t))}</span><span class="cn-card-footer"><b class="${active ? "cn-connected-label" : ""}">${active ? "Connected ✓" : "Connect ↗"}</b></span></button>`; }).join("") || `<div class="cn-empty"><h3>${loading ? "Looking for apps…" : "No apps match that search"}</h3><p>Try an app name or another category.</p></div>`;
+      KaiI18n.setText(host.querySelector("#cn-count"), KaiI18n.message`${shown.length} of ${matches.length.toLocaleString()} apps · ${featured.length.toLocaleString()} in catalog`);
+      out.innerHTML = shown.map(t => { const active = connections().some(c => c.toolkit === t.slug && c.status === "ACTIVE"); return KaiI18n.html`<button type="button" class="cn-app-card" data-cn="app" data-value="${esc(t.slug)}">${logo(t)}<strong>${esc(t.name)}</strong><span class="cn-auth-label">${esc(authLabel(t))}</span><span class="cn-card-footer"><b class="${active ? "cn-connected-label" : ""}">${active ? "Connected ✓" : "Connect ↗"}</b></span></button>`; }).join("") || KaiI18n.html`<div class="cn-empty"><h3>${loading ? "Looking for apps…" : "No apps match that search"}</h3><p>Try an app name or another category.</p></div>`;
       host.querySelector("#cn-more").innerHTML = nextCursor ? btn("Show more apps", "more") : ""; imageFallback(); void loadLogos();
     }
     async function catalog(append = false) {
@@ -89,58 +89,58 @@
       items = matches.slice(0, pageSize); nextCursor = matches.length > pageSize; realCatalog = true; loading = false; drawCards();
     }
     function drawConnected(out) {
-      out.innerHTML = `<div class="cn-list-heading"><div><h2>Your connected apps</h2><p>Choose what KAI can use, and what belongs in your Brain.</p></div>${btn("Connect an app", "explore", "", true)}${btn("Refresh", "refresh")}</div><div class="cn-account-grid">${connections().map(c => {
+      out.innerHTML = KaiI18n.html`<div class="cn-list-heading"><div><h2>Your connected apps</h2><p>Choose what KAI can use, and what belongs in your Brain.</p></div>${btn("Connect an app", "explore", "", true)}${btn("Refresh", "refresh")}</div><div class="cn-account-grid">${connections().map(c => {
         const t = featured.find(t => t.slug === c.toolkit) || { slug: c.toolkit, name: c.toolkit };
-        return `<article class="cn-account-card"><div class="cn-account-top">${logo(t)}<span class="cn-status ${c.status === "ACTIVE" ? "active" : ""}">${esc(c.status === "ACTIVE" ? "Connected" : c.status === "EXPIRED" ? "Reconnect needed" : c.status.toLowerCase())}</span></div><h3>${esc(t.name)}</h3><p class="cn-account-name">${esc(c.name)}</p><div class="cn-account-detail">${c.operations.length} selected actions · ${c.allowSync ? "Brain sync available" : "Sync off"}</div><div class="cn-account-actions">${btn(c.status === "ACTIVE" ? "Manage access" : "Reconnect", c.status === "ACTIVE" ? "access" : "connect", c.status === "ACTIVE" ? c.id : c.toolkit, true)}${c.status === "ACTIVE" && c.operations.some(o => o.readOnly) ? btn("Collect into Brain", "collect", c.id) : ""}${btn("Disconnect", "disconnect", c.id)}</div></article>`;
-      }).join("") || `<div class="cn-empty"><h3>A little more connected.</h3><p>Add an app you use every day. KAI will help you choose what to bring along.</p>${btn("Explore apps", "explore", "", true)}</div>`}</div>`;
+        return KaiI18n.html`<article class="cn-account-card"><div class="cn-account-top">${logo(t)}<span class="cn-status ${c.status === "ACTIVE" ? "active" : ""}">${esc(c.status === "ACTIVE" ? "Connected" : c.status === "EXPIRED" ? "Reconnect needed" : c.status.toLowerCase())}</span></div><h3>${esc(t.name)}</h3><p class="cn-account-name">${esc(c.name)}</p><div class="cn-account-detail">${c.operations.length} selected actions · ${c.allowSync ? "Brain sync available" : "Sync off"}</div><div class="cn-account-actions">${btn(c.status === "ACTIVE" ? "Manage access" : "Reconnect", c.status === "ACTIVE" ? "access" : "connect", c.status === "ACTIVE" ? c.id : c.toolkit, true)}${c.status === "ACTIVE" && c.operations.some(o => o.readOnly) ? btn("Collect into Brain", "collect", c.id) : ""}${btn("Disconnect", "disconnect", c.id)}</div></article>`;
+      }).join("") || KaiI18n.html`<div class="cn-empty"><h3>A little more connected.</h3><p>Add an app you use every day. KAI will help you choose what to bring along.</p>${btn("Explore apps", "explore", "", true)}</div>`}</div>`;
       drawActivity(out);
     }
     function drawActivity(out) {
       const turns = (state.conversations || []).filter(t => t.actions?.length).sort((a,b) => Number(b.actions.some(x => x.status === "uncertain")) - Number(a.actions.some(x => x.status === "uncertain")) || b.at - a.at).slice(0, 12);
       if (!turns.length) return;
       const section = document.createElement("section"); section.className = "cn-recent-actions";
-      section.innerHTML = `<h2>Recent chat actions</h2><p>Results stay here if a conversation stops or KAI restarts.</p>${turns.map(t => `<details class="kai-action-results"><summary>${esc(t.question)}</summary>${t.actions.map(a => `<div><strong>${esc(a.name)}</strong><p>${esc(a.runId ? state.runs.find(r => r.id === a.runId)?.status || a.status : a.status)}</p><p>${esc(a.message || "")}</p><small>Receipt ${esc(a.id)}</small>${a.status === "uncertain" ? btn("I inspected the destination", "reviewReceipt", t.id + ":" + a.id) : ""}<details><summary>Result details</summary><pre>${esc(JSON.stringify(a.data ?? a.ids ?? {}, null, 2))}</pre></details></div>`).join("")}</details>`).join("")}`;
+      section.innerHTML = KaiI18n.html`<h2>Recent chat actions</h2><p>Results stay here if a conversation stops or KAI restarts.</p>${turns.map(t => KaiI18n.html`<details class="kai-action-results"><summary>${esc(t.question)}</summary>${t.actions.map(a => KaiI18n.html`<div><strong>${esc(a.name)}</strong><p>${esc(a.runId ? state.runs.find(r => r.id === a.runId)?.status || a.status : a.status)}</p><p>${esc(a.message || "")}</p><small>Receipt ${esc(a.id)}</small>${a.status === "uncertain" ? btn("I inspected the destination", "reviewReceipt", t.id + ":" + a.id) : ""}<details><summary>Result details</summary><pre>${esc(JSON.stringify(a.data ?? a.ids ?? {}, null, 2))}</pre></details></div>`).join("")}</details>`).join("")}`;
       out.append(section);
     }
     function drawSetup(out) {
       const s = status();
       const grants = Array.isArray(state.settings?.approvalGrants) ? state.settings.approvalGrants : [];
-      out.innerHTML = `<div class="cn-setup-intro"><h2>How would you like to connect?</h2><p>Both options open the same app catalog and secure sign-in flow.</p></div><div data-cn-readiness></div><form id="cn-settings"><div class="cn-mode-grid">
+      out.innerHTML = KaiI18n.html`<div class="cn-setup-intro"><h2>How would you like to connect?</h2><p>Both options open the same app catalog and secure sign-in flow.</p></div><div data-cn-readiness></div><form id="cn-settings"><div class="cn-mode-grid">
         <label class="cn-mode-card"><input type="radio" name="mode" value="managed" ${s.mode !== "personal" ? "checked" : ""}><span class="cn-mode-icon">K</span><strong>KAI-managed</strong><p>Use the Composio service configured by your KAI server. No Composio key to enter.</p><small id="cn-managed-status"></small></label>
         <label class="cn-mode-card"><input type="radio" name="mode" value="personal" ${s.mode === "personal" ? "checked" : ""}><span class="cn-mode-icon personal">C</span><strong>My Composio key</strong><p>Connect through your own Composio project. Manage your usage and billing directly.</p><small>${s.personalConfigured ? "Your key is saved securely" : "Bring your own project API key"}</small></label></div>
-        <div class="cn-key-panel" ${s.mode !== "personal" ? "hidden" : ""}>${field("Composio project API key", `<input name="key" type="password" autocomplete="off" placeholder="${s.personalConfigured ? "Saved securely · leave blank to keep" : "Paste your Composio key"}">`)}<p>Find your project key in <a href="https://dashboard.composio.dev/" target="_blank" rel="noopener noreferrer">Composio settings ↗</a>. KAI encrypts it on this computer.</p></div>
+        <div class="cn-key-panel" ${s.mode !== "personal" ? "hidden" : ""}>${field("Composio project API key", KaiI18n.html`<input name="key" type="password" autocomplete="off" placeholder="${s.personalConfigured ? "Saved securely · leave blank to keep" : "Paste your Composio key"}">`)}<p>Find your project key in <a href="https://dashboard.composio.dev/" target="_blank" rel="noopener noreferrer">Composio settings ↗</a>. KAI encrypts it on this computer.</p></div>
         <div class="cn-setup-actions"><button class="cn-button cn-primary" type="submit">Save connection method</button>${!s.signedIn ? btn("Sign in to KAI", "signin") : ""}</div><p class="cn-muted">Connected accounts stay with the Composio project that created them. Changing methods does not move or disconnect those accounts.</p></form>
-        <section class="cn-recent-actions"><h2>Always allowed actions</h2><p>These exact capabilities can run in an attended KAI request without another prompt. Account and action permission changes invalidate connected-app grants.</p>${grants.length ? grants.map(g => `<div><strong>${esc(g.label)}</strong>${btn("Revoke", "revokeGrant", g.key)}</div>`).join("") : '<p class="cn-muted">No actions are always allowed.</p>'}</section>`;
+        <section class="cn-recent-actions"><h2>Always allowed actions</h2><p>These exact capabilities can run in an attended KAI request without another prompt. Account and action permission changes invalidate connected-app grants.</p>${grants.length ? grants.map(g => KaiI18n.html`<div><strong>${esc(g.label)}</strong>${btn("Revoke", "revokeGrant", g.key)}</div>`).join("") : KaiI18n.html('<p class="cn-muted">No actions are always allowed.</p>')}</section>`;
     }
     function openDrawer(title, content) {
       if (!host.querySelector(".cn-drawer")) focusBeforeDrawer = document.activeElement;
-      host.querySelector(".cn-modal-host").innerHTML = `<div class="cn-overlay"><section class="cn-drawer" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="cn-drawer-heading"><h2>${esc(title)}</h2>${btn("Close", "close")}</div><div class="cn-notice" role="status"></div>${content}</section></div>`; imageFallback(); host.querySelector(".cn-drawer button")?.focus();
+      host.querySelector(".cn-modal-host").innerHTML = KaiI18n.html`<div class="cn-overlay"><section class="cn-drawer" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="cn-drawer-heading"><h2>${esc(title)}</h2>${btn("Close", "close")}</div><div class="cn-notice" role="status"></div>${content}</section></div>`; imageFallback(); host.querySelector(".cn-drawer button")?.focus();
     }
     function drawDrawer() {
       if (!drawer) return; const d = drawer;
       if (d.kind === "app") {
         const t = d.app, active = connections().filter(c => c.toolkit === t.slug && c.status === "ACTIVE");
-        openDrawer(t.name, `<div class="cn-connect-intro">${logo(t)}<h3>Connect ${esc(t.name)} to your world.</h3><p>${esc(t.description)}</p><span class="cn-status">${esc(authLabel(t))} · ${t.toolCount || 0} actions</span></div>${readinessHTML()}${ready() ? `<ol class="cn-connect-steps"><li>${authLabel(t) === "Account sign-in" ? `Sign in to ${esc(t.name)} in your browser.` : authLabel(t) === "No account required" ? "Open the tool setup in your browser." : "Enter the credentials requested by the provider in your browser."}</li><li>Choose the account and permissions to share.</li><li>Return to KAI and choose what it can use.</li></ol><p class="cn-muted">${esc(modeLabel())} handles the connection through Composio. Available authentication methods depend on the provider and your Composio project. Some apps require administrator setup or provider credentials.</p>${active.map(c => `<div class="cn-existing"><span>${esc(c.name)}</span>${btn("Manage", "access", c.id)}</div>`).join("")}${btn(active.length ? "Connect another account" : "Connect " + t.name, "connect", t.slug, true)}` : ""}`);
+        openDrawer(t.name, KaiI18n.html`<div class="cn-connect-intro">${logo(t)}<h3>Connect ${esc(t.name)} to your world.</h3><p>${esc(t.description)}</p><span class="cn-status">${esc(authLabel(t))} · ${t.toolCount || 0} actions</span></div>${readinessHTML()}${ready() ? KaiI18n.html`<ol class="cn-connect-steps"><li>${authLabel(t) === "Account sign-in" ? `Sign in to ${esc(t.name)} in your browser.` : authLabel(t) === "No account required" ? "Open the tool setup in your browser." : "Enter the credentials requested by the provider in your browser."}</li><li>Choose the account and permissions to share.</li><li>Return to KAI and choose what it can use.</li></ol><p class="cn-muted">${esc(modeLabel())} handles the connection through Composio. Available authentication methods depend on the provider and your Composio project. Some apps require administrator setup or provider credentials.</p>${active.map(c => KaiI18n.html`<div class="cn-existing"><span>${esc(c.name)}</span>${btn("Manage", "access", c.id)}</div>`).join("")}${btn(active.length ? "Connect another account" : "Connect " + t.name, "connect", t.slug, true)}` : ""}`);
       } else if (d.kind === "waiting") {
-        openDrawer("Finish connecting", `<div class="cn-connect-intro"><div class="cn-wait-orb">↗</div><h3>Continue in your browser</h3><p>Sign in and approve the account you want to connect. KAI will check when you return.</p></div><div class="cn-setup-actions">${btn("Check connection", "check", "", true)}${btn("Open sign-in again", "reopen")}</div><p class="cn-muted">The check stops after five minutes. You can start again if the link expires.</p>`);
+        openDrawer("Finish connecting", KaiI18n.html`<div class="cn-connect-intro"><div class="cn-wait-orb">↗</div><h3>Continue in your browser</h3><p>Sign in and approve the account you want to connect. KAI will check when you return.</p></div><div class="cn-setup-actions">${btn("Check connection", "check", "", true)}${btn("Open sign-in again", "reopen")}</div><p class="cn-muted">The check stops after five minutes. You can start again if the link expires.</p>`);
       } else if (d.kind === "access") {
         const c = d.connection;
-        openDrawer("Manage " + c.name, `<form id="cn-access">${field("Account name", `<input name="name" value="${esc(c.name)}" maxlength="100">`)}
+        openDrawer("Manage " + c.name, KaiI18n.html`<form id="cn-access">${field("Account name", KaiI18n.html`<input name="name" value="${esc(c.name)}" maxlength="100">`)}
           ${check("allowAgent", "Use in conversations", "KAI asks before using an action unless you explicitly make that account action always allowed.", c.allowAgent || !c.operations.length)}
           ${check("allowWrite", "Allow reviewed actions", "Changes and actions without verified read-only behavior always ask for approval.", c.allowWrite)}
           ${check("allowSync", "Allow Brain and workflow reads", "Only selected, verified read actions can run in the background.", c.allowSync)}
-          ${window.KaiConnectionProfiles?.[c.toolkit] ? `<div class="cn-profile"><h3>${esc(window.KaiConnectionProfiles[c.toolkit].name)}</h3><p>${esc(window.KaiConnectionProfiles[c.toolkit].guidance)}</p><div class="cn-account-actions">${window.KaiConnectionProfiles[c.toolkit].searches.map(q => btn(q, "profileSearch", q)).join("")}</div><p>Choose the actions you need below, then Save access. These shortcuts do not grant permissions.</p></div>` : ""}<div class="cn-actions-heading"><h3>Choose actions for KAI</h3><span id="cn-selected-count"></span></div><input type="search" id="cn-action-search" aria-label="Search app actions" placeholder="Search actions and data…"><div class="cn-tool-list" id="cn-tool-list"></div><div id="cn-tool-more"></div>
+          ${window.KaiConnectionProfiles?.[c.toolkit] ? KaiI18n.html`<div class="cn-profile"><h3>${esc(window.KaiConnectionProfiles[c.toolkit].name)}</h3><p>${esc(window.KaiConnectionProfiles[c.toolkit].guidance)}</p><div class="cn-account-actions">${window.KaiConnectionProfiles[c.toolkit].searches.map(q => btn(q, "profileSearch", q)).join("")}</div><p>Choose the actions you need below, then Save access. These shortcuts do not grant permissions.</p></div>` : ""}<div class="cn-actions-heading"><h3>Choose actions for KAI</h3><span id="cn-selected-count"></span></div><input type="search" id="cn-action-search" aria-label="Search app actions" placeholder="Search actions and data…"><div class="cn-tool-list" id="cn-tool-list"></div><div id="cn-tool-more"></div>
           <div class="cn-sticky-actions"><button class="cn-button cn-primary" type="submit">Save access</button>${c.operations.length ? btn("Try an action", "try", c.id) : ""}${c.operations.some(o => o.readOnly) ? btn("Collect into Brain", "collect", c.id) : ""}</div></form>`); drawTools();
       } else if (d.kind === "collect" || d.kind === "try") {
         const c = d.connection, ops = c.operations.filter(o => d.kind !== "collect" || o.readOnly);
         const chosen = ops.find(o => o.id === d.operation) || ops[0]; d.operation = chosen?.id;
-        openDrawer(d.kind === "collect" ? "Collect into Brain" : "Try an action", `<form id="cn-run-action">${d.kind === "collect" ? field("Source name", `<input name="sourceName" value="${esc(c.name + " · " + (chosen?.name || "Source"))}" required maxlength="100">`) : ""}${field("What should KAI " + (d.kind === "collect" ? "collect?" : "do?"), `<select id="cn-operation">${ops.map(o => `<option value="${esc(o.id)}" ${o.id === d.operation ? "selected" : ""}>${esc(o.name)}</option>`).join("")}</select>`)}<p class="cn-muted">${esc(chosen?.description)}</p><div class="cn-argument-fields">${argumentFields(chosen)}</div>${d.kind === "collect" ? check("autoSync", "Keep this source up to date", "Refresh every 20 minutes while KAI is open.", false) : ""}<div class="cn-sticky-actions"><button class="cn-button cn-primary" type="submit">${d.kind === "collect" ? "Add to Brain" : "Run action"}</button></div><pre class="cn-result" id="cn-result" hidden></pre></form>`);
+        openDrawer(d.kind === "collect" ? "Collect into Brain" : "Try an action", KaiI18n.html`<form id="cn-run-action">${d.kind === "collect" ? field("Source name", KaiI18n.html`<input name="sourceName" value="${esc(c.name + " · " + (chosen?.name || "Source"))}" required maxlength="100">`) : ""}${field("What should KAI " + (d.kind === "collect" ? "collect?" : "do?"), KaiI18n.html`<select id="cn-operation">${ops.map(o => KaiI18n.html`<option value="${esc(o.id)}" ${o.id === d.operation ? "selected" : ""}>${esc(o.name)}</option>`).join("")}</select>`)}<p class="cn-muted">${esc(chosen?.description)}</p><div class="cn-argument-fields">${argumentFields(chosen)}</div>${d.kind === "collect" ? check("autoSync", "Keep this source up to date", "Refresh every 20 minutes while KAI is open.", false) : ""}<div class="cn-sticky-actions"><button class="cn-button cn-primary" type="submit">${d.kind === "collect" ? "Add to Brain" : "Run action"}</button></div><pre class="cn-result" id="cn-result" hidden></pre></form>`);
       }
     }
     function drawTools() {
       if (drawer?.kind !== "access") return; const d = drawer, target = host.querySelector("#cn-tool-list"); if (!target) return;
       const writes = host.querySelector('[name="allowWrite"]').checked;
-      target.innerHTML = d.tools.map(t => `<label class="cn-tool"><input type="checkbox" data-cn-tool="${esc(t.id)}" ${d.selected.has(t.id) ? "checked" : ""} ${!t.readOnly && !writes ? "disabled" : ""}><span><strong>${esc(t.name)}</strong><small>${esc(t.description.slice(0, 180))}</small><b class="cn-tool-type">${t.readOnly ? "Read only" : "Review required"}</b></span></label>`).join("") || '<p class="cn-muted">No matching actions. Try another search.</p>';
+      target.innerHTML = d.tools.map(t => KaiI18n.html`<label class="cn-tool"><input type="checkbox" data-cn-tool="${esc(t.id)}" ${d.selected.has(t.id) ? "checked" : ""} ${!t.readOnly && !writes ? "disabled" : ""}><span><strong>${esc(t.name)}</strong><small>${esc(t.description.slice(0, 180))}</small><b class="cn-tool-type">${t.readOnly ? "Read only" : "Review required"}</b></span></label>`).join("") || KaiI18n.html('<p class="cn-muted">No matching actions. Try another search.</p>');
       host.querySelector("#cn-selected-count").textContent = d.selected.size + " selected"; host.querySelector("#cn-tool-more").innerHTML = d.nextCursor ? btn("More actions", "moreTools") : "";
     }
     async function loadTools(append = false) {
@@ -152,16 +152,16 @@
       drawTools();
     }
     function argumentFields(op) {
-      if (!op) return '<p class="cn-muted">Select and save a read action in Manage access first.</p>';
+      if (!op) return KaiI18n.html('<p class="cn-muted">Select and save a read action in Manage access first.</p>');
       return Object.entries(op.schema.properties || {}).map(([key, p]) => {
         const required = op.schema.required?.includes(key), title = p.title || key.replace(/_/g, " ");
         const attrs = `data-cn-arg="${esc(key)}" ${required ? "required" : ""}`; let control;
-        if (p.enum) control = `<select ${attrs}><option value="">Choose…</option>${p.enum.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join("")}</select>`;
-        else if (p.type === "boolean") control = `<select ${attrs}><option value="">Use default</option><option value="true">Yes</option><option value="false">No</option></select>`;
-        else if (["object", "array"].includes(p.type)) control = `<textarea ${attrs} rows="3" placeholder="${p.type === "array" ? "[]" : "{}"}"></textarea>`;
-        else control = `<input ${attrs} type="${["integer", "number"].includes(p.type) ? "number" : "text"}" ${p.type === "number" ? 'step="any"' : ""} placeholder="${esc(p.default === undefined ? "" : String(p.default))}">`;
-        return field(title + (required ? " *" : ""), control + `<small>${esc(String(p.description || "").slice(0, 220))}</small>`);
-      }).join("") || '<p class="cn-muted">This action needs no extra information.</p>';
+        if (p.enum) control = KaiI18n.html`<select ${attrs}><option value="">Choose…</option>${p.enum.map(v => KaiI18n.html`<option value="${esc(v)}">${esc(v)}</option>`).join("")}</select>`;
+        else if (p.type === "boolean") control = KaiI18n.html`<select ${attrs}><option value="">Use default</option><option value="true">Yes</option><option value="false">No</option></select>`;
+        else if (["object", "array"].includes(p.type)) control = KaiI18n.html`<textarea ${attrs} rows="3" placeholder="${p.type === "array" ? "[]" : "{}"}"></textarea>`;
+        else control = KaiI18n.html`<input ${attrs} type="${["integer", "number"].includes(p.type) ? "number" : "text"}" ${p.type === "number" ? 'step="any"' : ""} placeholder="${esc(p.default === undefined ? "" : String(p.default))}">`;
+        return field(title + (required ? " *" : ""), control + KaiI18n.html`<small>${esc(String(p.description || "").slice(0, 220))}</small>`);
+      }).join("") || KaiI18n.html('<p class="cn-muted">This action needs no extra information.</p>');
     }
     function readArguments(form, op) {
       const out = {}; for (const el of form.querySelectorAll("[data-cn-arg]")) {
@@ -248,7 +248,7 @@
         if (f.id === "cn-access") { await manage("composioPermissions", { id: drawer.connection.id, name: f.elements.name.value, allowAgent: f.elements.allowAgent.checked, allowWrite: f.elements.allowWrite.checked, allowSync: f.elements.allowSync.checked, tools: [...drawer.selected].map(id => ({ id, version: drawer.known.get(id)?.version || "latest" })) }); state = await manage("status"); drawer = null; if (alive()) navigate("connected"); }
         if (f.id === "cn-run-action") {
           const d = drawer, op = d.connection.operations.find(o => o.id === d.operation), variables = readArguments(f, op);
-          if (d.kind === "collect") { const source = d.source || await manage("source", { connectionId: d.connection.id, operationId: op.id, variables, name: f.elements.sourceName.value, autoSync: f.elements.autoSync.checked }); d.source = source; for (const el of f.querySelectorAll("input, select, textarea")) el.disabled = true; try { await manage("sync", { id: source.id }); notice("Added to Brain and synced. Find it under Brain → Sources."); b.textContent = "Refresh this source"; } catch (error) { b.textContent = "Retry sync"; throw new Error("Source added to Brain, but its first sync failed: " + error.message); } }
+          if (d.kind === "collect") { const source = d.source || await manage("source", { connectionId: d.connection.id, operationId: op.id, variables, name: f.elements.sourceName.value, autoSync: f.elements.autoSync.checked }); d.source = source; for (const el of f.querySelectorAll("input, select, textarea")) el.disabled = true; try { await manage("sync", { id: source.id }); notice("Added to Brain and synced. Find it under Brain → Sources."); KaiI18n.setText(b, "Refresh this source"); } catch (error) { KaiI18n.setText(b, "Retry sync"); throw new Error("Source added to Brain, but its first sync failed: " + error.message); } }
           else { const result = await manage("request", { connectionId: d.connection.id, operationId: op.id, variables }); const out = host.querySelector("#cn-result"); out.hidden = false; out.textContent = result; notice("Action completed."); }
         }
       } catch (error) { notice(error.message, true); } finally { busy = false; b.disabled = false; }

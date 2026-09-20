@@ -28,11 +28,14 @@ app.whenReady().then(async () => {
     if (key === "getCursorScreenPoint") return () => globalThis.__kaiCursor || screen.getCursorScreenPoint();
     return typeof target[key] === "function" ? target[key].bind(target) : target[key];
   } });
+  const prefs = new JsonStore(path.join(dir, "window.json"), {});
   const controller = createMascotController({ BrowserWindow, screen: fixtureScreen, desktopCapturer, ipcMain, app,
     globalShortcut: require("electron").globalShortcut, describeModel: () => ({ kind: "local", label: "Koinos Fast", vision: true }),
     shell: { ...shell, openExternal: async target => { (globalThis.__openedSites ||= []).push(target); }, openPath: async target => { globalThis.__openedFolders.push(target); return ""; } },
     dialog: { showMessageBox: async (_win, options) => { globalThis.__folderApprovals.push(options); return { response: globalThis.__approveFolder ? 1 : 0 }; } },
-    prefs: new JsonStore(path.join(dir, "window.json"), {}), origin: fixture.origin, getMainWindow: () => main });
+    prefs, origin: fixture.origin, getMainWindow: () => main });
+  require("../../electron/language").registerLanguage({ ipcMain, app, store: prefs, origin: fixture.origin,
+    getMainWindow: () => main, getMascotWindow: () => controller.getWindow() });
   const { DesktopProviders, registerProviderIPC } = require("../../electron/providers");
   const providerService = new DesktopProviders({ dataDir: dir, safeStorage: require("electron").safeStorage,
     privacyMode: () => "local-first", fetchImpl: async (url, options) => {

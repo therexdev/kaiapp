@@ -74,7 +74,7 @@ function clientFixture(overrides = {}) {
     if (url === "/core/chat/completions") return new Response('data: {"choices":[{"delta":{"content":"Synthetic fixture response."}}]}\n\ndata: [DONE]\n\n');
     throw new Error("unexpected fetch " + url);
   };
-  const env = vm.createContext({ window, document, fetch, DOMException, AbortController, Response, TextDecoder, URL, setInterval, clearInterval });
+  const env = vm.createContext({ KaiI18n: require("../../ui/i18n"), window, document, fetch, DOMException, AbortController, Response, TextDecoder, URL, setInterval, clearInterval });
   vm.runInContext(source("companion-client.js"), env); vm.runInContext(source("desktop-providers.js"), env);
   return { env, window, calls, document, node };
 }

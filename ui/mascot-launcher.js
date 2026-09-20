@@ -9,7 +9,7 @@
       const model = typeof composedChatModel === "function" ? composedChatModel() : null;
       await window.koinosShell.launchMascot({ model });
     } catch {
-      error.textContent = "KAI could not open. Try again, or restart the app.";
+      KaiI18n.setText(error, "KAI could not open. Try again, or restart the app.");
       error.hidden = false;
     } finally { button.disabled = false; }
   });

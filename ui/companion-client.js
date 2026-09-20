@@ -31,7 +31,7 @@
         title.textContent = action.name; detail.textContent = action.runStatus || action.status;
         row.append(title, detail);
         if (action.message) { const message = document.createElement("p"); message.textContent = action.message; row.append(message); }
-        for (const link of action.links || []) { try { const u = new URL(link); if (u.protocol !== "https:" || u.username || u.password) continue; const a = document.createElement("a"); a.href = u.href; a.target = "_blank"; a.rel = "noopener noreferrer"; a.textContent = "Open result ↗"; row.append(a); } catch {} }
+        for (const link of action.links || []) { try { const u = new URL(link); if (u.protocol !== "https:" || u.username || u.password) continue; const a = document.createElement("a"); a.href = u.href; a.target = "_blank"; a.rel = "noopener noreferrer"; KaiI18n.setText(a, "Open result ↗"); row.append(a); } catch {} }
         panel.append(row);
       }
     }

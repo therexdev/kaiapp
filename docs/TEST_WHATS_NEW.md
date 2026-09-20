@@ -1,3 +1,9 @@
+## App interface languages
+
+- Choose English, Español, Português (Brasil), Français or Deutsch when first opening the app. The dialog previews your choice and remembers it after Continue. Existing users see it once after this update.
+- Change it later in **Settings → Language**, without restarting or losing an unsent message. The desktop companion and tray follow the same preference.
+- Translations are included in the app and work offline. User content, wallet addresses, model choices and voice settings stay as entered. Some advanced help and service diagnostics still fall back to English; native-speaker feedback on the initial translations is welcome.
+
 ## Koinos Node with Local-Only AI
 
 - Enabling Koinos Node now opens its UI while AI Privacy stays Local-Only. Node synchronization, production and explicit wallet actions use their own controls without requiring online AI.

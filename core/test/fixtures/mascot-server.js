@@ -66,7 +66,7 @@ async function startMascotServer(dataDir) {
     }
     if (url.pathname === "/main-fixture") {
       res.writeHead(200, { "content-type": "text/html" });
-      return res.end('<!doctype html><title>Main app fixture</title><button id="launch-kai" hidden>Launch KAI</button><p id="kai-launch-error" hidden></p><script src="/app-navigation.js"></script><script src="/mascot-launcher.js"></script>');
+      return res.end('<!doctype html><title>Main app fixture</title><button id="launch-kai" hidden>Launch KAI</button><p id="kai-launch-error" hidden></p><script src="/i18n.js"></script><script src="/app-navigation.js"></script><script src="/mascot-launcher.js"></script>');
     }
     if (req.method !== "GET") return output({ error: "Not found" }, 404);
     const relative = url.pathname === "/" ? (state.mainAtRoot ? "index.html" : "mascot.html") : url.pathname.replace(/^\/+/, "");

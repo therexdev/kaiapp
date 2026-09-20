@@ -73,7 +73,7 @@
     choices.className = "dev-tool-choices";
     const syncCount = () => {
       const count = choices.querySelectorAll('input[type="checkbox"]:checked').length;
-      summary.textContent = `Tools · ${count} selected`;
+      KaiI18n.setText(summary, KaiI18n.message`Tools · ${count} selected`);
     };
     choices.addEventListener("change", syncCount);
     picker.append(summary, choices);
@@ -115,7 +115,7 @@
         // it never reads as a state that is already true.
         const sync = () => {
           const boxes = [...group.querySelectorAll(`.${cls}`)];
-          all.textContent = boxes.every((b) => b.checked) ? "None" : "All";
+          KaiI18n.setText(all, boxes.every((b) => b.checked) ? "None" : "All");
         };
         all.addEventListener("click", () => {
           const boxes = [...group.querySelectorAll(`.${cls}`)];
@@ -141,7 +141,7 @@
         box.checked = checked.includes(t.name);
         label.appendChild(box);
         const caption = document.createElement("span");
-        caption.textContent = `${t.label || t.name}${t.sensitive ? " ⚠" : ""}`;
+        KaiI18n.setText(caption, KaiI18n.message`${t.label || t.name}${t.sensitive ? " ⚠" : ""}`);
         label.appendChild(caption);
         group.appendChild(label);
       }
@@ -149,7 +149,7 @@
       choices.appendChild(group);
     }
     syncCount();
-    if (!groups.size) choices.textContent = "No tools available.";
+    if (!groups.size) KaiI18n.setText(choices, "No tools available.");
   }
 
   // ================== Multi-agent builder ==================
@@ -187,7 +187,7 @@
     human.appendChild(document.createTextNode("Human (asks you)"));
     const rm = document.createElement("button");
     rm.className = "linklike ag-remove";
-    rm.textContent = "Remove";
+    KaiI18n.setText(rm, "Remove");
     rm.addEventListener("click", () => card.remove());
     row.append(nameField, human, rm);
     const promptField = document.createElement("label");
@@ -260,7 +260,7 @@
       if (sel.id === "pg-source") {
         const opt = document.createElement("option");
         opt.value = "";
-        opt.textContent = "Team in the builder (JSON box)";
+        KaiI18n.setText(opt, "Team in the builder (JSON box)");
         sel.appendChild(opt);
       }
       for (const d of defs) {
@@ -273,7 +273,7 @@
     if (!defs.length) {
       const opt = document.createElement("option");
       opt.value = "";
-      opt.textContent = "(no saved teams yet)";
+      KaiI18n.setText(opt, "(no saved teams yet)");
       $("ag-defs").appendChild(opt);
     }
   }
@@ -367,7 +367,7 @@
     $("pg-input-row").hidden = true;
     $("btn-pg-run").disabled = true;
     $("btn-pg-stop").hidden = false;
-    $("pg-status").textContent = "running…";
+    KaiI18n.setText($("pg-status"), "running…");
     try {
       const resp = await fetch("/core/agents/run", {
         method: "POST",
@@ -388,14 +388,14 @@
           pgInputId = t.inputId;
           $("pg-input-row").hidden = false;
           $("pg-input").focus();
-          $("pg-status").textContent = `waiting for you (${t.name})…`;
+          KaiI18n.setText($("pg-status"), KaiI18n.message`waiting for you (${t.name})…`);
         }
         if (t?.type === "note") $("pg-status").textContent = t.detail;
         if (ev.done) done = ev;
       });
       if (!done) throw new Error("the run ended without a result");
       if (done.error) throw new Error(done.error);
-      $("pg-status").textContent = `ended: ${done.reason} — ${done.modelCalls} model calls`;
+      KaiI18n.setText($("pg-status"), KaiI18n.message`ended: ${done.reason} — ${done.modelCalls} model calls`);
     } catch (e) {
       showError(e.message);
       $("pg-status").textContent = "";
@@ -485,7 +485,7 @@
     out.hidden = false;
     out.textContent = "";
     $("btn-dev-run").disabled = true;
-    $("dev-run-status").textContent = "running…";
+    KaiI18n.setText($("dev-run-status"), "running…");
     try {
       const resp = await fetch("/core/teams/run", {
         method: "POST",
@@ -519,7 +519,7 @@
     out.hidden = false;
     out.textContent = "";
     $("btn-dev-bench").disabled = true;
-    $("dev-bench-status").textContent = "running…";
+    KaiI18n.setText($("dev-bench-status"), "running…");
     try {
       const resp = await fetch("/core/bench/run", {
         method: "POST",
@@ -571,7 +571,7 @@
     card.className = "kc-approval";
     const head = document.createElement("div");
     head.className = "kc-approval-head";
-    head.textContent = t.kind === "edit" ? `edit ${t.path}` : `run: ${t.cmd}`;
+    KaiI18n.setText(head, t.kind === "edit" ? `edit ${t.path}` : `run: ${t.cmd}`);
     card.appendChild(head);
     if (t.kind === "edit") {
       const pre = document.createElement("pre");
@@ -579,7 +579,7 @@
       for (const line of String(t.diff || "").split("\n")) {
         const span = document.createElement("span");
         span.className = line.startsWith("+") ? "kc-add" : line.startsWith("-") ? "kc-del" : "";
-        span.textContent = `${line}\n`;
+        KaiI18n.setText(span, KaiI18n.message`${line}\n`);
         pre.appendChild(span);
       }
       card.appendChild(pre);
@@ -588,10 +588,10 @@
     row.className = "form-row";
     const yes = document.createElement("button");
     yes.className = "primary small";
-    yes.textContent = t.kind === "edit" ? "Apply edit" : "Run command";
+    KaiI18n.setText(yes, t.kind === "edit" ? "Apply edit" : "Run command");
     const no = document.createElement("button");
     no.className = "small";
-    no.textContent = "Deny";
+    KaiI18n.setText(no, "Deny");
     const answer = async (approved) => {
       yes.disabled = no.disabled = true;
       card.classList.add("answered");
@@ -601,7 +601,7 @@
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ approvalId: t.approvalId, approved }),
       }).catch(() => {});
-      $("kc-status").textContent = "running…";
+      KaiI18n.setText($("kc-status"), "running…");
     };
     yes.addEventListener("click", () => answer(true));
     no.addEventListener("click", () => answer(false));
@@ -626,7 +626,7 @@
     $("kc-trace").innerHTML = "";
     $("btn-kc-run").disabled = true;
     $("btn-kc-stop").hidden = false;
-    $("kc-status").textContent = "running…";
+    KaiI18n.setText($("kc-status"), "running…");
     try {
       const resp = await fetch("/core/code/run", {
         method: "POST",
@@ -646,7 +646,7 @@
         if (t?.type === "note") kcLine(t.text);
         if (t?.type === "approval-request") {
           kcApprovalCard(t);
-          $("kc-status").textContent = "waiting for your approval…";
+          KaiI18n.setText($("kc-status"), "waiting for your approval…");
         }
         if (ev.done) done = ev;
       });
@@ -657,18 +657,17 @@
         div.className = "pg-msg";
         const who = document.createElement("span");
         who.className = "pg-name";
-        who.textContent = "Koinos Code";
+        KaiI18n.setText(who, "Koinos Code");
         div.appendChild(who);
         div.appendChild(document.createTextNode(done.answer));
         $("kc-trace").appendChild(div);
         div.scrollIntoView({ block: "nearest" });
       }
-      $("kc-status").textContent =
-        done.reason === "budget"
+      KaiI18n.setText($("kc-status"), done.reason === "budget"
           ? "step budget exhausted — the task may be incomplete"
           : done.reason === "stopped"
             ? "stopped"
-            : `done — ${done.steps} tool step${done.steps === 1 ? "" : "s"}`;
+            : `done — ${done.steps} tool step${done.steps === 1 ? "" : "s"}`);
     } catch (e) {
       showError(e.message);
       $("kc-status").textContent = "";

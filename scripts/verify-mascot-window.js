@@ -206,6 +206,17 @@ async function main() {
       globalThis.__providerFixture.state.mainAtRoot = true;
       await globalThis.__kaiMain.loadURL(globalThis.__providerFixture.origin + "/");
     });
+    await main.waitForSelector("#language-dialog[open]");
+    await main.selectOption("#first-language", "de");
+    await main.click("#language-continue");
+    await main.waitForSelector("#language-dialog[open]", { state: "hidden" });
+    await mascot.waitForFunction(() => document.documentElement.lang === "de");
+    assert.equal(await mascot.evaluate(() => window.kaiLanguageBridge.get().then(value => value.language)), "de");
+    assert.equal(await mascot.evaluate(async () => { try { await window.kaiLanguageBridge.save("fr"); return false; } catch { return true; } }), true);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(dir, "window.json"), "utf8")).interfaceLanguage, "de");
+    await main.evaluate(() => window.kaiLanguageBridge.save("en"));
+    await mascot.waitForFunction(() => document.documentElement.lang === "en");
+    checkpoint("PASS: native first-launch language selection persists and updates the companion through sandboxed IPC.");
     const privateStatus = await main.evaluate(async () => {
       await window.kaiProviderBridge.save("openai", { key: "synthetic-native-provider-key", model: "gpt-fixture" });
       await window.kaiProviderBridge.save("anthropic", { key: "synthetic-native-provider-key", model: "claude-fixture" });

@@ -48,10 +48,10 @@ test("a window hidden in the tray can always still be quit", () => {
     /app\.on\("before-quit",\s*\(\)\s*=>\s*\{\s*quitting\s*=\s*true;?\s*\}\)/,
     "before-quit must set the quitting flag",
   );
-  assert.match(main, /label:\s*"Quit Koinos AI"/, "the tray menu needs a Quit item");
+  assert.match(main, /label:\s*tr\("Quit Koinos AI"\)/, "the tray menu needs a Quit item");
   assert.match(
     main,
-    /"Quit Koinos AI",\s*click:\s*\(\)\s*=>\s*\{\s*quitting\s*=\s*true;\s*app\.quit\(\);?\s*\}/,
+    /"Quit Koinos AI"\),\s*click:\s*\(\)\s*=>\s*\{\s*quitting\s*=\s*true;\s*app\.quit\(\);?\s*\}/,
     "the tray's Quit must force a real quit, not another trip to the tray",
   );
   // And the window must be shown again on relaunch — a second instance that

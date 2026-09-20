@@ -9,6 +9,16 @@
  */
 
 const { contextBridge, ipcRenderer } = require("electron");
+contextBridge.exposeInMainWorld("kaiLanguageBridge", {
+  get: () => ipcRenderer.invoke("shell:language"),
+  save: language => ipcRenderer.invoke("shell:set-language", language),
+  onChanged: callback => {
+    const listener = (_event, value) => callback(value);
+    ipcRenderer.on("shell:language-changed", listener);
+    return () => ipcRenderer.removeListener("shell:language-changed", listener);
+  },
+});
+
 
 contextBridge.exposeInMainWorld("kaiCompanionBridge", {
   manage: (action, input) => ipcRenderer.invoke("companion:manage", action, input),

@@ -87,7 +87,7 @@
     card.className = "kc-approval";
     const head = document.createElement("div");
     head.className = "kc-approval-head";
-    head.textContent = t.kind === "edit" ? `edit ${t.path}` : `run: ${t.cmd}`;
+    KaiI18n.setText(head, t.kind === "edit" ? `edit ${t.path}` : `run: ${t.cmd}`);
     card.appendChild(head);
     if (t.kind === "edit") {
       const pre = document.createElement("pre");
@@ -95,7 +95,7 @@
       for (const line of String(t.diff || "").split("\n")) {
         const span = document.createElement("span");
         span.className = line.startsWith("+") ? "kc-add" : line.startsWith("-") ? "kc-del" : "";
-        span.textContent = `${line}\n`;
+        KaiI18n.setText(span, KaiI18n.message`${line}\n`);
         pre.appendChild(span);
       }
       card.appendChild(pre);
@@ -104,10 +104,10 @@
     row.className = "form-row";
     const yes = document.createElement("button");
     yes.className = "primary small";
-    yes.textContent = t.kind === "edit" ? "Apply edit" : "Run command";
+    KaiI18n.setText(yes, t.kind === "edit" ? "Apply edit" : "Run command");
     const no = document.createElement("button");
     no.className = "small";
-    no.textContent = "Deny";
+    KaiI18n.setText(no, "Deny");
     const answer = async (approved) => {
       yes.disabled = no.disabled = true;
       card.classList.add("answered");
@@ -141,7 +141,7 @@
     card.className = "kc-approval";
     const head = document.createElement("div");
     head.className = "kc-approval-head";
-    head.textContent = "proposed plan — nothing has been changed yet";
+    KaiI18n.setText(head, "proposed plan — nothing has been changed yet");
     const body = document.createElement("div");
     body.className = "pg-msg";
     body.textContent = planText;
@@ -149,20 +149,20 @@
     row.className = "form-row";
     const go = document.createElement("button");
     go.className = "primary small";
-    go.textContent = "Approve and run";
+    KaiI18n.setText(go, "Approve and run");
     const no = document.createElement("button");
     no.className = "small";
-    no.textContent = "Discard";
+    KaiI18n.setText(no, "Discard");
     go.addEventListener("click", () => {
       go.disabled = no.disabled = true;
       card.classList.add("answered");
-      head.textContent = "plan approved";
+      KaiI18n.setText(head, "plan approved");
       run(task, { plan: planText });
     });
     no.addEventListener("click", () => {
       go.disabled = no.disabled = true;
       card.classList.add("answered");
-      head.textContent = "plan discarded";
+      KaiI18n.setText(head, "plan discarded");
       status("");
     });
     row.append(go, no);
@@ -185,7 +185,7 @@
       const sub = document.createElement("span");
       sub.className = "kc-sub";
       // A moved or deleted folder is SAID, not silently dropped.
-      sub.textContent = p.missing ? "folder not found" : p.path;
+      KaiI18n.setText(sub, p.missing ? "folder not found" : p.path);
       b.append(name, sub);
       b.addEventListener("click", () => selectProject(p.id));
       host.appendChild(b);
@@ -204,7 +204,7 @@
       t.textContent = s.title;
       const sub = document.createElement("span");
       sub.className = "kc-sub";
-      sub.textContent = `${s.turns} turn${s.turns === 1 ? "" : "s"}`;
+      KaiI18n.setText(sub, KaiI18n.message`${s.turns} turn${s.turns === 1 ? "" : "s"}`);
       b.append(t, sub);
       b.addEventListener("click", () => selectSession(s.id));
       host.appendChild(b);
@@ -367,14 +367,14 @@
       if (seq !== kc.browseSeq) return;
       kc.browsePath = j.path || "";
       $("kc-browse-path").value = kc.browsePath;
-      $("kc-browse-here").textContent = kc.browsePath ? `Selected: ${kc.browsePath}` : "Pick a starting point";
+      KaiI18n.setText($("kc-browse-here"), kc.browsePath ? `Selected: ${kc.browsePath}` : "Pick a starting point");
       $("btn-kc-browse-use").disabled = !kc.browsePath;
       const host = $("kc-browse-list");
       host.innerHTML = "";
       if (j.parent) {
         const up = document.createElement("button");
         up.className = "kc-browse-item up";
-        up.textContent = "⬆ up a level";
+        KaiI18n.setText(up, "⬆ up a level");
         up.addEventListener("click", () => browse(j.parent));
         host.appendChild(up);
       }
@@ -389,7 +389,7 @@
       if (!j.start && !(j.entries || []).length) {
         const empty = document.createElement("div");
         empty.className = "kc-browse-item up";
-        empty.textContent = "(no folders in here — you can still use it)";
+        KaiI18n.setText(empty, "(no folders in here — you can still use it)");
         host.appendChild(empty);
       }
       startError("");
@@ -435,7 +435,7 @@
         for (const r of j.repos || []) {
           const b = document.createElement("button");
           b.className = "kc-browse-item";
-          b.textContent = `${r.private ? "🔒" : "📦"} ${r.full}`;
+          KaiI18n.setText(b, KaiI18n.message`${r.private ? "🔒" : "📦"} ${r.full}`);
           b.title = r.description || r.full;
           b.addEventListener("click", () => {
             $("kc-clone-repo").value = r.full;
@@ -480,7 +480,7 @@
     if (!repo) return startError("Name the repository — owner/name, or its GitHub URL.");
     if (!parentDir) return startError("Choose a folder to clone into.");
     $("btn-kc-clone-go").disabled = true;
-    $("kc-clone-status").textContent = "cloning…";
+    KaiI18n.setText($("kc-clone-status"), "cloning…");
     startError("");
     try {
       // Core clones AND registers the project; going straight into it is the
@@ -515,8 +515,8 @@
         return;
       }
       $("btn-kc-gh").hidden = false;
-      $("btn-kc-gh").textContent = g.connected ? "Disconnect GitHub" : "Connect GitHub";
-      el.textContent = g.connected ? `${g.login} (${g.tokenTail})` : "Not connected";
+      KaiI18n.setText($("btn-kc-gh"), g.connected ? "Disconnect GitHub" : "Connect GitHub");
+      KaiI18n.setText(el, g.connected ? `${g.login} (${g.tokenTail})` : "Not connected");
     } catch (e) {
       $("kc-gh-status").textContent = e.message;
     }
@@ -551,7 +551,7 @@
       input.autocomplete = "off";
       const save = document.createElement("button");
       save.className = "primary small";
-      save.textContent = "Connect";
+      KaiI18n.setText(save, "Connect");
       const connect = async () => {
         const token = input.value.trim();
         if (!token) return;
@@ -576,7 +576,7 @@
       panel.insertBefore(row, panel.querySelector(".form-row"));
       const note = document.createElement("div");
       note.className = "kc-choice-sub";
-      note.textContent = "Stored on this machine only, never shown again, and sent nowhere but github.com.";
+      KaiI18n.setText(note, "Stored on this machine only, never shown again, and sent nowhere but github.com.");
       panel.insertBefore(note, row.nextSibling);
     }
     $("kc-token")?.focus();
@@ -637,39 +637,39 @@
 
   $("btn-kc-branch").addEventListener("click", async () => {
     const name = gitInput();
-    if (!name) return ($("kc-git-status").textContent = "Type a branch name first.");
+    if (!name) return (KaiI18n.setText($("kc-git-status"), "Type a branch name first."));
     if (await gitAction("/core/code/github/branch", { name }, "switching branch…")) {
-      $("kc-git-status").textContent = `on ${name}`;
+      KaiI18n.setText($("kc-git-status"), KaiI18n.message`on ${name}`);
       clearGitInput();
     }
   });
 
   $("btn-kc-commit").addEventListener("click", async () => {
     const message = gitInput();
-    if (!message) return ($("kc-git-status").textContent = "Type a commit message first.");
+    if (!message) return (KaiI18n.setText($("kc-git-status"), "Type a commit message first."));
     if (await gitAction("/core/code/github/commit", { message }, "committing…")) {
-      $("kc-git-status").textContent = "committed";
+      KaiI18n.setText($("kc-git-status"), "committed");
       clearGitInput();
     }
   });
 
   $("btn-kc-push").addEventListener("click", async () => {
     const j = await gitAction("/core/code/github/push", {}, "pushing…");
-    if (j) $("kc-git-status").textContent = `pushed ${j.branch}`;
+    if (j) KaiI18n.setText($("kc-git-status"), KaiI18n.message`pushed ${j.branch}`);
   });
 
   $("btn-kc-pr").addEventListener("click", async () => {
     const title = gitInput();
-    if (!title) return ($("kc-git-status").textContent = "Type a pull request title first.");
+    if (!title) return (KaiI18n.setText($("kc-git-status"), "Type a pull request title first."));
     const j = await gitAction("/core/code/github/pr", { title }, "opening pull request…");
     if (j) {
-      $("kc-git-status").textContent = `opened #${j.pr.number}`;
+      KaiI18n.setText($("kc-git-status"), KaiI18n.message`opened #${j.pr.number}`);
       clearGitInput();
       const a = document.createElement("a");
       a.href = j.pr.url;
       a.target = "_blank";
       a.rel = "noreferrer";
-      a.textContent = `Pull request #${j.pr.number}`;
+      KaiI18n.setText(a, KaiI18n.message`Pull request #${j.pr.number}`);
       const div = document.createElement("div");
       div.className = "pg-tool";
       div.appendChild(a);
@@ -885,9 +885,9 @@
     if (!hits.length) {
       const none = document.createElement("div");
       none.className = "kc-browse-item up";
-      none.textContent = (kc.commands || []).length
+      KaiI18n.setText(none, (kc.commands || []).length
         ? "no command matches"
-        : `no commands yet — add one as ${kc.commandsDir || ".koinos/commands"}/name.md`;
+        : `no commands yet — add one as ${kc.commandsDir || ".koinos/commands"}/name.md`);
       host.appendChild(none);
       host.hidden = false;
       return;
@@ -895,7 +895,7 @@
     for (const c of hits) {
       const b = document.createElement("button");
       b.className = "kc-browse-item";
-      b.textContent = `/${c.name}${c.description ? ` — ${c.description}` : ""}`;
+      KaiI18n.setText(b, KaiI18n.message`/${c.name}${c.description ? ` — ${c.description}` : ""}`);
       b.addEventListener("click", () => {
         $("kc-task").value = `/${c.name} `;
         host.hidden = true;
@@ -931,9 +931,9 @@
     const host = $("kc-tools-list");
     host.innerHTML = "";
     const chosen = new Set(allowedTools());
-    $("kc-tools-note").textContent = kc.allTools.length
+    KaiI18n.setText($("kc-tools-note"), kc.allTools.length
       ? `Off by default. Pick up to ${kc.maxTools} — a small local model cannot hold many tool descriptions and still have room for the task. Anything marked "asks first" still shows you a card before it runs.`
-      : "No tools are available right now. Add an MCP server under Tools, or switch off Local-Only if the tools you want reach the internet.";
+      : "No tools are available right now. Add an MCP server under Tools, or switch off Local-Only if the tools you want reach the internet.");
     for (const t of kc.allTools) {
       const row = document.createElement("label");
       row.className = "kc-tool-row";
@@ -945,7 +945,7 @@
         if (cb.checked) {
           if (now.size >= kc.maxTools) {
             cb.checked = false;
-            $("kc-tools-note").textContent = `That is the limit (${kc.maxTools}). Uncheck something first.`;
+            KaiI18n.setText($("kc-tools-note"), KaiI18n.message`That is the limit (${kc.maxTools}). Uncheck something first.`);
             return;
           }
           now.add(t.name);
@@ -965,7 +965,7 @@
       name.textContent = t.name;
       const sub = document.createElement("span");
       sub.className = "kc-sub";
-      sub.textContent = `${t.description || ""}${t.sensitive ? " — asks first" : ""}${t.egress ? " · leaves this machine" : ""}`;
+      KaiI18n.setText(sub, KaiI18n.message`${t.description || ""}${t.sensitive ? " — asks first" : ""}${t.egress ? " · leaves this machine" : ""}`);
       text.append(name, sub);
       row.append(cb, text);
       host.appendChild(row);
@@ -1039,7 +1039,7 @@
     if (chosen && !options.some((o) => o.v === chosen)) {
       const el = document.createElement("option");
       el.value = chosen;
-      el.textContent = `${chosen} — not installed`;
+      KaiI18n.setText(el, KaiI18n.message`${chosen} — not installed`);
       pick.appendChild(el);
       pick.dataset.sig = "";
     }

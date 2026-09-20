@@ -31,14 +31,14 @@ async function refreshDocList() {
   host.innerHTML = docs.length
     ? docs
         .map(
-          (d) => `<div class="doc-row${d.id === doc.id ? " active" : ""}" data-id="${esc2(d.id)}">
+          (d) => KaiI18n.html`<div class="doc-row${d.id === doc.id ? " active" : ""}" data-id="${esc2(d.id)}">
             <div class="doc-row-title">${esc2(d.title)}</div>
             <div class="doc-row-sub">${d.words} words</div>
             <button class="chat-del" data-del="${esc2(d.id)}" title="Delete document">×</button>
           </div>`
         )
         .join("")
-    : `<div class="chat-list-empty">Documents you write live here — on this machine, nowhere else.</div>`;
+    : KaiI18n.html`<div class="chat-list-empty">Documents you write live here — on this machine, nowhere else.</div>`;
 }
 
 function updateDocWords() {
@@ -62,7 +62,7 @@ async function saveDoc(now) {
       if (j.ok) {
         doc.id = j.id;
         if (!$("doc-title").value && j.title !== "Untitled") $("doc-title").placeholder = j.title;
-        $("doc-saved").textContent = "Saved ✓";
+        KaiI18n.setText($("doc-saved"), "Saved ✓");
         setTimeout(() => ($("doc-saved").textContent = ""), 1500);
         refreshDocList();
       }
@@ -147,7 +147,7 @@ async function runDocAction(instruction, label) {
 
   $("doc-suggest").hidden = false;
   $("doc-suggest-label").textContent = label;
-  $("doc-suggest-target").textContent = hasSel ? "on your selection" : "on the whole document";
+  KaiI18n.setText($("doc-suggest-target"), hasSel ? "on your selection" : "on the whole document");
   $("doc-suggest-body").textContent = "";
   $("doc-apply").disabled = true;
   $("doc-suggest-stop").hidden = false;
@@ -188,7 +188,7 @@ async function runDocAction(instruction, label) {
     $("doc-suggest-body").textContent = acc.trim();
     $("doc-apply").disabled = !acc.trim();
   } catch (e) {
-    if (e.name !== "AbortError") $("doc-suggest-body").textContent = `Couldn't get a suggestion: ${e.message}`;
+    if (e.name !== "AbortError") KaiI18n.setText($("doc-suggest-body"), KaiI18n.message`Couldn't get a suggestion: ${e.message}`);
   } finally {
     $("doc-suggest-stop").hidden = true;
     doc.abort = null;
@@ -229,7 +229,7 @@ $("doc-suggest-stop").addEventListener("click", () => doc.abort?.abort());
 async function startImport(filePath) {
   const status = $("import-status");
   status.hidden = false;
-  status.textContent = "Verifying the file (hashing) — big models take a minute or two…";
+  KaiI18n.setText(status, "Verifying the file (hashing) — big models take a minute or two…");
   try {
     const r = await fetch("/core/models/import", {
       method: "POST",
@@ -239,7 +239,7 @@ async function startImport(filePath) {
     const j = await r.json();
     if (!j.ok) throw new Error(j.error?.message || "Import failed");
     if (j.done) {
-      status.textContent = `Imported “${j.entry.label}” ✓ — it's in the list above and the chat picker.`;
+      KaiI18n.setText(status, KaiI18n.message`Imported “${j.entry.label}” ✓ — it's in the list above and the chat picker.`);
     }
     // Not done yet → renderModels polling shows hash progress via `importing`.
   } catch (e) {

@@ -55,6 +55,7 @@ test("Connections readiness: managed sign-in, delayed enablement, refresh errors
  await page.setContent('<main id="connections"></main>');
  await page.addStyleTag({ path: path.resolve(__dirname, "../../ui/styles.css") });
  await page.addStyleTag({ path: path.resolve(__dirname, "../../ui/brain.css") });
+ await page.addScriptTag({ path: path.resolve(__dirname, "../../ui/i18n.js") });
  await page.addScriptTag({ path: path.resolve(__dirname, "../../ui/connection-catalog.js") });
  await page.addScriptTag({ path: path.resolve(__dirname, "../../ui/connections.js") });
  const render = async (section = "explore") => { await page.evaluate(async section => {

@@ -15,7 +15,7 @@ function setAttachment(name, text) {
     trimmed = true;
   }
   state.attachment = { name, text, trimmed };
-  $("attach-name").textContent = `📎 ${name}${trimmed ? " (trimmed to fit the model's context)" : ""}`;
+  KaiI18n.setText($("attach-name"), KaiI18n.message`📎 ${name}${trimmed ? " (trimmed to fit the model's context)" : ""}`);
   $("attach-chip-row").hidden = false;
 }
 
@@ -28,7 +28,7 @@ function clearAttachment() {
 // phone photo doesn't become a 12 MB base64 blob in a 4k-token request.
 function setImageAttachment(name, dataUri) {
   state.attachment = { kind: "image", name, dataUri };
-  $("attach-name").textContent = `🖼️ ${name}`;
+  KaiI18n.setText($("attach-name"), KaiI18n.message`🖼️ ${name}`);
   $("attach-chip-row").hidden = false;
 }
 
@@ -183,7 +183,7 @@ async function cmpStreamInto(model, prompt, paneIdx, signal) {
       lastPaint = now;
     }
   }
-  body.innerHTML = mdToHtml(acc) || "<p>(no answer)</p>";
+  body.innerHTML = mdToHtml(acc) || KaiI18n.html("<p>(no answer)</p>");
   return acc;
 }
 
@@ -195,7 +195,7 @@ $("cmp-form").addEventListener("submit", async (e) => {
   const b = $("cmp-b").value;
   if (a === b) {
     $("cmp-status").hidden = false;
-    $("cmp-status").textContent = "Pick two different models to compare.";
+    KaiI18n.setText($("cmp-status"), "Pick two different models to compare.");
     return;
   }
   cmp.running = true;
@@ -211,20 +211,20 @@ $("cmp-form").addEventListener("submit", async (e) => {
   $("cmp-reveal").hidden = false;
   $("cmp-tally").textContent = "";
   for (const i of [0, 1]) {
-    $(`cmp-label-${i}`).textContent = `Answer ${i + 1}`;
+    KaiI18n.setText($(`cmp-label-${i}`), KaiI18n.message`Answer ${i + 1}`);
     $(`cmp-body-${i}`).innerHTML = "";
   }
   const status = $("cmp-status");
   status.hidden = false;
   try {
-    status.textContent = "First model answering…";
+    KaiI18n.setText(status, "First model answering…");
     await cmpStreamInto(cmp.models[0], prompt, 0, cmp.abort.signal);
-    status.textContent = "Switching models (they share the machine) — second answer coming…";
+    KaiI18n.setText(status, "Switching models (they share the machine) — second answer coming…");
     await cmpStreamInto(cmp.models[1], prompt, 1, cmp.abort.signal);
     status.hidden = true;
     $("cmp-verdict").hidden = false;
   } catch (err) {
-    status.textContent = err.name === "AbortError" ? "Stopped." : String(err.message);
+    KaiI18n.setText(status, err.name === "AbortError" ? "Stopped." : String(err.message));
   } finally {
     cmp.running = false;
     cmp.abort = null;
@@ -241,7 +241,7 @@ function cmpLabelOf(v) {
 
 $("cmp-reveal").addEventListener("click", () => {
   cmp.revealed = true;
-  for (const i of [0, 1]) $(`cmp-label-${i}`).textContent = `Answer ${i + 1} — ${cmpLabelOf(cmp.models[i])}`;
+  for (const i of [0, 1]) KaiI18n.setText($(`cmp-label-${i}`), KaiI18n.message`Answer ${i + 1} — ${cmpLabelOf(cmp.models[i])}`);
   $("cmp-reveal").hidden = true;
   $("cmp-vote").hidden = false;
 });
@@ -262,7 +262,7 @@ $("cmp-vote").addEventListener("click", (e) => {
   const parts = Object.entries(tally[key])
     .sort((x, y) => y[1] - x[1])
     .map(([who, n]) => `${who === "tie" ? "ties" : cmpLabelOf(who)}: ${n}`);
-  $("cmp-tally").textContent = `Your picks so far — ${parts.join(" · ")}`;
+  KaiI18n.setText($("cmp-tally"), KaiI18n.message`Your picks so far — ${parts.join(" · ")}`);
 });
 
 // ---------- scheduled tasks view ----------
@@ -279,7 +279,7 @@ function taskHourOptions() {
   for (let h = 0; h < 24; h++) {
     const o = document.createElement("option");
     o.value = String(h);
-    o.textContent = `${String(h).padStart(2, "0")}:00`;
+    KaiI18n.setText(o, KaiI18n.message`${String(h).padStart(2, "0")}:00`);
     if (h === 9) o.selected = true;
     sel.appendChild(o);
   }
@@ -345,13 +345,13 @@ async function renderTasks() {
            */
           const running = t.running || tasksStarting.has(t.id);
           const last = running
-            ? `<span class="hint">running now — the model may need to load first</span>`
+            ? KaiI18n.html`<span class="hint">running now — the model may need to load first</span>`
             : t.lastError
-              ? `<span class="task-err">last run failed: ${esc2(t.lastError)}</span>`
+              ? KaiI18n.html`<span class="task-err">last run failed: ${esc2(t.lastError)}</span>`
               : t.lastChatId
-                ? `<button class="linklike" data-open-chat="${esc2(t.lastChatId)}">last result</button>`
-                : `<span class="hint">hasn't run yet</span>`;
-          return `<div class="task-row${t.enabled ? "" : " off"}">
+                ? KaiI18n.html`<button class="linklike" data-open-chat="${esc2(t.lastChatId)}">last result</button>`
+                : KaiI18n.html`<span class="hint">hasn't run yet</span>`;
+          return KaiI18n.html`<div class="task-row${t.enabled ? "" : " off"}">
             <div class="task-main">
               <div class="task-name">${esc2(t.name)} <span class="hint">· ${esc2(scheduleText(t.schedule))} · ${esc2(cmpLabelOf(t.model))}</span></div>
               <div class="task-sub">${last}</div>
@@ -364,7 +364,7 @@ async function renderTasks() {
           </div>`;
         })
         .join("")
-    : `<div class="chat-list-empty">No tasks yet. The first one takes ten seconds — try a daily writing prompt.</div>`;
+    : KaiI18n.html`<div class="chat-list-empty">No tasks yet. The first one takes ten seconds — try a daily writing prompt.</div>`;
   if (!$("view-tasks").hidden) tasksTimer = setTimeout(renderTasks, 5000);
 }
 
@@ -415,7 +415,7 @@ $("task-list").addEventListener("click", async (e) => {
     if (tasksStarting.has(id)) return;      // double-click is not a second run
     tasksStarting.add(id);
     run.disabled = true;
-    run.textContent = "Running…";
+    KaiI18n.setText(run, "Running…");
     renderTasks();                          // paint the running state at once
     try {
       const r = await fetch(`/core/tasks/${id}/run`, { method: "POST" });
@@ -486,7 +486,7 @@ async function renderNetwork() {
     $("net-queue").textContent = "–";
     chips.replaceChildren();
     list.replaceChildren();
-    note.textContent = "The network isn't reachable right now. It reconnects on its own — this page keeps retrying.";
+    KaiI18n.setText(note, "The network isn't reachable right now. It reconnects on its own — this page keeps retrying.");
   } else {
     $("net-computers").textContent = String(s.workersOnline ?? 0);
     $("net-classes").textContent = String((s.models || []).length);

@@ -81,7 +81,7 @@ function sym() {
 function toast(message, kind = "info", ms = 5000) {
   const div = document.createElement("div");
   div.className = `toast ${kind}`;
-  div.textContent = message;
+  KaiI18n.setText(div, message);
   $("#toasts").appendChild(div);
   setTimeout(() => div.remove(), ms);
 }
@@ -90,13 +90,13 @@ function showModal({ title, body, actions = [], onMount }) {
   const root = $("#modal-root");
   const backdrop = document.createElement("div");
   backdrop.className = "modal-backdrop";
-  backdrop.innerHTML = `<div class="modal"><h2>${esc(title)}</h2><div class="modal-body">${body}</div><div class="actions"></div></div>`;
+  backdrop.innerHTML = KaiI18n.html`<div class="modal"><h2>${esc(title)}</h2><div class="modal-body">${body}</div><div class="actions"></div></div>`;
   const close = () => backdrop.remove();
   const actionsEl = $(".actions", backdrop);
   for (const a of actions) {
     const b = document.createElement("button");
     b.className = `btn ${a.class || ""}`;
-    b.textContent = a.label;
+    KaiI18n.setText(b, a.label);
     b.addEventListener("click", () => a.onClick?.(close, backdrop));
     actionsEl.appendChild(b);
   }
@@ -112,7 +112,7 @@ function busyButton(btn, busy, labelBusy = "Working…") {
   if (!btn) return;
   if (busy) {
     btn.dataset.label = btn.textContent;
-    btn.innerHTML = `<span class="spin"></span> ${esc(labelBusy)}`;
+    btn.innerHTML = KaiI18n.html`<span class="spin"></span> ${esc(labelBusy)}`;
     btn.disabled = true;
   } else {
     btn.textContent = btn.dataset.label || btn.textContent;
@@ -207,7 +207,7 @@ async function refreshDashboard() {
 
 function renderDashboardView() {
   const root = $("#view-dashboard");
-  root.innerHTML = `
+  root.innerHTML = KaiI18n.html`
     <div class="row spread">
       <h1>Dashboard</h1>
       <span class="muted small" id="d-updated"></span>
@@ -248,7 +248,7 @@ function renderDashboardView() {
 }
 
 function tile(label, value, sub, cls) {
-  return `<div class="tile ${cls || ""}"><div class="t-label">${esc(label)}</div>
+  return KaiI18n.html`<div class="tile ${cls || ""}"><div class="t-label" data-i18n="${esc(label)}">${esc(label)}</div>
     <div class="t-value">${value}</div><div class="t-sub">${esc(sub || "")}</div></div>`;
 }
 
@@ -256,7 +256,7 @@ function patchDashboardView() {
   if (!S.dashboardRendered) return;
   const d = S.dashboard;
   if (!d || d.error) {
-    if ($("#d-status-text")) $("#d-status-text").textContent = "Can't reach the app";
+    if ($("#d-status-text")) KaiI18n.setText($("#d-status-text"), "Can't reach the app");
     return;
   }
   const symbol = d.network.tokenSymbol;
@@ -270,10 +270,10 @@ function patchDashboardView() {
   $("#d-producer-counts").innerHTML = tile("Active producers · ~24h", value("activeApprox24h"), "Produced within the last 28,800 blocks")
     + tile("Recent producers · 2h", value("recent2h"), "Produced within 2 hours · green status")
     + tile("Tracked producer accounts", value("totalTracked"), "Recent producers plus VHP holders");
-  $("#d-producer-source").textContent = available
+  KaiI18n.setText($("#d-producer-source"), available
     ? np.stale ? "Last known data · refresh unavailable" : ""
     : matching && np.unsupported ? "Mainnet only"
-    : np ? "Counts unavailable · retrying…" : "Loading counts…";
+    : np ? "Counts unavailable · retrying…" : "Loading counts…");
 
   const dot = $("#d-dot");
   const text = $("#d-status-text");
@@ -281,32 +281,32 @@ function patchDashboardView() {
   const toggle = $("#d-toggle");
   dot.className = "dot " + (quickSync ? "amber" : d.node?.health?.ok === false || d.node?.production?.reason ? "red" : running ? "green" : "red");
   if (quickSync) {
-    text.textContent = "Quick syncing";
+    KaiI18n.setText(text, "Quick syncing");
     text.className = "status-text warn-text";
-    sub.textContent = `${running ? "Stopping node" : "Node stopped"} · ${quickSyncStage(d.node.op)} · ${d.network.label}`;
-    toggle.textContent = "Quick sync in progress";
+    KaiI18n.setText(sub, KaiI18n.message`${running ? "Stopping node" : "Node stopped"} · ${quickSyncStage(d.node.op)} · ${d.network.label}`);
+    KaiI18n.setText(toggle, "Quick sync in progress");
     toggle.className = "btn";
     toggle.dataset.action = "";
   } else if (running) {
-    text.textContent = d.node.health?.ok === false || d.node.production?.reason ? "Needs attention" : "Running";
+    KaiI18n.setText(text, d.node.health?.ok === false || d.node.production?.reason ? "Needs attention" : "Running");
     text.className = d.node.health?.ok === false || d.node.production?.reason ? "status-text bad-text" : "status-text good-text";
     const op = d.node.op;
     sub.textContent = op && op.running ? `${op.name} in progress…` : `${d.node.runningCount} services · ${d.network.label}`;
-    toggle.textContent = "Stop node";
+    KaiI18n.setText(toggle, "Stop node");
     toggle.className = "btn danger";
     toggle.dataset.action = "stop";
   } else if (!dockerOk) {
-    text.textContent = "Offline";
+    KaiI18n.setText(text, "Offline");
     text.className = "status-text bad-text";
-    sub.textContent = "Docker not ready — finish setup on the Node tab";
-    toggle.textContent = "Set up node";
+    KaiI18n.setText(sub, "Docker not ready — finish setup on the Node tab");
+    KaiI18n.setText(toggle, "Set up node");
     toggle.className = "btn";
     toggle.dataset.action = "setup";
   } else {
-    text.textContent = "Offline";
+    KaiI18n.setText(text, "Offline");
     text.className = "status-text bad-text";
-    sub.textContent = `Node stopped · ${d.network.label}`;
-    toggle.textContent = "Start node";
+    KaiI18n.setText(sub, KaiI18n.message`Node stopped · ${d.network.label}`);
+    KaiI18n.setText(toggle, "Start node");
     toggle.className = "btn primary";
     toggle.dataset.action = "start";
   }
@@ -316,8 +316,8 @@ function patchDashboardView() {
   const sync = d.sync;
   if (!quickSync && running && sync && !sync.local?.error) {
     const pct = sync.progressPct != null ? sync.progressPct : sync.inSync ? 100 : 0;
-    syncEl.innerHTML = `<div class="row spread" style="margin-top:12px">
-      <span>${sync.inSync ? '<span class="pill good">in sync</span>' : '<span class="pill warn">syncing</span>'}</span>
+    syncEl.innerHTML = KaiI18n.html`<div class="row spread" style="margin-top:12px">
+      <span>${sync.inSync ? KaiI18n.html('<span class="pill good">in sync</span>') : KaiI18n.html('<span class="pill warn">syncing</span>')}</span>
       <span class="mono small">${sync.local.height.toLocaleString()}${sync.remote ? " / " + sync.remote.height.toLocaleString() : ""} blocks</span></div>
       <div class="progress" style="margin-top:6px"><div style="width:${Math.min(100, pct).toFixed(1)}%"></div></div>`;
   } else {
@@ -369,36 +369,36 @@ function patchDashboardView() {
     tile("Yearly + reburn", yearlyReburn, yearlyReburnSub, "accent"),
   ];
   $("#d-returns").innerHTML = returnTiles.join("");
-  $("#d-returns-note").textContent = !w
+  KaiI18n.setText($("#d-returns-note"), !w
     ? ""
     : st.syncing
       ? "history syncing — longer windows still catching up"
       : w.daysTracked > 0 && w.daysTracked < 30
         ? `based on ${w.daysTracked} day${w.daysTracked === 1 ? "" : "s"} of history`
-        : "";
+        : "");
 
   // feed
   const feedEl = $("#d-feed");
   const note = $("#d-feed-note");
   if (!d.wallet.exists) {
-    feedEl.innerHTML = `<span class="muted small">Create a wallet (Wallet tab) to see activity.</span>`;
+    feedEl.innerHTML = KaiI18n.html`<span class="muted small">Create a wallet (Wallet tab) to see activity.</span>`;
     note.textContent = "";
   } else if (!st) {
-    feedEl.innerHTML = `<span class="muted small">Activity history isn't available on ${esc(d.network.label)} — it needs a history RPC (works on mainnet).</span>`;
+    feedEl.innerHTML = KaiI18n.html`<span class="muted small">Activity history isn't available on ${esc(d.network.label)} — it needs a history RPC (works on mainnet).</span>`;
     note.textContent = "";
   } else if (!st.feed.length) {
-    feedEl.innerHTML = `<span class="muted small">No activity yet. When your node produces a block, it appears here.</span>`;
-    note.textContent = st.syncing ? "syncing…" : "";
+    feedEl.innerHTML = KaiI18n.html`<span class="muted small">No activity yet. When your node produces a block, it appears here.</span>`;
+    KaiI18n.setText(note, st.syncing ? "syncing…" : "");
   } else {
-    note.textContent = st.syncing ? "totals still syncing…" : "";
+    KaiI18n.setText(note, st.syncing ? "totals still syncing…" : "");
     feedEl.innerHTML = st.feed.map((f) => feedRow(symbol, f)).join("");
   }
-  $("#d-updated").textContent = st && st.updatedAt ? "updated " + new Date(st.updatedAt).toLocaleTimeString() : "";
+  KaiI18n.setText($("#d-updated"), st && st.updatedAt ? "updated " + new Date(st.updatedAt).toLocaleTimeString() : "");
 }
 
 function feedRow(symbol, f) {
   if (f.type === "block") {
-    return `<div class="feed-row">
+    return KaiI18n.html`<div class="feed-row">
       <span class="fr-ico">🧊</span>
       <span class="fr-main">Block <span class="mono">#${f.height.toLocaleString()}</span></span>
       <span class="fr-metric burn">🔥 ${fmtSat(f.vhpBurned, 4)}</span>
@@ -413,7 +413,7 @@ function feedRow(symbol, f) {
     sent: ["📤", "Sent out"],
   };
   const [ico, label] = map[f.type] || ["•", f.type];
-  return `<div class="feed-row ${f.id ? "link" : ""}" ${f.id ? `data-tx="${esc(f.id)}"` : ""}>
+  return KaiI18n.html`<div class="feed-row ${f.id ? "link" : ""}" ${f.id ? `data-tx="${esc(f.id)}"` : ""}>
     <span class="fr-ico">${ico}</span>
     <span class="fr-main">${esc(label)}</span>
     <span class="fr-metric">${fmtSat(f.amount, 4)} ${esc(symbol)}</span>
@@ -453,7 +453,7 @@ function renderWalletView() {
   const stage = S.walletStage;
 
   if (stage === "none") {
-    root.innerHTML = `
+    root.innerHTML = KaiI18n.html`
       <h1>Welcome 👋</h1>
       <p class="lead">Set up a Koinos wallet to get started. It takes a few seconds — your key is generated locally and encrypted with a password on this computer.</p>
       <div class="grid-2">
@@ -482,7 +482,7 @@ function renderWalletView() {
   }
 
   if (stage === "locked") {
-    root.innerHTML = `
+    root.innerHTML = KaiI18n.html`
       <h1>Unlock your wallet</h1>
       <p class="lead">Wallet <span class="mono">${esc(S.wallet.address ?? "")}</span></p>
       <div class="card" style="max-width:420px">
@@ -499,7 +499,7 @@ function renderWalletView() {
   }
 
   // unlocked
-  root.innerHTML = `
+  root.innerHTML = KaiI18n.html`
     <div class="row spread">
       <h1>Wallet</h1>
       <div class="row">
@@ -512,7 +512,7 @@ function renderWalletView() {
       <div class="row">
         <div class="addr" style="flex:1">${esc(S.wallet.address)}</div>
         <button id="w-copy" class="btn">Copy</button>
-        ${net().explorer ? '<button id="w-explore" class="btn ghost">Explorer ↗</button>' : ""}
+        ${net().explorer ? KaiI18n.html('<button id="w-explore" class="btn ghost">Explorer ↗</button>') : ""}
       </div>
     </div>
     <div class="grid-3">
@@ -581,7 +581,7 @@ async function refreshCryptoBalances() {
 function openEthSendModal() {
   showModal({
     title: "Send ETH",
-    body: `
+    body: KaiI18n.html`
       <label class="field"><span>Recipient Ethereum address</span>
         <input id="es-to" type="text" class="mono" placeholder="0x…" autocomplete="off" spellcheck="false"></label>
       <label class="field"><span>Amount (ETH)</span>
@@ -614,13 +614,13 @@ function openEthSendModal() {
       let t = null;
       const quote = async () => {
         if (!Number(amt.value) || !to.value.trim()) { q.textContent = ""; return; }
-        q.textContent = "Getting quote…";
+        KaiI18n.setText(q, "Getting quote…");
         try {
           const r = await call("fund:ethSendQuote", { toAddress: to.value.trim(), amountEth: amt.value });
           q.innerHTML = r.sufficient
             ? `Gas ~${esc(Number(r.gasCostEth).toFixed(5))} ETH · balance ${esc(Number(r.balanceEth).toFixed(5))} ETH`
-            : `<span style="color:var(--bad)">Not enough ETH for amount + gas (balance ${esc(Number(r.balanceEth).toFixed(5))})</span>`;
-        } catch (e) { q.innerHTML = `<span style="color:var(--bad)">${esc(e.message)}</span>`; }
+            : KaiI18n.html`<span style="color:var(--bad)">Not enough ETH for amount + gas (balance ${esc(Number(r.balanceEth).toFixed(5))})</span>`;
+        } catch (e) { q.innerHTML = KaiI18n.html`<span style="color:var(--bad)">${esc(e.message)}</span>`; }
       };
       const deb = () => { clearTimeout(t); t = setTimeout(quote, 500); };
       to.addEventListener("input", deb); amt.addEventListener("input", deb);
@@ -639,7 +639,7 @@ function openEthSendModal() {
 function openUsdtSendModal() {
   showModal({
     title: "Send USDT",
-    body: `
+    body: KaiI18n.html`
       <label class="field"><span>Recipient Ethereum address</span>
         <input id="us-to" type="text" class="mono" placeholder="0x…" autocomplete="off" spellcheck="false"></label>
       <label class="field"><span>Amount (USDT)</span>
@@ -673,15 +673,15 @@ function openUsdtSendModal() {
       let t = null;
       const quote = async () => {
         if (!Number(amt.value) || !to.value.trim()) { q.textContent = ""; return; }
-        q.textContent = "Getting quote…";
+        KaiI18n.setText(q, "Getting quote…");
         try {
           const r = await call("fund:usdtSendQuote", { toAddress: to.value.trim(), amountUsdt: amt.value });
           if (r.sufficientUsdt && r.sufficientGas) {
             q.innerHTML = `Gas ~${esc(Number(r.gasCostEth).toFixed(5))} ETH · USDT balance ${esc(Number(r.usdtBalance).toFixed(2))}`;
           } else {
-            q.innerHTML = `<span style="color:var(--bad)">${r.sufficientUsdt ? "" : "Not enough USDT. "}${r.sufficientGas ? "" : "Not enough ETH for gas."}</span>`;
+            q.innerHTML = KaiI18n.html`<span style="color:var(--bad)">${r.sufficientUsdt ? "" : "Not enough USDT. "}${r.sufficientGas ? "" : "Not enough ETH for gas."}</span>`;
           }
-        } catch (e) { q.innerHTML = `<span style="color:var(--bad)">${esc(e.message)}</span>`; }
+        } catch (e) { q.innerHTML = KaiI18n.html`<span style="color:var(--bad)">${esc(e.message)}</span>`; }
       };
       const deb = () => { clearTimeout(t); t = setTimeout(quote, 500); };
       to.addEventListener("input", deb); amt.addEventListener("input", deb);
@@ -700,7 +700,7 @@ function openUsdtSendModal() {
 function openVkoinSendModal() {
   showModal({
     title: "Send vKOIN",
-    body: `
+    body: KaiI18n.html`
       <label class="field"><span>Recipient Ethereum address</span>
         <input id="vs-to" type="text" class="mono" placeholder="0x…" autocomplete="off" spellcheck="false"></label>
       <label class="field"><span>Amount (vKOIN)</span>
@@ -734,15 +734,15 @@ function openVkoinSendModal() {
       let t = null;
       const quote = async () => {
         if (!Number(amt.value) || !to.value.trim()) { q.textContent = ""; return; }
-        q.textContent = "Getting quote…";
+        KaiI18n.setText(q, "Getting quote…");
         try {
           const r = await call("fund:vkoinSendQuote", { toAddress: to.value.trim(), amountVkoin: amt.value });
           if (r.sufficientVkoin && r.sufficientGas) {
             q.innerHTML = `Gas ~${esc(Number(r.gasCostEth).toFixed(5))} ETH · vKOIN balance ${esc(Number(r.vkoinBalance).toFixed(4))}`;
           } else {
-            q.innerHTML = `<span style="color:var(--bad)">${r.sufficientVkoin ? "" : "Not enough vKOIN. "}${r.sufficientGas ? "" : "Not enough ETH for gas."}</span>`;
+            q.innerHTML = KaiI18n.html`<span style="color:var(--bad)">${r.sufficientVkoin ? "" : "Not enough vKOIN. "}${r.sufficientGas ? "" : "Not enough ETH for gas."}</span>`;
           }
-        } catch (e) { q.innerHTML = `<span style="color:var(--bad)">${esc(e.message)}</span>`; }
+        } catch (e) { q.innerHTML = KaiI18n.html`<span style="color:var(--bad)">${esc(e.message)}</span>`; }
       };
       const deb = () => { clearTimeout(t); t = setTimeout(quote, 500); };
       to.addEventListener("input", deb); amt.addEventListener("input", deb);
@@ -764,7 +764,7 @@ function onBridgeVkoin() {
   const prefill = cur && /^[\d.,]+$/.test(cur.textContent) ? cur.textContent.replace(/,/g, "") : "";
   showModal({
     title: "Bridge vKOIN → KOIN",
-    body: `
+    body: KaiI18n.html`
       <p class="small">Bridges vKOIN from your funding address to <b>native KOIN</b> (1:1) via Vortex. Needs a little ETH for gas. Runs a couple of transactions and auto-advances.</p>
       <label class="field"><span>Amount (vKOIN)</span>
         <div class="row" style="gap:8px">
@@ -844,7 +844,7 @@ async function onCreateWallet() {
 function showBackupModal(address, wif) {
   showModal({
     title: "🔑 Back up your private key now",
-    body: `
+    body: KaiI18n.html`
       <p class="small">This is the only time it will be shown automatically. Anyone with this key controls the wallet — write it down and store it offline.</p>
       <div class="wif-box">${esc(wif)}</div>
       <p class="small muted">Address: <span class="mono">${esc(address)}</span></p>`,
@@ -887,7 +887,7 @@ async function onUnlock() {
 function openSendModal() {
   showModal({
     title: "Send tokens",
-    body: `
+    body: KaiI18n.html`
       <label class="field"><span>Token</span>
         <select id="s-token"><option value="koin">${esc(sym())}</option><option value="vhp">VHP</option></select></label>
       <label class="field"><span>Recipient address</span>
@@ -924,7 +924,7 @@ function openSendModal() {
 function txToast(res, label) {
   const div = document.createElement("div");
   div.className = "toast good";
-  div.innerHTML = `${esc(label)} ${res.confirmed ? "confirmed" : "submitted"} · <button class="link">${esc(shortTx(res.txId))} ↗</button>`;
+  div.innerHTML = KaiI18n.html`${esc(label)} ${res.confirmed ? "confirmed" : "submitted"} · <button class="link">${esc(shortTx(res.txId))} ↗</button>`;
   $("button", div).addEventListener("click", () => openTx(res.txId));
   $("#toasts").appendChild(div);
   setTimeout(() => div.remove(), 9000);
@@ -934,15 +934,15 @@ function txToast(res, label) {
 
 function renderBurnView() {
   const root = $("#view-burn");
-  if (S.appInfo.settings.producer?.mode === "external") { root.innerHTML = '<h1>Burn KOIN → VHP</h1><div class="banner info">External producer mode: prepare and sign burns through Node → External signing. KAI will not use the earning wallet.</div>'; return; }
+  if (S.appInfo.settings.producer?.mode === "external") { root.innerHTML = KaiI18n.html('<h1>Burn KOIN → VHP</h1><div class="banner info">External producer mode: prepare and sign burns through Node → External signing. KAI will not use the earning wallet.</div>'); return; }
   if (S.walletStage !== "unlocked") {
-    root.innerHTML = `
+    root.innerHTML = KaiI18n.html`
       <h1>Burn ${esc(sym())} → VHP</h1>
       <p class="lead">Burning converts liquid ${esc(sym())} into Virtual Hash Power (VHP) — the stake that lets your node produce blocks and earn rewards.</p>
       <div class="banner info">${S.walletStage === "none" ? "Create a wallet first (Wallet tab)." : "Unlock your wallet to burn (Wallet tab)."}</div>`;
     return;
   }
-  root.innerHTML = `
+  root.innerHTML = KaiI18n.html`
     <h1>Burn ${esc(sym())} → VHP</h1>
     <p class="lead">Burning converts liquid ${esc(sym())} into VHP 1:1. VHP is consumed slowly while producing blocks, and you earn ${esc(sym())} rewards in return.</p>
     <div class="grid-2">
@@ -992,7 +992,7 @@ function renderBurnView() {
 function patchBurnBalances() {
   const b = S.balances;
   if ($("#burn-koin") && b && !b.error) {
-    $("#burn-koin").textContent = `${fmtSat(b.koin, 4)} ${sym()}`;
+    KaiI18n.setText($("#burn-koin"), KaiI18n.message`${fmtSat(b.koin, 4)} ${sym()}`);
     $("#burn-vhp").textContent = fmtSat(b.vhp, 4);
   }
 }
@@ -1003,10 +1003,10 @@ function updateBurnEstimate() {
   const warn = $("#burn-warn");
   warn.innerHTML = "";
   if (!v || !/^\d+(\.\d{1,8})?$/.test(v.replace(/,/g, ""))) {
-    est.textContent = "You will receive: —";
+    KaiI18n.setText(est, "You will receive: —");
     return;
   }
-  est.textContent = `You will receive: ${v} VHP`;
+  KaiI18n.setText(est, KaiI18n.message`You will receive: ${v} VHP`);
   try {
     const sats = toSat(v);
     const bal = BigInt(S.balances?.koin ?? "0");
@@ -1014,12 +1014,12 @@ function updateBurnEstimate() {
     const burnableMana = mana > ONE ? mana - ONE : 0n; // 1 KOIN cushion for tx rc
     const keep = toSatBig(S.appInfo.settings.keepLiquidKoin);
     if (sats > bal) {
-      warn.innerHTML = `<div class="banner bad">Amount exceeds your balance.</div>`;
+      warn.innerHTML = KaiI18n.html`<div class="banner bad">Amount exceeds your balance.</div>`;
     } else if (sats > burnableMana) {
       // Burning requires mana >= amount on-chain; catch it before the revert.
-      warn.innerHTML = `<div class="banner warn">Not enough mana to burn this much right now (about ${fmtSat(burnableMana.toString(), 4)} ${esc(sym())} available). Burning spends mana, which recharges over ~5 days — burn less or wait.</div>`;
+      warn.innerHTML = KaiI18n.html`<div class="banner warn">Not enough mana to burn this much right now (about ${fmtSat(burnableMana.toString(), 4)} ${esc(sym())} available). Burning spends mana, which recharges over ~5 days — burn less or wait.</div>`;
     } else if (bal - sats < keep) {
-      warn.innerHTML = `<div class="banner warn">This leaves less than ${esc(S.appInfo.settings.keepLiquidKoin)} ${esc(sym())} liquid. You need liquid ${esc(sym())} for mana to keep transacting.</div>`;
+      warn.innerHTML = KaiI18n.html`<div class="banner warn">This leaves less than ${esc(S.appInfo.settings.keepLiquidKoin)} ${esc(sym())} liquid. You need liquid ${esc(sym())} for mana to keep transacting.</div>`;
     }
   } catch { /* ignore */ }
 }
@@ -1035,7 +1035,7 @@ function onBurn() {
   if (!amount) return toast("Enter an amount to burn", "warn");
   showModal({
     title: "Confirm burn",
-    body: `
+    body: KaiI18n.html`
       <p>You are about to <b>permanently burn</b> <span class="mono">${esc(amount)} ${esc(sym())}</span> and receive <span class="mono">${esc(amount)} VHP</span>.</p>
       <p class="small muted" style="margin-top:8px">VHP is only useful for producing blocks with a node. It converts back to ${esc(sym())} gradually through block rewards.</p>`,
     actions: [
@@ -1092,16 +1092,16 @@ function patchVault() {
   $("#pc-vault-prepare").disabled = !!busy;
   $("#pc-vault-use").disabled = !!busy;
   const messages = { pending: "Waiting for your approval in Koin Vault…", sending: "Sending request to Koin Vault…", submitting: "Wallet is submitting your transaction…", rejected: "You rejected the request. Nothing was submitted by this request.", confirmed: "Transaction verified on-chain. For registration, click Verify registration before starting the node." };
-  $("#pc-vault-status").textContent = p ? (messages[p.status] || p.note || p.status) + (p.txId ? " Transaction: " + p.txId : "")
+  KaiI18n.setText($("#pc-vault-status"), p ? (messages[p.status] || p.note || p.status) + (p.txId ? " Transaction: " + p.txId : "")
     : paired ? "Connected. Use this producer wallet, generate a hot key, then sign its registration below."
     : v.uri ? "Scan with Koin Vault → Connect App. This connection expires in 30 minutes."
-    : "Mainnet · No wallet connected.";
+    : "Mainnet · No wallet connected.");
 }
 
 function renderNodeView() {
   const custody = S.appInfo.settings.producer || { mode: "local", addresses: {} };
   const root = $("#view-node");
-  root.innerHTML = `
+  root.innerHTML = KaiI18n.html`
     <div class="row spread">
       <h1>Koinos node</h1>
       <div class="row">
@@ -1198,7 +1198,7 @@ function renderNodeView() {
           <select id="n-log-svc" style="width:auto">
             <option value="">all services</option>
             ${["chain", "p2p", "block_producer", "mempool", "block_store", "jsonrpc", "amqp"]
-              .map((s) => `<option value="${s}">${s}</option>`).join("")}
+              .map((s) => KaiI18n.html`<option value="${s}">${s}</option>`).join("")}
           </select>
           <button id="n-log-refresh" class="btn">Refresh</button>
         </div>
@@ -1208,7 +1208,7 @@ function renderNodeView() {
 
   const producerAction = (id, fn) => $(id).addEventListener("click", async () => {
     const button = $(id); if (button.disabled) return; button.disabled = true;
-    if (id === "#pc-broadcast") $("#pc-broadcast-result").textContent = "Checking the signed transaction and submitting to the network…";
+    if (id === "#pc-broadcast") KaiI18n.setText($("#pc-broadcast-result"), "Checking the signed transaction and submitting to the network…");
     if (id.startsWith("#pc-vault-")) $("#pc-vault-result").textContent = "";
     try { await fn(); } catch (e) {
       $("#pc-result").textContent = e.message;
@@ -1221,11 +1221,11 @@ function renderNodeView() {
     await call("producer:configure", { mode: $("#pc-mode").value, address: $("#pc-address").value });
     S.appInfo = await call("app:info"); S.balancesAt = 0; S.balances = null;
     await refreshNode(); renderBurnView(); renderReturnsView(); await refreshRewards();
-    $("#pc-result").textContent = "Custody saved. Automatic returns are off. Verify registration before starting production.";
+    KaiI18n.setText($("#pc-result"), "Custody saved. Automatic returns are off. Verify registration before starting production.");
   });
   producerAction("#pc-key", async () => { const r = await call("producer:key"); await refreshNode(); $("#pc-result").textContent = "Hot key ready. Back up private.key and public.key securely from: " + r.keyDirectory; });
-  producerAction("#pc-rotate", async () => showModal({ title: "Rotate hot production key?", body: "<p>Stop the node first. KAI will preserve a local backup of the old hot key. Register the new public key with your external wallet before restarting production.</p>", actions: [{ label: "Cancel", onClick: close => close() }, { label: "Rotate key", onClick: async close => { try { const r = await call("producer:key", { rotate: true, confirm: true }); close(); await refreshNode(); $("#pc-result").textContent = "New hot key ready. Old key backup: " + (r.backupDirectory || "none"); } catch (e) { toast(e.message, "bad"); } } }] }));
-  producerAction("#pc-verify", async () => { await refreshNode(); $("#pc-result").textContent = S.producer?.matches ? "On-chain registration matches this node's hot key." : S.producer?.verificationError || "Registration does not match yet. Sign and confirm the registration, then check again."; });
+  producerAction("#pc-rotate", async () => showModal({ title: "Rotate hot production key?", body: KaiI18n.html("<p>Stop the node first. KAI will preserve a local backup of the old hot key. Register the new public key with your external wallet before restarting production.</p>"), actions: [{ label: "Cancel", onClick: close => close() }, { label: "Rotate key", onClick: async close => { try { const r = await call("producer:key", { rotate: true, confirm: true }); close(); await refreshNode(); $("#pc-result").textContent = "New hot key ready. Old key backup: " + (r.backupDirectory || "none"); } catch (e) { toast(e.message, "bad"); } } }] }));
+  producerAction("#pc-verify", async () => { await refreshNode(); KaiI18n.setText($("#pc-result"), S.producer?.matches ? "On-chain registration matches this node's hot key." : S.producer?.verificationError || "Registration does not match yet. Sign and confirm the registration, then check again."); });
   producerAction("#pc-vault-connect", async () => { S.vault = await call("producer:vaultConnect"); patchVault(); });
   producerAction("#pc-vault-disconnect", async () => { S.vault = await call("producer:vaultDisconnect"); patchVault(); });
   producerAction("#pc-vault-use", async () => {
@@ -1233,7 +1233,7 @@ function renderNodeView() {
     S.appInfo = await call("app:info"); S.balancesAt = 0; S.balances = null;
     $("#pc-mode").value = "external"; $("#pc-address").value = S.vault.address;
     await refreshNode(); renderBurnView(); renderReturnsView(); await refreshRewards(); patchVault();
-    $("#pc-result").textContent = "Koin Vault producer saved. Generate a hot key, then register it with Koin Vault below.";
+    KaiI18n.setText($("#pc-result"), "Koin Vault producer saved. Generate a hot key, then register it with Koin Vault below.");
   });
   producerAction("#pc-vault-open", () => { if (!S.vault?.uri) throw new Error("Create a connection QR first."); return call("util:openExternal", { url: S.vault.uri }); });
   producerAction("#pc-vault-copy", () => { if (!S.vault?.uri) throw new Error("Create a connection QR first."); return call("util:copy", { text: S.vault.uri }); });
@@ -1252,15 +1252,15 @@ function renderNodeView() {
     if (producer?.mode !== "external" || producer?.addresses?.[net().id] !== S.vault?.address) {
       throw new Error('Click "Use this producer wallet" above first (stop the node if it is running), then generate a hot key before registering it.');
     }
-    $("#pc-vault-result").textContent = "Preparing review…";
+    KaiI18n.setText($("#pc-vault-result"), "Preparing review…");
     const draft = await call("producer:vaultPrepare", { useFullBalance: $("#pc-vault-full").checked, allowFullVhp: $("#pc-vault-burn-full").checked, action: $("#pc-vault-action").value, amount: $("#pc-vault-amount").value, token: $("#pc-vault-token").value, to: $("#pc-vault-to").value.trim() });
-    $("#pc-vault-result").textContent = "Review the request in KAI, then click Request wallet approval to send it to your phone.";
+    KaiI18n.setText($("#pc-vault-result"), "Review the request in KAI, then click Request wallet approval to send it to your phone.");
     const a = draft.summary;
-    const detail = a.action === "productionAllowance" ? `<p>Set the official Proof-of-Burn contract's spending allowance to <b>${esc(a.amount)} VHP</b>.</p><p class="mono">${esc(a.spender)}</p><p>This replaces the remaining allowance. Block production consumes it as VHP converts to KOIN rewards. Renew it when exhausted; set 0 to revoke it. No tokens move now. Your hot key gains no transfer permission.</p>`
-      : a.action === "register" ? `<p>Register this node's hot public key:</p><p class="mono">${esc(a.publicKey)}</p>`
-      : a.action === "burn" ? `<p>Permanently burn <b>${esc(a.amount)} KOIN</b> for the same amount of VHP in your producer wallet.</p>${a.productionAllowance ? `<p>Also set the official PoB production allowance to <b>${esc(a.productionAllowance)} VHP</b>: current VHP plus this burn. Both changes succeed together. This replaces the remaining allowance; later deposits need a new approval.</p>` : ""}`
-      : `<p>Transfer <b>${esc(a.amount)} ${esc(a.token.toUpperCase())}</b> to:</p><p class="mono">${esc(a.to)}</p>`;
-    showModal({ title: "Review Koin Vault request", body: `<p>Mainnet · Producer:</p><p class="mono">${esc(a.producer)}</p>${detail}<p>Next, review the same details in Koin Vault and approve with your fingerprint or device passkey. Wallet approval submits the transaction.</p>`, actions: [
+    const detail = a.action === "productionAllowance" ? KaiI18n.html`<p>Set the official Proof-of-Burn contract's spending allowance to <b>${esc(a.amount)} VHP</b>.</p><p class="mono">${esc(a.spender)}</p><p>This replaces the remaining allowance. Block production consumes it as VHP converts to KOIN rewards. Renew it when exhausted; set 0 to revoke it. No tokens move now. Your hot key gains no transfer permission.</p>`
+      : a.action === "register" ? KaiI18n.html`<p>Register this node's hot public key:</p><p class="mono">${esc(a.publicKey)}</p>`
+      : a.action === "burn" ? KaiI18n.html`<p>Permanently burn <b>${esc(a.amount)} KOIN</b> for the same amount of VHP in your producer wallet.</p>${a.productionAllowance ? KaiI18n.html`<p>Also set the official PoB production allowance to <b>${esc(a.productionAllowance)} VHP</b>: current VHP plus this burn. Both changes succeed together. This replaces the remaining allowance; later deposits need a new approval.</p>` : ""}`
+      : KaiI18n.html`<p>Transfer <b>${esc(a.amount)} ${esc(a.token.toUpperCase())}</b> to:</p><p class="mono">${esc(a.to)}</p>`;
+    showModal({ title: "Review Koin Vault request", body: KaiI18n.html`<p>Mainnet · Producer:</p><p class="mono">${esc(a.producer)}</p>${detail}<p>Next, review the same details in Koin Vault and approve with your fingerprint or device passkey. Wallet approval submits the transaction.</p>`, actions: [
       { label: "Cancel", onClick: close => close() },
       { label: "Request wallet approval", class: "primary", onClick: async (close, modal) => {
         const button = $(".btn.primary", modal); button.disabled = true;
@@ -1276,14 +1276,14 @@ function renderNodeView() {
   producerAction("#pc-copy-signer", () => call("util:copy", { text: signerUrl }));
   producerAction("#pc-guide", () => call("util:openExternal", { url: "https://github.com/therexdev/kaiapp/blob/test/docs/EXTERNAL_PRODUCER.md" }));
   producerAction("#pc-copy", () => call("util:copy", { text: $("#pc-public").value }));
-  producerAction("#pc-prepare", async () => { const d = await call("producer:prepare", { action: $("#pc-action").value, offlineSigning: $("#pc-offline").checked, amount: $("#pc-amount").value, token: $("#pc-token").value, to: $("#pc-to").value.trim() }); $("#pc-unsigned").value = JSON.stringify(d, null, 2); $("#pc-signed").value = ""; $("#pc-import-signed").value = ""; $("#pc-signed-review").textContent = ""; $("#pc-confirm").checked = false; $("#pc-result").textContent = "Prepared only — nothing signed or broadcast. Review decoded operations on your separate signing machine."; });
+  producerAction("#pc-prepare", async () => { const d = await call("producer:prepare", { action: $("#pc-action").value, offlineSigning: $("#pc-offline").checked, amount: $("#pc-amount").value, token: $("#pc-token").value, to: $("#pc-to").value.trim() }); $("#pc-unsigned").value = JSON.stringify(d, null, 2); $("#pc-signed").value = ""; $("#pc-import-signed").value = ""; $("#pc-signed-review").textContent = ""; $("#pc-confirm").checked = false; KaiI18n.setText($("#pc-result"), "Prepared only — nothing signed or broadcast. Review decoded operations on your separate signing machine."); });
   producerAction("#pc-resume", async () => {
     const draft = await call("producer:draft");
     $("#pc-unsigned").value = JSON.stringify(draft, null, 2);
     $("#pc-signed").value = ""; $("#pc-import-signed").value = "";
     $("#pc-signed-review").textContent = ""; $("#pc-confirm").checked = false;
     $("#pc-offline").checked = draft.signingWindow === "offline-24h";
-    $("#pc-broadcast-result").textContent = `Saved draft restored. Expires ${new Date(draft.expiresAt).toLocaleString()}. Import its signed JSON below. Do not prepare another draft for this signature.`;
+    KaiI18n.setText($("#pc-broadcast-result"), KaiI18n.message`Saved draft restored. Expires ${new Date(draft.expiresAt).toLocaleString()}. Import its signed JSON below. Do not prepare another draft for this signature.`);
   });
   producerAction("#pc-download-draft", () => {
     const content = $("#pc-unsigned").value;
@@ -1297,8 +1297,8 @@ function renderNodeView() {
     try {
       const tx = JSON.parse($("#pc-signed").value), rc = tx.header?.rc_limit;
       if (typeof rc !== "string" || !/^[0-9]{1,20}$/.test(rc)) throw new Error("Invalid mana");
-      $("#pc-signed-review").textContent = `Imported transaction ID: ${tx.id}. Mana limit: ${(BigInt(rc) / 100000000n).toString()}.${(BigInt(rc) % 100000000n).toString().padStart(8, "0")}. KAI will verify its signature and compare all operations with your prepared draft before broadcasting.`;
-    } catch { $("#pc-signed-review").textContent = $("#pc-signed").value ? "Choose or paste a valid signed transaction JSON file." : ""; }
+      KaiI18n.setText($("#pc-signed-review"), KaiI18n.message`Imported transaction ID: ${tx.id}. Mana limit: ${(BigInt(rc) / 100000000n).toString()}.${(BigInt(rc) % 100000000n).toString().padStart(8, "0")}. KAI will verify its signature and compare all operations with your prepared draft before broadcasting.`);
+    } catch { KaiI18n.setText($("#pc-signed-review"), $("#pc-signed").value ? "Choose or paste a valid signed transaction JSON file." : ""); }
   };
   $("#pc-signed").addEventListener("input", signedChanged);
   $("#pc-import-signed").addEventListener("change", async () => {
@@ -1312,7 +1312,7 @@ function renderNodeView() {
     } catch (e) { $("#pc-result").textContent = e.message; }
   });
   producerAction("#pc-copy-draft", () => call("util:copy", { text: $("#pc-unsigned").value }));
-  producerAction("#pc-broadcast", async () => { const tx = JSON.parse($("#pc-signed").value); const r = await call("producer:broadcast", { transaction: tx, confirm: $("#pc-confirm").checked }); $("#pc-signed").value = ""; $("#pc-unsigned").value = ""; $("#pc-import-signed").value = ""; $("#pc-signed-review").textContent = ""; $("#pc-confirm").checked = false; txToast(r, "External transaction"); $("#pc-result").textContent = r.note; $("#pc-broadcast-result").textContent = `${r.note} Transaction ID: ${r.txId}`; await refreshNode(); });
+  producerAction("#pc-broadcast", async () => { const tx = JSON.parse($("#pc-signed").value); const r = await call("producer:broadcast", { transaction: tx, confirm: $("#pc-confirm").checked }); $("#pc-signed").value = ""; $("#pc-unsigned").value = ""; $("#pc-import-signed").value = ""; $("#pc-signed-review").textContent = ""; $("#pc-confirm").checked = false; txToast(r, "External transaction"); $("#pc-result").textContent = r.note; KaiI18n.setText($("#pc-broadcast-result"), KaiI18n.message`${r.note} Transaction ID: ${r.txId}`); await refreshNode(); });
   $("#n-backups").addEventListener("click", loadNodeBackups);
   $("#n-open").addEventListener("click", () => call("util:openPath", { which: "nodeData" }).catch(() => {}));
   $("#n-docker").addEventListener("click", onSetupClick);
@@ -1347,12 +1347,12 @@ function fmtBytes(n) {
 
 async function loadNodeBackups() {
   const el = $("#n-backup-list");
-  el.textContent = "Measuring backups…";
+  KaiI18n.setText(el, "Measuring backups…");
   try {
     const rows = await call("node:backups");
-    el.innerHTML = rows.length ? rows.map(b => `<div class="row spread" style="margin-top:8px"><span>${esc(b.createdAt ? new Date(b.createdAt).toLocaleString() : b.id)} · ${b.bytes == null ? "Size unavailable" : fmtBytes(b.bytes)}</span><button class="btn danger" data-backup="${esc(b.id)}" ${b.error ? "disabled" : ""}>Delete backup</button></div>`).join("") : '<p class="muted small">No previous chain backups.</p>';
+    el.innerHTML = rows.length ? rows.map(b => KaiI18n.html`<div class="row spread" style="margin-top:8px"><span>${esc(b.createdAt ? new Date(b.createdAt).toLocaleString() : b.id)} · ${b.bytes == null ? "Size unavailable" : fmtBytes(b.bytes)}</span><button class="btn danger" data-backup="${esc(b.id)}" ${b.error ? "disabled" : ""}>Delete backup</button></div>`).join("") : KaiI18n.html('<p class="muted small">No previous chain backups.</p>');
     el.querySelectorAll("[data-backup]").forEach(btn => btn.addEventListener("click", () => {
-      showModal({ title: "Delete previous chain backup?", body: `<p>This permanently deletes ${esc(btn.dataset.backup)}. Confirm the restored node is working before removing your rollback copy. Active chain data, wallets and keys are kept.</p>`, actions: [
+      showModal({ title: "Delete previous chain backup?", body: KaiI18n.html`<p>This permanently deletes ${esc(btn.dataset.backup)}. Confirm the restored node is working before removing your rollback copy. Active chain data, wallets and keys are kept.</p>`, actions: [
         { label: "Cancel", onClick: close => close() },
         { label: "Delete backup", class: "danger", onClick: async close => {
           try { await call("node:deleteBackup", { id: btn.dataset.backup }); close(); await loadNodeBackups(); }
@@ -1377,7 +1377,7 @@ async function onQuickSync() {
   const lowSpace = info.freeBytes != null && info.freeBytes < info.requiredBytes;
   showModal({
     title: "⚡ Quick sync from official backup",
-    body: `
+    body: KaiI18n.html`
       <p class="small">Downloads the Koinos Foundation chain snapshot and installs it, so the node
       catches up in hours instead of syncing for days. Your wallet, node config, and peer identity are not touched;
       current chain data is set aside for rollback.</p>
@@ -1385,10 +1385,10 @@ async function onQuickSync() {
         <tr><td class="muted small">Snapshot size</td><td class="mono small">${fmtBytes(info.archiveBytes)} (compressed)</td></tr>
         <tr><td class="muted small">Snapshot date</td><td class="mono small">${esc(info.lastModified ?? "unknown")}</td></tr>
         <tr><td class="muted small">Free disk space</td><td class="mono small">${info.freeBytes != null ? fmtBytes(info.freeBytes) : "unknown"} (needs ~${fmtBytes(info.requiredBytes)} during restore)</td></tr>
-        ${info.resumeFrom > 0 ? `<tr><td class="muted small">Resumable</td><td class="mono small">${fmtBytes(info.resumeFrom)} already downloaded</td></tr>` : ""}
+        ${info.resumeFrom > 0 ? KaiI18n.html`<tr><td class="muted small">Resumable</td><td class="mono small">${fmtBytes(info.resumeFrom)} already downloaded</td></tr>` : ""}
       </table>
-      ${lowSpace ? `<div class="banner warn">Free space looks below the recommended headroom — the restore may fail mid-way. Free up disk first if possible.</div>` : ""}
-      ${info.nodeRunning ? `<div class="banner info">The node is running — it will be stopped before the restore and can be started again right after.</div>` : ""}
+      ${lowSpace ? KaiI18n.html`<div class="banner warn">Free space looks below the recommended headroom — the restore may fail mid-way. Free up disk first if possible.</div>` : ""}
+      ${info.nodeRunning ? KaiI18n.html`<div class="banner info">The node is running — it will be stopped before the restore and can be started again right after.</div>` : ""}
       <p class="small muted">The download is verified against the published SHA-256 and the archive layout is checked before anything is installed. You can cancel at any time and resume later.</p>`,
     actions: [
       { label: "Cancel", onClick: (close) => close() },
@@ -1413,7 +1413,7 @@ function onStartNode() {
   const canProduce = S.producer?.mode === "external" ? !!S.producer.matches : S.wallet?.exists;
   showModal({
     title: "Start Koinos node",
-    body: `
+    body: KaiI18n.html`
       <label class="field"><span class="row" style="gap:8px">
         <input type="checkbox" id="ns-produce" ${canProduce ? "checked" : "disabled"} style="width:auto">
         <span>Enable block production (uses producer address <span class="mono">${esc(S.producer?.address || S.wallet?.address || "not configured")}</span> as producer)</span>
@@ -1465,13 +1465,13 @@ async function onRegisterKey() {
 
 async function loadLogs() {
   const out = $("#n-log-out");
-  out.textContent = "Loading…";
+  KaiI18n.setText(out, "Loading…");
   try {
     const text = await call("node:logs", { service: $("#n-log-svc").value || undefined, tail: 200 });
     out.textContent = text || "(no output)";
     out.scrollTop = out.scrollHeight;
   } catch (e) {
-    out.textContent = `Failed to load logs: ${e.message}`;
+    KaiI18n.setText(out, KaiI18n.message`Failed to load logs: ${e.message}`);
   }
 }
 
@@ -1481,7 +1481,7 @@ function renderSetupCard(n) {
   const setup = n.setup;
   if (!setup) {
     // Detection unavailable — fall back to a simple prompt with a docs link.
-    return `<div class="banner bad"><b>Docker isn't available.</b> ${esc(n.docker?.error ?? "")}<br>
+    return KaiI18n.html`<div class="banner bad"><b>Docker isn't available.</b> ${esc(n.docker?.error ?? "")}<br>
       <div class="row" style="margin-top:10px">
         <button class="btn" data-setup-action="openDockerDocs">Docker install guide ↗</button>
       </div></div>`;
@@ -1490,15 +1490,15 @@ function renderSetupCard(n) {
   const platLabel = { win32: "Windows", darwin: "macOS", linux: "Linux" }[setup.platform] ?? setup.platform;
   const stepsHtml = setup.steps
     .map((s) => {
-      const icon = s.status === "active" ? '<span class="spin"></span>' : SETUP_ICONS[s.status] ?? "•";
+      const icon = s.status === "active" ? KaiI18n.html('<span class="spin"></span>') : SETUP_ICONS[s.status] ?? "•";
       const btn = s.action
-        ? `<button class="btn ${s.status === "reboot" ? "danger" : "primary"}" data-setup-action="${esc(s.action.channel.split(":")[1])}">${esc(s.action.label)}</button>`
+        ? KaiI18n.html`<button class="btn ${s.status === "reboot" ? "danger" : "primary"}" data-setup-action="${esc(s.action.channel.split(":")[1])}">${esc(s.action.label)}</button>`
         : "";
       const altBtn = s.altAction
-        ? `<button class="btn ghost" data-setup-action="${esc(s.altAction.channel.split(":")[1])}">${esc(s.altAction.label)}</button>`
+        ? KaiI18n.html`<button class="btn ghost" data-setup-action="${esc(s.altAction.channel.split(":")[1])}">${esc(s.altAction.label)}</button>`
         : "";
       const cls = s.status === "done" ? "muted" : "";
-      return `<div class="setup-step ${s.status}">
+      return KaiI18n.html`<div class="setup-step ${s.status}">
         <div class="setup-ico">${icon}</div>
         <div class="setup-body"><div class="setup-title ${cls}">${esc(s.title)}</div>
           <div class="setup-detail">${esc(s.detail)}</div></div>
@@ -1513,14 +1513,14 @@ function renderSetupCard(n) {
   if (op?.running && op.name === "docker-download") {
     const p = op.progress ?? {};
     const bytes = p.doneBytes != null ? ` — ${fmtBytes(p.doneBytes)} / ${fmtBytes(p.totalBytes)}` : "";
-    progressHtml = `<div class="banner info" style="margin-top:12px">
+    progressHtml = KaiI18n.html`<div class="banner info" style="margin-top:12px">
       <div class="row spread"><span><span class="spin"></span> Downloading Docker Desktop${bytes}</span>
         <button class="btn ghost" style="padding:4px 10px" data-setup-action="cancelInstallDocker">Cancel</button></div>
       <div class="progress" style="margin-top:8px"><div style="width:${p.pct != null ? Math.min(100, p.pct).toFixed(1) : 0}%"></div></div>
     </div>`;
   }
 
-  return `<div class="card setup-card">
+  return KaiI18n.html`<div class="card setup-card">
     <div class="row spread"><h2>🧰 Set up requirements <span class="muted small">one time · ${esc(platLabel)}</span></h2>
       <button class="btn ghost" data-setup-action="recheck">Re-check</button></div>
     <p class="hint" style="margin-top:0">The Koinos node runs inside Docker. KoinosKit can set everything up for you — just click through the steps. It's all free.</p>
@@ -1570,7 +1570,7 @@ async function onSetupClick(e) {
   if (action === "restart") {
     showModal({
       title: "Restart Windows?",
-      body: `<p class="small">Windows needs to restart to finish enabling WSL 2. This will restart your computer in 60 seconds — save any open work first. You can cancel during the countdown.</p>`,
+      body: KaiI18n.html`<p class="small">Windows needs to restart to finish enabling WSL 2. This will restart your computer in 60 seconds — save any open work first. You can cancel during the countdown.</p>`,
       actions: [
         { label: "Not now", onClick: (close) => close() },
         {
@@ -1581,7 +1581,7 @@ async function onSetupClick(e) {
               close();
               const div = document.createElement("div");
               div.className = "toast warn";
-              div.innerHTML = `Windows will restart in 60 seconds. <button class="link">Cancel</button>`;
+              div.innerHTML = KaiI18n.html`Windows will restart in 60 seconds. <button class="link">Cancel</button>`;
               $("button", div).addEventListener("click", async () => {
                 await call("setup:cancelRestart").catch(() => {});
                 toast("Restart cancelled", "good");
@@ -1620,7 +1620,7 @@ async function onSetupClick(e) {
 
 function busyDelegate(el, label) {
   el.disabled = true;
-  el.innerHTML = `<span class="spin"></span> ${esc(label)}`;
+  el.innerHTML = KaiI18n.html`<span class="spin"></span> ${esc(label)}`;
 }
 
 function quickSyncStage(op) {
@@ -1659,20 +1659,20 @@ function patchNodeView() {
     const p = op.progress ?? {};
     const pctText = p.pct != null ? ` — ${p.pct.toFixed(1)}%` : "";
     const bytesText = p.doneBytes != null ? ` (${fmtBytes(p.doneBytes)} / ${fmtBytes(p.totalBytes)})` : "";
-    opEl.innerHTML = `<div class="banner info">
+    opEl.innerHTML = KaiI18n.html`<div class="banner info">
       <div class="row spread"><span><span class="spin"></span> <b>Quick sync:</b> ${esc(quickSyncStage(op))}${pctText}${bytesText}</span>
       <button id="n-qs-cancel" class="btn ghost" style="padding:4px 10px">Cancel</button></div>
-      ${p.pct != null ? `<div class="progress" style="margin-top:8px"><div style="width:${Math.min(100, p.pct).toFixed(1)}%"></div></div>` : ""}
-      <span class="mono small">${op.tail.slice(-2).map(esc).join("<br>")}</span></div>`;
+      ${p.pct != null ? KaiI18n.html`<div class="progress" style="margin-top:8px"><div style="width:${Math.min(100, p.pct).toFixed(1)}%"></div></div>` : ""}
+      <span class="mono small">${op.tail.slice(-2).map(esc).join(KaiI18n.html("<br>"))}</span></div>`;
     $("#n-qs-cancel")?.addEventListener("click", async () => {
       await call("node:quickSyncCancel").catch(() => {});
       toast("Cancelling quick sync — the download can be resumed later", "warn");
     });
   } else if (op?.running) {
-    opEl.innerHTML = `<div class="banner info"><span class="spin"></span> <b>${esc(op.name)}</b> in progress…<br>
-      <span class="mono small">${op.tail.slice(-4).map(esc).join("<br>")}</span></div>`;
+    opEl.innerHTML = KaiI18n.html`<div class="banner info"><span class="spin"></span> <b>${esc(op.name)}</b> in progress…<br>
+      <span class="mono small">${op.tail.slice(-4).map(esc).join(KaiI18n.html("<br>"))}</span></div>`;
   } else if (op && op.code !== 0 && op.error) {
-    opEl.innerHTML = `<div class="banner bad"><b>${esc(op.name)} failed:</b> ${esc(op.error)}</div>`;
+    opEl.innerHTML = KaiI18n.html`<div class="banner bad"><b>${esc(op.name)} failed:</b> ${esc(op.error)}</div>`;
   } else {
     opEl.innerHTML = "";
   }
@@ -1681,7 +1681,7 @@ function patchNodeView() {
   const pill = $("#n-run-pill");
   if (pill) {
     pill.className = "pill " + (!quickSync && n?.isRunning && n?.health?.ok !== false && !n?.production?.reason ? "good" : "warn");
-    pill.textContent = quickSync ? (n?.isRunning ? "stopping for quick sync" : "stopped · quick syncing") : n?.isRunning ? (n?.health?.ok === false || n?.production?.reason ? "needs attention" : `running (${n.runningCount} services)`) : "stopped";
+    KaiI18n.setText(pill, quickSync ? (n?.isRunning ? "stopping for quick sync" : "stopped · quick syncing") : n?.isRunning ? (n?.health?.ok === false || n?.production?.reason ? "needs attention" : `running (${n.runningCount} services)`) : "stopped");
   }
 
   // friendly, jargon-free health line + auto-recover toggle state
@@ -1690,12 +1690,12 @@ function patchNodeView() {
   const healthEl = $("#n-health");
   if (healthEl) {
     const h = n?.health;
-    const recovered = h?.recoveries ? ` <span class="muted small">(recovered ${h.recoveries}× recently)</span>` : "";
+    const recovered = h?.recoveries ? KaiI18n.html` <span class="muted small">(recovered ${h.recoveries}× recently)</span>` : "";
     if (quickSync) {
-      healthEl.innerHTML = `<div class="banner info">${n?.isRunning ? "The node is stopping for a snapshot restore." : "The node is stopped while quick sync restores the chain data. Block production is paused."} Automatic recovery will not restart it during quick sync. Start the node after the restore finishes.</div>`;
+      healthEl.innerHTML = KaiI18n.html`<div class="banner info">${n?.isRunning ? "The node is stopping for a snapshot restore." : "The node is stopped while quick sync restores the chain data. Block production is paused."} Automatic recovery will not restart it during quick sync. Start the node after the restore finishes.</div>`;
     } else if (h?.needsRepair) {
       // Corrupted block data — a restart can't fix it. Offer the one-click rebuild.
-      healthEl.innerHTML = `<div class="banner bad">
+      healthEl.innerHTML = KaiI18n.html`<div class="banner bad">
         <b>Chain validation failed — block production is not healthy.</b> The saved chain state could not be replayed correctly. Quick Sync can rebuild the local data from a verified snapshot; completion time depends on your disk and connection. If this repeats, save the chain logs for investigation. Your wallet, keys and settings are kept.
         <div style="margin-top:8px"><button id="n-repair" class="btn primary" style="padding:6px 12px">🔧 Repair node data</button></div>
       </div>`;
@@ -1703,18 +1703,18 @@ function patchNodeView() {
     } else if (!n?.isRunning) {
       healthEl.innerHTML = "";
     } else if (n?.production?.reason === "vhp-burn-rejected") {
-      healthEl.innerHTML = `<div class="banner bad"><b>Block submissions rejected: could not burn VHP.</b> The node is running, but its last observed block attempt failed. For Koin Vault, connect the producer wallet and choose Allow VHP for block production above. This needs phone approval. Quick Sync does not fix wallet authorization.</div>`;
+      healthEl.innerHTML = KaiI18n.html`<div class="banner bad"><b>Block submissions rejected: could not burn VHP.</b> The node is running, but its last observed block attempt failed. For Koin Vault, connect the producer wallet and choose Allow VHP for block production above. This needs phone approval. Quick Sync does not fix wallet authorization.</div>`;
     } else if (n?.production?.reason) {
-      healthEl.innerHTML = `<div class="banner bad"><b>Last observed block submission was rejected.</b> Open block_producer logs for the failure details. Running services and a registered key do not guarantee accepted blocks.</div>`;
+      healthEl.innerHTML = KaiI18n.html`<div class="banner bad"><b>Last observed block submission was rejected.</b> Open block_producer logs for the failure details. Running services and a registered key do not guarantee accepted blocks.</div>`;
     } else if (h?.recovering) {
-      healthEl.innerHTML = `<div class="banner info"><span class="spin"></span> Getting your node back up — this takes a minute. You don't need to do anything.</div>`;
+      healthEl.innerHTML = KaiI18n.html`<div class="banner info"><span class="spin"></span> Getting your node back up — this takes a minute. You don't need to do anything.</div>`;
     } else if (h && h.ok === false) {
-      healthEl.innerHTML = `<div class="banner bad">The node is not confirmed healthy (${esc(h.reason || "status unavailable")}). Block production may be interrupted. Check the chain logs${n?.autoRecover ? "; automatic recovery is enabled" : "; automatic recovery is off"}.</div>`;
+      healthEl.innerHTML = KaiI18n.html`<div class="banner bad">The node is not confirmed healthy (${esc(h.reason || "status unavailable")}). Block production may be interrupted. Check the chain logs${n?.autoRecover ? "; automatic recovery is enabled" : "; automatic recovery is off"}.</div>`;
     } else if (h?.memorySaver) {
-      healthEl.innerHTML = `<div class="banner warn">Running in memory-saver mode to stay stable on this PC — your node services are running.${recovered}</div>`;
+      healthEl.innerHTML = KaiI18n.html`<div class="banner warn">Running in memory-saver mode to stay stable on this PC — your node services are running.${recovered}</div>`;
 
     } else if (h) {
-      healthEl.innerHTML = `<div class="banner good">✓ Your node is running and healthy.${recovered}</div>`;
+      healthEl.innerHTML = KaiI18n.html`<div class="banner good">✓ Your node is running and healthy.${recovered}</div>`;
     } else {
       healthEl.innerHTML = "";
     }
@@ -1723,11 +1723,11 @@ function patchNodeView() {
   if (tbody) {
     tbody.innerHTML = (n?.services ?? [])
       .map(
-        (s) => `<tr><td class="mono">${esc(s.service)}</td>
+        (s) => KaiI18n.html`<tr><td class="mono">${esc(s.service)}</td>
           <td><span class="pill ${/running|up/i.test(s.state) ? "good" : "warn"}">${esc(s.state)}</span></td>
           <td class="muted">${esc(s.status)}</td></tr>`
       )
-      .join("") || `<tr><td class="muted">No services running.</td></tr>`;
+      .join("") || KaiI18n.html`<tr><td class="muted">No services running.</td></tr>`;
   }
 
   // sync
@@ -1735,16 +1735,16 @@ function patchNodeView() {
   if (syncEl) {
     const sync = n?.sync;
     if (quickSync) {
-      syncEl.innerHTML = `<span class="muted">${esc(quickSyncStage(op))}. Live chain sync resumes when you start the node after the restore.</span>`;
+      syncEl.innerHTML = KaiI18n.html`<span class="muted">${esc(quickSyncStage(op))}. Live chain sync resumes when you start the node after the restore.</span>`;
     } else if (!n?.isRunning) {
-      syncEl.innerHTML = `<span class="muted">Start the node to sync the chain.</span>`;
+      syncEl.innerHTML = KaiI18n.html`<span class="muted">Start the node to sync the chain.</span>`;
     } else if (!sync || sync.local?.error) {
-      syncEl.innerHTML = `<span class="muted">Waiting for local RPC… (services may still be starting)</span>`;
+      syncEl.innerHTML = KaiI18n.html`<span class="muted">Waiting for local RPC… (services may still be starting)</span>`;
     } else {
       const pct = sync.progressPct != null ? sync.progressPct : sync.inSync ? 100 : 0;
-      syncEl.innerHTML = `
+      syncEl.innerHTML = KaiI18n.html`
         <div class="row spread">
-          <span>${sync.inSync ? '<span class="pill good">in sync</span>' : '<span class="pill warn">syncing</span>'}</span>
+          <span>${sync.inSync ? KaiI18n.html('<span class="pill good">in sync</span>') : KaiI18n.html('<span class="pill warn">syncing</span>')}</span>
           <span class="mono small">${sync.local.height.toLocaleString()}${sync.remote ? " / " + sync.remote.height.toLocaleString() : ""} blocks</span>
         </div>
         <div class="progress"><div style="width:${pct.toFixed(1)}%"></div></div>
@@ -1781,8 +1781,8 @@ function patchNodeView() {
     const tickFor = (s) => (s === "ok" ? "✅" : s === "pending" ? "⏳" : "⬜");
     checklist.innerHTML = items
       .map(
-        ([state, label, hint]) => `<li><span class="tick">${tickFor(state)}</span>
-          <span>${esc(label)}${state === "ok" ? "" : `<br><span class="muted small">${esc(hint)}</span>`}</span></li>`
+        ([state, label, hint]) => KaiI18n.html`<li><span class="tick">${tickFor(state)}</span>
+          <span>${esc(label)}${state === "ok" ? "" : KaiI18n.html`<br><span class="muted small">${esc(hint)}</span>`}</span></li>`
       )
       .join("");
     const reg = $("#n-register");
@@ -1791,15 +1791,15 @@ function patchNodeView() {
     reg.disabled = !canRegister;
     if ($("#pc-public")) $("#pc-public").value = p?.filePublicKey || "";
     if (p?.mode === "external") {
-      regHint.textContent = p.matches ? "External producer registration verified. The node holds only its hot production key." : p.verificationError || "Use External signing above to register this hot key with your separate wallet.";
+      KaiI18n.setText(regHint, p.matches ? "External producer registration verified. The node holds only its hot production key." : p.verificationError || "Use External signing above to register this hot key with your separate wallet.");
     } else if (p?.matches) {
-      regHint.textContent = "Signing key registered on chain.";
+      KaiI18n.setText(regHint, "Signing key registered on chain.");
     } else if (p?.registeredPublicKey && p?.filePublicKey && !p.matches) {
-      regHint.textContent = "⚠️ A different key is registered on chain for this address. Register the current node key to replace it.";
+      KaiI18n.setText(regHint, "⚠️ A different key is registered on chain for this address. Register the current node key to replace it.");
     } else if (!p?.filePublicKey) {
-      regHint.textContent = "The signing key appears after the node's first start.";
+      KaiI18n.setText(regHint, "The signing key appears after the node's first start.");
     } else if (S.walletStage !== "unlocked") {
-      regHint.textContent = "Unlock your wallet to register.";
+      KaiI18n.setText(regHint, "Unlock your wallet to register.");
     } else {
       regHint.textContent = "";
     }
@@ -1815,7 +1815,7 @@ let FUND = { ethAddress: null, onrampEndpoint: "", onrampConfigured: false };
 
 function renderFundView() {
   const root = $("#view-fund");
-  root.innerHTML = `
+  root.innerHTML = KaiI18n.html`
     <h1>Fund node</h1>
     <p class="lead">Buy ETH into an address the app generates for you, then bridge it to Koinos and swap to KOIN — all in-app. Mana for the Koinos steps is sponsored, so you don't need any KOIN to start.</p>
     <div class="grid-2">
@@ -1888,11 +1888,11 @@ const BRIDGE_PHASES = ["Deposit ETH into the bridge", "Wait for guardians", "Red
 function bridgePhaseIdx(status) { return BRIDGE_ORDER.indexOf(status); }
 
 function fundDoneBanner(route, koin) {
-  return `<div class="banner good">✅ ${esc(route)} complete — received ~<b>${esc(fmtKoin(koin))} KOIN</b>. Check the Wallet tab.</div>`;
+  return KaiI18n.html`<div class="banner good">✅ ${esc(route)} complete — received ~<b>${esc(fmtKoin(koin))} KOIN</b>. Check the Wallet tab.</div>`;
 }
 function fundErrorBanner(route, job, safeNote) {
   const where = job.failedAt ? ` (at ${esc(job.failedAt)})` : "";
-  return `<div class="banner bad">${esc(route)} stopped${where}: ${esc(job.error || "unknown error")}${safeNote ? `<br><span class="small">${esc(safeNote)}</span>` : ""}</div>`;
+  return KaiI18n.html`<div class="banner bad">${esc(route)} stopped${where}: ${esc(job.error || "unknown error")}${safeNote ? KaiI18n.html`<br><span class="small">${esc(safeNote)}</span>` : ""}</div>`;
 }
 
 // Route C shows only the phases its source actually runs (vKOIN skips both swaps,
@@ -1921,12 +1921,12 @@ function fundProgress(kind, job) {
     title = job.source === "vkoin" ? "vKOIN → KOIN" : job.source === "usdt" ? "USDT funding" : "Route C";
   }
   const steps = labels.map((label, i) => {
-    const ico = i < idx ? "✅" : i === idx ? '<span class="spin"></span>' : "⬜";
-    return `<div class="row" style="gap:8px;align-items:center"><span>${ico}</span><span class="${i === idx ? "" : "muted"}">${esc(label)}</span></div>`;
+    const ico = i < idx ? "✅" : i === idx ? KaiI18n.html('<span class="spin"></span>') : "⬜";
+    return KaiI18n.html`<div class="row" style="gap:8px;align-items:center"><span>${ico}</span><span class="${i === idx ? "" : "muted"}">${esc(label)}</span></div>`;
   }).join("");
-  const tx = job.pendingTx ? `<div class="small muted" style="margin-top:6px">Waiting on tx ${esc(String(job.pendingTx).slice(0, 12))}…</div>` : "";
-  const attempts = job.redeemAttempts ? `<div class="small muted" style="margin-top:6px">Retrying redeem (nonce) — attempt ${esc(String(job.redeemAttempts))}…</div>` : "";
-  return `<div style="margin-top:4px"><b>${esc(title)}</b> running…</div>
+  const tx = job.pendingTx ? KaiI18n.html`<div class="small muted" style="margin-top:6px">Waiting on tx ${esc(String(job.pendingTx).slice(0, 12))}…</div>` : "";
+  const attempts = job.redeemAttempts ? KaiI18n.html`<div class="small muted" style="margin-top:6px">Retrying redeem (nonce) — attempt ${esc(String(job.redeemAttempts))}…</div>` : "";
+  return KaiI18n.html`<div style="margin-top:4px"><b>${esc(title)}</b> running…</div>
     <div style="display:flex;flex-direction:column;gap:6px;margin-top:6px">${steps}</div>${tx}${attempts}
     <p class="hint" style="margin-top:10px">Keep the app open and unlocked. Auto-advances; resumes if interrupted.</p>`;
 }
@@ -1954,19 +1954,19 @@ function patchFundUnified() {
   const usdtBusy = c && !isTerminal(c) && c.source === "usdt";
 
   const ctl = [];
-  if (b && b.status === "error") ctl.push('<button class="btn" data-act="b-retry">Retry Route B</button>', '<button class="btn ghost" data-act="b-clear">Clear</button>');
-  else if (b && b.status === "done") ctl.push('<button class="btn ghost" data-act="b-clear">Clear</button>');
-  if (c && c.source !== "usdt" && c.status === "error") ctl.push('<button class="btn" data-act="c-resume">Resume Route C</button>', '<button class="btn ghost" data-act="c-clear">Clear</button>');
-  else if (c && c.source !== "usdt" && c.status === "done") ctl.push('<button class="btn ghost" data-act="c-clear">Clear</button>');
-  const controls = ctl.length ? `<div class="row" style="gap:8px;margin-bottom:8px">${ctl.join("")}</div>` : "";
+  if (b && b.status === "error") ctl.push(KaiI18n.html('<button class="btn" data-act="b-retry">Retry Route B</button>'), KaiI18n.html('<button class="btn ghost" data-act="b-clear">Clear</button>'));
+  else if (b && b.status === "done") ctl.push(KaiI18n.html('<button class="btn ghost" data-act="b-clear">Clear</button>'));
+  if (c && c.source !== "usdt" && c.status === "error") ctl.push(KaiI18n.html('<button class="btn" data-act="c-resume">Resume Route C</button>'), KaiI18n.html('<button class="btn ghost" data-act="c-clear">Clear</button>'));
+  else if (c && c.source !== "usdt" && c.status === "done") ctl.push(KaiI18n.html('<button class="btn ghost" data-act="c-clear">Clear</button>'));
+  const controls = ctl.length ? KaiI18n.html`<div class="row" style="gap:8px;margin-bottom:8px">${ctl.join("")}</div>` : "";
 
-  el.innerHTML = `${banner}${controls}
+  el.innerHTML = KaiI18n.html`${banner}${controls}
     <label class="field"><span>Amount (ETH · max 0.05)</span>
       <div class="row" style="gap:8px">
         <input id="fund-u-amt" type="number" min="0" max="0.05" step="0.001" class="mono" placeholder="0.02" style="max-width:180px" ${usdtBusy ? "disabled" : ""}>
         <button id="fund-u-max" class="btn ghost" style="padding:6px 12px" title="Your ETH balance minus a gas reserve for the funding steps" ${usdtBusy ? "disabled" : ""}>Max</button>
       </div></label>
-    <div id="fund-u-routes" class="hint" style="margin-top:8px">${usdtBusy ? '<span class="muted">A USDT funding is in progress below…</span>' : "Enter an amount to see both routes."}</div>`;
+    <div id="fund-u-routes" class="hint" style="margin-top:8px">${usdtBusy ? KaiI18n.html('<span class="muted">A USDT funding is in progress below…</span>') : "Enter an amount to see both routes."}</div>`;
   el.querySelectorAll("[data-act]").forEach((btn) => btn.addEventListener("click", () => onFundControl(btn.dataset.act)));
   const amt = document.getElementById("fund-u-amt");
   const maxBtn = document.getElementById("fund-u-max");
@@ -2004,8 +2004,8 @@ async function doUnifiedQuote() {
   const amt = document.getElementById("fund-u-amt");
   const box = document.getElementById("fund-u-routes");
   if (!amt || !box) return;
-  if (!Number(amt.value)) { box.textContent = "Enter an amount to see both routes."; return; }
-  box.innerHTML = '<span class="muted">Pricing both routes…</span>';
+  if (!Number(amt.value)) { KaiI18n.setText(box, "Enter an amount to see both routes."); return; }
+  box.innerHTML = KaiI18n.html('<span class="muted">Pricing both routes…</span>');
   try {
     const r = await call("fund:routeCompare", { amountEth: amt.value });
     box.innerHTML = renderRouteChoices(r);
@@ -2014,11 +2014,11 @@ async function doUnifiedQuote() {
     try {
       const g = await call("fund:routeMaxEth");
       if (Number(amt.value) + Number(g.gasReserveEth) > Number(g.balanceEth)) {
-        box.insertAdjacentHTML("beforeend", `<div class="banner warn" style="margin-top:8px">⚠ Low on gas: a run needs ~${esc(Number(g.gasReserveEth).toFixed(4))} ETH of gas on top of the amount, but your balance is ${esc(Number(g.balanceEth).toFixed(4))} ETH. It could stall mid-way — use <b>Max</b> or add ETH.</div>`);
+        box.insertAdjacentHTML("beforeend", KaiI18n.html`<div class="banner warn" style="margin-top:8px">⚠ Low on gas: a run needs ~${esc(Number(g.gasReserveEth).toFixed(4))} ETH of gas on top of the amount, but your balance is ${esc(Number(g.balanceEth).toFixed(4))} ETH. It could stall mid-way — use <b>Max</b> or add ETH.</div>`);
       }
     } catch { /* non-blocking */ }
   } catch (e) {
-    box.innerHTML = `<span style="color:var(--bad)">${esc(e.message)}</span>`;
+    box.innerHTML = KaiI18n.html`<span style="color:var(--bad)">${esc(e.message)}</span>`;
   }
 }
 
@@ -2029,11 +2029,11 @@ function renderRouteChoices(r) {
   });
   return routes.map((rt) => {
     const koin = rt.koinOut ? fmtKoin(rt.koinOut) : null;
-    const best = rt.isBest ? ' <span class="good">★ best</span>' : "";
-    const mult = rt.bestMultiple && !rt.isBest ? ` <span class="muted small">— best returns ${esc(String(rt.bestMultiple))}× more</span>` : "";
-    const val = koin ? `<b>${esc(koin)} KOIN</b>${best}${mult}` : `<span style="color:var(--bad)">unavailable${rt.error ? ": " + esc(rt.error) : ""}</span>`;
-    const btn = koin ? `<button class="btn ${rt.isBest ? "primary" : ""}" data-route="${esc(rt.id)}">Use Route ${esc(rt.id)}</button>` : "";
-    return `<div style="padding:10px 0;border-top:1px solid var(--border)">
+    const best = rt.isBest ? KaiI18n.html(' <span class="good">★ best</span>') : "";
+    const mult = rt.bestMultiple && !rt.isBest ? KaiI18n.html` <span class="muted small">— best returns ${esc(String(rt.bestMultiple))}× more</span>` : "";
+    const val = koin ? KaiI18n.html`<b>${esc(koin)} KOIN</b>${best}${mult}` : KaiI18n.html`<span style="color:var(--bad)">unavailable${rt.error ? ": " + esc(rt.error) : ""}</span>`;
+    const btn = koin ? KaiI18n.html`<button class="btn ${rt.isBest ? "primary" : ""}" data-route="${esc(rt.id)}">Use Route ${esc(rt.id)}</button>` : "";
+    return KaiI18n.html`<div style="padding:10px 0;border-top:1px solid var(--border)">
       <div class="row spread" style="gap:8px"><div><b>Route ${esc(rt.id)}</b> — ${esc(rt.label)}</div>${btn}</div>
       <div class="muted small" style="margin-top:2px">${esc((rt.steps || []).join(" → "))}</div>
       <div style="margin-top:3px">${val}</div>
@@ -2049,7 +2049,7 @@ function onPickRoute(routeId, amountEth) {
   const isC = routeId === "C";
   showModal({
     title: `Fund via Route ${routeId}?`,
-    body: `<p class="small">This runs <b>${esc(String(v))} ETH</b> through <b>Route ${esc(routeId)}</b> — ${isC ? "swap ETH→USDT→vKOIN on Uniswap, then bridge vKOIN to native KOIN" : "deposit to the Vortex bridge, then swap vETH→KOIN on KoinDX"}. Real funds, several on-chain steps, auto-advances. Keep the app open and unlocked. Continue?</p>`,
+    body: KaiI18n.html`<p class="small">This runs <b>${esc(String(v))} ETH</b> through <b>Route ${esc(routeId)}</b> — ${isC ? "swap ETH→USDT→vKOIN on Uniswap, then bridge vKOIN to native KOIN" : "deposit to the Vortex bridge, then swap vETH→KOIN on KoinDX"}. Real funds, several on-chain steps, auto-advances. Keep the app open and unlocked. Continue?</p>`,
     actions: [
       { label: "Cancel", onClick: (c) => c() },
       {
@@ -2085,7 +2085,7 @@ function patchUsdtFund() {
   else if (c && c.source === "usdt" && c.status === "error") banner = fundErrorBanner("USDT funding", c, "Funds are safe as USDT / vKOIN.");
   const busyElsewhere = anyFundingActive();
 
-  el.innerHTML = `${banner}
+  el.innerHTML = KaiI18n.html`${banner}
     <label class="field"><span>Amount (USDT · max 150)</span>
       <div class="row" style="gap:8px">
         <input id="fund-usdt-amt" type="number" min="0" step="1" class="mono" placeholder="20" style="max-width:180px" ${busyElsewhere ? "disabled" : ""}>
@@ -2094,10 +2094,10 @@ function patchUsdtFund() {
     <div id="fund-usdt-quote" class="hint" style="min-height:18px;margin-top:6px"></div>
     <div class="row" style="margin-top:8px;gap:8px">
       <button id="fund-usdt-go" class="btn primary" ${busyElsewhere ? "disabled" : ""}>Swap &amp; bridge to KOIN</button>
-      ${c && c.source === "usdt" && c.status === "error" ? '<button id="fund-usdt-resume" class="btn">Resume</button>' : ""}
-      ${c && c.source === "usdt" && (c.status === "error" || c.status === "done") ? '<button class="btn ghost" data-act="u-clear">Clear</button>' : ""}
+      ${c && c.source === "usdt" && c.status === "error" ? KaiI18n.html('<button id="fund-usdt-resume" class="btn">Resume</button>') : ""}
+      ${c && c.source === "usdt" && (c.status === "error" || c.status === "done") ? KaiI18n.html('<button class="btn ghost" data-act="u-clear">Clear</button>') : ""}
     </div>
-    ${busyElsewhere ? '<p class="hint">Finish the funding above first.</p>' : ""}`;
+    ${busyElsewhere ? KaiI18n.html('<p class="hint">Finish the funding above first.</p>') : ""}`;
   if (!busyElsewhere) {
     $("#fund-usdt-amt").addEventListener("input", debounceUsdtFundQuote);
     $("#fund-usdt-max").addEventListener("click", onUsdtFundMax);
@@ -2114,15 +2114,15 @@ async function doUsdtFundQuote() {
   const amt = document.getElementById("fund-usdt-amt");
   const q = document.getElementById("fund-usdt-quote");
   if (!amt || !q || !Number(amt.value)) { if (q) q.textContent = ""; return; }
-  q.textContent = "Getting quote…";
+  KaiI18n.setText(q, "Getting quote…");
   try {
     const r = await call("fund:usdtFundQuote", { amountUsdt: amt.value });
-    q.innerHTML = `~<b>${esc(fmtKoin(r.koinOut))} KOIN</b> (min ${esc(fmtKoin(r.koinOutMin))} after slippage).`;
+    q.innerHTML = KaiI18n.html`~<b>${esc(fmtKoin(r.koinOut))} KOIN</b> (min ${esc(fmtKoin(r.koinOutMin))} after slippage).`;
     try {
       const g = await call("fund:routeMaxEth");
-      if (!g.enoughForGas) q.insertAdjacentHTML("beforeend", `<br><span style="color:var(--warn)">⚠ Low ETH for gas — needs ~${esc(Number(g.gasReserveEth).toFixed(4))} ETH in this address.</span>`);
+      if (!g.enoughForGas) q.insertAdjacentHTML("beforeend", KaiI18n.html`<br><span style="color:var(--warn)">⚠ Low ETH for gas — needs ~${esc(Number(g.gasReserveEth).toFixed(4))} ETH in this address.</span>`);
     } catch { /* non-blocking */ }
-  } catch (e) { q.innerHTML = `<span style="color:var(--bad)">${esc(e.message)}</span>`; }
+  } catch (e) { q.innerHTML = KaiI18n.html`<span style="color:var(--bad)">${esc(e.message)}</span>`; }
 }
 async function onUsdtFundMax() {
   const amt = document.getElementById("fund-usdt-amt");
@@ -2144,7 +2144,7 @@ function onUsdtFundStart() {
   if (anyFundingActive()) return toast("A funding is already in progress", "bad");
   showModal({
     title: "Fund with USDT?",
-    body: `<p class="small">This swaps <b>${esc(String(v))} USDT</b> → vKOIN on Uniswap and bridges it to native KOIN. Needs a little ETH in your funding address for gas. Real funds, auto-advances. Continue?</p>`,
+    body: KaiI18n.html`<p class="small">This swaps <b>${esc(String(v))} USDT</b> → vKOIN on Uniswap and bridges it to native KOIN. Needs a little ETH in your funding address for gas. Real funds, auto-advances. Continue?</p>`,
     actions: [
       { label: "Cancel", onClick: (c) => c() },
       {
@@ -2168,7 +2168,7 @@ function patchFundView() {
     if (addrWrap.dataset.addr !== key) {
       addrWrap.dataset.addr = key;
       if (FUND.ethAddress) {
-        addrWrap.innerHTML = `
+        addrWrap.innerHTML = KaiI18n.html`
           <div class="mono" style="word-break:break-all;font-size:15px;padding:10px;background:var(--card-2);border:1px solid var(--border);border-radius:8px">${esc(FUND.ethAddress)}</div>
           <div class="row" style="margin-top:8px;align-items:center;gap:10px">
             <button id="fund-copy" class="btn">Copy address</button>
@@ -2181,7 +2181,7 @@ function patchFundView() {
         });
         $("#fund-bal-refresh").addEventListener("click", loadEthBalance);
       } else {
-        addrWrap.innerHTML = `<div class="banner warn">Create or unlock your wallet first — your ETH address is derived from it.</div>`;
+        addrWrap.innerHTML = KaiI18n.html`<div class="banner warn">Create or unlock your wallet first — your ETH address is derived from it.</div>`;
       }
     }
     if (FUND.ethAddress) loadEthBalance();
@@ -2193,7 +2193,7 @@ function patchFundView() {
     // shows when the user has set their own (approved) endpoint. Everyone gets
     // the keyless buy links + the receive address.
     const state = !FUND.ethAddress ? "locked" : FUND.onrampEndpoint ? "buy-custom" : "buy-default";
-    const keylessLinks = `
+    const keylessLinks = KaiI18n.html`
       <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
         <div class="muted small" style="margin-bottom:6px">Buy ETH anywhere — no account with us, no setup — and send it to your address above:</div>
         <div class="row" style="gap:8px;flex-wrap:wrap">
@@ -2206,9 +2206,9 @@ function patchFundView() {
     if (buyWrap.dataset.state !== state) {
       buyWrap.dataset.state = state;
       if (state === "locked") {
-        buyWrap.innerHTML = `<p class="muted">Unlock your wallet to enable buying.</p>`;
+        buyWrap.innerHTML = KaiI18n.html`<p class="muted">Unlock your wallet to enable buying.</p>`;
       } else if (state === "buy-custom") {
-        buyWrap.innerHTML = `
+        buyWrap.innerHTML = KaiI18n.html`
           <label class="field"><span>Amount (USD, optional)</span>
             <input id="fund-usd" type="number" min="0" step="1" class="mono" placeholder="e.g. 50" style="max-width:160px"></label>
           <button id="fund-buy" class="btn primary big">Buy ETH with Coinbase ↗</button>
@@ -2216,7 +2216,7 @@ function patchFundView() {
           ${keylessLinks}`;
         $("#fund-buy").addEventListener("click", onBuyEth);
       } else {
-        buyWrap.innerHTML = `
+        buyWrap.innerHTML = KaiI18n.html`
           <div class="banner info">Coinbase in-app purchase is <b>currently unavailable</b> (pending Coinbase approval). Use a Buy link below, or add your own approved Coinbase endpoint in the settings above.</div>
           ${keylessLinks}`;
       }
@@ -2235,11 +2235,11 @@ async function loadEthBalance() {
   try {
     const b = await call("fund:ethBalance");
     const positive = Number(b.eth) > 0;
-    el.textContent = `Balance: ${b.eth} ETH`;
+    KaiI18n.setText(el, KaiI18n.message`Balance: ${b.eth} ETH`);
     el.classList.toggle("good", positive);
     el.classList.toggle("muted", !positive);
   } catch {
-    el.textContent = "Balance: unavailable";
+    KaiI18n.setText(el, "Balance: unavailable");
   } finally {
     _balBusy = false;
   }
@@ -2280,22 +2280,22 @@ function patchBridge() {
     const idx = BRIDGE_ORDER.indexOf(job.status);
     const steps = BRIDGE_ORDER.slice(0, 4)
       .map((s, i) => {
-        const ico = i < idx ? "✅" : i === idx ? '<span class="spin"></span>' : "⬜";
-        return `<div class="row" style="gap:8px;align-items:center"><span>${ico}</span><span class="${i === idx ? "" : "muted"}">${esc(BRIDGE_LABELS[s])}</span></div>`;
+        const ico = i < idx ? "✅" : i === idx ? KaiI18n.html('<span class="spin"></span>') : "⬜";
+        return KaiI18n.html`<div class="row" style="gap:8px;align-items:center"><span>${ico}</span><span class="${i === idx ? "" : "muted"}">${esc(BRIDGE_LABELS[s])}</span></div>`;
       })
       .join("");
-    el.innerHTML = `<div style="display:flex;flex-direction:column;gap:6px;margin-top:6px">${steps}</div>
+    el.innerHTML = KaiI18n.html`<div style="display:flex;flex-direction:column;gap:6px;margin-top:6px">${steps}</div>
       <p class="hint" style="margin-top:10px">Keep the app open and unlocked. This can take several minutes and resumes automatically if interrupted.</p>`;
     return;
   }
 
   let banner = "";
   if (job && job.status === "done") {
-    banner = `<div class="banner good">✅ Bridged! Received ~<b>${esc(fmtKoin(job.koinReceived))} KOIN</b> — check the Wallet tab.</div>`;
+    banner = KaiI18n.html`<div class="banner good">✅ Bridged! Received ~<b>${esc(fmtKoin(job.koinReceived))} KOIN</b> — check the Wallet tab.</div>`;
   } else if (job && job.status === "error") {
-    banner = `<div class="banner bad">Bridge stopped: ${esc(job.error || "unknown error")}${job.ethTxHash ? `<br><span class="small">Your ETH deposit (${esc(job.ethTxHash.slice(0, 12))}…) is safe — Retry resumes from where it left off.</span>` : ""}</div>`;
+    banner = KaiI18n.html`<div class="banner bad">Bridge stopped: ${esc(job.error || "unknown error")}${job.ethTxHash ? KaiI18n.html`<br><span class="small">Your ETH deposit (${esc(job.ethTxHash.slice(0, 12))}…) is safe — Retry resumes from where it left off.</span>` : ""}</div>`;
   }
-  el.innerHTML = `${banner}
+  el.innerHTML = KaiI18n.html`${banner}
     <div class="field" style="margin-top:10px"><span>Amount to bridge (ETH · max 0.05)</span>
       <div class="row" style="gap:8px;align-items:center">
         <input id="fund-bridge-amt" type="number" min="0" max="0.05" step="0.001" class="mono" placeholder="0.01" style="max-width:180px">
@@ -2305,8 +2305,8 @@ function patchBridge() {
     <div id="fund-bridge-quote" class="hint" style="min-height:18px;margin-top:6px"></div>
     <div class="row" style="margin-top:8px">
       <button id="fund-bridge-start" class="btn primary">Bridge &amp; swap to KOIN</button>
-      ${job && job.status === "error" ? '<button id="fund-bridge-retry" class="btn">Retry</button>' : ""}
-      ${job ? '<button id="fund-bridge-reset" class="btn ghost">Reset</button>' : ""}
+      ${job && job.status === "error" ? KaiI18n.html('<button id="fund-bridge-retry" class="btn">Retry</button>') : ""}
+      ${job ? KaiI18n.html('<button id="fund-bridge-reset" class="btn ghost">Reset</button>') : ""}
     </div>`;
   $("#fund-bridge-amt").addEventListener("input", debounceBridgeQuote);
   $("#fund-bridge-max").addEventListener("click", onBridgeMax);
@@ -2350,23 +2350,23 @@ function patchRouteC() {
   if (active) {
     const idx = routeCPhase(job.status);
     const steps = ROUTEC_PHASES.map((label, i) => {
-      const ico = i < idx ? "✅" : i === idx ? '<span class="spin"></span>' : "⬜";
-      return `<div class="row" style="gap:8px;align-items:center"><span>${ico}</span><span class="${i === idx ? "" : "muted"}">${esc(label)}</span></div>`;
+      const ico = i < idx ? "✅" : i === idx ? KaiI18n.html('<span class="spin"></span>') : "⬜";
+      return KaiI18n.html`<div class="row" style="gap:8px;align-items:center"><span>${ico}</span><span class="${i === idx ? "" : "muted"}">${esc(label)}</span></div>`;
     }).join("");
-    const tx = job.pendingTx ? `<div class="small muted" style="margin-top:6px">Waiting on tx ${esc(String(job.pendingTx).slice(0, 12))}…</div>` : "";
-    el.innerHTML = `<div style="display:flex;flex-direction:column;gap:6px;margin-top:6px">${steps}</div>${tx}
+    const tx = job.pendingTx ? KaiI18n.html`<div class="small muted" style="margin-top:6px">Waiting on tx ${esc(String(job.pendingTx).slice(0, 12))}…</div>` : "";
+    el.innerHTML = KaiI18n.html`<div style="display:flex;flex-direction:column;gap:6px;margin-top:6px">${steps}</div>${tx}
       <p class="hint" style="margin-top:10px">Keep the app open and unlocked. Auto-advances; resumes if interrupted.</p>`;
     return;
   }
 
   let banner = "";
   if (job && job.status === "done") {
-    banner = `<div class="banner good">✅ Funded via Route C! Received ~<b>${esc(fmtKoin(job.koinReceived))} KOIN</b> — check the Wallet tab.</div>`;
+    banner = KaiI18n.html`<div class="banner good">✅ Funded via Route C! Received ~<b>${esc(fmtKoin(job.koinReceived))} KOIN</b> — check the Wallet tab.</div>`;
   } else if (job && job.status === "error") {
     const where = job.failedAt ? ` (at ${esc(job.failedAt)})` : "";
-    banner = `<div class="banner bad">Route C stopped${where}: ${esc(job.error || "unknown error")}<br><span class="small">Your funds are safe as ETH / USDT / vKOIN — Resume continues from the last step.</span></div>`;
+    banner = KaiI18n.html`<div class="banner bad">Route C stopped${where}: ${esc(job.error || "unknown error")}<br><span class="small">Your funds are safe as ETH / USDT / vKOIN — Resume continues from the last step.</span></div>`;
   }
-  el.innerHTML = `${banner}
+  el.innerHTML = KaiI18n.html`${banner}
     <div class="field" style="margin-top:10px"><span>Amount (ETH · max 0.05)</span>
       <div class="row" style="gap:8px;align-items:center">
         <input id="fund-routec-amt" type="number" min="0" max="0.05" step="0.001" class="mono" placeholder="0.01" style="max-width:180px">
@@ -2375,8 +2375,8 @@ function patchRouteC() {
     <div id="fund-routec-quote" class="hint" style="min-height:18px;margin-top:6px"></div>
     <div class="row" style="margin-top:8px">
       <button id="fund-routec-start" class="btn primary">Swap &amp; bridge to KOIN</button>
-      ${job && job.status === "error" ? '<button id="fund-routec-resume" class="btn">Resume</button>' : ""}
-      ${job ? '<button id="fund-routec-reset" class="btn ghost">Reset</button>' : ""}
+      ${job && job.status === "error" ? KaiI18n.html('<button id="fund-routec-resume" class="btn">Resume</button>') : ""}
+      ${job ? KaiI18n.html('<button id="fund-routec-reset" class="btn ghost">Reset</button>') : ""}
     </div>`;
   $("#fund-routec-amt").addEventListener("input", debounceRouteCQuote);
   $("#fund-routec-start").addEventListener("click", onRouteCStart);
@@ -2395,17 +2395,17 @@ async function doRouteCQuote() {
   const q = document.getElementById("fund-routec-quote");
   const amt = document.getElementById("fund-routec-amt");
   if (!q || !amt || !Number(amt.value)) { if (q) q.textContent = ""; return; }
-  q.textContent = "Getting quote…";
+  KaiI18n.setText(q, "Getting quote…");
   try {
     const r = await call("fund:routeCompare", { amountEth: amt.value });
     const c = (r.routes || []).find((x) => x.id === "C");
     if (c && c.koinOut) {
-      q.innerHTML = `~<b>${esc(fmtKoin(c.koinOut))} KOIN</b> (min ${esc(fmtKoin(c.koinOutMin))} after slippage).`;
+      q.innerHTML = KaiI18n.html`~<b>${esc(fmtKoin(c.koinOut))} KOIN</b> (min ${esc(fmtKoin(c.koinOutMin))} after slippage).`;
     } else {
-      q.innerHTML = `<span style="color:var(--bad)">Quote unavailable${c && c.error ? ": " + esc(c.error) : ""}</span>`;
+      q.innerHTML = KaiI18n.html`<span style="color:var(--bad)">Quote unavailable${c && c.error ? ": " + esc(c.error) : ""}</span>`;
     }
   } catch (e) {
-    q.innerHTML = `<span style="color:var(--bad)">${esc(e.message)}</span>`;
+    q.innerHTML = KaiI18n.html`<span style="color:var(--bad)">${esc(e.message)}</span>`;
   }
 }
 
@@ -2416,7 +2416,7 @@ async function onRouteCStart() {
   if (v > 0.05) return toast("Max 0.05 ETH while Route C is experimental", "bad");
   showModal({
     title: "Fund via Route C?",
-    body: `<p class="small">This swaps <b>${esc(String(v))} ETH</b> → USDT → vKOIN on Uniswap and bridges it to <b>native KOIN</b> across several real Ethereum transactions (unaudited bridge). It auto-advances and can take a few minutes — keep the app open and unlocked. <b>New path — test small first.</b> Continue?</p>`,
+    body: KaiI18n.html`<p class="small">This swaps <b>${esc(String(v))} ETH</b> → USDT → vKOIN on Uniswap and bridges it to <b>native KOIN</b> across several real Ethereum transactions (unaudited bridge). It auto-advances and can take a few minutes — keep the app open and unlocked. <b>New path — test small first.</b> Continue?</p>`,
     actions: [
       { label: "Cancel", onClick: (c) => c() },
       {
@@ -2446,22 +2446,22 @@ async function doBridgeQuote() {
   const q = document.getElementById("fund-bridge-quote");
   const amt = document.getElementById("fund-bridge-amt");
   if (!q || !amt || !Number(amt.value)) { if (q) q.textContent = ""; return; }
-  q.textContent = "Getting quote…";
+  KaiI18n.setText(q, "Getting quote…");
   try {
     const r = await call("fund:bridgeQuote", { amountEth: amt.value });
     const gas = Number(r.deposit.gasCostEth || 0).toFixed(5);
-    const short = r.deposit.sufficient ? "" : ' <span style="color:var(--bad)">Not enough ETH for amount + gas.</span>';
+    const short = r.deposit.sufficient ? "" : KaiI18n.html(' <span style="color:var(--bad)">Not enough ETH for amount + gas.</span>');
     if (r.swap && r.swap.amountOut) {
       const koin = fmtKoin(r.swap.amountOut);
       const min = fmtKoin(r.swap.amountOutMin);
-      q.innerHTML = `Deposit ${esc(r.deposit.amountEth)} ETH (gas ~${esc(gas)} ETH) → ~<b>${esc(koin)} KOIN</b> (min ${esc(min)} after slippage).${short}`;
+      q.innerHTML = KaiI18n.html`Deposit ${esc(r.deposit.amountEth)} ETH (gas ~${esc(gas)} ETH) → ~<b>${esc(koin)} KOIN</b> (min ${esc(min)} after slippage).${short}`;
     } else {
       const why = r.swap && r.swap.error ? `: ${esc(r.swap.error)}` : "";
       const veth = r.deposit.vethSats ? fmtKoin(r.deposit.vethSats) : "?";
-      q.innerHTML = `Deposit ${esc(r.deposit.amountEth)} ETH (gas ~${esc(gas)} ETH) → ${esc(veth)} vETH. <span style="color:var(--bad)">KOIN quote unavailable${why}</span>.${short}`;
+      q.innerHTML = KaiI18n.html`Deposit ${esc(r.deposit.amountEth)} ETH (gas ~${esc(gas)} ETH) → ${esc(veth)} vETH. <span style="color:var(--bad)">KOIN quote unavailable${why}</span>.${short}`;
     }
   } catch (e) {
-    q.innerHTML = `<span style="color:var(--bad)">${esc(e.message)}</span>`;
+    q.innerHTML = KaiI18n.html`<span style="color:var(--bad)">${esc(e.message)}</span>`;
   }
 }
 
@@ -2496,7 +2496,7 @@ async function onBridgeStart() {
   if (v > 0.05) return toast("Max 0.05 ETH per bridge", "bad");
   showModal({
     title: "Bridge real ETH?",
-    body: `<p class="small">This sends <b>${esc(String(v))} ETH</b> to the Vortex bridge (unaudited), then mints vETH and swaps it to KOIN. It moves real funds and can take several minutes. Keep the app open and unlocked. Continue?</p>`,
+    body: KaiI18n.html`<p class="small">This sends <b>${esc(String(v))} ETH</b> to the Vortex bridge (unaudited), then mints vETH and swaps it to KOIN. It moves real funds and can take several minutes. Keep the app open and unlocked. Continue?</p>`,
     actions: [
       { label: "Cancel", onClick: (c) => c() },
       {
@@ -2526,12 +2526,12 @@ async function onCompareRoutes() {
   if (!v || v <= 0) return toast("Enter an ETH amount to compare", "bad");
   if (!body) return;
   busyButton(btn, true, "Quoting…");
-  body.innerHTML = '<span class="muted">Quoting both routes…</span>';
+  body.innerHTML = KaiI18n.html('<span class="muted">Quoting both routes…</span>');
   try {
     const r = await call("fund:routeCompare", { amountEth: String(v) });
     body.innerHTML = renderRouteCompare(r);
   } catch (e) {
-    body.innerHTML = `<span style="color:var(--bad)">${esc(e.message)}</span>`;
+    body.innerHTML = KaiI18n.html`<span style="color:var(--bad)">${esc(e.message)}</span>`;
   } finally {
     busyButton(btn, false);
   }
@@ -2540,26 +2540,26 @@ async function onCompareRoutes() {
 function renderRouteCompare(r) {
   const rows = (r.routes || []).map((rt) => {
     const steps = (rt.steps || []).join(" → ");
-    const preview = rt.executable ? "" : ' <span class="muted small">(preview)</span>';
+    const preview = rt.executable ? "" : KaiI18n.html(' <span class="muted small">(preview)</span>');
     let val;
     if (rt.koinOut) {
       const koin = fmtKoin(rt.koinOut);
-      const best = rt.isBest ? ' <span class="good">★ best</span>' : "";
-      const mult = rt.bestMultiple && !rt.isBest ? ` <span class="muted">— best returns ${esc(String(rt.bestMultiple))}× more</span>` : "";
-      val = `<b>${esc(koin)} KOIN</b>${best}${mult}`;
+      const best = rt.isBest ? KaiI18n.html(' <span class="good">★ best</span>') : "";
+      const mult = rt.bestMultiple && !rt.isBest ? KaiI18n.html` <span class="muted">— best returns ${esc(String(rt.bestMultiple))}× more</span>` : "";
+      val = KaiI18n.html`<b>${esc(koin)} KOIN</b>${best}${mult}`;
     } else {
-      val = `<span style="color:var(--bad)">unavailable${rt.error ? ": " + esc(rt.error) : ""}</span>`;
+      val = KaiI18n.html`<span style="color:var(--bad)">unavailable${rt.error ? ": " + esc(rt.error) : ""}</span>`;
     }
-    return `<div style="padding:8px 0;border-top:1px solid var(--border)">
+    return KaiI18n.html`<div style="padding:8px 0;border-top:1px solid var(--border)">
       <div><b>Route ${esc(rt.id)}</b> — ${esc(rt.label)}${preview}</div>
       <div class="muted small">${esc(steps)}</div>
       <div style="margin-top:3px">${val}</div>
     </div>`;
   }).join("");
   const hdr = r.best
-    ? `Best for <b>${esc(r.amountEth)} ETH</b>: <b>Route ${esc(r.best.id)}</b> (${esc(fmtKoin(r.best.koinOut))} KOIN)`
-    : '<span style="color:var(--bad)">No route could be quoted right now.</span>';
-  return `<div style="margin-bottom:4px">${hdr}</div>${rows}`;
+    ? KaiI18n.html`Best for <b>${esc(r.amountEth)} ETH</b>: <b>Route ${esc(r.best.id)}</b> (${esc(fmtKoin(r.best.koinOut))} KOIN)`
+    : KaiI18n.html('<span style="color:var(--bad)">No route could be quoted right now.</span>');
+  return KaiI18n.html`<div style="margin-bottom:4px">${hdr}</div>${rows}`;
 }
 
 // ---- withdraw ETH out ----
@@ -2575,7 +2575,7 @@ async function doSendQuote() {
   if (!q || !to || !amt) return;
   const v = Number(amt.value);
   if (!to.value.trim() || !v || v <= 0) { q.textContent = ""; return; }
-  q.textContent = "Estimating…";
+  KaiI18n.setText(q, "Estimating…");
   try {
     const r = await call("fund:ethSendQuote", { toAddress: to.value.trim(), amountEth: String(v) });
     const gas = Number(r.gasCostEth || 0).toFixed(5);
@@ -2583,9 +2583,9 @@ async function doSendQuote() {
     const bal = Number(r.balanceEth || 0).toFixed(6);
     q.innerHTML = r.sufficient
       ? `Gas ~${esc(gas)} ETH · total ~${esc(total)} ETH · balance ${esc(bal)} ETH`
-      : `<span style="color:var(--bad)">Not enough ETH: need ~${esc(total)} incl. gas, have ${esc(bal)}.</span>`;
+      : KaiI18n.html`<span style="color:var(--bad)">Not enough ETH: need ~${esc(total)} incl. gas, have ${esc(bal)}.</span>`;
   } catch (e) {
-    q.innerHTML = `<span style="color:var(--bad)">${esc(e.message)}</span>`;
+    q.innerHTML = KaiI18n.html`<span style="color:var(--bad)">${esc(e.message)}</span>`;
   }
 }
 
@@ -2623,7 +2623,7 @@ async function onSendEth() {
   if (!v || v <= 0) return toast("Enter an amount to send", "bad");
   showModal({
     title: "Send real ETH?",
-    body: `<p class="small">This sends <b>${esc(String(v))} ETH</b> to<br><span class="mono" style="word-break:break-all">${esc(dest)}</span><br>on Ethereum Mainnet. This is irreversible. Continue?</p>`,
+    body: KaiI18n.html`<p class="small">This sends <b>${esc(String(v))} ETH</b> to<br><span class="mono" style="word-break:break-all">${esc(dest)}</span><br>on Ethereum Mainnet. This is irreversible. Continue?</p>`,
     actions: [
       { label: "Cancel", onClick: (c) => c() },
       {
@@ -2639,7 +2639,7 @@ async function onSendEth() {
             if (amt) amt.value = "";
             const q = document.getElementById("fund-send-quote");
             if (q) {
-              q.innerHTML = `<span class="good">Sent ✓</span> <a href="#" id="fund-send-tx">view on Etherscan ↗</a>`;
+              q.innerHTML = KaiI18n.html`<span class="good">Sent ✓</span> <a href="#" id="fund-send-tx">view on Etherscan ↗</a>`;
               const link = document.getElementById("fund-send-tx");
               if (link) link.addEventListener("click", (e) => {
                 e.preventDefault();
@@ -2691,9 +2691,9 @@ async function onSaveOnrampEndpoint() {
 
 function renderReturnsView() {
   const root = $("#view-returns");
-  if (S.appInfo.settings.producer?.mode === "external") { root.innerHTML = '<h1>Reward returns</h1><div class="banner info">Automatic burns and transfers are disabled for your external producer. Use Node → External signing for each funds operation.</div>'; return; }
+  if (S.appInfo.settings.producer?.mode === "external") { root.innerHTML = KaiI18n.html('<h1>Reward returns</h1><div class="banner info">Automatic burns and transfers are disabled for your external producer. Use Node → External signing for each funds operation.</div>'); return; }
   const cfg = S.rewards?.config ?? S.appInfo.settings.rewards;
-  root.innerHTML = `
+  root.innerHTML = KaiI18n.html`
     <h1>Reward returns</h1>
     <p class="lead">Automatically return a percentage of the block rewards your node earns — compound them back into VHP to keep producing, or send them to any address.</p>
     <div class="grid-2">
@@ -2745,7 +2745,7 @@ function renderReturnsView() {
     </div>`;
 
   $("#r-pct").addEventListener("input", () => {
-    $("#r-pct-label").textContent = `${$("#r-pct").value}%`;
+    KaiI18n.setText($("#r-pct-label"), KaiI18n.message`${$("#r-pct").value}%`);
   });
   $("#r-mode").addEventListener("change", () => {
     const sending = $("#r-mode").value === "send";
@@ -2819,16 +2819,16 @@ function patchReturnsView() {
   const statusEl = $("#r-status");
   if (!statusEl) return;
   const r = S.rewards;
-  if (!r) { statusEl.innerHTML = `<span class="muted">Loading…</span>`; return; }
+  if (!r) { statusEl.innerHTML = KaiI18n.html`<span class="muted">Loading…</span>`; return; }
   const d = r.derived;
   const last = r.last;
   const [pillClass, pillLabel] = last ? OUTCOME_LABELS[last.outcome] ?? ["pill", last.outcome] : ["pill", "no checks yet"];
-  statusEl.innerHTML = `
+  statusEl.innerHTML = KaiI18n.html`
     <div class="row spread"><span class="muted">Engine</span>
       <span class="pill ${r.config.enabled ? "good" : "warn"}">${r.config.enabled ? "enabled" : "disabled"}</span></div>
     <div class="row spread"><span class="muted">Last check</span>
       <span class="small">${last ? `${fmtTime(last.time)} · ` : ""}<span class="${pillClass}">${esc(pillLabel)}</span></span></div>
-    ${last?.message ? `<div class="muted small">${esc(last.message)}</div>` : ""}
+    ${last?.message ? KaiI18n.html`<div class="muted small">${esc(last.message)}</div>` : ""}
     <div class="row spread"><span class="muted">Next automatic check</span>
       <span class="small mono">${r.nextRunAt ? fmtTime(r.nextRunAt) : "—"}</span></div>
     <hr style="border-color:var(--border);border-style:solid;opacity:.4">
@@ -2841,21 +2841,21 @@ function patchReturnsView() {
     <div class="row spread"><span class="muted">Pending return</span>
       <span class="mono">${d ? fmtSat(d.pending, 4) : "0"} ${sym()}</span></div>
     ${r.config.maxReturnKoin && r.config.maxReturnKoin !== "0"
-      ? `<div class="row spread"><span class="muted">Max per return</span>
+      ? KaiI18n.html`<div class="row spread"><span class="muted">Max per return</span>
       <span class="mono">${esc(r.config.maxReturnKoin)} ${sym()}</span></div>`
       : ""}`;
 
   const hist = $("#r-history");
   if (hist) {
     const rows = (d?.actions ?? []).map((a) => {
-      return `<tr>
+      return KaiI18n.html`<tr>
         <td class="small">${fmtTime(a.time)}</td>
         <td class="mono">${fmtSat(a.amount, 4)}</td>
         <td>${a.mode === "burn" ? "♻️ VHP" : "📤 send"}</td>
         <td><button class="link" data-tx="${esc(a.txId)}">${esc(shortTx(a.txId))}</button></td>
       </tr>`;
     });
-    hist.innerHTML = rows.join("") || `<tr><td colspan="4" class="muted">No returns yet.</td></tr>`;
+    hist.innerHTML = rows.join("") || KaiI18n.html`<tr><td colspan="4" class="muted">No returns yet.</td></tr>`;
     $$("button[data-tx]", hist).forEach((b) =>
       b.addEventListener("click", () => openTx(b.dataset.tx))
     );
@@ -2868,7 +2868,7 @@ function renderSettingsView() {
   const root = $("#view-settings");
   const s = S.appInfo.settings;
   const networks = Object.values(S.appInfo.networks);
-  root.innerHTML = `
+  root.innerHTML = KaiI18n.html`
     <h1>Settings</h1>
     <p class="lead">Network, RPC and wallet management.</p>
     <div class="card">
@@ -2876,7 +2876,7 @@ function renderSettingsView() {
       <div class="stack">
         ${networks
           .map(
-            (n) => `<label class="row" style="gap:8px">
+            (n) => KaiI18n.html`<label class="row" style="gap:8px">
           <input type="radio" name="set-net" value="${n.id}" ${s.network === n.id ? "checked" : ""} style="width:auto">
           <b>${esc(n.label)}</b>
           <span class="muted small">${n.rpcUrls[0] ?? "local node RPC"} · token ${esc(n.tokenSymbol)}</span></label>`
@@ -2889,7 +2889,7 @@ function renderSettingsView() {
       <h2>🔌 Custom RPC (optional)</h2>
       ${networks
         .map(
-          (n) => `<label class="field"><span>${esc(n.label)} RPC URL</span>
+          (n) => KaiI18n.html`<label class="field"><span>${esc(n.label)} RPC URL</span>
         <input type="text" class="mono set-rpc" data-net="${n.id}" placeholder="${n.rpcUrls[0] ?? n.localRpcUrl}" value="${esc(s.customRpc?.[n.id] ?? "")}"></label>`
         )
         .join("")}
@@ -2941,7 +2941,7 @@ function onRevealWif() {
   if (!S.wallet?.exists) return toast("No wallet on this device", "warn");
   showModal({
     title: "Reveal private key",
-    body: `
+    body: KaiI18n.html`
       <p class="small">Enter your password. Never share this key or enter it on websites.</p>
       <label class="field"><span>Password</span><input id="rv-pass" type="password"></label>
       <div id="rv-out"></div>`,
@@ -2952,7 +2952,7 @@ function onRevealWif() {
         onClick: async (_close, modal) => {
           try {
             const { wif } = await call("wallet:revealWif", { password: $("#rv-pass", modal).value });
-            $("#rv-out", modal).innerHTML = `<div class="wif-box">${esc(wif)}</div>`;
+            $("#rv-out", modal).innerHTML = KaiI18n.html`<div class="wif-box">${esc(wif)}</div>`;
           } catch (e) {
             toast(e.message, "bad");
           }
@@ -2966,7 +2966,7 @@ function onRemoveWallet() {
   if (!S.wallet?.exists) return toast("No wallet on this device", "warn");
   showModal({
     title: "⚠️ Remove wallet",
-    body: `
+    body: KaiI18n.html`
       <p class="small">This deletes the encrypted key file from this device. <b>Without a backup of the private key, the funds are lost forever.</b></p>
       <label class="field"><span>Password</span><input id="rm-pass" type="password"></label>
       <label class="field"><span>Type <b>REMOVE</b> to confirm</span><input id="rm-confirm" type="text" class="mono"></label>`,
@@ -3019,7 +3019,7 @@ async function heartbeat() {
 async function init() {
   S.appInfo = await call("app:info");
   $("#network-pill").textContent = net().label;
-  $("#version-tag").textContent = `v${S.appInfo.version}`;
+  KaiI18n.setText($("#version-tag"), KaiI18n.message`v${S.appInfo.version}`);
 
   $$(".nav-item").forEach((b) => b.addEventListener("click", () => switchView(b.dataset.view)));
 
@@ -3047,5 +3047,5 @@ async function init() {
 }
 
 init().catch((e) => {
-  document.body.innerHTML = `<div style="padding:40px;font-family:monospace">Failed to start UI: ${esc(e.message)}</div>`;
+  document.body.innerHTML = KaiI18n.html`<div style="padding:40px;font-family:monospace">Failed to start UI: ${esc(e.message)}</div>`;
 });

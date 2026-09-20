@@ -79,14 +79,14 @@
     host.hidden = !bridge;
     if (!bridge) return;
     const note = document.getElementById("provider-privacy");
-    note.textContent = current.locked ? "Saved keys could not be unlocked. Restart with your original OS account and keychain." :
+    KaiI18n.setText(note, current.locked ? "Saved keys could not be unlocked. Restart with your original OS account and keychain." :
       !current.available ? "Unlock your system keychain and restart to use secure provider storage." :
       current.blocked ? "Local-Only currently blocks online requests. Open Local API → Privacy and choose Local-First to use these connections. Provider chats always go directly to the selected provider." :
-      "Online requests allowed. Provider chats go directly to the selected provider; your earning node keeps its own models.";
+      "Online requests allowed. Provider chats go directly to the selected provider; your earning node keeps its own models.");
     for (const p of current.providers) {
       const card = document.getElementById("provider-" + p.id);
       if (!card) continue;
-      card.querySelector("[data-provider-state]").textContent = p.configured ? `Key saved · ${p.models.length} model${p.models.length === 1 ? "" : "s"}` : "Not connected";
+      KaiI18n.setText(card.querySelector("[data-provider-state]"), p.configured ? `Key saved · ${p.models.length} model${p.models.length === 1 ? "" : "s"}` : "Not connected");
       card.querySelector("input[type=password]").placeholder = p.configured ? "Saved securely · enter a replacement key" : "Paste your API key";
       for (const b of card.querySelectorAll("button")) b.disabled = !current.available || current.locked ||
         (["refresh", "use"].includes(b.dataset.providerAction) && (!p.configured || current.blocked)) ||
@@ -106,11 +106,11 @@
     const options = { key: keyField.value, model: card.querySelector("[data-provider-model]").value };
     if (action === "save") keyField.value = "";
     card.querySelectorAll("button").forEach(b => { b.disabled = true; });
-    status.textContent = action === "refresh" ? "Checking your key and available models…" : "Saving…";
+    KaiI18n.setText(status, action === "refresh" ? "Checking your key and available models…" : "Saving…");
     try {
       current = await checked(bridge[action](id, options));
-      status.textContent = action === "save" ? "Saved securely. Test & refresh models to check access, or use your model ID." :
-        action === "refresh" ? "Connected. Models refreshed. Choose Use in chat or pick a brain in KAI." : "Connection removed.";
+      KaiI18n.setText(status, action === "save" ? "Saved securely. Test & refresh models to check access, or use your model ID." :
+        action === "refresh" ? "Connected. Models refreshed. Choose Use in chat or pick a brain in KAI." : "Connection removed.");
       window.dispatchEvent(new Event("kai-providers-changed"));
     } catch (e) { status.textContent = e.message; }
     finally { options.key = ""; fillSettings(); }

@@ -1,5 +1,15 @@
 "use strict";
 const { contextBridge, ipcRenderer } = require("electron");
+contextBridge.exposeInMainWorld("kaiLanguageBridge", {
+  get: () => ipcRenderer.invoke("shell:language"),
+  save: language => ipcRenderer.invoke("shell:set-language", language),
+  onChanged: callback => {
+    const listener = (_event, value) => callback(value);
+    ipcRenderer.on("shell:language-changed", listener);
+    return () => ipcRenderer.removeListener("shell:language-changed", listener);
+  },
+});
+
 contextBridge.exposeInMainWorld("kaiCompanionBridge", {
   context: (model, query) => ipcRenderer.invoke("companion:context", model, query),
   tools: model => ipcRenderer.invoke("companion:tools", model),
