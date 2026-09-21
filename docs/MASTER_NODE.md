@@ -57,6 +57,14 @@ is necessary.
 
 ## History safety patch and local checks
 
+Version `0.54.9-master.8` fixes the Windows startup error
+`Unexpected block-store Compose template` introduced in master.7. Windows
+checkouts could package the Compose template with CRLF line endings while the
+patch injector expected LF. The injector now normalizes line endings before
+checking the service boundaries. Windows release verification also runs the
+packaged app's actual NodeManager against its ASAR template and bundled runtime,
+using temporary data and no Docker commands. Node databases are unaffected.
+
 Version `0.54.9-master.7` includes a patched block-store executable for Windows
 Docker Desktop (Linux containers, x64) and Linux x64. The source is the exact
 upstream v1.1.0 commit with a small missing-record error-handling patch. The
@@ -77,7 +85,7 @@ To apply it to a recovered node:
 1. Keep **Enable account history, transaction and contract metadata services
    on the next node start** unchecked and saved. Also leave the separate
    account-history setting off if it was previously enabled.
-2. Install Master `0.54.9-master.7`. When ready for a short API interruption,
+2. Install Master `0.54.9-master.8` or later. When ready for a short API interruption,
    use the app's **Stop**, wait for completion, then **Start**.
 3. Wait for core RPC to become ready again. Under **Master node API**, select
    **Check historical blocks**. This first verifies the running patched binary;

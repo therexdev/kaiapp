@@ -32,6 +32,9 @@ function stageRuntime(root, nodeRoot, { required = __dirname.includes("app.asar"
   return true;
 }
 function patchedCompose(source) {
+  // Windows checkouts can package CRLF templates. Normalize before matching
+  // service boundaries; line endings do not change the Compose configuration.
+  source = String(source).replace(/\r\n?/g, "\n");
   const original = "   block_store:\n      image: koinos/koinos-block-store:${BLOCK_STORE_TAG:-latest}\n";
   if (!source.includes(original)) throw new Error("Unexpected block-store Compose template");
   const start = source.indexOf(original), end = source.indexOf("\n   p2p:", start);

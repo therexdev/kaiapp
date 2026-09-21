@@ -2,7 +2,7 @@
 const { test } = require("node:test"), assert = require("node:assert/strict");
 const fs = require("fs"), os = require("os"), path = require("path"), crypto = require("crypto"), yaml = require("js-yaml");
 const { NodeManager } = require("../lib/koinos/node-manager");
-const { PATCH, VERSION, UPSTREAM, FILES, verifyBundle } = require("../lib/koinos/block-store-runtime");
+const { PATCH, VERSION, UPSTREAM, FILES, verifyBundle, patchedCompose } = require("../lib/koinos/block-store-runtime");
 const { checkHistory } = require("../lib/koinos/history-check");
 const MAINNET = "EiBZK_GGVP0H_fXVAM3j6EAuz3-B-l3ejxRSewi7qIBfSA==";
 
@@ -14,6 +14,36 @@ function fixture(t) {
   fs.writeFileSync(path.join(bundle, "manifest.json"), JSON.stringify({ schemaVersion: 1, patch: PATCH, version: VERSION, upstreamCommit: UPSTREAM, platform: "linux/amd64", files }));
   return { root, bundle };
 }
+test("LF, Windows CRLF and mixed Compose templates produce the same patched services", () => {
+  const source = fs.readFileSync(path.join(__dirname, "../koinos-node-template/docker-compose.yml"), "utf8").replace(/\r\n?/g, "\n");
+  const expected = yaml.load(patchedCompose(source));
+  for (const input of [source.replace(/\n/g, "\r\n"), source.replace(/\n/g, "\r"), source.replace(/volumes:\n/g, "volumes:\r\n")]) {
+    assert.deepEqual(yaml.load(patchedCompose(input)), expected);
+  }
+  const original = yaml.load(source);
+  for (const service of Object.keys(original.services).filter(name => name !== "block_store")) {
+    assert.deepEqual(expected.services[service], original.services[service]);
+  }
+  assert.deepEqual(expected.configs, original.configs);
+  assert.throws(() => patchedCompose(source.replace("   block_store:", "   unrelated_store:")), /Unexpected block-store Compose template/);
+});
+test("Windows template can start the patched node while retaining paused history and existing data", async t => {
+  const { root, bundle } = fixture(t), templateRoot = path.join(root, "template");
+  fs.cpSync(path.join(__dirname, "../koinos-node-template"), templateRoot, { recursive: true });
+  const file = path.join(templateRoot, "docker-compose.yml");
+  fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace(/\r\n?/g, "\n").replace(/\n/g, "\r\n"));
+  const mgr = new NodeManager({ dataRoot: path.join(root, "node"), templateRoot, runtimeBundle: bundle, platform: "win32" });
+  const d = mgr.dirs("mainnet"); fs.mkdirSync(d.basedir, { recursive: true });
+  fs.writeFileSync(path.join(d.basedir, "existing-data"), "preserve");
+  const calls = []; mgr._composeOp = async (...args) => { calls.push(args); }; mgr._startWatchdog = () => {};
+  await mgr.start("mainnet", null);
+  assert.deepEqual(calls, [["mainnet", "start", ["up", "-d", "--remove-orphans"]]]);
+  const compose = yaml.load(fs.readFileSync(path.join(d.root, "docker-compose.yml"), "utf8"));
+  assert.equal(compose.services.block_store.labels["io.koinosai.block-store.patch"], PATCH);
+  assert.equal(fs.readFileSync(path.join(d.basedir, "existing-data"), "utf8"), "preserve");
+  assert.ok(!fs.readFileSync(path.join(d.root, ".env"), "utf8").includes("account_history"));
+  assert.equal(yaml.load(fs.readFileSync(path.join(d.config, "config.yml"), "utf8")).chain["verify-blocks"], true);
+});
 test("Master stages a verified patch on normal start and recovery while preserving data and paused profiles", async t => {
   const { root, bundle } = fixture(t);
   const mgr = new NodeManager({ dataRoot: path.join(root, "node"), runtimeBundle: bundle, templateRoot: path.join(__dirname, "../koinos-node-template") });

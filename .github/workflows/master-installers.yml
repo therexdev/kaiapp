@@ -104,6 +104,8 @@ jobs:
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
       - run: node scripts/verify-windows-signatures.js dist
+      - name: Verify node startup using the packaged Windows app
+        run: node scripts/verify-master-node-package.js dist/win-unpacked
       - uses: actions/upload-artifact@v4
         with:
           name: master-windows-installers
