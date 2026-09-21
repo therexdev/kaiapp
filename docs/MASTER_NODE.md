@@ -25,6 +25,34 @@ cloud providers and account connections continue to follow AI Privacy.
 Version `0.54.9-master.2` fixes the “Failed to start UI” privacy error. The same
 fix is also maintained on `therexdev/kaiapp:test` for its separate Test feed.
 
+## Recovery from receipt replay failures
+
+Version `0.54.9-master.6` generates `chain.verify-blocks: true` on every normal
+start and automatic recovery. Chain re-executes stored blocks with full
+validation when catching its state up to block_store, instead of replaying
+cached receipt deltas. A saved receipt can fail replay even when the original
+block can still be executed successfully. This is not a database reset or a
+relaxation of consensus checks. Large startup gaps can take longer to verify.
+The node owner must initiate a restart; updating the app does not restart the
+running Docker services. A completed chain startup clears a historical replay
+failure from the status display, while newer failures remain visible.
+
+The September 21 recovery replayed the 60 stored blocks successfully with this
+setting and resumed live catch-up. It does not fix block_store v1.1.0's separate
+`GetBlocksByHeight` nil-pointer crash. Keep account history paused while that
+issue is investigated. A manual `docker stop` is temporary: a full app-controlled
+node start can enable configured optional index services again. To keep all
+optional indexes disabled across starts, clear **Enable account history,
+transaction and contract metadata services on the next node start** in Master
+node API and save before starting; their public methods will be unavailable.
+Do not re-enable history solely because `/healthz/rpc` becomes ready.
+
+A log's “block time remaining” is the age of the block being processed, not an
+estimate of the remaining wall-clock sync duration. The public RPC remains
+unready until the local mainnet head is fresh. If full verification still fails,
+retain the logs and existing data before deciding whether a snapshot restore
+is necessary.
+
 ## Distribution
 
 Koinos Node → Distribution includes VHP-restoring reburn, extra compounding,

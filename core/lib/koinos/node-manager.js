@@ -891,10 +891,15 @@ class NodeManager {
         // Keep the last failed attempt visible through quiet periods. Merely
         // logging "Producing with VHP" is not a successful block submission.
         if (!value.production && services.some(s => s.service === "block_producer" && /running|up/i.test(s.state))) value.production = old?.value?.production || null;
-        if (old?.value?.health?.needsRepair) value.health = old.value.health;
+        if (old?.value?.health?.needsRepair && !value.chainStartupComplete) value.health = old.value.health;
         if (!value.health) {
           const health = assessHealth({ services, producing: services.some(s => s.service === "block_producer") });
           value.health = health;
+        }
+        if (value.chainStartupComplete && this._watch?.networkId === networkId && this._watch.repairReason === "replay-mismatch") {
+          this._watch.needsRepair = false;
+          this._watch.repairReason = null;
+          this._watch.health = value.health;
         }
       }
       entry.value = value;
@@ -1111,6 +1116,11 @@ global:
   blacklist:
     - block_store.add_block
     - chain.propose_block
+
+chain:
+  # Re-execute stored blocks on startup instead of replaying cached receipt deltas.
+  # A receipt mismatch must not strand an otherwise recoverable chain database.
+  verify-blocks: true
 
 block_producer:
   algorithm: pob

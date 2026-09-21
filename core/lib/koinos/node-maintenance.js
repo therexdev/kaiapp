@@ -5,17 +5,24 @@ const path = require("path");
 const DATA_DIRS = ["chain", "block_store", "mempool", "transaction_store", "account_history", "contract_meta_store"];
 
 function inspectLogs(text) {
+  const lines = String(text).split(/\r?\n/);
+  let readyIndex = -1;
+  for (let i = 0; i < lines.length; i++) {
+    // Chain publishes this only after its startup indexer has completed. A
+    // newer successful start supersedes replay failures from an earlier run.
+    if (/(?:\bchain(?:-\d+)?\s*\||\(chain\.)[^\n]*Listening for requests over AMQP/.test(lines[i])) readyIndex = i;
+  }
+  const healthText = lines.slice(readyIndex + 1).join("\n");
   let health = null;
-  if (/replayed state delta merkle root does not match block receipt/i.test(text)) {
+  if (/replayed state delta merkle root does not match block receipt/i.test(healthText)) {
     health = { ok: false, needsRepair: true, reason: "replay-mismatch", service: "chain" };
-  } else if (/fatal.*chain|chain[^\n]*fatal/i.test(text)) {
+  } else if (/fatal.*chain|chain[^\n]*fatal/i.test(healthText)) {
     health = { ok: false, reason: "chain-failed", service: "chain" };
-  } else if ((text.match(/No response to client request[^\n]*within 30000ms/gi) || []).length >= 2) {
+  } else if ((healthText.match(/No response to client request[^\n]*within 30000ms/gi) || []).length >= 2) {
     health = { ok: false, reason: "chain-unresponsive", service: "chain" };
   }
   // Official koinos-p2p emits this snapshot once a minute. Never turn a
   // missing/truncated snapshot into a zero or reuse it beyond the log window.
-  const lines = String(text).split(/\r?\n/);
   let peers = null;
   for (let i = 0; i < lines.length; i++) {
     if (!/Connected peers:/.test(lines[i])) continue;
@@ -38,7 +45,7 @@ function inspectLogs(text) {
     };
     else if (/Produced block - Height:/i.test(line)) production = { reason: null };
   }
-  return { health, peers, production };
+  return { health, peers, production, chainStartupComplete: readyIndex >= 0 && !health };
 }
 
 function lockError(e) {

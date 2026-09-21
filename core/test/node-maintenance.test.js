@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const yaml = require("js-yaml");
 const { inspectLogs, preflightFolders, installSnapshot, backupList, deleteBackup } = require("../lib/koinos/node-maintenance");
 const { NodeManager } = require("../lib/koinos/node-manager");
 const { classifyCrash, crashRemedy } = require("../lib/koinos/node-health");
@@ -15,6 +16,56 @@ function fixture(t) {
   return root;
 }
 function data(root, name, value) { fs.mkdirSync(path.join(root, name), { recursive: true }); fs.writeFileSync(path.join(root, name, "data"), value); }
+
+test("normal starts and automatic recovery retain full block verification without resetting data", async t => {
+  const mgr = new NodeManager({ dataRoot: fixture(t), templateRoot: path.join(__dirname, "../koinos-node-template") });
+  const d = mgr.dirs("mainnet");
+  data(d.basedir, "chain", "existing-chain");
+  data(d.basedir, "block_producer", "existing-key");
+  mgr._composeOp = async () => {};
+  mgr._startWatchdog = () => {};
+  await mgr.start("mainnet", null);
+  const file = path.join(d.config, "config.yml");
+  const check = () => {
+    const config = yaml.load(fs.readFileSync(file, "utf8"));
+    assert.equal(config.chain["verify-blocks"], true);
+    assert.equal(config.chain.reset, undefined);
+    assert.equal(fs.readFileSync(path.join(d.basedir, "chain/data"), "utf8"), "existing-chain");
+    assert.equal(fs.readFileSync(path.join(d.basedir, "block_producer/data"), "utf8"), "existing-key");
+    assert.ok(!fs.readFileSync(path.join(d.root, ".env"), "utf8").includes("account_history"));
+  };
+  check();
+  fs.writeFileSync(file, "chain:\n  verify-blocks: false\n");
+  mgr._compose = async () => ({ ok: true });
+  const watch = { networkId: "mainnet", producerAddress: null, memorySaver: false };
+  mgr._watch = watch;
+  assert.equal(await mgr._restartStack(watch), true);
+  check();
+});
+
+test("a completed chain startup supersedes old replay failures but not newer failures", async () => {
+  const failed = `chain-1 | <fatal>: ${mismatch}`;
+  const ready = "chain-1 | Listening for requests over AMQP";
+  assert.equal(inspectLogs(`${failed}\n${ready}`).health, null);
+  assert.equal(inspectLogs(`${ready}\n${failed}`).health.needsRepair, true);
+  assert.equal(inspectLogs(`${failed}\njsonrpc-1 | Listening for requests over AMQP`).health.needsRepair, true);
+  const mgr = new NodeManager({ dataRoot: "/unused" });
+  const services = ["chain", "block_store", "mempool", "p2p"].map(service => ({ service, state: "running" }));
+  let log = failed;
+  mgr._compose = async () => ({ ok: true, stdout: log, stderr: "" });
+  assert.equal((await mgr.observe("mainnet", services)).health.needsRepair, true);
+  mgr._watch = { networkId: "mainnet", needsRepair: true, repairReason: "replay-mismatch" };
+  mgr._observations.get("mainnet").at = 0;
+  log = "chain-1 | Producing no new logs";
+  assert.equal((await mgr.observe("mainnet", services)).health.needsRepair, true);
+  mgr._observations.get("mainnet").at = 0;
+  log = ready;
+  assert.equal((await mgr.observe("mainnet", services)).health.ok, true);
+  assert.equal(mgr._watch.needsRepair, false);
+  mgr._observations.get("mainnet").at = 0;
+  log = "";
+  assert.equal((await mgr.observe("mainnet", services)).health.ok, true);
+});
 
 test("replay mismatch is recognized and displayed with recovery disabled after reopening", async () => {
   const mgr = new NodeManager({ dataRoot: "/unused", autoRecover: false });
