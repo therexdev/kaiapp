@@ -1,0 +1,87 @@
+name: Master history repair package
+on:
+  push:
+    branches: [master-kaiapp]
+    paths:
+      - patches/history-repair/**
+      - scripts/build-history-repair.js
+      - scripts/smoke-history-repair.js
+      - scripts/test-history-repair.ps1
+      - .github/workflows/master-history-repair.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: master-history-repair
+  cancel-in-progress: false
+jobs:
+  verify-app:
+    if: github.ref == 'refs/heads/master-kaiapp'
+    uses: ./.github/workflows/master-ci.yml
+  build:
+    if: github.ref == 'refs/heads/master-kaiapp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.1'
+          cache: false
+      - name: Test repair, restore and rejection paths; build Linux helper
+        run: node scripts/build-history-repair.js
+        env:
+          KAI_REPAIR_SMOKE_FIXTURE: ${{ runner.temp }}/repair-smoke
+      - name: Run offline repair inside the original Docker image
+        run: node scripts/smoke-history-repair.js
+        env:
+          KAI_REPAIR_SMOKE_FIXTURE: ${{ runner.temp }}/repair-smoke
+      - uses: actions/upload-artifact@v4
+        with:
+          name: history-repair-package
+          path: build/history-repair/*
+          if-no-files-found: error
+  windows:
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: history-repair-package
+          path: build/history-repair
+      - name: Verify Windows PowerShell launcher and failure guards
+        shell: powershell
+        run: .\scripts\test-history-repair.ps1
+  publish:
+    needs: [verify-app, build, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: history-repair-package
+          path: build/history-repair
+      - name: Package verified files
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import zipfile, hashlib
+          target=Path('Master-KAI-History-Repair-6033632-v1.zip')
+          with zipfile.ZipFile(target,'w',zipfile.ZIP_DEFLATED) as archive:
+              for p in sorted(Path('build/history-repair').iterdir()):
+                  archive.write(p,p.name)
+          Path(str(target)+'.sha256').write_text(hashlib.sha256(target.read_bytes()).hexdigest()+'  '+target.name+'\n')
+          PY
+      - name: Publish separate maintenance release without changing app update feeds
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_COMMIT: ${{ github.sha }}
+        run: |
+          gh release create master-history-repair-v1 --target "$TARGET_COMMIT" --title "Master KAI: repair historical block 6033632" --prerelease --notes-file patches/history-repair/README.txt Master-KAI-History-Repair-6033632-v1.zip Master-KAI-History-Repair-6033632-v1.zip.sha256

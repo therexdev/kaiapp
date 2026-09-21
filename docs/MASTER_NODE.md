@@ -108,6 +108,43 @@ core API but does not recover that missing record. Do not run Quick Sync or
 delete data merely to make this message disappear. The next recovery step
 depends on the missing block ID and available historical data.
 
+### Targeted September 21 history repair
+
+The node reopened account history at 6,033,500 but its next 500-block batch
+failed because block-store lacked block 6,033,632, ID
+`0x1220dcad24263596cee0e0bd91e1c7d054ef0bc1466cddbeb00a63ffc0cb81d706d4`.
+Upstream account-history v1.1.0 silently retries an RPC error once per minute;
+its zero-record messages did not mean the history database was caught up.
+Individual sample reads did not cover this gap. The block-store patch kept the
+service running while reporting the missing record.
+
+The separate **Master-KAI-History-Repair-6033632-v1.zip** maintenance package
+restores only this pinned record. See [its instructions and limitations](../patches/history-repair/README.txt).
+It is not an app update and does not run automatically. Stop the node and quit
+Master before launching it; Docker Desktop stays running. It verifies package
+hashes, checks local neighbor headers and head ancestry, reconstructs the
+upstream skip-list record in memory, and requires the next 500 blocks and
+receipts to be readable with the proposed record before proceeding.
+
+The block and receipt JSON were fetched from both configured backup RPCs and
+matched. Header hashes and local links are checked; receipt contents still
+rely on those trusted RPC sources and are not independently re-executed from
+historical state. No public write method is enabled. An isolated, networkless
+container takes the database lock, makes a complete checksummed Badger logical
+backup, and inserts the absent record in one conditional transaction. It
+preserves the saved head and refuses existing records, changed heads, extra
+gaps in the batch, invalid neighbors, or backup failure. A restore operation
+can load the backup only into a new empty directory after checksum verification.
+
+Backups default to `mainnet/history-repair-backups`; `-BackupDirectory` can put
+them on another drive. The node/API remain stopped during backup and repair;
+the duration and space depend on database size and drive speed. After success,
+the owner starts Master and checks history progress beyond 6,033,632. Keep the
+backup until indexing is confirmed. This repairs one gap, not a complete audit.
+CI gates publication on upstream/repair/race tests, real Badger backup/restore,
+the compiled helper in the original Docker image, Windows PowerShell 5.1
+launcher tests, and the normal Master app suite. The app remains master.8.
+
 ## Distribution
 
 Koinos Node → Distribution includes VHP-restoring reburn, extra compounding,

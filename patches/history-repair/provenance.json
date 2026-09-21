@@ -1,0 +1,12 @@
+{
+  "observedAt": "2026-09-21T15:07:41.957472+00:00",
+  "blockHeight": 6033632,
+  "blockId": "0x1220dcad24263596cee0e0bd91e1c7d054ef0bc1466cddbeb00a63ffc0cb81d706d4",
+  "sources": [
+    "https://api.koinosblocks.com/",
+    "https://api.koinos.io/"
+  ],
+  "localNeighborSource": "https://api.koinosai.com/",
+  "candidateSha256": "8e84e4fe1c044d1de49e0b85b5bf2681c80bae81814f7471ff7ed796e0111bfe",
+  "receiptTrust": "Two separately queried trusted RPC endpoints supplied identical block and receipt JSON values. This is not historical state re-execution."
+}

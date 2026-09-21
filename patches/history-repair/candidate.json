@@ -1,0 +1,103 @@
+{
+  "block_id": "0x1220dcad24263596cee0e0bd91e1c7d054ef0bc1466cddbeb00a63ffc0cb81d706d4",
+  "block_height": "6033632",
+  "block": {
+    "id": "0x1220dcad24263596cee0e0bd91e1c7d054ef0bc1466cddbeb00a63ffc0cb81d706d4",
+    "header": {
+      "previous": "0x122017a597ba11423d0e5001eaaae6fe4043e5260ad0108a22c28e9f03d766c74b31",
+      "height": "6033632",
+      "timestamp": "1686306690580",
+      "previous_state_merkle_root": "EiAohCGG28ph33Im6nELrZOdzlCZ7J5lX1I8o8qyeWKqiQ==",
+      "transaction_merkle_root": "EiDjsMRCmPwcFJr79MiZb7kkJ65B5GSbk0yklZkbeFK4VQ==",
+      "signer": "1NsQbH5AhQXgtSNg1ejpFqTi2hmCWz1eQS",
+      "approved_proposals": [
+        "0x12200b9ff93c42799d33733ecfcffb032a233c7780d7b0d90f81766ad7abd17c5c03"
+      ]
+    },
+    "signature": "ClEDUn4LvYgiTXRlf0m5mqWQk5JZn-MlxN4ypyUq9RnIeu3rSvTvX0hgfgGEzGpvZIV9jSjZcqBrK_WCr9LDUSyXmGFJYhMOaQx1WalQ2yLzfV8SIhIgACttUKrR6WQP40KU2zXqeJGj_FMnpcH3IsCYA3SlgGIaQR_wrFnchnrQonWKL4CP-s_1iwwI_GVPjtf-IJVqDww7v0LZM0BGCmGY2uNGmrnHJFMQH7Nq5bOVZCPKM8kb6K2Z"
+  },
+  "receipt": {
+    "id": "0x1220dcad24263596cee0e0bd91e1c7d054ef0bc1466cddbeb00a63ffc0cb81d706d4",
+    "height": "6033632",
+    "network_bandwidth_used": "411",
+    "compute_bandwidth_used": "3015022",
+    "events": [
+      {
+        "source": "1AdzuXSpC6K9qtXdCBgD5NUpDNwHjMgrc9",
+        "name": "koinos.contracts.token.burn_event",
+        "data": "ChkA7-Mh3yERswBXFp2UPvegxIiGAauR1O_zEKLh614=",
+        "impacted": [
+          "1NsQbH5AhQXgtSNg1ejpFqTi2hmCWz1eQS"
+        ]
+      },
+      {
+        "sequence": 1,
+        "source": "15DJN4a8SgrbGhhGksSBASiSYjGnMU8dGL",
+        "name": "koinos.contracts.token.mint_event",
+        "data": "ChkA7-Mh3yERswBXFp2UPvegxIiGAauR1O_zENTKy2I=",
+        "impacted": [
+          "1NsQbH5AhQXgtSNg1ejpFqTi2hmCWz1eQS"
+        ]
+      }
+    ],
+    "network_bandwidth_charged": "411",
+    "compute_bandwidth_charged": "2942325",
+    "state_delta_entries": [
+      {
+        "object_space": {
+          "system": true
+        },
+        "key": "EiDIiXqmJH5E-r9zJwsyZAAqmy-mZUrXRH47P4AmqzkbTA==",
+        "value": "CiISINytJCY1ls7g4L2R4cfQVO8LwUZs3b6wCmP_wMuB1wbUErcBCiISIBell7oRQj0OUAHqqub-QEPlJgrQEIoiwo6fA9dmx0sxEOCh8AIYlKzY_YkxIiISICiEIYbbymHfcibqcQutk53OUJnsnmVfUjyjyrJ5YqqJKiISIOOwxEKY_BwUmvv0yJlvuSQnrkHkZJuTTKSVmRt4UrhVMhkA7-Mh3yERswBXFp2UPvegxIiGAauR1O_zOiISIAuf-TxCeZ0zcz7Pz_sDKiM8d4DXsNkPgXZq16vRfFwDIroBClEDUn4LvYgiTXRlf0m5mqWQk5JZn-MlxN4ypyUq9RnIeu3rSvTvX0hgfgGEzGpvZIV9jSjZcqBrK_WCr9LDUSyXmGFJYhMOaQx1WalQ2yLzfV8SIhIgACttUKrR6WQP40KU2zXqeJGj_FMnpcH3IsCYA3SlgGIaQR_wrFnchnrQonWKL4CP-s_1iwwI_GVPjtf-IJVqDww7v0LZM0BGCmGY2uNGmrnHJFMQH7Nq5bOVZCPKM8kb6K2Z"
+      },
+      {
+        "object_space": {
+          "system": true,
+          "zone": "AC4z_RqpB7IkzpzmyUIokB0oOgLalW2nkQ=="
+        },
+        "value": "CMTMhNCSvtYE"
+      },
+      {
+        "object_space": {
+          "system": true,
+          "zone": "AGm4cZ-LWSrhw-uN7S3U23xvkVwMymnlcg=="
+        },
+        "value": "CMrHyveptN4C"
+      },
+      {
+        "object_space": {
+          "system": true,
+          "zone": "ALJp6C6zICjLRQ8DEj48TS-Rp8fr9OW8fA=="
+        },
+        "key": "bWFya2V0cw==",
+        "value": "Cg4IxoH5hB8YsLUCIICAIBIPCI6-vaTNARiAgBAggIBAGhMIvJqzuZ_VAhjgwrUbIODNi4kB"
+      },
+      {
+        "object_space": {
+          "system": true,
+          "zone": "AC2JYMoRjQmqoqHV0ltl0iBF94hV5E3QsQ==",
+          "id": 1
+        },
+        "value": "CiISID0kWpj1PLbMWSpxulIqyPorGNbRhRcUK-H-5Zp_9W7REhAAAAAAAAAAAAStgUhUwB0uGJSs2P2JMQ=="
+      },
+      {
+        "object_space": {
+          "system": true,
+          "zone": "AC4z_RqpB7IkzpzmyUIokB0oOgLalW2nkQ==",
+          "id": 1
+        },
+        "key": "AO_jId8hEbMAVxadlD73oMSIhgGrkdTv8w==",
+        "value": "CJGrnr61UxD51ODguEgYlKzY_Ykx"
+      },
+      {
+        "object_space": {
+          "system": true,
+          "zone": "AGm4cZ-LWSrhw-uN7S3U23xvkVwMymnlcg==",
+          "id": 1
+        },
+        "key": "AO_jId8hEbMAVxadlD73oMSIhgGrkdTv8w==",
+        "value": "CIKg0qbz8z4SDQjYyO8CEIKg0qbz8z4="
+      }
+    ]
+  }
+}

@@ -6,3 +6,4 @@ __pycache__/
 build/bin/kai-windows-voice.exe
 build/bin/kai-computer.exe
 build/node-runtime/
+build/history-repair/
