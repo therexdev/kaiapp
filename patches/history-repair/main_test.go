@@ -59,34 +59,28 @@ func TestExportSmokeFixture(t *testing.T) {
 
 func fixture(t *testing.T, backend bstore.BlockStoreBackend) map[uint64][]byte {
 	t.Helper()
-	item, err := candidate()
+	batch, err := candidates()
 	if err != nil {
 		t.Fatal(err)
 	}
-	neighbors := map[uint64]*bs.BlockItem{targetHeight: item}
-	for _, name := range []string{"predecessor", "successor"} {
-		raw, e := os.ReadFile("testdata/" + name + ".json")
-		if e != nil {
-			t.Fatal(e)
-		}
-		i := &bs.BlockItem{}
-		if e = decodeJSON(raw, i); e != nil {
-			t.Fatal(e)
-		}
-		neighbors[i.BlockHeight] = i
+	actual := map[uint64]*bs.BlockItem{}
+	for _, item := range batch {
+		actual[item.BlockHeight] = item
 	}
 	ids := map[uint64][]byte{}
-	for height := batchStart - 1; height < batchStart+uint64(batchSize); height++ {
+	// Synthetic earlier ancestors exercise skip-list reconstruction; the pinned
+	// 502-block range itself uses real Mainnet blocks and receipts.
+	for height := uint64(6033408); height <= batchStart+uint64(batchSize); height++ {
 		b := &protocol.Block{Header: &protocol.BlockHeader{Height: height, Previous: ids[height-1]}}
 		b.Id, _ = util.HashMessage(b.Header)
 		receipt := &protocol.BlockReceipt{Id: b.Id, Height: height}
-		if height == targetHeight-2 {
-			b.Id = neighbors[targetHeight-1].Block.Header.Previous
+		if height == batchStart-2 {
+			b.Id = batch[0].Block.Header.Previous
 			receipt.Id = b.Id
 		}
-		if neighbor := neighbors[height]; neighbor != nil {
-			b = neighbor.Block
-			receipt = neighbor.Receipt
+		if item := actual[height]; item != nil {
+			b = item.Block
+			receipt = item.Receipt
 		}
 		ids[height] = b.Id
 		previous := [][]byte{b.Header.Previous}
@@ -101,7 +95,7 @@ func fixture(t *testing.T, backend bstore.BlockStoreBackend) map[uint64][]byte {
 			t.Fatal(e)
 		}
 	}
-	head := batchStart + uint64(batchSize) - 1
+	head := batchStart + uint64(batchSize)
 	raw, _ := proto.Marshal(&koinos.BlockTopology{Id: ids[head], Height: head, Previous: ids[head-1]})
 	if err = backend.Put([]byte{1}, raw); err != nil {
 		t.Fatal(err)
@@ -109,8 +103,10 @@ func fixture(t *testing.T, backend bstore.BlockStoreBackend) map[uint64][]byte {
 	if err = backend.Put([]byte("unrelated-sentinel"), []byte("preserve me")); err != nil {
 		t.Fatal(err)
 	}
-	if err = backend.Delete(mustHex(targetHex)); err != nil {
-		t.Fatal(err)
+	for _, height := range []uint64{6033629, targetHeight} {
+		if err = backend.Delete(ids[height]); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return ids
 }
@@ -124,71 +120,122 @@ func openTestDB(t *testing.T, dir string) *badger.DB {
 	return db
 }
 
-func TestPayloadMatchesBothSourcesAndHeaderHash(t *testing.T) {
-	a, err := candidate()
+func TestPayloadCommitmentsAndTampering(t *testing.T) {
+	batch, err := candidates()
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := os.ReadFile("testdata/candidate-koinosblocks.json")
-	if err != nil {
-		t.Fatal(err)
+	var txBlock *bs.BlockItem
+	for _, b := range batch {
+		if len(b.Block.Transactions) > 0 {
+			txBlock = b
+			break
+		}
 	}
-	b := &bs.BlockItem{}
-	if err = decodeJSON(raw, b); err != nil {
-		t.Fatal(err)
+	if txBlock == nil {
+		t.Fatal("fixture must exercise real transactions")
 	}
-	if !proto.Equal(a, b) {
-		t.Fatal("providers do not match")
-	}
-	a.Block.Header.Timestamp++
-	if verifyHeader(a.Block) == nil {
-		t.Fatal("tampered header accepted")
+	for _, scenario := range []string{"header", "operation", "signature", "receipt"} {
+		t.Run(scenario, func(t *testing.T) {
+			b := proto.Clone(txBlock).(*bs.BlockItem)
+			switch scenario {
+			case "header":
+				b.Block.Header.Timestamp++
+			case "operation":
+				b.Block.Transactions[0].Operations = nil
+			case "signature":
+				b.Block.Transactions[0].Signatures[0][0] ^= 1
+			case "receipt":
+				b.Receipt.TransactionReceipts[0].Id = []byte("wrong")
+			}
+			if verifyContents(b) == nil {
+				t.Fatal("tampered payload accepted")
+			}
+		})
 	}
 }
 
-func TestPreflightRejectsIncompleteOrWrongLocalData(t *testing.T) {
-	for _, scenario := range []string{"pass", "other-gap", "wrong-neighbor", "missing-receipt", "already-present"} {
+func TestPreflightAndAtomicBatchRepair(t *testing.T) {
+	for _, scenario := range []string{"two-gaps", "adjacent-boundary-gaps", "all-500-missing", "wrong-neighbor", "missing-receipt", "existing-invalid-target", "missing-checkpoint", "wrong-head-branch"} {
 		t.Run(scenario, func(t *testing.T) {
 			db := openTestDB(t, t.TempDir())
 			defer db.Close()
 			backend := &bstore.BadgerBackend{DB: db}
 			ids := fixture(t, backend)
+			count := 2
+			valid := true
 			switch scenario {
-			case "other-gap":
-				backend.Delete(ids[batchStart+20])
+			case "adjacent-boundary-gaps":
+				for _, h := range []uint64{batchStart, batchStart + 1, 6033630, 6033631, batchStart + uint64(batchSize) - 1} {
+					backend.Delete(ids[h])
+					count++
+				}
+			case "all-500-missing":
+				for h := batchStart; h < batchStart+uint64(batchSize); h++ {
+					backend.Delete(ids[h])
+				}
+				count = 500
 			case "wrong-neighbor":
 				r, _ := readRecord(backend, ids[targetHeight+1])
 				r.Block.Header.Timestamp++
 				raw, _ := proto.Marshal(r)
 				backend.Put(r.BlockId, raw)
+				valid = false
 			case "missing-receipt":
 				r, _ := readRecord(backend, ids[batchStart+20])
 				r.Receipt = nil
 				raw, _ := proto.Marshal(r)
 				backend.Put(r.BlockId, raw)
-			case "already-present":
-				backend.Put(mustHex(targetHex), []byte("never overwrite"))
+				valid = false
+			case "existing-invalid-target":
+				backend.Put(ids[targetHeight], []byte("never overwrite"))
+				valid = false
+			case "missing-checkpoint":
+				backend.Delete(ids[batchStart-1])
+				valid = false
+			case "wrong-head-branch":
+				r, _ := readRecord(backend, ids[batchStart+uint64(batchSize)])
+				r.PreviousBlockIds[0] = []byte("wrong-branch")
+				raw, _ := proto.Marshal(r)
+				backend.Put(r.BlockId, raw)
+				valid = false
 			}
-			before, _ := backend.Get([]byte{1})
+			before := databaseRecords(t, db)
 			p, err := prepare(backend)
-			if scenario == "pass" {
-				if err != nil || len(p.record) == 0 {
-					t.Fatalf("%v", err)
-				}
-			} else if err == nil {
-				t.Fatal("unsafe preflight accepted")
+			if !reflect.DeepEqual(before, databaseRecords(t, db)) {
+				t.Fatal("preflight changed logical records")
 			}
-			after, _ := backend.Get([]byte{1})
-			if !bytes.Equal(before, after) {
-				t.Fatal("preflight changed head")
-			}
-			value, _ := backend.Get(mustHex(targetHex))
-			if scenario == "already-present" {
-				if string(value) != "never overwrite" {
-					t.Fatal("overwrote existing")
+			if !valid {
+				if err == nil {
+					t.Fatal("unsafe preflight accepted")
 				}
-			} else if len(value) != 0 {
-				t.Fatal("preflight wrote record")
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(p.entries) != count {
+				t.Fatalf("got %d gaps; expected %d", len(p.entries), count)
+			}
+			if err = applyRecord(db, p); err != nil {
+				t.Fatal(err)
+			}
+			after := databaseRecords(t, db)
+			for _, e := range p.entries {
+				if _, exists := before[string(e.id)]; exists {
+					t.Fatal("target was already present")
+				}
+				if after[string(e.id)] != string(e.value) {
+					t.Fatal("missing repair record")
+				}
+				delete(after, string(e.id))
+			}
+			if !reflect.DeepEqual(before, after) {
+				t.Fatal("repair changed existing records")
+			}
+			again, err := prepare(backend)
+			if err != nil || len(again.entries) != 0 {
+				t.Fatalf("repeat check: %v", err)
 			}
 		})
 	}
@@ -198,7 +245,7 @@ func TestRepairBackupRestoreAndNoOverwrite(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "db")
 	db := openTestDB(t, dir)
 	backend := &bstore.BadgerBackend{DB: db}
-	fixture(t, backend)
+	ids := fixture(t, backend)
 	highest, _ := backend.Get([]byte{1})
 	original := databaseRecords(t, db)
 	db.Close()
@@ -224,17 +271,18 @@ func TestRepairBackupRestoreAndNoOverwrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	changed := databaseRecords(t, db)
-	delete(changed, string(mustHex(targetHex)))
+	delete(changed, string(ids[targetHeight]))
+	delete(changed, string(ids[6033629]))
 	if !reflect.DeepEqual(original, changed) {
-		t.Fatal("repair changed more than the missing key")
+		t.Fatal("repair changed more than the two missing keys")
 	}
 	v, _ := backend.Get([]byte("unrelated-sentinel"))
 	if string(v) != "preserve me" {
 		t.Fatal("unrelated key changed")
 	}
 	db.Close()
-	if err := run([]string{"--db", dir, "--repair", "--backup", backup + "2"}); err == nil {
-		t.Fatal("repeat repair must refuse")
+	if err := run([]string{"--db", dir, "--repair", "--backup", backup + "2"}); err != nil {
+		t.Fatalf("complete batch should succeed without writes: %v", err)
 	}
 	if _, err := os.Stat(backup + "2"); !os.IsNotExist(err) {
 		t.Fatal("repeat repair wrote backup")
@@ -297,24 +345,30 @@ func TestBackupFailureLocksAndInvalidPathPreventRepair(t *testing.T) {
 	}
 }
 
-func TestConcurrentChangePreventsSingleKeyWrite(t *testing.T) {
-	for _, which := range []string{"head", "target"} {
+func TestConcurrentChangePreventsEntireBatchWrite(t *testing.T) {
+	for _, which := range []string{"head", "target", "neighbor"} {
 		t.Run(which, func(t *testing.T) {
 			db := openTestDB(t, t.TempDir())
 			defer db.Close()
 			b := &bstore.BadgerBackend{DB: db}
-			fixture(t, b)
+			ids := fixture(t, b)
 			p, err := prepare(b)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if which == "head" {
 				b.Put([]byte{1}, []byte("changed"))
+			} else if which == "neighbor" {
+				b.Put(ids[targetHeight+1], []byte("changed"))
 			} else {
 				b.Put(mustHex(targetHex), []byte("appeared"))
 			}
 			if applyRecord(db, p) == nil {
 				t.Fatal("concurrent change ignored")
+			}
+			second, _ := b.Get(ids[6033629])
+			if len(second) != 0 {
+				t.Fatal("partial batch committed despite conflict")
 			}
 			v, _ := b.Get(mustHex(targetHex))
 			if which == "head" && len(v) > 0 {

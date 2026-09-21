@@ -17,6 +17,7 @@ if ($parseErrors.Count) { throw ($parseErrors | Out-String) }
 $global:RepairCalls = [Collections.Generic.List[object]]::new()
 $global:RepairRunning = $false
 $global:RepairDockerFail = $false
+$global:RepairComplete = $false
 function global:docker {
     $a = @($args)
     $global:RepairCalls.Add($a)
@@ -25,7 +26,7 @@ function global:docker {
         'info' { 'linux'; return }
         'ps' { if ($global:RepairRunning) { 'fixture-running-container' }; return }
         'image' { 'sha256:' + ('a' * 64); return }
-        'run' { if ($global:RepairDockerFail) { $global:LASTEXITCODE = 17; return }; 'fixture helper succeeded'; return }
+        'run' { if ($global:RepairDockerFail) { $global:LASTEXITCODE = 17; return }; if ($global:RepairComplete) { 'NO REPAIR NEEDED: the 500-block batch is already complete.' } else { 'fixture helper succeeded' }; return }
         default { throw ('Unexpected Docker operation: ' + ($a -join ' ')) }
     }
 }
@@ -46,6 +47,11 @@ try {
     Assert-Case (($runs[1] -join '|').Contains('--repair --backup /backups/')) 'Missing mandatory backup argument.'
     Assert-Case (-not (($runs[1] -join '|').Contains("source=$db,target=/database,readonly"))) 'Repair DB mount remained read-only.'
     Assert-Case (-not (@($global:RepairCalls | Where-Object { $_[0] -in @('stop','start','restart','rm','compose') }).Count)) 'Wrapper changed existing services.'
+    $global:RepairComplete = $true; $global:RepairCalls.Clear()
+    & $script -NodeRoot $nodeRoot
+    Assert-Case ($LASTEXITCODE -eq 0) 'Complete batch failed.'
+    Assert-Case (@($global:RepairCalls | Where-Object { $_[0] -eq 'run' }).Count -eq 1) 'Complete batch attempted a backup/repair.'
+    $global:RepairComplete = $false
     $global:RepairRunning = $true; $global:RepairCalls.Clear()
     & $script -NodeRoot $nodeRoot -CheckOnly
     Assert-Case ($LASTEXITCODE -eq 1) 'Running node was accepted.'

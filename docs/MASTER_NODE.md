@@ -118,35 +118,52 @@ its zero-record messages did not mean the history database was caught up.
 Individual sample reads did not cover this gap. The block-store patch kept the
 service running while reporting the missing record.
 
-The separate **Master-KAI-History-Repair-6033632-v1.zip** maintenance package
-restores only this pinned record. See [its instructions and limitations](../patches/history-repair/README.txt).
+The v1 owner's preflight discovered another missing record, block **6,033,629**,
+ID `0x1220eff3bdfea7351a7678757034c046a79bab09522941e57413eeac5d93c82714aa`,
+and stopped before backup or insertion. The separate
+**Master-KAI-History-Repair-Batch-v2.zip** maintenance package now checks and
+repairs every absent record in the fixed pending range **6,033,501–6,034,000**.
+See [instructions and limitations](../patches/history-repair/README.txt).
 It is not an app update and does not run automatically. Stop the node and quit
-Master before launching it; Docker Desktop stays running. It verifies package
-hashes, checks local neighbor headers and head ancestry, reconstructs the
-upstream skip-list record in memory, and requires the next 500 blocks and
-receipts to be readable with the proposed record before proceeding.
-Preflight uses Badger's `ReadOnly` option to prohibit logical record writes.
-The pinned library nevertheless opens housekeeping files such as `DISCARD`
-with write access, so even CheckOnly uses a writable mount with the node stopped.
+Master before launching it; Docker Desktop stays running.
 
-The block and receipt JSON were fetched from both configured backup RPCs and
-matched. Header hashes and local links are checked; receipt contents still
-rely on those trusted RPC sources and are not independently re-executed from
-historical state. No public write method is enabled. An isolated, networkless
-container takes the database lock, makes a complete checksummed Badger logical
-backup, and inserts the absent record in one conditional transaction. It
-preserves the saved head and refuses existing records, changed heads, extra
-gaps in the batch, invalid neighbors, or backup failure. A restore operation
-can load the backup only into a new empty directory after checksum verification.
+The compiled, checksummed payload contains 502 public Mainnet blocks (500
+candidates and two boundaries). Both configured backup RPCs returned identical
+block/receipt values after excluding only `receipt.state_merkle_root`, which
+KoinosBlocks omitted and api.koinos.io supplied. Supplied candidate roots are
+retained and checked against the successor header. Provenance records the
+raw and normalized hashes and this trust limit. The helper validates block and
+transaction header hashes, operation and transaction Merkle commitments,
+Mainnet transaction chain IDs, receipt IDs/heights, and every payload link.
+It matches the local 6,033,500 checkpoint and verifies that the repaired range
+belongs to the local saved head's ancestry. Receipt bodies rely on the trusted
+RPC sources; historical execution and all consensus signatures are not replayed.
+
+Missing records are simulated together in ascending order using upstream
+skip-list construction, including adjacent gaps. Existing records are never
+replaced. The entire next 500-block history request must succeed in memory.
+Missing required ancestors outside the batch or inconsistent existing records
+stop preflight. Preflight uses Badger's `ReadOnly` option to prohibit logical
+record writes. The pinned library still opens housekeeping files such as
+`DISCARD` with write access, so CheckOnly uses a writable mount and stopped node.
+
+An isolated, networkless container takes the database lock and makes a complete
+checksummed Badger logical backup before one conditional transaction inserts
+all verified missing records. Every record read during preflight must remain
+unchanged, including the saved head, neighbors, ancestors and absent keys.
+The batch is checked again after commit; no public write method is enabled.
+A complete batch succeeds without backup or record writes on repeat runs.
+Restore accepts only a new empty directory and requires the backup checksum.
 
 Backups default to `mainnet/history-repair-backups`; `-BackupDirectory` can put
 them on another drive. The node/API remain stopped during backup and repair;
-the duration and space depend on database size and drive speed. After success,
-the owner starts Master and checks history progress beyond 6,033,632. Keep the
-backup until indexing is confirmed. This repairs one gap, not a complete audit.
+duration and space depend on database size and drive speed. After success,
+the owner starts Master and checks history progress beyond **6,034,000**. Keep
+the backup until indexing is confirmed. Other historical gaps can still exist.
 CI gates publication on upstream/repair/race tests, real Badger backup/restore,
-the compiled helper in the original Docker image, Windows PowerShell 5.1
-launcher tests, and the normal Master app suite. The app remains master.8.
+multiple/adjacent/all-500 gaps, conditional transaction conflicts, the compiled
+helper in the original Docker image, Windows PowerShell 5.1 launcher tests,
+and the normal Master app suite. The app remains master.8.
 
 ## Distribution
 

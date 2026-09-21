@@ -73,7 +73,7 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import zipfile, hashlib
-          target=Path('Master-KAI-History-Repair-6033632-v1.zip')
+          target=Path('Master-KAI-History-Repair-Batch-v2.zip')
           with zipfile.ZipFile(target,'w',zipfile.ZIP_DEFLATED) as archive:
               for p in sorted(Path('build/history-repair').iterdir()):
                   archive.write(p,p.name)
@@ -84,4 +84,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TARGET_COMMIT: ${{ github.sha }}
         run: |
-          gh release create master-history-repair-v1 --target "$TARGET_COMMIT" --title "Master KAI: repair historical block 6033632" --prerelease --notes-file patches/history-repair/README.txt Master-KAI-History-Repair-6033632-v1.zip Master-KAI-History-Repair-6033632-v1.zip.sha256
+          gh release create master-history-repair-v2 --target "$TARGET_COMMIT" --title "Master KAI: repair history batch 6033501-6034000" --prerelease --notes-file patches/history-repair/README.txt Master-KAI-History-Repair-Batch-v2.zip Master-KAI-History-Repair-Batch-v2.zip.sha256

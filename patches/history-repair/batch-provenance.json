@@ -1,0 +1,27 @@
+{
+  "repair": "mainnet-6033501-6034000-v2",
+  "observedAt": "2026-09-21T15:42:17.983432+00:00",
+  "batchStart": 6033501,
+  "batchEnd": 6034000,
+  "anchorBefore": "0x12204543d19030062b586dee7990a6d070d7e4ae8d54c8ff02a9987f379dda24a318",
+  "anchorAfter": "0x1220d27ad3dcf005f73b8879e2be07059c357be52e401aeb1a99e2f21793456dd735",
+  "payloadSha256": "7fbae5e2bb58230c28ca95440352d622e55d7286bc3ab61a73ec7ca62bf1b2ea",
+  "normalizedSha256": "46bbae86ced419f3d9934efe57cf5bf23136c2f2111e9e87fe3c141894efe41f",
+  "payloadBlocks": 502,
+  "sources": [
+    {
+      "url": "https://api.koinosblocks.com/",
+      "payloadSha256": "46bbae86ced419f3d9934efe57cf5bf23136c2f2111e9e87fe3c141894efe41f",
+      "normalizedSha256": "46bbae86ced419f3d9934efe57cf5bf23136c2f2111e9e87fe3c141894efe41f",
+      "stateRootsPresent": 0
+    },
+    {
+      "url": "https://api.koinos.io/",
+      "payloadSha256": "7fbae5e2bb58230c28ca95440352d622e55d7286bc3ab61a73ec7ca62bf1b2ea",
+      "normalizedSha256": "46bbae86ced419f3d9934efe57cf5bf23136c2f2111e9e87fe3c141894efe41f",
+      "stateRootsPresent": 502
+    }
+  ],
+  "normalization": "Only receipt.state_merkle_root is omitted for provider comparison. Every available root for a repair candidate is checked against its successor header. All other block and receipt JSON values match.",
+  "receiptTrust": "Two trusted RPC endpoints; not independent execution of historical state."
+}

@@ -1,4 +1,4 @@
-// Owner-run offline repair for one identified Mainnet block-store gap.
+// Owner-run offline repair for missing records in one pinned Mainnet history batch.
 // Built inside the pinned upstream block-store module; no new dependencies.
 package main
 
@@ -31,11 +31,11 @@ import (
 
 const targetHeight uint64 = 6033632
 const targetHex = "1220dcad24263596cee0e0bd91e1c7d054ef0bc1466cddbeb00a63ffc0cb81d706d4"
-const successorHex = "1220e29081fb712979cd4edddcdcd412bd276f011257ac8a4d5e6d4fd8d40dbbf4da"
+const anchorHex = "12204543d19030062b586dee7990a6d070d7e4ae8d54c8ff02a9987f379dda24a318"
 const batchStart uint64 = 6033501
 const batchSize uint32 = 500
 
-// candidateJSON is compiled from the checked-in, checksum-pinned payload by
+// batchJSON and batchPayloadSHA256 are compiled from the checked-in, checksum-pinned payload by
 // build-history-repair.js. No runtime downloads are accepted by this helper.
 
 func mustHex(s string) []byte {
@@ -153,53 +153,142 @@ func verifyHeader(block *protocol.Block) error {
 	return nil
 }
 
-func candidate() (*bs.BlockItem, error) {
-	i := &bs.BlockItem{}
-	if err := decodeJSON(candidateJSON, i); err != nil {
-		return nil, err
-	}
+// Match Koinos Chain v1.5.2's apply_block/apply_transaction commitments:
+// block leaves alternate transaction-header hashes and hashes of concatenated
+// signatures. Transaction headers commit to operation Merkle roots.
+func verifyContents(i *bs.BlockItem) error {
 	if err := verifyHeader(i.Block); err != nil {
-		return nil, err
+		return err
 	}
-	if i.BlockHeight != targetHeight || i.Block.Header.Height != targetHeight || !bytes.Equal(i.BlockId, mustHex(targetHex)) || !bytes.Equal(i.Block.Id, i.BlockId) || i.Receipt == nil || !bytes.Equal(i.Receipt.Id, i.BlockId) || i.Receipt.Height != targetHeight {
-		return nil, errors.New("recovery payload is not the pinned block and receipt")
+	if i.BlockHeight != i.Block.Header.Height || !bytes.Equal(i.Block.Id, i.BlockId) || i.Receipt == nil || i.Receipt.Height != i.BlockHeight || !bytes.Equal(i.Receipt.Id, i.BlockId) {
+		return errors.New("inconsistent payload block/receipt")
 	}
-	// This known block has no transactions. Its signed header commits to the
-	// empty transaction list; the two trusted RPCs supplied identical receipts.
-	empty := sha256.Sum256(nil)
-	if len(i.Block.Transactions) != 0 || len(i.Receipt.TransactionReceipts) != 0 || !bytes.Equal(i.Block.Header.TransactionMerkleRoot, append([]byte{0x12, 0x20}, empty[:]...)) {
-		return nil, errors.New("unexpected transactions in the recovery block")
+	if len(i.Receipt.TransactionReceipts) != len(i.Block.Transactions) {
+		return errors.New("transaction receipt count mismatch")
 	}
-	return i, nil
+	leaves := [][]byte{}
+	chainID, _ := base64.URLEncoding.DecodeString("EiBZK_GGVP0H_fXVAM3j6EAuz3-B-l3ejxRSewi7qIBfSA==")
+	for n, t := range i.Block.Transactions {
+		if t == nil || t.Header == nil || !bytes.Equal(t.Header.ChainId, chainID) {
+			return errors.New("invalid Mainnet transaction header")
+		}
+		id, err := util.HashMessage(t.Header)
+		if err != nil || !bytes.Equal(id, t.Id) {
+			return errors.New("transaction header hash mismatch")
+		}
+		ops := [][]byte{}
+		for _, op := range t.Operations {
+			h, e := util.HashMessage(op)
+			if e != nil {
+				return e
+			}
+			ops = append(ops, h)
+		}
+		root, err := util.CalculateMerkleRoot(ops)
+		if err != nil || !bytes.Equal(root, t.Header.OperationMerkleRoot) {
+			return errors.New("operation Merkle root mismatch")
+		}
+		signatures := bytes.Join(t.Signatures, nil)
+		sigHash := sha256.Sum256(signatures)
+		leaves = append(leaves, id, append([]byte{0x12, 0x20}, sigHash[:]...))
+		if i.Receipt.TransactionReceipts[n] == nil || !bytes.Equal(i.Receipt.TransactionReceipts[n].Id, t.Id) {
+			return errors.New("transaction receipt ID mismatch")
+		}
+	}
+	root, err := util.CalculateMerkleRoot(leaves)
+	if err != nil || !bytes.Equal(root, i.Block.Header.TransactionMerkleRoot) {
+		return errors.New("block transaction Merkle root mismatch")
+	}
+	return nil
 }
 
-// Capture upstream AddBlock's reconstructed record in memory. Every other
-// mutation, including highest-block changes, is forbidden.
+func candidates() ([]*bs.BlockItem, error) {
+	hash := sha256.Sum256(batchJSON)
+	if hex.EncodeToString(hash[:]) != batchPayloadSHA256 {
+		return nil, errors.New("compiled batch checksum mismatch")
+	}
+	var raw []json.RawMessage
+	if err := json.Unmarshal(batchJSON, &raw); err != nil {
+		return nil, err
+	}
+	if len(raw) != int(batchSize)+2 {
+		return nil, errors.New("wrong payload range size")
+	}
+	result := make([]*bs.BlockItem, len(raw))
+	for n, b := range raw {
+		i := &bs.BlockItem{}
+		if err := decodeJSON(b, i); err != nil {
+			return nil, err
+		}
+		if i.BlockHeight != batchStart-1+uint64(n) {
+			return nil, errors.New("payload heights out of order")
+		}
+		if err := verifyContents(i); err != nil {
+			return nil, fmt.Errorf("payload height %d: %w", i.BlockHeight, err)
+		}
+		if n > 0 {
+			prev := result[n-1]
+			if !bytes.Equal(i.Block.Header.Previous, prev.BlockId) {
+				return nil, errors.New("payload blocks do not link")
+			}
+			if len(prev.Receipt.StateMerkleRoot) > 0 && !bytes.Equal(prev.Receipt.StateMerkleRoot, i.Block.Header.PreviousStateMerkleRoot) {
+				return nil, errors.New("receipt state root differs from successor header")
+			}
+		}
+		result[n] = i
+	}
+	if !bytes.Equal(result[0].BlockId, mustHex(anchorHex)) || !bytes.Equal(result[targetHeight-batchStart+1].BlockId, mustHex(targetHex)) {
+		return nil, errors.New("payload does not contain pinned Mainnet anchors")
+	}
+	return result, nil
+}
+
+type entry struct {
+	id, value []byte
+	height    uint64
+}
+type proposal struct {
+	entries       []entry
+	observed      map[string][]byte
+	highest, head []byte
+}
+
+// Every base read is retained for the final conditional transaction. Only
+// absent, approved candidate keys can be written into this in-memory overlay.
+// Existing records, head changes, deletion and reset are prohibited.
 type overlay struct {
-	base       bstore.BlockStoreBackend
-	key, value []byte
+	base     bstore.BlockStoreBackend
+	allowed  map[string]bool
+	values   map[string][]byte
+	observed map[string][]byte
 }
 
 func (o *overlay) Get(k []byte) ([]byte, error) {
-	if bytes.Equal(k, o.key) && o.value != nil {
-		return o.value, nil
+	if v, ok := o.values[string(k)]; ok {
+		return v, nil
 	}
-	return o.base.Get(k)
+	v, err := o.base.Get(k)
+	if err == nil {
+		o.observed[string(k)] = append([]byte{}, v...)
+	}
+	return v, err
 }
 func (o *overlay) Put(k, v []byte) error {
-	if !bytes.Equal(k, o.key) {
-		return errors.New("unexpected write outside missing record")
+	if !o.allowed[string(k)] {
+		return errors.New("unexpected write outside approved missing records")
 	}
-	o.value = append([]byte{}, v...)
+	existing, err := o.base.Get(k)
+	if err != nil {
+		return err
+	}
+	if len(existing) > 0 {
+		return errors.New("existing record cannot be overwritten")
+	}
+	o.values[string(k)] = append([]byte{}, v...)
 	return nil
 }
 func (o *overlay) Delete([]byte) error { return errors.New("deletion forbidden") }
 func (o *overlay) Reset() error        { return errors.New("reset forbidden") }
-
-type proposal struct {
-	record, highest []byte
-	head            []byte
-}
 
 func readRecord(backend bstore.BlockStoreBackend, id []byte) (*bs.BlockRecord, error) {
 	raw, err := backend.Get(id)
@@ -207,7 +296,7 @@ func readRecord(backend bstore.BlockStoreBackend, id []byte) (*bs.BlockRecord, e
 		return nil, err
 	}
 	if len(raw) == 0 {
-		return nil, fmt.Errorf("required local record missing: 0x%x", id)
+		return nil, fmt.Errorf("required local record missing outside proposed repairs: 0x%x", id)
 	}
 	r := &bs.BlockRecord{}
 	if err = proto.Unmarshal(raw, r); err != nil {
@@ -218,7 +307,6 @@ func readRecord(backend bstore.BlockStoreBackend, id []byte) (*bs.BlockRecord, e
 	}
 	return r, nil
 }
-
 func checkBatch(backend bstore.BlockStoreBackend, head []byte) error {
 	h := &bstore.RequestHandler{Backend: backend}
 	r, err := h.GetBlocksByHeight(&bs.GetBlocksByHeightRequest{HeadBlockId: head, AncestorStartHeight: batchStart, NumBlocks: batchSize, ReturnBlock: true, ReturnReceipt: true})
@@ -240,18 +328,12 @@ func checkBatch(backend bstore.BlockStoreBackend, head []byte) error {
 }
 
 func prepare(backend bstore.BlockStoreBackend) (*proposal, error) {
-	i, err := candidate()
+	batch, err := candidates()
 	if err != nil {
 		return nil, err
 	}
-	existing, err := backend.Get(i.BlockId)
-	if err != nil {
-		return nil, err
-	}
-	if len(existing) > 0 {
-		return nil, errors.New("target record already exists; nothing will be overwritten")
-	}
-	highest, err := backend.Get([]byte{1})
+	o := &overlay{base: backend, allowed: map[string]bool{}, values: map[string][]byte{}, observed: map[string][]byte{}}
+	highest, err := o.Get([]byte{1})
 	if err != nil {
 		return nil, err
 	}
@@ -260,51 +342,60 @@ func prepare(backend bstore.BlockStoreBackend) (*proposal, error) {
 		return nil, err
 	}
 	if top.Height < batchStart+uint64(batchSize)-1 || len(top.Id) != 34 {
-		return nil, errors.New("database head is not beyond the repair batch")
+		return nil, errors.New("database head is not beyond repair batch")
 	}
-	h := &bstore.RequestHandler{Backend: backend}
-	s, err := h.GetBlocksByHeight(&bs.GetBlocksByHeightRequest{HeadBlockId: top.Id, AncestorStartHeight: targetHeight + 1, NumBlocks: 1, ReturnBlock: true, ReturnReceipt: true})
+	predecessor, err := readRecord(o, batch[0].BlockId)
 	if err != nil {
 		return nil, err
 	}
-	if len(s.BlockItems) != 1 || s.BlockItems[0] == nil || !bytes.Equal(s.BlockItems[0].BlockId, mustHex(successorHex)) {
-		return nil, errors.New("pinned successor is not on the local head's ancestry")
+	if predecessor.BlockHeight != batchStart-1 || !proto.Equal(predecessor.Block, batch[0].Block) {
+		return nil, errors.New("local history checkpoint block differs from pinned Mainnet anchor")
 	}
-	successor, err := readRecord(backend, mustHex(successorHex))
+	if err = verifyHeader(predecessor.Block); err != nil {
+		return nil, err
+	}
+	p := &proposal{highest: highest, head: top.Id, observed: o.observed}
+	// Build forward so adjacent missing records can use each other's verified
+	// skip-list links. No database writes occur during this simulation.
+	for _, i := range batch[1 : len(batch)-1] {
+		raw, e := o.Get(i.BlockId)
+		if e != nil {
+			return nil, e
+		}
+		if len(raw) > 0 {
+			local, e := readRecord(o, i.BlockId)
+			if e != nil {
+				return nil, e
+			}
+			if !proto.Equal(local.Block, i.Block) || local.Receipt == nil || local.Receipt.Height != i.BlockHeight || !bytes.Equal(local.Receipt.Id, i.BlockId) {
+				return nil, fmt.Errorf("existing record at %d is inconsistent; refusing replacement", i.BlockHeight)
+			}
+			continue
+		}
+		o.allowed[string(i.BlockId)] = true
+		if _, e = (&bstore.RequestHandler{Backend: o}).AddBlock(&bs.AddBlockRequest{BlockToAdd: i.Block, ReceiptToAdd: i.Receipt}); e != nil {
+			return nil, fmt.Errorf("cannot rebuild record %d: %w", i.BlockHeight, e)
+		}
+		value := o.values[string(i.BlockId)]
+		if len(value) == 0 {
+			return nil, errors.New("upstream did not construct missing record")
+		}
+		p.entries = append(p.entries, entry{id: i.BlockId, value: value, height: i.BlockHeight})
+	}
+	// Bind the candidate branch to the locally saved head, including any skip
+	// pointers used above. Merely obtaining the same heights from RPC is not enough.
+	end := batch[len(batch)-2]
+	r, err := (&bstore.RequestHandler{Backend: o}).GetBlocksByHeight(&bs.GetBlocksByHeightRequest{HeadBlockId: top.Id, AncestorStartHeight: end.BlockHeight, NumBlocks: 1, ReturnBlock: true, ReturnReceipt: true})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cannot verify local head ancestry: %w", err)
 	}
-	if err = verifyHeader(successor.Block); err != nil {
-		return nil, err
-	}
-	if successor.BlockHeight != targetHeight+1 || !bytes.Equal(successor.Block.Header.Previous, i.BlockId) {
-		return nil, errors.New("local successor does not link to target")
-	}
-	previous, err := readRecord(backend, i.Block.Header.Previous)
-	if err != nil {
-		return nil, err
-	}
-	if err = verifyHeader(previous.Block); err != nil {
-		return nil, err
-	}
-	if previous.BlockHeight != targetHeight-1 {
-		return nil, errors.New("local predecessor has wrong height")
-	}
-	if len(i.Receipt.StateMerkleRoot) > 0 && !bytes.Equal(i.Receipt.StateMerkleRoot, successor.Block.Header.PreviousStateMerkleRoot) {
-		return nil, errors.New("receipt state root differs from local successor")
-	}
-	o := &overlay{base: backend, key: i.BlockId}
-	_, err = (&bstore.RequestHandler{Backend: o}).AddBlock(&bs.AddBlockRequest{BlockToAdd: i.Block, ReceiptToAdd: i.Receipt})
-	if err != nil {
-		return nil, err
-	}
-	if len(o.value) == 0 {
-		return nil, errors.New("upstream did not construct a record")
+	if len(r.BlockItems) != 1 || r.BlockItems[0] == nil || !bytes.Equal(r.BlockItems[0].BlockId, end.BlockId) {
+		return nil, errors.New("repair range does not belong to the local head's ancestry")
 	}
 	if err = checkBatch(o, top.Id); err != nil {
 		return nil, err
 	}
-	return &proposal{record: o.value, highest: highest, head: top.Id}, nil
+	return p, nil
 }
 
 type progressWriter struct {
@@ -324,7 +415,7 @@ func (p *progressWriter) Write(b []byte) (int, error) {
 }
 
 // A complete Badger logical backup is finished, synced and checksummed before
-// the one-key transaction. Existing backup names are never reused.
+// the single atomic repair transaction. Existing backup names are never reused.
 func backupDB(db *badger.DB, name string) (string, error) {
 	for _, p := range []string{name, name + ".json", name + ".partial"} {
 		if _, e := os.Stat(p); e == nil {
@@ -354,7 +445,7 @@ func backupDB(db *badger.DB, name string) (string, error) {
 	if err = os.Rename(name+".partial", name); err != nil {
 		return "", err
 	}
-	meta, _ := json.MarshalIndent(map[string]interface{}{"schemaVersion": 1, "format": "badger-v3-logical-backup", "sha256": digest, "bytes": p.bytes, "createdAt": time.Now().UTC().Format(time.RFC3339), "repairBlock": "0x" + targetHex}, "", "  ")
+	meta, _ := json.MarshalIndent(map[string]interface{}{"schemaVersion": 1, "format": "badger-v3-logical-backup", "sha256": digest, "bytes": p.bytes, "createdAt": time.Now().UTC().Format(time.RFC3339), "repairRange": "6033501-6034000", "payloadSha256": batchPayloadSHA256}, "", "  ")
 	m, err := os.OpenFile(name+".json", os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
 		return "", err
@@ -376,21 +467,33 @@ func backupDB(db *badger.DB, name string) (string, error) {
 
 func applyRecord(db *badger.DB, p *proposal) error {
 	err := db.Update(func(tx *badger.Txn) error {
-		if _, e := tx.Get(mustHex(targetHex)); e != badger.ErrKeyNotFound {
-			return errors.New("target appeared; refusing to overwrite")
+		// Validate the complete read set before staging any writes. A changed head,
+		// neighbor, skip ancestor, or appeared target aborts the entire transaction.
+		for key, want := range p.observed {
+			item, e := tx.Get([]byte(key))
+			if len(want) == 0 {
+				if e != badger.ErrKeyNotFound {
+					return errors.New("record appeared after preflight; refusing overwrite")
+				}
+				continue
+			}
+			if e != nil {
+				return e
+			}
+			got, e := item.ValueCopy(nil)
+			if e != nil {
+				return e
+			}
+			if !bytes.Equal(got, want) {
+				return errors.New("database changed after preflight; aborting")
+			}
 		}
-		h, e := tx.Get([]byte{1})
-		if e != nil {
-			return e
+		for _, e := range p.entries {
+			if err := tx.Set(e.id, e.value); err != nil {
+				return err
+			}
 		}
-		v, e := h.ValueCopy(nil)
-		if e != nil {
-			return e
-		}
-		if !bytes.Equal(v, p.highest) {
-			return errors.New("database head changed; aborting")
-		}
-		return tx.Set(mustHex(targetHex), p.record)
+		return nil
 	})
 	if err != nil {
 		return err
@@ -453,7 +556,7 @@ func run(args []string) error {
 	flags := flag.NewFlagSet("kai_history_repair", flag.ContinueOnError)
 	dir := flags.String("db", "", "offline block_store/db directory")
 	backup := flags.String("backup", "", "new full logical backup file; required for --repair")
-	repair := flags.Bool("repair", false, "back up and restore ONLY pinned missing block 6033632")
+	repair := flags.Bool("repair", false, "back up and restore ONLY absent records in pinned range 6033501-6034000")
 	check := flags.Bool("check", false, "check the proposed repair without writing")
 	restoreFile := flags.String("restore", "", "restore backup into a NEW EMPTY directory")
 	digest := flags.String("sha256", "", "expected backup checksum for --restore")
@@ -490,7 +593,16 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println("Checked pinned block, local neighbors, head ancestry and all 500 blocks/receipts in the next history batch.")
+	fmt.Println("Checked all 500 candidate blocks, transactions, roots, local records and head ancestry.")
+	if len(p.entries) == 0 {
+		fmt.Println("NO REPAIR NEEDED: the 500-block batch is already complete. No block records changed.")
+		return nil
+	}
+	heights := make([]string, len(p.entries))
+	for n, e := range p.entries {
+		heights[n] = fmt.Sprint(e.height)
+	}
+	fmt.Printf("Missing records: %d (%s)\n", len(p.entries), strings.Join(heights, ", "))
 	if *check {
 		fmt.Println("CHECK PASSED. No database records changed.")
 		return nil
@@ -502,7 +614,7 @@ func run(args []string) error {
 	if err = applyRecord(db, p); err != nil {
 		return err
 	}
-	fmt.Println("REPAIR COMPLETE: restored block 6033632; saved head unchanged; blocks 6033501-6034000 and receipts are readable. Full history completeness remains unverified.")
+	fmt.Printf("REPAIR COMPLETE: restored %d missing records; saved head unchanged; blocks 6033501-6034000 and receipts are readable. Full history completeness remains unverified.\n", len(p.entries))
 	return nil
 }
 

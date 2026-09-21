@@ -15,8 +15,8 @@ const launch = "cp /repair/kai_history_repair /tmp/kai_history_repair && chmod 7
 const run = args => execFileSync("docker", [...options, "--mount", `type=bind,source=${path.join(fixture, "db")},target=/database`, "--mount", `type=bind,source=${backup},target=/backups`, "koinos/koinos-block-store:v1.1.0", "-c", `${launch} --db /database ${args}`], { encoding: "utf8" });
 assert.match(run("--check"), /CHECK PASSED/);
 const output = run("--repair --backup /backups/before.bak");
-assert.match(output, /REPAIR COMPLETE/);
+assert.match(output, /REPAIR COMPLETE: restored 2 missing records/);
 process.stdout.write(output);
 const repeat = spawnSync("docker", [...options, "--mount", `type=bind,source=${path.join(fixture, "db")},target=/database`, "koinos/koinos-block-store:v1.1.0", "-c", `${launch} --db /database --check`], { encoding: "utf8" });
-assert.notEqual(repeat.status, 0); assert.match(repeat.stderr, /target record already exists/);
-console.log("Original-container smoke passed: check-only preflight, full backup, one-record repair, and overwrite refusal.");
+assert.equal(repeat.status, 0); assert.match(repeat.stdout, /NO REPAIR NEEDED/);
+console.log("Original-container smoke passed: check-only preflight, full backup, two-record repair, and an idempotent complete-batch check.");

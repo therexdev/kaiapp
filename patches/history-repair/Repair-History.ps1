@@ -17,7 +17,7 @@ function Docker-Text([string[]]$DockerArguments) {
 try {
     $bundle = $PSScriptRoot
     $manifest = Get-Content -LiteralPath (Join-Path $bundle 'manifest.json') -Raw | ConvertFrom-Json
-    if ($manifest.schemaVersion -ne 1 -or $manifest.repair -ne 'mainnet-6033632-v1' -or $manifest.platform -ne 'linux/amd64') {
+    if ($manifest.schemaVersion -ne 1 -or $manifest.repair -ne 'mainnet-6033501-6034000-v2' -or $manifest.platform -ne 'linux/amd64') {
         throw 'This is not the expected repair package.'
     }
     $expectedFiles = @('kai_history_repair', 'Repair-History.ps1', 'Start-Repair.cmd', 'README.txt', 'LICENSE.md', 'provenance.json')
@@ -48,8 +48,14 @@ try {
     # with ReadOnly=true. --check prohibits logical writes inside Badger;
     # its mount must still permit the library's housekeeping-file access.
     $checkArgs = $baseArgs + @('--mount', "type=bind,source=$database,target=/database", $image, '-c', "$launcher --db /database --check")
-    & docker @checkArgs
-    if ($LASTEXITCODE -ne 0) { throw 'Preflight failed. No repair was attempted. Keep account history paused and share the output.' }
+    $checkOutput = & docker @checkArgs
+    $checkExit = $LASTEXITCODE
+    $checkOutput | ForEach-Object { Write-Host $_ }
+    if ($checkExit -ne 0) { throw 'Preflight failed. No repair was attempted. Keep account history paused and share the output.' }
+    if (($checkOutput | Out-String).Contains('NO REPAIR NEEDED:')) {
+        Write-Host 'SUCCESS. This batch is already complete. Reopen Master and Start the node; keep any existing backup.'
+        return
+    }
     if ($CheckOnly) { return }
     if (-not $BackupDirectory) { $BackupDirectory = Join-Path $NodeRoot 'history-repair-backups' }
     $null = New-Item -ItemType Directory -Path $BackupDirectory -Force
@@ -62,9 +68,9 @@ try {
     if ($drive.Free -lt $estimate) {
         throw ('Insufficient backup space on this drive. Estimated headroom: {0:N1} GiB; free: {1:N1} GiB. Run with -BackupDirectory on a drive with more space.' -f ($estimate / 1GB), ($drive.Free / 1GB))
     }
-    $backupName = 'block-store-before-6033632-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + ([Guid]::NewGuid().ToString('N').Substring(0,8)) + '.bak'
+    $backupName = 'block-store-before-6033501-6034000-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + ([Guid]::NewGuid().ToString('N').Substring(0,8)) + '.bak'
     Write-Host "Backup folder: $BackupDirectory"
-    Write-Host 'A complete logical backup will finish before the single missing record is written.'
+    Write-Host 'A complete logical backup will finish before any missing records are written.'
     Write-Host 'Keep Master and the node stopped. Backup time depends on your database size and drive speed.'
     # Recheck immediately before the writable invocation. The helper also takes
     # Badger's exclusive database lock and repeats the complete preflight.
@@ -74,7 +80,7 @@ try {
     & docker @repairArgs
     if ($LASTEXITCODE -ne 0) { throw 'Repair did not complete. Keep the node stopped, retain the backup and share this output.' }
     Write-Host ''
-    Write-Host 'SUCCESS. Reopen Master and Start the node. Account history should now pass height 6,033,632.'
+    Write-Host 'SUCCESS. Reopen Master and Start the node. Account history should now pass height 6,034,000.'
     Write-Host 'Keep the backup. Other historical gaps may still exist; full history is not yet verified.'
 } catch {
     Write-Host ''
