@@ -38,7 +38,7 @@ async function rpc(url, method, params = {}, { fetchImpl = fetch, signal } = {})
     }
   } finally { await reader.cancel().catch(() => {}); }
   const result = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-  if (result.error || !result.result) throw new Error(`Local RPC rejected ${method}`);
+  if (result.error || !result.result) throw new Error(`Local RPC rejected ${method}${result.error?.message ? ": " + String(result.error.message).slice(0,350) : ""}`);
   return result.result;
 }
 

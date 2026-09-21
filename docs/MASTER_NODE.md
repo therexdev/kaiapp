@@ -38,9 +38,11 @@ running Docker services. A completed chain startup clears a historical replay
 failure from the status display, while newer failures remain visible.
 
 The September 21 recovery replayed the 60 stored blocks successfully with this
-setting and resumed live catch-up. It does not fix block_store v1.1.0's separate
-`GetBlocksByHeight` nil-pointer crash. Keep account history paused while that
-issue is investigated. A manual `docker stop` is temporary: a full app-controlled
+setting and resumed live catch-up. That setting alone does not fix block_store
+v1.1.0's separate `GetBlocksByHeight` nil-pointer crash; the next section describes
+the patch included in version `0.54.9-master.7`. Keep history paused until the
+patched service is running and historical data has been checked.
+A manual `docker stop` is temporary: a full app-controlled
 node start can enable configured optional index services again. To keep all
 optional indexes disabled across starts, clear **Enable account history,
 transaction and contract metadata services on the next node start** in Master
@@ -52,6 +54,51 @@ estimate of the remaining wall-clock sync duration. The public RPC remains
 unready until the local mainnet head is fresh. If full verification still fails,
 retain the logs and existing data before deciding whether a snapshot restore
 is necessary.
+
+## History safety patch and local checks
+
+Version `0.54.9-master.7` includes a patched block-store executable for Windows
+Docker Desktop (Linux containers, x64) and Linux x64. The source is the exact
+upstream v1.1.0 commit with a small missing-record error-handling patch. The
+build reproduces the upstream crash, runs the upstream tests, checks both
+database backends and concurrency, and smoke-tests the binary in the original
+container. See [patch source and build details](../patches/koinos-block-store/README.md).
+
+On a Mainnet node start, Master checks the bundled executable, startup wrapper
+and license against their manifest hashes. It stages them beside the generated
+Compose file in `block-store-runtime`, then runs the patched executable inside
+the original block-store image. The existing `basedir`, arguments, ports and
+database format stay the same. Normal starts and watchdog recovery retain the
+patch. Installing the app does not stop or replace running containers, and no
+chain databases or keys are deleted. Testnet uses its existing service.
+
+To apply it to a recovered node:
+
+1. Keep **Enable account history, transaction and contract metadata services
+   on the next node start** unchecked and saved. Also leave the separate
+   account-history setting off if it was previously enabled.
+2. Install Master `0.54.9-master.7`. When ready for a short API interruption,
+   use the app's **Stop**, wait for completion, then **Start**.
+3. Wait for core RPC to become ready again. Under **Master node API**, select
+   **Check historical blocks**. This first verifies the running patched binary;
+   it refuses to query old blocks against the vulnerable service.
+4. Share the result before re-enabling history. Missing blocks or receipts keep
+   history paused. A successful sample is not a full database audit: it checks
+   up to eight single-block reads including genesis, selected old heights,
+   the last logged history checkpoint and the following range boundary, and
+   the finalized head. The old log checkpoint may be unavailable after Compose
+   recreates the history container; other samples still run.
+
+The diagnostic is a private, explicit local action. It reads the managed
+Mainnet RPC on loopback port 8085, requires the correct chain and a fresh head,
+stops on the first missing or inconsistent block/receipt, and never downloads
+replacement blocks, enables indexes or declares all history complete.
+
+When a requested record is missing, the patched service returns
+`Block not present - ID: ...` instead of crashing. This preserves the working
+core API but does not recover that missing record. Do not run Quick Sync or
+delete data merely to make this message disappear. The next recovery step
+depends on the missing block ID and available historical data.
 
 ## Distribution
 

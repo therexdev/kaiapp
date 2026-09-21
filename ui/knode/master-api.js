@@ -16,7 +16,19 @@ function renderMasterApiView() {
     <button id="ma-save" class="btn primary">Save API settings</button>
     <p class="hint">In Cloudflare Tunnel, publish this HTTPS hostname to the local API port shown below. The tunnel must run on this computer. This field does not create DNS or a tunnel.</p>
     <p class="hint">Keep memory-saver mode off for API use. Producer counts cover the last 28,800 finalized blocks; initial indexing may take time while the RPC is already ready.</p></div>
-    <div class="card"><h2>Endpoint status</h2><pre id="ma-status" style="white-space:pre-wrap"></pre></div>`;
+    <div class="card"><h2>Endpoint status</h2><pre id="ma-status" style="white-space:pre-wrap"></pre></div>
+    <div class="card"><h2>Historical data</h2><p class="hint">Check a small sample of local blocks and receipts, including the last logged account-history position. This requires a node restart after installing the history safety patch. It does not start history, repair data, or prove the entire history is complete.</p>
+    <button id="ma-check-history" class="btn">Check historical blocks</button><pre id="ma-history-result" style="white-space:pre-wrap"></pre></div>`;
+  $("#ma-check-history").addEventListener("click", async () => {
+    const button = $("#ma-check-history"), result = $("#ma-history-result");
+    button.disabled = true; result.textContent = "Checking the patched local service and historical samples…";
+    try {
+      const value = await call("masterApi:checkHistory");
+      result.textContent = `${value.samplesAvailable ? "Sampled blocks and receipts are available. Full history completeness remains unverified." : "Historical data is missing or unavailable. Keep account history paused."}\nLast logged history height: ${value.lastLoggedHeight ?? "not found"}\n` +
+        value.samples.map(s => `Block ${s.height}: ${s.available ? "available" : s.error}`).join("\n");
+    } catch (error) { result.textContent = error.message; }
+    finally { button.disabled = false; }
+  });
   $("#ma-save").addEventListener("click",async () => { try {
     const previousIndexes = Boolean(S.appInfo.settings.masterApi?.extendedIndexes);
     const saved = await call("masterApi:configure",{ enabled:$("#ma-enabled").checked, rpcEnabled:$("#ma-rpc-enabled").checked,

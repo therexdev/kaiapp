@@ -10,6 +10,7 @@ const { parseSha256File, analyzeMembers, requiredSpace, fmtBytes } = require("./
 const { httpHead, httpGetText, httpDownload } = require("./download");
 const { assessHealth, describeRecovery, classifyCrash, isCrashLooping } = require("./node-health");
 const dataMove = require("./data-move");
+const blockStoreRuntime = require("./block-store-runtime");
 
 const { assertRestoreReady, inspectLogs, backupList, deleteBackup, installSnapshot, preflightFolders } = require("./node-maintenance");
 const OP_LOG_LIMIT = 400;
@@ -29,12 +30,13 @@ const MAX_BACKOFF_MS = 15 * 60 * 1000;
 // docker-compose.yml plus generated .env and config files, and drives it
 // through `docker compose`.
 class NodeManager {
-  constructor({ templateRoot, dataRoot, onEvent, autoRecover = true, probeHead = null, accountHistory = false, apiServices = false, platform = process.platform }) {
+  constructor({ templateRoot, dataRoot, onEvent, autoRecover = true, probeHead = null, accountHistory = false, apiServices = false, platform = process.platform, runtimeBundle = blockStoreRuntime.defaultBundle() }) {
     this.accountHistory = accountHistory;
     this.apiServices = apiServices;
     this.templateRoot = templateRoot;
     this.dataRoot = dataRoot;
     this.platform = platform;
+    this.runtimeBundle = runtimeBundle;
     this.onEvent = onEvent || (() => {});
     this._composeCmd = null;
     this._op = null; // { name, network, running, startedAt, lines, code, error }
@@ -66,7 +68,10 @@ class NodeManager {
     fs.mkdirSync(d.basedir, { recursive: true });
 
     const tpl = (...p) => path.join(this.templateRoot, ...p);
-    const composeSource = fs.readFileSync(tpl("docker-compose.yml"), "utf8");
+    let composeSource = fs.readFileSync(tpl("docker-compose.yml"), "utf8");
+    if (networkId === "mainnet" && blockStoreRuntime.stageRuntime(this.runtimeBundle, d.root)) {
+      composeSource = blockStoreRuntime.patchedCompose(composeSource);
+    }
     fs.writeFileSync(
       path.join(d.root, "docker-compose.yml"),
       this.platform === "darwin" ? composeForMacos(composeSource) : composeSource

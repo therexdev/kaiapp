@@ -19,7 +19,7 @@ test("Master Distribution saves recipients, pauses and exposes Node API controls
   t.after(async () => { await browser.close(); await core.stop(); fs.rmSync(dir, { recursive: true, force: true }); });
   const page = await browser.newPage({ viewport: { width: 1180, height: 800 } });
   const errors = []; page.on("pageerror", e => errors.push(e.message));
-  const allowed = new Set(["app:info", "wallet:status", "distribution:status", "distribution:configure", "rewards:status", "masterApi:status", "masterApi:configure"]);
+  const allowed = new Set(["app:info", "wallet:status", "distribution:status", "distribution:configure", "rewards:status", "masterApi:status", "masterApi:configure", "masterApi:checkHistory"]);
   await page.route("**/core/koinos/rpc", async route => {
     const { channel, payload } = route.request().postDataJSON();
     let response;
@@ -77,5 +77,13 @@ test("Master Distribution saves recipients, pauses and exposes Node API controls
   assert.equal(await page.isChecked("#ma-indexes"), true);
   assert.equal(await page.isChecked("#ma-metadata-backups"), false);
   assert.equal(await page.inputValue("#ma-public"), "https://api.koinosai.com");
+  // An app update alone does not prove the patched Docker service is active.
+  // The actual local channel must reject the diagnostic before any block read.
+  const inspect = t.mock.method(node.nodeMgr, "_compose", async () => ({ ok: false, stdout: "" }));
+  await page.click("#ma-check-history");
+  await page.waitForFunction(() => document.querySelector("#ma-history-result").textContent.includes("patch is not running yet"));
+  assert.equal(inspect.mock.callCount(), 1);
+  assert.equal(await page.isEnabled("#ma-check-history"), true);
+  assert.equal(starts.mock.callCount(), 0); assert.equal(stops.mock.callCount(), 0);
   assert.deepEqual(errors, []);
 });

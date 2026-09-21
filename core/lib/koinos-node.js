@@ -13,6 +13,7 @@ const dataMove = require("./koinos/data-move");
 const { SetupService } = require("./koinos/setup");
 const { DistributionEngine } = require("./koinos/distribution");
 const { MasterNodeApi } = require("./koinos/master-api");
+const { checkHistory } = require("./koinos/history-check");
 const { RewardEngine } = require("./koinos/rewards");
 const { createProducerCache } = require("./koinos/network-producers");
 const { ProducerStats } = require("./koinos/producer-stats");
@@ -615,6 +616,12 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
     handle("distribution:distributeNow", () => { custody.requireLocal(); return distribution.tick("manual", { forceClose: true }); });
   }
   if (masterApi) {
+    let historyCheck = null;
+    handle("masterApi:checkHistory", () => {
+      // Multiple clicks share one bounded local check. No public route exists.
+      if (!historyCheck) historyCheck = checkHistory({ nodeMgr }).finally(() => { historyCheck = null; });
+      return historyCheck;
+    });
     handle("masterApi:status", () => masterApi.status());
     handle("masterApi:configure", async input => {
       const result = await masterApi.configure(input);

@@ -31,8 +31,30 @@ jobs:
   verify:
     needs: signing
     uses: ./.github/workflows/master-ci.yml
+  node-runtime:
+    needs: signing
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.1'
+          cache: false
+      - name: Reproduce the crash, test the patch and build the static Linux runtime
+        run: node scripts/build-block-store.js
+      - name: Verify the runtime starts inside the upstream container
+        run: node scripts/smoke-block-store.js
+      - uses: actions/upload-artifact@v4
+        with:
+          name: master-node-runtime
+          path: build/node-runtime/*
+          if-no-files-found: error
   linux:
-    needs: verify
+    needs: [verify, node-runtime]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -41,6 +63,10 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: master-node-runtime
+          path: build/node-runtime
       - run: npm run dist -- --linux --x64 --publish never
       - uses: actions/upload-artifact@v4
         with:
@@ -50,7 +76,7 @@ jobs:
             dist/master-linux*.yml
           if-no-files-found: error
   windows:
-    needs: verify
+    needs: [verify, node-runtime]
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
@@ -59,6 +85,10 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: master-node-runtime
+          path: build/node-runtime
       - name: Require the established Azure publisher
         run: node scripts/configure-windows-signing.js
         env:
