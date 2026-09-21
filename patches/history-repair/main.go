@@ -479,7 +479,7 @@ func run(args []string) error {
 		return errors.New("repair requires a full backup destination")
 	}
 	if _, err := os.Stat(filepath.Join(*dir, "MANIFEST")); err != nil {
-		return errors.New("existing database MANIFEST not found; refusing to create a database")
+		return fmt.Errorf("cannot read existing database MANIFEST; refusing to create a database: %w", err)
 	}
 	db, err := badger.Open(badger.DefaultOptions(*dir).WithLogger(nil).WithReadOnly(*check).WithSyncWrites(true))
 	if err != nil {
