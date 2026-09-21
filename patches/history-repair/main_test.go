@@ -206,6 +206,11 @@ func TestRepairBackupRestoreAndNoOverwrite(t *testing.T) {
 	if err := run([]string{"--db", dir, "--check"}); err != nil {
 		t.Fatal(err)
 	}
+	db = openTestDB(t, dir)
+	if !reflect.DeepEqual(original, databaseRecords(t, db)) {
+		t.Fatal("preflight changed logical records")
+	}
+	db.Close()
 	if err := run([]string{"--db", dir, "--repair", "--backup", backup}); err != nil {
 		t.Fatal(err)
 	}

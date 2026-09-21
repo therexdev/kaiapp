@@ -44,7 +44,10 @@ try {
     $launcher = 'cp /repair/kai_history_repair /tmp/kai_history_repair && chmod 700 /tmp/kai_history_repair && exec /tmp/kai_history_repair'
     Write-Host "Database: $database"
     Write-Host 'Checking the repair without changing database records...'
-    $checkArgs = $baseArgs + @('--mount', "type=bind,source=$database,target=/database,readonly", $image, '-c', "$launcher --db /database --check")
+    # Badger v3.2103.2 opens DISCARD housekeeping metadata with O_RDWR even
+    # with ReadOnly=true. --check prohibits logical writes inside Badger;
+    # its mount must still permit the library's housekeeping-file access.
+    $checkArgs = $baseArgs + @('--mount', "type=bind,source=$database,target=/database", $image, '-c', "$launcher --db /database --check")
     & docker @checkArgs
     if ($LASTEXITCODE -ne 0) { throw 'Preflight failed. No repair was attempted. Keep account history paused and share the output.' }
     if ($CheckOnly) { return }

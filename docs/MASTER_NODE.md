@@ -125,6 +125,9 @@ Master before launching it; Docker Desktop stays running. It verifies package
 hashes, checks local neighbor headers and head ancestry, reconstructs the
 upstream skip-list record in memory, and requires the next 500 blocks and
 receipts to be readable with the proposed record before proceeding.
+Preflight uses Badger's `ReadOnly` option to prohibit logical record writes.
+The pinned library nevertheless opens housekeeping files such as `DISCARD`
+with write access, so even CheckOnly uses a writable mount with the node stopped.
 
 The block and receipt JSON were fetched from both configured backup RPCs and
 matched. Header hashes and local links are checked; receipt contents still

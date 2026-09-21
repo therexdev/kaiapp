@@ -20,9 +20,12 @@ repair write. A .partial file means backup did not finish; keep failure output.
 
 To choose another backup drive, open PowerShell in the extracted folder:
   .\Repair-History.ps1 -BackupDirectory 'D:\KAI-repair-backups'
-To run the read-only preflight alone:
+To run the preflight without inserting a block:
   .\Repair-History.ps1 -CheckOnly
 For a custom node directory, supply -NodeRoot with the mainnet folder.
+Badger's ReadOnly option prevents logical record writes during preflight.
+This older library still opens housekeeping files such as DISCARD for writing,
+so CheckOnly requires a writable database mount and a stopped node too.
 
 Verification and limits
 -----------------------

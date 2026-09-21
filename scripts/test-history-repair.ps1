@@ -35,7 +35,8 @@ try {
     Assert-Case ($LASTEXITCODE -eq 0) 'Read-only preflight failed.'
     $runs = @($global:RepairCalls | Where-Object { $_[0] -eq 'run' })
     Assert-Case ($runs.Count -eq 1) 'Unexpected invocation count for CheckOnly.'
-    Assert-Case (($runs[0] -join '|').Contains("source=$db,target=/database,readonly")) 'Read-only DB mount lost or path with spaces split.'
+    Assert-Case (($runs[0] -join '|').Contains("source=$db,target=/database")) 'DB mount lost or path with spaces split.'
+    Assert-Case (($runs[0] -join '|').Contains('--db /database --check')) 'Check-only operation lost.'
     Assert-Case (($runs[0] -join '|').Contains('--network|none')) 'Network isolation lost.'
     $global:RepairCalls.Clear()
     & $script -NodeRoot $nodeRoot
