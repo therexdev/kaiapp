@@ -1,4 +1,5 @@
 #include "engine.h"
+#include "context_budget.h"
 #include <algorithm>
 #include <chrono>
 #include <memory>
@@ -68,18 +69,10 @@ Generation Engine::generate(std::vector<Message> messages, int maxTokens, float 
     if (messages.empty() || messages.back().role != "user") throw std::runtime_error("A user message is required.");
     Generation result;
     std::vector<llama_token> tokens;
-    const int available = static_cast<int>(llama_n_ctx(context)) - maxTokens;
-    while (true) {
-        tokens = tokenize(messages);
-        if (static_cast<int>(tokens.size()) <= available) break;
-        const size_t first = messages.front().role == "system" ? 1 : 0;
-        if (messages.size() <= first + 1)
-            throw std::runtime_error("This message is too long for the selected context. Shorten it or increase context in Settings.");
-        size_t end = first + 1;
-        while (end < messages.size() - 1 && messages[end].role != "user") ++end;
-        messages.erase(messages.begin() + first, messages.begin() + end);
-        ++result.dropped;
-    }
+    const int capacity=static_cast<int>(llama_n_ctx(context));
+    const int available=capacity-std::min(maxTokens,capacity/3);
+    result.dropped=fitConversation(messages,available,[&](const std::vector<Message> &chat){tokens=tokenize(chat);return static_cast<int>(tokens.size());});
+    maxTokens=std::min(maxTokens,capacity-static_cast<int>(tokens.size()));
     llama_memory_clear(llama_get_memory(context), true);
     for (size_t offset = 0; offset < tokens.size() && !stopped(); offset += 128) {
         auto count = std::min<size_t>(128, tokens.size() - offset);

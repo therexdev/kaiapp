@@ -1,3 +1,9 @@
+## Android 0.3.3 · Follow-up context and selective search
+
+- Removed thinking text and the duplicate stop icon from the message bubble. Thinking stays in the answer card, with one Stop button beside the globe.
+- Added Auto / Always / Off to the globe. Auto selects useful lookups, builds keyword queries and can include the recent topic for follow-ups after consent. The actual query stays visible in search activity and source details.
+- Stopped adding every old search payload back into the model prompt. Current evidence is bounded, recent conversation turns stay available, and the engine shortens long recent replies before discarding earlier topics. It reports insufficient context instead of silently losing the preceding exchange.
+
 ## Android 0.3.2 · Compact chat composer
 
 - Moved Chats to the top bar and removed the persistent model-ready and voice-ready rows. Conversation details now scroll with messages.

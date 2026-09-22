@@ -13,8 +13,8 @@ android {
         applicationId 'io.koinosai.mobile'
         minSdk 28
         targetSdk 35
-        versionCode 7
-        versionName '0.3.2-preview'
+        versionCode 8
+        versionName '0.3.3-preview'
         ndk { abiFilters providers.gradleProperty('kaiAbi').getOrElse('arm64-v8a') }
         externalNativeBuild {
             cmake { arguments '-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON'; cppFlags '-std=c++17' }

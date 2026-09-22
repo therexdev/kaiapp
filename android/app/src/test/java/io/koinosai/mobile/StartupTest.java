@@ -104,7 +104,7 @@ public class StartupTest {
         installedVoice();chooseVoiceChat();dialog=org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();assertNotNull(find(dialog.getWindow().getDecorView(),"Load & start voice"));assertFalse(app.networkAllowed());
     }
     @Test public void localVoiceWithWebEnabledOffersOfflineContinuation()throws Exception{
-        signIn();installedVoice();app.active=app.models.get(0);app.prefs.edit().putBoolean("webSearch",true).apply();app.changed();chooseVoiceChat();
+        signIn();installedVoice();app.active=app.models.get(0);app.prefs.edit().putBoolean("webSearch",true).putBoolean("webTopicConsent",true).apply();app.changed();chooseVoiceChat();
         android.app.AlertDialog dialog=org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();assertEquals("Continue offline",dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE).getText().toString());
         dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE).performClick();Shadows.shadowOf(Looper.getMainLooper()).idle();assertFalse(app.prefs.getBoolean("webSearch",true));assertFalse(app.networkAllowed());assertEquals("local",app.route);
     }
@@ -124,7 +124,19 @@ public class StartupTest {
         signIn();control("Voice options").performClick();PopupMenu menu=org.robolectric.shadows.ShadowPopupMenu.getLatestPopupMenu();
         assertEquals(2,menu.getMenu().size());assertEquals("Dictate message",menu.getMenu().findItem(1).getTitle());assertEquals("Voice chat",menu.getMenu().findItem(2).getTitle());menu.dismiss();
         VoiceController voice=fakeVoice(false);app.changed();assertNotNull(control("Finish dictation"));control("Finish dictation").performClick();assertFalse(voice.listening);
-        voice=fakeVoice(true);app.changed();assertNotNull(control("End voice chat"));control("End voice chat").performClick();assertFalse(voice.active());assertNotNull(control("Voice options"));
+        voice=fakeVoice(true);app.changed();assertNotNull(control("Stop voice"));control("Stop voice").performClick();assertFalse(voice.active());assertNotNull(control("Voice options"));
+    }
+    @Test public void thinkingAndStopStayOutsideComposerWhileVoiceWaitsForReply()throws Exception{
+        signIn();VoiceController voice=fakeVoice(true);voice.beginReply();app.busy=true;app.generating=true;app.current.messages.add(new KaiApp.ChatMessage("assistant",""));app.changed();
+        TextView voiceStatus=org.robolectric.util.ReflectionHelpers.getField(activity,"voiceStatus");View voiceButton=org.robolectric.util.ReflectionHelpers.getField(activity,"voiceButton");
+        assertEquals(View.GONE,voiceStatus.getVisibility());assertEquals(View.GONE,voiceButton.getVisibility());assertNotNull(control("Stop response"));assertNotNull(find("Thinking…"));
+        app.busy=false;app.generating=false;voice.stop();app.changed();assertEquals(View.VISIBLE,control("Voice options").getVisibility());
+    }
+    @Test public void globeOffersAutoAlwaysAndOffAndAutoRequiresTopicConsent()throws Exception{
+        signIn();control("Web search off").performClick();PopupMenu menu=org.robolectric.shadows.ShadowPopupMenu.getLatestPopupMenu();assertEquals(3,menu.getMenu().size());menu.getMenu().performIdentifierAction(1,0);
+        assertFalse(app.prefs.getBoolean("webTopicConsent",false));android.app.AlertDialog dialog=org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE).performClick();
+        Shadows.shadowOf(Looper.getMainLooper()).idle();assertTrue(app.prefs.getBoolean("webTopicConsent",false));assertTrue(app.autoWeb());assertNotNull(control("Web search auto"));assertFalse(app.networkAllowed());
+        control("Web search auto").performClick();org.robolectric.shadows.ShadowPopupMenu.getLatestPopupMenu().getMenu().performIdentifierAction(3,0);assertFalse(app.prefs.getBoolean("webSearch",true));
     }
     private Runnable afterLoad(Runnable action){return org.robolectric.util.ReflectionHelpers.callInstanceMethod(activity,"afterModelLoad",org.robolectric.util.ReflectionHelpers.ClassParameter.from(Runnable.class,action));}
     @Test public void loadContinuationRunsOnceAndIsCancelledByBackgroundNavigationOrScopeChange()throws Exception{

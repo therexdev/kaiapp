@@ -30,10 +30,12 @@ jobs:
         working-directory: android
         run: |
           python3 scripts/check-catalog.py
+          g++ -std=c++17 -I vendor/llama.cpp/include -I vendor/llama.cpp/ggml/include app/src/main/cpp/context_budget_test.cpp -o /tmp/kai-context-test
+          /tmp/kai-context-test
           ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug --no-daemon
       - uses: actions/upload-artifact@v4
         with:
-          name: KAI-Mobile-0.3.2-ARM64-ci-debug
+          name: KAI-Mobile-0.3.3-ARM64-ci-debug
           path: android/app/build/outputs/apk/debug/app-debug.apk
       - uses: actions/upload-artifact@v4
         if: always()

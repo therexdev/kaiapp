@@ -158,4 +158,18 @@ public class AccountContractTest {
         app.send("latest information",true);app.network.submit(()->{}).get();idle();assertNull(api.streamRequest);assertTrue(app.error.contains("Search unavailable"));assertEquals("latest information",app.retryPrompt);assertTrue(app.current.messages.isEmpty());
     }
 
+    @Test public void autoWebFollowUpUsesTopicAndCurrentEvidenceWhileKeepingChatHistory()throws Exception{
+        signIn();app.setNetworkEnabled(true);app.setRoute("own");app.prefs.edit().putBoolean("webSearch",true).putBoolean("webTopicConsent",true).apply();
+        KaiApp.ChatMessage original=new KaiApp.ChatMessage("user","What's the best Pokemon game?");original.research=new WebSearch.Result("Fixture","pokemon",1,Arrays.asList(new WebSearch.Source("Old","https://example.com/old","OLD_SNIPPET")));app.current.messages.add(original);app.current.messages.add(new KaiApp.ChatMessage("assistant","Red and Blue are popular."));
+        final String[] query={null};app.webApi=new WebSearch(){@Override Result search(String q,AtomicBoolean stop,java.util.function.Consumer<String> progress){query[0]=q;return new Result("Fixture",q,2,Arrays.asList(new Source("Timeline","https://example.com/pokemon","CURRENT_SNIPPET Pokemon game chronology")));}};
+        app.send("What is the first game chronologically?");for(int i=0;i<3;i++){app.network.submit(()->{}).get();idle();}
+        assertEquals("pokemon first game chronologically",query[0]);assertNotNull(api.streamRequest);String payload=api.streamRequest.toString();assertTrue(payload.contains("best Pokemon game"));assertTrue(payload.contains("Red and Blue"));assertTrue(payload.contains("CURRENT_SNIPPET"));assertFalse(payload.contains("OLD_SNIPPET"));assertTrue(api.streamRequest.getBoolean("selfHost"));
+    }
+    @Test public void autoWebSkipsUnneededSearchAndAlwaysStillPerformsLookup()throws Exception{
+        signIn();app.setNetworkEnabled(true);app.setRoute("own");app.prefs.edit().putBoolean("webSearch",true).putBoolean("webTopicConsent",true).apply();int[] calls={0};
+        app.webApi=new WebSearch(){@Override Result search(String q,AtomicBoolean stop,java.util.function.Consumer<String> progress){calls[0]++;return new Result("Fixture",q,1,Arrays.asList(new Source("Fact","https://example.com/fact","Some facts")));}};
+        app.send("Explain photosynthesis");app.network.submit(()->{}).get();idle();assertEquals(0,calls[0]);assertNotNull(api.streamRequest);assertFalse(api.streamRequest.toString().contains("WEB_SEARCH_DATA ("));
+        app.prefs.edit().putString("webMode","always").apply();app.send("Explain photosynthesis");for(int i=0;i<3;i++){app.network.submit(()->{}).get();idle();}assertEquals(1,calls[0]);
+    }
+
 }

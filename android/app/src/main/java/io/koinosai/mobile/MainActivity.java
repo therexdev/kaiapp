@@ -26,7 +26,7 @@ public final class MainActivity extends Activity {
     private EditText composer;
     private ImageButton send,voiceButton,webButton;
     private Button chatsButton;
-    private PopupMenu voiceMenu;
+    private PopupMenu voiceMenu,webMenu;
     private boolean keyboardVisible,voicePackWasPending;
     private TextView voiceStatus;
     private TextView thinkingTitle,thinkingDetail;
@@ -144,7 +144,7 @@ public final class MainActivity extends Activity {
     }
     private void go(String name){if(!tab.equals(name)){chatActionEpoch++;endVoice(true);}hideKeyboard();tab=name;pageKey="";render();}
     private String key() {
-        String auth=app.account.signedIn()+app.account.owner()+app.route+app.networkAllowed()+app.prefs.getBoolean("webSearch",false);
+        String auth=app.account.signedIn()+app.account.owner()+app.route+app.networkAllowed()+app.prefs.getBoolean("webSearch",false)+app.autoWeb()+app.prefs.getBoolean("webTopicConsent",false);
         if(tab.equals("Accounts")||tab.equals("Network"))return tab+auth+app.account.revision+app.grantId+app.busy+accountSection;
         if(tab.equals("Chat")&&!app.account.signedIn())return "gate"+auth+app.account.restoring;
 
@@ -187,11 +187,12 @@ public final class MainActivity extends Activity {
             iconState(send,app.busy?"Stop response":voiceActive?"Stop voice":"Send message",app.busy||voiceActive?R.drawable.ic_stop:R.drawable.ic_send,true);
             send.setEnabled(app.busy||voiceActive||app.account.signedIn());composer.setEnabled(!app.busy);
             if(!app.retryPrompt.isEmpty()&&composer.getText().length()==0){composer.setText(app.retryPrompt);app.retryPrompt="";}
-            String voiceAction=!voiceActive?"Voice options":voice.session?"End voice chat":voice.listening?"Finish dictation":"Stop voice";
-            iconState(voiceButton,voiceAction,voiceActive?R.drawable.ic_stop:R.drawable.ic_voice_options,voiceActive);voiceButton.setEnabled(!app.busy||voiceActive);
-            boolean web=app.prefs.getBoolean("webSearch",false);iconState(webButton,web?"Web search on":"Web search off",R.drawable.ic_web,web);webButton.setEnabled(!app.busy);
+            String voiceAction=voice!=null&&voice.listening&&!voice.session?"Finish dictation":"Voice options";
+            iconState(voiceButton,voiceAction,voice!=null&&voice.listening?R.drawable.ic_mic:R.drawable.ic_voice_options,voice!=null&&voice.listening);
+            voiceButton.setVisibility(app.busy||voice!=null&&(voice.waiting||voice.speaking)?View.GONE:View.VISIBLE);voiceButton.setEnabled(!app.busy);
+            boolean web=app.prefs.getBoolean("webSearch",false);iconState(webButton,web?(app.autoWeb()?"Web search auto":"Web search always"):"Web search off",R.drawable.ic_web,web);webButton.setEnabled(!app.busy);
             boolean downloading=app.voicePack.installing||app.voicePack.downloadId!=-1;
-            String message=voiceActive?voice.status:"";
+            String message=voiceActive&&!voice.waiting&&!voice.speaking?voice.status:"";
             if(downloading)message=app.voicePack.status.isEmpty()?"Checking voice download…":app.voicePack.status;
             else if(!app.voicePack.ready()&&!app.voicePack.status.isEmpty())message=app.voicePack.status;
             voiceStatus.setText(message);voiceStatus.setVisibility(message.isEmpty()?View.GONE:View.VISIBLE);
@@ -322,7 +323,7 @@ public final class MainActivity extends Activity {
         Switch wifi=new Switch(this);wifi.setText("Download on Wi-Fi only");wifi.setTextSize(15);wifi.setTextColor(NAVY);wifi.setChecked(app.prefs.getBoolean("wifi",true));wifi.setPadding(0,dp(8),0,dp(8));wifi.setOnCheckedChangeListener((b,v)->app.prefs.edit().putBoolean("wifi",v).apply());add(downloads,wifi);space(downloads,10);
         add(downloads,text("This applies to new downloads. Android manages downloads in the background. Model files are checked before use.\n\nChats stay in this app's storage and are excluded from Android backup. Generation stops when you leave the app. Local inference stays on this device while your account and downloads stay connected. Enabling Web sends the current search query to search providers. Offline mode separately pauses network access. Your saved sign-in unlocks offline chat for up to 30 days after verification.",14,MUTED,false));
         LinearLayout about=card(content);add(about,text("KAI Mobile",19,NAVY,true));space(about,8);
-        add(about,text("Version 0.3.2 · Android 9+ · ARM64\nMade for a little more possibility.\n\nLocal AI powered by llama.cpp. Connect to your KAI account, chat over the network, and check your nodes. Mining happens on your existing nodes, not on this handheld.",14,MUTED,false));space(about,12);
+        add(about,text("Version 0.3.3 · Android 9+ · ARM64\nMade for a little more possibility.\n\nLocal AI powered by llama.cpp. Connect to your KAI account, chat over the network, and check your nodes. Mining happens on your existing nodes, not on this handheld.",14,MUTED,false));space(about,12);
         add(about,button("Open-source notices",false,()-> {
             try(InputStream input=getAssets().open("third-party-notices.txt")) {
                 new AlertDialog.Builder(this).setTitle("Open-source notices").setMessage(new String(ModelFile.readLimited(input,128*1024),StandardCharsets.UTF_8)).setPositiveButton("Close",null).show();
@@ -354,7 +355,7 @@ public final class MainActivity extends Activity {
     }
     private void updateThinking(){
         if(thinkingTitle==null)return;
-        if(app.searching){thinkingTitle.setText(app.searchStopped.get()?"Stopping search…":"Searching the web…");thinkingDetail.setText((app.searchStopped.get()?"Your question will stay in the composer":app.searchProvider.isEmpty()?"Preparing search": "Searching "+app.searchProvider)+"\n“"+WebSearch.limit(WebSearch.query(app.searchQuestion),130)+"”");return;}
+        if(app.searching){thinkingTitle.setText(app.searchStopped.get()?"Stopping search…":"Searching the web…");thinkingDetail.setText((app.searchStopped.get()?"Your question will stay in the composer":app.searchProvider.isEmpty()?"Preparing search": "Searching "+app.searchProvider)+"\n“"+WebSearch.limit(app.searchQuery.isEmpty()?WebSearch.query(app.searchQuestion):app.searchQuery,180)+"”");return;}
         if(app.busy&&!app.generating){thinkingTitle.setText("Preparing model…");thinkingDetail.setText(app.status);return;}
         thinkingTitle.setText(thinkingAnswer==null||thinkingAnswer.text.isEmpty()?"Thinking…":"Writing answer…");
         if(thinkingAnswer!=null&&thinkingAnswer.research!=null){Set<String> domains=new LinkedHashSet<>();for(WebSearch.Source s:thinkingAnswer.research.sources)domains.add(sourceHost(s.url));thinkingDetail.setText("Using search snippets from\n"+android.text.TextUtils.join(" · ",domains));}
@@ -394,23 +395,24 @@ public final class MainActivity extends Activity {
         if(voice!=null&&voice.active())endVoice(false);
         if(!app.account.signedIn()){go("Accounts");return;}
         Runnable sendPrompt=()->sendPrompt(prompt);
-        if(!app.usesRemoteModel()){if(app.active==null){chooseLocalModel("send",()->submit(prompt));return;}withWebConnection(sendPrompt);return;}
+        if(!app.usesRemoteModel()){if(app.active==null){chooseLocalModel("send",()->submit(prompt));return;}prepareWeb(prompt,sendPrompt);return;}
         if(!app.networkAllowed()){ensureOnline(()->submit(prompt));return;}
+        if(needsWebConsent(prompt)){smartSearchConsent(()->submit(prompt));return;}
         JSONObject grant=app.account.grant(app.grantId);
         if(grant==null){accountSection="access";go("Accounts");app.fail("Choose a spending grant for network chat.");return;}
         String destination=app.route.equals("own")?"your own desktop node through the Koinos scheduler":"the Koinos AI network";
-        confirm("Send to "+app.routeLabel()+"?","This message and this conversation's history will be sent to "+destination+".\n\nModel: "+app.networkModel+".\nGrant remaining: "+money(grant.optDouble("remainingUsd"))+". The server enforces its cap and expiry. "+(app.route.equals("own")?"If your node is unavailable, the request fails without switching to other providers.":"Network usage may spend from this grant.")+(app.prefs.getBoolean("webSearch",false)?"\nWeb search sends the first 400 characters of this question to DuckDuckGo or Bing.":"")+"\n\nYou can stop the response at any time; work already completed may still be charged.","Send message",sendPrompt);
+        confirm("Send to "+app.routeLabel()+"?","This message and this conversation's history will be sent to "+destination+".\n\nModel: "+app.networkModel+".\nGrant remaining: "+money(grant.optDouble("remainingUsd"))+". The server enforces its cap and expiry. "+(app.route.equals("own")?"If your node is unavailable, the request fails without switching to other providers.":"Network usage may spend from this grant.")+(app.prefs.getBoolean("webSearch",false)?"\nWeb search may send a short query, including the recent topic when enabled, to DuckDuckGo or Bing.":"")+"\n\nYou can stop the response at any time; work already completed may still be charged.","Send message",sendPrompt);
     }
-    private void dismissVoiceMenu(){if(voiceMenu!=null){voiceMenu.dismiss();voiceMenu=null;}}
+    private void dismissVoiceMenu(){if(voiceMenu!=null){voiceMenu.dismiss();voiceMenu=null;}if(webMenu!=null){webMenu.dismiss();webMenu=null;}}
     private void voiceAction(){
-        if(voice!=null&&voice.active()){if(voice.listening&&!voice.session)voice.finishInput();else endVoice(true);render();return;}
+        if(voice!=null&&voice.listening&&!voice.session){voice.finishInput();render();return;}
         dismissVoiceMenu();voiceMenu=new PopupMenu(this,voiceButton,Gravity.END);
         voiceMenu.getMenu().add(0,1,0,"Dictate message").setIcon(R.drawable.ic_mic);
         voiceMenu.getMenu().add(0,2,1,"Voice chat").setIcon(R.drawable.ic_voice);
         if(Build.VERSION.SDK_INT>=29)voiceMenu.setForceShowIcon(true);
-        voiceMenu.setOnMenuItemClickListener(item->{startVoice(item.getItemId()==2);return true;});voiceMenu.show();
+        voiceMenu.setOnMenuItemClickListener(item->{endVoice(true);startVoice(item.getItemId()==2);return true;});voiceMenu.show();
     }
-    private String voiceScope(){return app.account.owner()+"|"+app.current.id+"|"+app.route+"|"+app.grantId+"|"+app.networkModel+"|"+app.prefs.getBoolean("webSearch",false);}
+    private String voiceScope(){return app.account.owner()+"|"+app.current.id+"|"+app.route+"|"+app.grantId+"|"+app.networkModel+"|"+app.prefs.getBoolean("webSearch",false)+"|"+app.autoWeb()+"|"+app.prefs.getBoolean("webTopicConsent",false);}
     private void initVoice(){if(voice!=null)return;voice=new VoiceController(new AndroidVoice.Input(app),new AndroidVoice.Speaker(app),new VoiceController.Host(){
         public boolean allowed(){return foreground&&tab.equals("Chat")&&app.account.signedIn();}
         public void changed(){app.main.removeCallbacks(voiceRender);app.main.post(voiceRender);}
@@ -439,6 +441,7 @@ public final class MainActivity extends Activity {
     private void startVoice(boolean conversation){
         if(!app.account.signedIn()){go("Accounts");return;}if(app.busy){app.fail("Stop the current reply before using the microphone.");return;}
         if(!app.voicePack.ready()){offerVoicePack();return;}
+        if(conversation&&app.prefs.getBoolean("webSearch",false)&&app.autoWeb()&&!app.prefs.getBoolean("webTopicConsent",false)){smartSearchConsent(()->startVoice(true));return;}
         if(conversation&&!app.usesRemoteModel()&&app.active==null){chooseLocalModel("start voice",()->startVoice(true));return;}
         if(conversation&&app.usesRemoteModel()&&!app.networkAllowed()){ensureOnline(()->startVoice(true));return;}
         if(conversation&&!app.usesRemoteModel()&&app.prefs.getBoolean("webSearch",false)&&!app.networkAllowed()){withWebConnection(()->startVoice(true));return;}
@@ -449,7 +452,7 @@ public final class MainActivity extends Activity {
         if(!conversation){begin.run();return;}
         String message="KAI will listen, automatically send each spoken question to "+app.routeLabel()+", speak its reply and listen for your follow-up. The microphone pauses while KAI speaks. Voice chat stops when you leave Chat or the app. Tap the stop icon at any time.";
         if(app.usesRemoteModel())message+="\n\nUses your selected grant ("+money(grant.optDouble("remainingUsd"))+" remaining). Each response may spend from it; its cap and expiry still apply.";
-        if(app.prefs.getBoolean("webSearch",false))message+="\n\nWeb is on: the first 400 characters of each spoken question go to DuckDuckGo or Bing.";
+        if(app.prefs.getBoolean("webSearch",false))message+="\n\nWeb search is enabled: short search queries may include the recent conversation topic. Auto searches only selected question types; Always searches every question.";
         confirm("Start voice chat?",message,"Start listening",begin);
     }
     @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results){super.onRequestPermissionsResult(request,permissions,results);if(request==MICROPHONE){if(results.length>0&&results[0]==android.content.pm.PackageManager.PERMISSION_GRANTED&&tab.equals("Chat")){if(foreground)startVoice(pendingVoiceChat);else resumeVoice=true;}else app.fail("Microphone permission is needed for voice input. You can still type.");}}
@@ -459,10 +462,26 @@ public final class MainActivity extends Activity {
         if(!app.networkAllowed()){ensureOnline(this::offerVoicePack);return;}
         confirm("Set up offline voice input?","Download the 41 MB English speech pack from Alpha Cephei. Speech recognition then stays on this device. About 110 MB of storage is used during setup. Android supplies the voice for spoken replies.","Download",()->app.voicePack.download());
     }
+    private boolean needsWebConsent(String prompt){return app.autoWeb()&&app.prefs.getBoolean("webSearch",false)&&!app.prefs.getBoolean("webTopicConsent",false)&&SearchPlanner.plan(prompt,app.current.messages,true,false,true).search;}
+    private void prepareWeb(String prompt,Runnable next){
+        if(needsWebConsent(prompt)){smartSearchConsent(()->prepareWeb(prompt,next));return;}
+        if(!app.searchPlan(prompt).search){next.run();return;}
+        withWebConnection(next);
+    }
+    private void smartSearchConsent(Runnable next){
+        confirm("Use smart web search?","Auto searches for changing facts, recommendations, specifications and explicit lookup requests. Writing, summaries and ordinary conversation usually stay with the model. A short keyword query may include the recent conversation topic to understand follow-ups. Queries go to DuckDuckGo or Bing; full chats and account credentials are not sent. You can choose Always or Off from the globe.","Enable Auto",()->{app.prefs.edit().putBoolean("webTopicConsent",true).putString("webMode","auto").putBoolean("webSearch",true).apply();next.run();render();});
+    }
     private void toggleWeb(){
-        if(app.prefs.getBoolean("webSearch",false)){endVoice(true);app.prefs.edit().putBoolean("webSearch",false).apply();render();return;}
-        if(!app.networkAllowed()){ensureOnline(this::toggleWeb);return;}
-        confirm("Use web search?","When Web is on, Send searches DuckDuckGo or Bing using the first 400 characters of your question. Your earlier chat history and KAI account credentials are not sent to search providers. Search snippets help your selected model answer, with source links. Turn Web off for private questions.","Enable Web",()->{endVoice(true);app.prefs.edit().putBoolean("webSearch",true).apply();render();});
+        dismissVoiceMenu();webMenu=new PopupMenu(this,webButton,Gravity.END);
+        webMenu.getMenu().add(0,1,0,"Auto · search when useful");webMenu.getMenu().add(0,2,1,"Always · search each message");webMenu.getMenu().add(0,3,2,"Off · model knowledge");
+        webMenu.setOnMenuItemClickListener(item->{
+            int mode=item.getItemId();endVoice(true);
+            if(mode==3){app.prefs.edit().putBoolean("webSearch",false).apply();render();}
+            else if(mode==1&&!app.prefs.getBoolean("webTopicConsent",false))smartSearchConsent(()->{});
+            else {Runnable enable=()->{app.prefs.edit().putBoolean("webSearch",true).putString("webMode",mode==1?"auto":"always").apply();render();};
+                if(!app.prefs.getBoolean("webTopicConsent",false))confirm("Use web search?","Always sends a short keyword query from each question to DuckDuckGo or Bing. Enable Auto to optionally include the recent topic for follow-ups. Full chats and account credentials are not sent.","Enable search",enable);else enable.run();}
+            return true;
+        });webMenu.show();
     }
     private void voiceSettings(LinearLayout parent){
         LinearLayout c=card(parent);add(c,text("Voice & spoken replies",20,NAVY,true));space(c,10);
