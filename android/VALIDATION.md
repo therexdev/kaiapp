@@ -1,3 +1,12 @@
+# Android 0.2.2 independent model selection — 2026-09-22
+
+- Model route (Local / Network / My node) and network permission now persist independently. Switching routes does not cancel account requests, sign-in, model downloads, or unload the local model. Offline mode is a separate Settings control; upgrading preserves the prior privacy choice.
+- Passed the complete 33-test Android suite: 16 account/route tests, five startup/UI tests, six file-integrity tests, four network-stream tests and two native-layout rendering tests. New coverage exercises online Local account refresh/downloads without changing route, local prompt isolation while online, session/download/model/grant retention across all routes, device-link continuity, preference/session restoration, legacy privacy migration, signed-out gates, and explicit Offline cancellation without stopping local generation. UI tests check switches without a disconnect dialog and Offline confirmation/cancel behavior.
+- Passed `:app:testDebugUnitTest :app:lintDebug :app:assembleRelease`. Lint has no errors. Reviewed native Android portrait and handheld renders, including model choices, the separate Offline setting, and signed-in account details with Local selected.
+- Verified the non-debuggable ARM64 release, package `io.koinosai.mobile`, version code 4 / `0.2.2-preview`, 16 KB ZIP alignment, and unchanged retained owner signing certificate. Installs over owner-signed 0.2.0 / 0.2.1 without clearing app data.
+- Delivered APK SHA-256: `4126c86468f27f7c154fd6e22216198fbeee32066ef4fe8556a9175f2dc0f6e7`.
+- Account tests use a fake transport, session vault and Android download service; no real login, paid generation or physical-device update is claimed. The native inference engine, original mascot exports, launcher and website services are unchanged.
+
 # Android 0.2.1 mascot correction — 2026-09-22
 
 - Replaced the in-app vector redraw with direct static exports of the original desktop SVG, stylesheet, and texture. The source artwork matches the latest Test branch inspected (`6d51341`); hashes and renderer versions are in `mascot-source.json`.

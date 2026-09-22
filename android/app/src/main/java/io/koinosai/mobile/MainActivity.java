@@ -94,7 +94,7 @@ public final class MainActivity extends Activity {
         ImageView icon=new ImageView(this);icon.setImageResource(R.drawable.kai_avatar);icon.getDrawable().setFilterBitmap(true);icon.setContentDescription("KAI robot");heading.addView(icon,new LinearLayout.LayoutParams(dp(48),dp(42)));
         LinearLayout brand=column();brand.setPadding(dp(12),0,0,0);
         add(brand,text("KAI",22,NAVY,true));add(brand,text("KOINOS AI",12,MUTED,false));heading.addView(brand,new LinearLayout.LayoutParams(0,-2,1));
-        routeBadge=text("LOCAL ONLY",10,BLUE,true);routeBadge.setPadding(dp(10),dp(8),dp(10),dp(8));routeBadge.setBackground(bg(0xffe7efff,20));routeBadge.setMinHeight(dp(48));routeBadge.setGravity(Gravity.CENTER);routeBadge.setFocusable(true);routeBadge.setOnClickListener(v->go("Network"));heading.addView(routeBadge);add(root,heading);
+        routeBadge=text("LOCAL",10,BLUE,true);routeBadge.setPadding(dp(10),dp(8),dp(10),dp(8));routeBadge.setBackground(bg(0xffe7efff,20));routeBadge.setMinHeight(dp(48));routeBadge.setGravity(Gravity.CENTER);routeBadge.setFocusable(true);routeBadge.setOnClickListener(v->go("Network"));heading.addView(routeBadge);add(root,heading);
         status=text(app.status,12,MUTED,false);status.setPadding(dp(18),0,dp(18),dp(10));add(root,status);
         errorPanel=row();errorPanel.setPadding(dp(16),dp(6),dp(10),dp(6));errorPanel.setBackgroundColor(0xffffeded);
         errorText=text("",13,0xff9b2636,false);errorPanel.addView(errorText,new LinearLayout.LayoutParams(0,-2,1));
@@ -110,18 +110,18 @@ public final class MainActivity extends Activity {
     }
     private void go(String name){hideKeyboard();tab=name;pageKey="";render();}
     private String key() {
-        String auth=app.account.signedIn()+app.account.owner()+app.route;
+        String auth=app.account.signedIn()+app.account.owner()+app.route+app.networkAllowed();
         if(tab.equals("Accounts")||tab.equals("Network"))return tab+auth+app.account.revision+app.grantId+app.busy+accountSection;
         if(tab.equals("Chat")&&!app.account.signedIn())return "gate"+auth+app.account.restoring;
 
         if(tab.equals("Chat"))return tab+auth+app.current.id+app.current.messages.size()+app.generating+(app.active==null?"":app.active.id);
-        if(tab.equals("Settings"))return tab;
+        if(tab.equals("Settings"))return tab+app.networkAllowed();
         StringBuilder k=new StringBuilder(tab+auth).append(app.busy).append(app.importing).append(app.transferStatus).append(app.active==null?"":app.active.id);
         for(KaiApp.Model m:app.models)k.append(m.id).append(m.installed).append(m.downloadId).append(m.downloadStatus).append(m.issue).append(app.verifying.contains(m.id));
         return k.toString();
     }
     private void render() {
-        routeBadge.setText(app.routeLabel().toUpperCase(Locale.ROOT));
+        routeBadge.setText(app.routeLabel().toUpperCase(Locale.ROOT)+(app.networkAllowed()?"":" · OFFLINE"));
         status.setVisibility(tab.equals("Chat")?View.VISIBLE:View.GONE);
         status.setText(app.account.signedIn()?app.status:"Sign in to your KAI account to get started");errorText.setText(app.error);errorPanel.setVisibility(app.error.isEmpty()?View.GONE:View.VISIBLE);
         for(Button b:tabs) {boolean selected=b.getText().toString().equals(tab);b.setTextColor(selected?BLUE:MUTED);b.setTypeface(Typeface.DEFAULT,selected?Typeface.BOLD:Typeface.NORMAL);b.setBackground(bg(selected?0xffeaf1ff:Color.WHITE,16));Drawable icon=b.getCompoundDrawables()[1];if(icon!=null)icon.setTint(selected?BLUE:MUTED);}
@@ -136,7 +136,7 @@ public final class MainActivity extends Activity {
             if(body.getChildCount()>0&&body.getChildAt(0) instanceof ScrollView){ScrollView scroll=(ScrollView)body.getChildAt(0);scroll.post(()->scroll.scrollTo(0,oldScroll));}
         }
         if(tab.equals("Chat")&&composer!=null) {
-            if(modelLabel!=null)modelLabel.setText(app.networkAllowed()?(app.route.equals("own")?"Your desktop node · encrypted connection":"Koinos network · account spending grant"):(app.active==null?"Local only · choose a model in Models":app.active.name+" · on this device"));
+            if(modelLabel!=null)modelLabel.setText(app.usesRemoteModel()?(!app.networkAllowed()?"Offline · go online or choose Local":app.route.equals("own")?"Your desktop node · encrypted connection":"Koinos network · account spending grant"):(app.active==null?"Local · choose a model in Models":app.active.name+" · on this device"));
             for(Map.Entry<KaiApp.ChatMessage,TextView> entry:bubbles.entrySet()) {
                 String value=entry.getKey().text;
                 if(value.isEmpty())value=app.generating?"Thinking…":"No response saved.";
@@ -146,7 +146,7 @@ public final class MainActivity extends Activity {
                     t.setText(value);if(atBottom)chatScroll.post(()->chatScroll.fullScroll(View.FOCUS_DOWN));
                 }
             }
-            send.setText(app.busy?"Stop":"Send");send.setEnabled(app.busy||(app.account.signedIn()&&(app.networkAllowed()||app.active!=null)));
+            send.setText(app.busy?"Stop":"Send");send.setEnabled(app.busy||(app.account.signedIn()&&(app.usesRemoteModel()?app.networkAllowed():app.active!=null)));
             composer.setEnabled(!app.busy);
         }
         if(tab.equals("Models"))for(KaiApp.Model m:downloadLabels.keySet()) {
@@ -171,8 +171,8 @@ public final class MainActivity extends Activity {
         LinearLayout messages=column();messages.setPadding(dp(18),dp(8),dp(18),dp(12));chatScroll.addView(messages);
         if(app.current.messages.isEmpty()) {
             LinearLayout welcome=card(messages);hero(welcome,"Hey, I'm KAI.","A little AI. A lot of possibility.");space(welcome,12);
-            add(welcome,text(app.networkAllowed()?"A bigger world of ideas, powered by your KAI network.":"A space to think, create, and ask anything. Right here on your device.",15,MUTED,false));space(welcome,18);
-            if(!app.networkAllowed()&&app.active==null)add(welcome,button("Choose a local model",true,()->go("Models")));
+            add(welcome,text(app.usesRemoteModel()?"A bigger world of ideas, powered by your KAI network.":"A space to think, create, and ask anything. Right here on your device.",15,MUTED,false));space(welcome,18);
+            if(!app.usesRemoteModel()&&app.active==null)add(welcome,button("Choose a local model",true,()->go("Models")));
             else {
                 add(welcome,button("Help me plan my day",false,()->submit("Help me plan my day. Ask me what I need to get done first.")));space(welcome,8);
                 add(welcome,button("Explain something simply",false,()->submit("Ask me what topic I would like you to explain simply.")));
@@ -235,11 +235,11 @@ public final class MainActivity extends Activity {
     }
     private void confirmDownload(KaiApp.Model m) {
         if(!app.account.signedIn()){go("Accounts");return;}
-        if(!app.networkAllowed()){confirm("Connect to download?","Enable network access for model downloads. After downloading, choose Local only to disconnect again.","Enable network",()->{app.setRoute("network");confirmDownload(m);});return;}
-        confirm("Download "+m.name+"?",KaiApp.size(m.bytes)+" will be downloaded from Hugging Face.\n\n"+m.creator+"\nLicense: "+m.license+" (available on the model card).\n\n"+(app.prefs.getBoolean("wifi",true)?"Wi-Fi downloads only.":"Mobile data downloads are allowed.")+" Chat stays offline after setup.","Download",()->app.download(m));
+        if(!app.networkAllowed()){ensureOnline(()->confirmDownload(m));return;}
+        confirm("Download "+m.name+"?",KaiApp.size(m.bytes)+" will be downloaded from Hugging Face.\n\n"+m.creator+"\nLicense: "+m.license+" (available on the model card).\n\n"+(app.prefs.getBoolean("wifi",true)?"Wi-Fi downloads only.":"Mobile data downloads are allowed.")+" Local chat runs on this device.","Download",()->app.download(m));
     }
     private void buildSettings() {
-        LinearLayout content=scrollBody();add(content,text("Make KAI yours",28,NAVY,true));space(content,18);
+        LinearLayout content=scrollBody();add(content,text("Make KAI yours",28,NAVY,true));space(content,18);connectionSettings(content);
         LinearLayout engine=card(content);add(engine,text("Local performance",20,NAVY,true));space(engine,10);
         add(engine,text("Changes to context and CPU threads apply the next time you load a model.",13,MUTED,false));space(engine,12);
         add(engine,text("Conversation context",14,NAVY,true));spinner(engine,new String[]{"1,024 tokens · light","2,048 tokens · balanced","4,096 tokens · more memory"},new int[]{1024,2048,4096},app.contextSize(),v->app.prefs.edit().putInt("context",v).apply());
@@ -252,9 +252,9 @@ public final class MainActivity extends Activity {
         add(personality,button("Save instructions",true,()-> {app.prefs.edit().putString("system",system.getText().toString()).apply();hideKeyboard();Toast.makeText(this,"Saved for your next message",Toast.LENGTH_SHORT).show();}));
         LinearLayout downloads=card(content);add(downloads,text("Downloads & privacy",20,NAVY,true));space(downloads,10);
         Switch wifi=new Switch(this);wifi.setText("Download on Wi-Fi only");wifi.setTextSize(15);wifi.setTextColor(NAVY);wifi.setChecked(app.prefs.getBoolean("wifi",true));wifi.setPadding(0,dp(8),0,dp(8));wifi.setOnCheckedChangeListener((b,v)->app.prefs.edit().putBoolean("wifi",v).apply());add(downloads,wifi);space(downloads,10);
-        add(downloads,text("This applies to new downloads. Android manages downloads in the background. Model files are checked before use.\n\nChats stay in this app's storage and are excluded from Android backup. Generation stops when you leave the app. Local only blocks account refresh, downloads, and network chat. Your saved sign-in unlocks offline chat for up to 30 days after verification.",14,MUTED,false));
+        add(downloads,text("This applies to new downloads. Android manages downloads in the background. Model files are checked before use.\n\nChats stay in this app's storage and are excluded from Android backup. Generation stops when you leave the app. Local keeps chat on this device while your account and downloads stay connected. Offline mode separately pauses network access. Your saved sign-in unlocks offline chat for up to 30 days after verification.",14,MUTED,false));
         LinearLayout about=card(content);add(about,text("KAI Mobile",19,NAVY,true));space(about,8);
-        add(about,text("Version 0.2.1 · Android 9+ · ARM64\nMade for a little more possibility.\n\nLocal AI powered by llama.cpp. Connect to your KAI account, chat over the network, and check your nodes. Mining happens on your existing nodes, not on this handheld.",14,MUTED,false));space(about,12);
+        add(about,text("Version 0.2.2 · Android 9+ · ARM64\nMade for a little more possibility.\n\nLocal AI powered by llama.cpp. Connect to your KAI account, chat over the network, and check your nodes. Mining happens on your existing nodes, not on this handheld.",14,MUTED,false));space(about,12);
         add(about,button("Open-source notices",false,()-> {
             try(InputStream input=getAssets().open("third-party-notices.txt")) {
                 new AlertDialog.Builder(this).setTitle("Open-source notices").setMessage(new String(ModelFile.readLimited(input,128*1024),StandardCharsets.UTF_8)).setPositiveButton("Close",null).show();
@@ -277,22 +277,40 @@ public final class MainActivity extends Activity {
         add(welcome,text("Your AI, wherever you go.",21,NAVY,true));space(welcome,8);
         add(welcome,text("Run a model on your handheld or connect to the Koinos AI network. One familiar companion, wherever inspiration finds you.",15,MUTED,false));space(welcome,20);
         Button sign=button(app.account.restoring?"Opening your account…":"Get started · Sign in",true,()->go("Accounts"));sign.setEnabled(!app.account.restoring);add(welcome,sign);
-        LinearLayout note=card(content);add(note,text("PRIVATE BY CHOICE",11,BLUE,true));space(note,8);add(note,text("Local only keeps your conversations on this device. Sign in once, then take your downloaded models offline.",14,MUTED,false));
+        LinearLayout note=card(content);add(note,text("PRIVATE BY CHOICE",11,BLUE,true));space(note,8);add(note,text("Local keeps your conversations on this device while you stay signed in. Switch models any time, or use Offline mode with your downloaded models.",14,MUTED,false));
     }
     private void submit(String prompt){
         if(!app.account.signedIn()){go("Accounts");return;}
         Runnable sendPrompt=()->{if(composer!=null)composer.setText("");hideKeyboard();app.send(prompt);};
-        if(!app.networkAllowed()){sendPrompt.run();return;}
+        if(!app.usesRemoteModel()){sendPrompt.run();return;}
+        if(!app.networkAllowed()){ensureOnline(()->submit(prompt));return;}
         JSONObject grant=app.account.grant(app.grantId);
         if(grant==null){accountSection="access";go("Accounts");app.fail("Choose a spending grant for network chat.");return;}
         String destination=app.route.equals("own")?"your own desktop node through the Koinos scheduler":"the Koinos AI network";
         confirm("Send to "+app.routeLabel()+"?","This message and this conversation's history will be sent to "+destination+".\n\nModel: "+app.networkModel+".\nGrant remaining: "+money(grant.optDouble("remainingUsd"))+". The server enforces its cap and expiry. "+(app.route.equals("own")?"If your node is unavailable, the request fails without switching to other providers.":"Network usage may spend from this grant.")+"\n\nYou can stop the response at any time; work already completed may still be charged.","Send message",sendPrompt);
     }
+    private void ensureOnline(Runnable action){
+        if(app.networkAllowed()){action.run();return;}
+        confirm("Go online?","Turn off Offline mode for account updates, downloads and network chat. Your selected model stays the same.","Go online",()->{app.setNetworkEnabled(true);action.run();});
+    }
+    private void refreshAccount(){ensureOnline(()->app.account.refresh());}
+    private void connectionSettings(LinearLayout parent){
+        LinearLayout c=card(parent);add(c,text("Connection",20,NAVY,true));space(c,8);
+        Switch offline=new Switch(this);offline.setText("Offline mode");offline.setTextSize(15);offline.setTextColor(NAVY);offline.setMinHeight(dp(48));offline.setChecked(!app.networkAllowed());add(c,offline);
+        add(c,text("Stay signed in in every mode. Offline mode pauses account updates and remote chat, and cancels unfinished downloads. Local models remain available.",13,MUTED,false));
+        offline.setOnCheckedChangeListener((button,checked)->{
+            // Reset the control until the user confirms this separate privacy change.
+            if(checked==!app.networkAllowed())return;
+            offline.setChecked(!app.networkAllowed());
+            if(checked)confirm("Use Offline mode?","Your sign-in stays saved. Account updates and remote chat will stop; unfinished downloads will be cancelled. Downloaded models remain available.","Go offline",()->app.setNetworkEnabled(false));
+            else ensureOnline(()->{if(app.account.hasSavedSession())app.account.refresh();});
+        });
+    }
     private void chooseRoute(String route){
         if(app.busy){app.fail("Stop the current task before switching modes.");return;}
         if(route.equals(app.route))return;
-        String message=route.equals("local")?"Disconnect account updates and network chat. In-progress model downloads will be cancelled. Downloaded models remain available offline with your saved sign-in.":"Allow connections to koinosai.com. Messages are sent only when you choose Send and confirm. Switching modes starts a fresh conversation.";
-        confirm(route.equals("local")?"Go local only?":"Enable network access?",message,route.equals("local")?"Go local":"Connect",()->{app.setRoute(route);if(app.account.hasSavedSession()&&app.networkAllowed())app.account.refresh();});
+        Runnable select=()->app.setRoute(route);
+        if(!route.equals("local")&&!app.networkAllowed())ensureOnline(()->{select.run();if(app.account.hasSavedSession())app.account.refresh();});else select.run();
     }
     private void modeCard(LinearLayout parent,String route,String name,String description,int icon){
         LinearLayout c=card(parent);boolean selected=app.route.equals(route);if(selected)c.setBackground(outline(0xffedf4ff,0xff8db6ff));
@@ -301,11 +319,16 @@ public final class MainActivity extends Activity {
         add(c,text(description,14,MUTED,false));space(c,14);Button use=button(selected?"Selected":"Use "+name,!selected,()->chooseRoute(route));use.setEnabled(!app.busy&&!selected);add(c,use);
     }
     private void buildNetwork(){
-        LinearLayout content=scrollBody();add(content,text("Choose your connection",27,NAVY,true));space(content,8);add(content,text("Same KAI. Your choice of where it thinks.",15,MUTED,false));space(content,22);
-        modeCard(content,"local","Local only","Your model runs on this device. No account refresh, model downloads, or network requests. Your saved sign-in allows offline use for up to 30 days.",R.drawable.ic_shield);
+        LinearLayout content=scrollBody();add(content,text("Choose where KAI runs",27,NAVY,true));space(content,8);add(content,text("Stay signed in. Switch where your model runs.",15,MUTED,false));space(content,22);
+        if(!app.networkAllowed()){
+            LinearLayout offline=card(content);add(offline,text("Offline mode is on",18,NAVY,true));space(offline,8);
+            add(offline,text("Your sign-in is saved. Go online for account updates, downloads, Network or My node.",14,MUTED,false));space(offline,10);
+            add(offline,button("Go online",true,()->ensureOnline(()->{if(app.account.hasSavedSession())app.account.refresh();})));
+        }
+        modeCard(content,"local","Local","Run a downloaded model on this device. Stay signed in and keep account updates and downloads available while online. Your chat stays on this device.",R.drawable.ic_shield);
         modeCard(content,"network","Network","Use the Koinos AI network with your account's existing spending grant. Review each send and see its reported cost when the reply finishes.",R.drawable.ic_network);
         modeCard(content,"own","My node","Route chat to your own desktop node using the grant linked to its wallet. The node must be online and serving models. KAI never falls back to other providers.",R.drawable.ic_models);
-        if(app.networkAllowed()){
+        if(app.usesRemoteModel()&&app.networkAllowed()){
             LinearLayout account=card(content);add(account,text("Your network access",20,NAVY,true));space(account,8);
             JSONObject grant=app.account.grant(app.grantId);add(account,text(!app.account.signedIn()?"Sign in to connect.":grant==null?"Select an active spending grant in Accounts.":"Selected grant · "+money(grant.optDouble("remainingUsd"))+" remaining",14,MUTED,false));space(account,12);
             add(account,button("Open Accounts",false,()->{accountSection="access";go("Accounts");}));
@@ -328,8 +351,7 @@ public final class MainActivity extends Activity {
         LinearLayout r=row();r.setPadding(0,dp(6),0,dp(6));r.addView(text(name,13,MUTED,false),new LinearLayout.LayoutParams(0,-2,1));TextView v=text(value,13,NAVY,true);v.setGravity(Gravity.END);r.addView(v,new LinearLayout.LayoutParams(0,-2,1));add(parent,r);
     }
     private void beginSignIn(){
-        Runnable start=()->{if(!app.networkAllowed())app.setRoute("network");app.account.start();};
-        if(!app.networkAllowed())confirm("Sign in with KAI","Enable network access to sign in through koinosai.com in your browser. Your password and passkeys stay with the website. You can choose Local only after signing in.","Continue",start);else start.run();
+        ensureOnline(()->app.account.start());
     }
     private void buildAccounts(){
         AccountState a=app.account;LinearLayout content=scrollBody();add(content,text("Your KAI account",28,NAVY,true));space(content,8);
@@ -347,16 +369,16 @@ public final class MainActivity extends Activity {
             }else{
                 add(login,text(a.hasSavedSession()?"Your session needs to be verified. Reconnect to refresh it or sign in again.":"Sign in securely in your browser with the same email, Google account, or passkey you use on the website.",14,MUTED,false));space(login,16);
                 Button sign=button(a.working?"Connecting…":"Sign in with KAI",true,this::beginSignIn);sign.setEnabled(!a.working&&!app.busy);add(login,sign);
-                if(a.hasSavedSession()){space(login,8);add(login,button("Retry saved sign-in",false,()->{if(!app.networkAllowed())chooseRoute("network");else a.refresh();}));space(login,8);add(login,button("Forget saved sign-in",false,()->a.signOut()));}
+                if(a.hasSavedSession()){space(login,8);add(login,button("Retry saved sign-in",false,this::refreshAccount));space(login,8);add(login,button("Forget saved sign-in",false,()->a.signOut()));}
             }
             return;
         }
         LinearLayout profile=card(content);LinearLayout heading=row();ImageView face=new ImageView(this);face.setImageResource(R.drawable.kai_avatar);face.getDrawable().setFilterBitmap(true);heading.addView(face,new LinearLayout.LayoutParams(dp(52),dp(48)));
-        LinearLayout name=column();name.setPadding(dp(12),0,0,0);add(name,text("CONNECTED TO KAI",10,BLUE,true));space(name,4);TextView email=text(a.account.optString("email","KAI account"),17,NAVY,true);email.setMaxLines(2);add(name,email);heading.addView(name,new LinearLayout.LayoutParams(0,-2,1));add(profile,heading);space(profile,14);
-        add(profile,text(app.networkAllowed()?"Refresh to see the latest status from your nodes.":"Local only is on. This is your saved sign-in; account updates are paused.",13,MUTED,false));space(profile,12);
-        LinearLayout actions=row();Button refresh=button(a.working?"Refreshing…":"Refresh",true,()->{if(app.networkAllowed())a.refresh();else chooseRoute("network");});refresh.setEnabled(!a.working);weighted(actions,refresh);
+        LinearLayout name=column();name.setPadding(dp(12),0,0,0);add(name,text("SIGNED IN TO KAI",10,BLUE,true));space(name,4);TextView email=text(a.account.optString("email","KAI account"),17,NAVY,true);email.setMaxLines(2);add(name,email);heading.addView(name,new LinearLayout.LayoutParams(0,-2,1));add(profile,heading);space(profile,14);
+        add(profile,text(app.networkAllowed()?"Refresh to see the latest status from your nodes.":"Offline mode is on. You are still signed in; account updates are paused.",13,MUTED,false));space(profile,12);
+        LinearLayout actions=row();Button refresh=button(a.working?"Refreshing…":"Refresh",true,this::refreshAccount);refresh.setEnabled(!a.working);weighted(actions,refresh);
         weighted(actions,button("Website",false,()->openUrl(NetworkApi.ORIGIN+"/account")));add(profile,actions);space(profile,8);
-        add(profile,button("Sign out",false,()->confirm("Sign out of KAI?","Local chat and network chat will lock. Saved conversations remain on this device for this account. "+(app.networkAllowed()?"KAI will also try to revoke this device's session.":"With Local only on, this removes the saved session here. You can revoke it on the website."),"Sign out",()->a.signOut())));
+        add(profile,button("Sign out",false,()->confirm("Sign out of KAI?","Local chat and network chat will lock. Saved conversations remain on this device for this account. "+(app.networkAllowed()?"KAI will also try to revoke this device's session.":"With Offline mode on, this removes the saved session here. You can revoke it on the website."),"Sign out",()->a.signOut())));
         LinearLayout sections=row();
         String[] values={"nodes","mining","access"}, names={"AI nodes","Mining","Access"};
         for(int i=0;i<values.length;i++){String value=values[i];weighted(sections,button(names[i],accountSection.equals(value),()->{accountSection=value;pageKey="";render();}));}add(content,sections);space(content,18);

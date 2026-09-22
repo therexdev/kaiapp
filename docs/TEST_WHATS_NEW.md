@@ -1,3 +1,9 @@
+## Android 0.2.2 · Stay signed in across model choices
+
+- Local, Network and My node now select where chat runs without disconnecting your account, cancelling model downloads, or unloading your local model.
+- Added a separate Offline mode setting. Signing in, refreshing nodes, and downloading models no longer switch your chat to Network.
+- Preserves the original KAI artwork, launcher icon and owner signing key for an in-place update.
+
 ## Android 0.2.1 · Original KAI mascot
 
 - Replaced the Android mascot redraw with direct exports of the original desktop/website KAI artwork, including in-app avatars. The approved launcher icon stays the same.

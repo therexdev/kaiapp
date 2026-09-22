@@ -31,22 +31,35 @@ public final class KaiApp extends Application {
     final ExecutorService network=Executors.newSingleThreadExecutor();
     final AtomicBoolean networkStopped=new AtomicBoolean();
     String route="local", grantId="", networkModel="auto";
-    boolean networkGenerating;
-    boolean networkAllowed(){return !route.equals("local");}
+    boolean networkGenerating,networkEnabled;
+    boolean networkAllowed(){return networkEnabled;}
+    boolean usesRemoteModel(){return !route.equals("local");}
+    void restoreRoutingPreferences(){
+        String saved=prefs.getString("route","local");route=Arrays.asList("local","network","own").contains(saved)?saved:"local";
+        // Preserve the previous Local-only privacy choice when upgrading. Once
+        // migrated, model selection and connectivity are independent settings.
+        networkEnabled=prefs.getBoolean("networkEnabled",!route.equals("local"));
+        if(!prefs.contains("networkEnabled"))prefs.edit().putBoolean("networkEnabled",networkEnabled).apply();
+    }
+    void setNetworkEnabled(boolean enabled){
+        if(networkEnabled==enabled)return;
+        networkEnabled=enabled;prefs.edit().putBoolean("networkEnabled",enabled).apply();
+        if(!enabled){
+            account.cancelRequests();networkStopped.set(true);chatApi.cancel();
+            for(Model m:models)if(m.downloadId!=-1&&!verifying.contains(m.id))cancelDownload(m);
+        }
+        error="";status=enabled?"Online · "+routeLabel()+" selected":"Offline mode · local models available";changed();
+    }
     boolean requireAccount(){if(account.signedIn())return true;fail("Sign in from Accounts to use KAI.");return false;}
-    String routeLabel(){return route.equals("local")?"Local only":route.equals("own")?"My node":"Network";}
+    String routeLabel(){return route.equals("local")?"Local":route.equals("own")?"My node":"Network";}
     void setRoute(String value){
         if(!Arrays.asList("local","network","own").contains(value))return;
         if(busy){fail("Stop the current task before switching modes.");return;}
         if(!route.equals(value)&&current!=null&&!current.messages.isEmpty()&&visibleChats().size()>=30){fail("Delete a saved conversation before starting a chat in another mode.");return;}
         boolean different=!route.equals(value);route=value;prefs.edit().putString("route",route).apply();
-        if(!networkAllowed()){
-            account.cancelRequests();networkStopped.set(true);chatApi.cancel();
-            for(Model m:models)if(m.downloadId!=-1&&!verifying.contains(m.id))cancelDownload(m);
-        }
         if(different&&current!=null&&!current.messages.isEmpty())newChat();
         if(current!=null)current.route=route;
-        status=networkAllowed()?"Network access enabled":"Local only · no network requests";changed();
+        error="";status=routeLabel()+" model selected";changed();
     }
     List<Conversation> visibleChats(){List<Conversation> result=new ArrayList<>();if(account.signedIn())for(Conversation c:chats)if(c.owner.equals(account.owner()))result.add(c);return result;}
     void hideAccountChats(){current=new Conversation();grantId="";changed();}
@@ -116,7 +129,7 @@ public final class KaiApp extends Application {
 
     @Override public void onCreate() {
         super.onCreate(); prefs=getSharedPreferences("kai",MODE_PRIVATE); downloads=getSystemService(DownloadManager.class);
-        String savedRoute=prefs.getString("route","local");route=Arrays.asList("local","network","own").contains(savedRoute)?savedRoute:"local";
+        restoreRoutingPreferences();
         try (InputStream input=getAssets().open("models.json")) {
             JSONArray a=new JSONArray(new String(ModelFile.readLimited(input,256*1024),StandardCharsets.UTF_8));
             for(int i=0;i<a.length();i++) models.add(new Model(a.getJSONObject(i)));
@@ -154,7 +167,7 @@ public final class KaiApp extends Application {
 
     void download(Model m) {
         if(!requireAccount())return;
-        if(!networkAllowed()){fail("Enable network access to download models. You can switch back to Local only afterward.");return;}
+        if(!networkAllowed()){fail("Turn off Offline mode to download models. You can keep Local selected.");return;}
         if(m.downloadId!=-1 || m.installed || m.imported) return;
         if(file(m).getParentFile().getUsableSpace()<m.bytes+256*1024*1024L) { fail("Free up storage before downloading this model."); return; }
         try {
@@ -286,7 +299,7 @@ public final class KaiApp extends Application {
     void stop() { networkStopped.set(true);chatApi.cancel();fileCancelled.set(true); if(NativeEngine.unavailable==null) NativeEngine.cancel(); if(busy) status="Stopping…"; changed(); }
     void send(String prompt) {
         if(!requireAccount())return;
-        if(networkAllowed()){sendNetwork(prompt);return;}
+        if(usesRemoteModel()){sendNetwork(prompt);return;}
         prompt=prompt.trim();
         if(busy||prompt.isEmpty()) return;
         if(active==null) { fail("Load a model in Models to start chatting."); return; }
@@ -336,7 +349,9 @@ public final class KaiApp extends Application {
         });
     }
     void sendNetwork(String prompt) {
-        if(!requireAccount()||!networkAllowed()||busy)return;
+        if(!requireAccount()||busy)return;
+        if(!usesRemoteModel()){fail("Choose Network or My node for remote chat.");return;}
+        if(!networkAllowed()){fail("Offline mode is on. Go online or choose Local to chat on this device.");return;}
         prompt=prompt.trim();if(prompt.isEmpty())return;
         if(prompt.length()>12000){fail("Please keep each message below 12,000 characters.");return;}
         if(current.messages.size()>=100){fail("Start a new conversation to continue.");return;}
@@ -392,7 +407,7 @@ public final class KaiApp extends Application {
         if(visibleChats().size()>=30) { fail("You have 30 saved chats. Delete a chat before starting another."); return; }
         current=new Conversation();current.owner=account.owner();current.route=route;if(account.signedIn())chats.add(0,current);saveChats();changed();
     }
-    void selectChat(Conversation c) { if(busy||!account.signedIn()||!c.owner.equals(account.owner()))return; if(!c.route.equals(route)){fail("Switch to "+(c.route.equals("local")?"Local only":c.route.equals("own")?"My node":"Network")+" before opening this conversation.");return;}current=c;saveChats();changed(); }
+    void selectChat(Conversation c) { if(busy||!account.signedIn()||!c.owner.equals(account.owner()))return; if(!c.route.equals(route)){fail("Switch to "+(c.route.equals("local")?"Local":c.route.equals("own")?"My node":"Network")+" before opening this conversation.");return;}current=c;saveChats();changed(); }
     void deleteChat(Conversation c) {
         if(busy||!account.signedIn()||!c.owner.equals(account.owner()))return; chats.remove(c);
         if(current==c) current=visibleChats().isEmpty()?null:visibleChats().get(0);

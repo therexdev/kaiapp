@@ -39,7 +39,7 @@ public class StartupTest {
     @Test public void firstLaunchRequiresAccountAndAllFiveTabsOpen() {
         assertNotNull(find("Get started · Sign in"));assertNull(app.active);assertEquals(2,app.models.size());
         find("Models").performClick();assertNotNull(find("Koinos Fast"));assertNotNull(find("Koinos Balanced"));assertNotNull(find("Import GGUF"));
-        find("Network").performClick();assertNotNull(find("Local only"));assertNotNull(find("My node"));
+        find("Network").performClick();assertNotNull(find("Local"));assertNotNull(find("My node"));
         find("Accounts").performClick();assertNotNull(find("Sign in with KAI"));
         find("Settings").performClick();assertNotNull(find("Download on Wi-Fi only"));assertNotNull(find("Save instructions"));
         find("Chat").performClick();assertNull(find("Send"));assertNotNull(find("Get started · Sign in"));
@@ -54,4 +54,25 @@ public class StartupTest {
         app.account.token="";app.hideAccountChats();assertEquals("",app.exportChat());assertTrue(app.visibleChats().isEmpty());
         signIn();app.selectChat(first);app.deleteChat(first);assertFalse(app.chats.contains(first));
     }
+    @Test public void signedInModelSwitchesNeedNoDisconnectDialog() throws Exception {
+        signIn();app.setNetworkEnabled(true);find("Network").performClick();
+        for(String mode:new String[]{"Network","My node","Local"}){
+            find("Use "+mode).performClick();
+            android.app.AlertDialog dialog=org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();
+            assertTrue(dialog==null||!dialog.isShowing());assertTrue(app.account.signedIn());assertTrue(app.networkAllowed());
+        }
+        assertEquals("local",app.route);find("Chat").performClick();
+        assertNotNull(find("Choose a local model"));assertFalse(find("Send").isEnabled());
+    }
+    @Test public void offlineSettingIsSeparateAndRequiresExplicitConfirmation() throws Exception {
+        signIn();app.setNetworkEnabled(true);find("Settings").performClick();
+        ((Switch)find("Offline mode")).setChecked(true);
+        android.app.AlertDialog dialog=org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();
+        assertNotNull(dialog);assertTrue(dialog.isShowing());assertTrue(app.networkAllowed());
+        dialog.getButton(android.content.DialogInterface.BUTTON_NEGATIVE).performClick();Shadows.shadowOf(Looper.getMainLooper()).idle();assertTrue(app.networkAllowed());
+        ((Switch)find("Offline mode")).setChecked(true);dialog=org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();
+        dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE).performClick();Shadows.shadowOf(Looper.getMainLooper()).idle();
+        assertFalse(app.networkAllowed());assertTrue(app.account.signedIn());assertEquals("local",app.route);assertTrue(((Switch)find("Offline mode")).isChecked());
+    }
+
 }

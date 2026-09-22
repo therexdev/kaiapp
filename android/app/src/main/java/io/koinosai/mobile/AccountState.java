@@ -37,7 +37,7 @@ final class AccountState {
         });
     }
     private boolean connect(){
-        if(!app.networkAllowed()){error="Local only is on. Enable network access to connect to your account.";changed();return false;}
+        if(!app.networkAllowed()){error="Offline mode is on. Go online to refresh your account; your sign-in stays saved.";changed();return false;}
         if(working)return false;
         working=true;cancelled=new AtomicBoolean();error="";changed();return true;
     }
