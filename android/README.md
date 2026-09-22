@@ -46,7 +46,7 @@ The native dependency is pinned by Git submodule to `ec5a12b85ae32fbccfa42760513
 
 ## Verification
 
-`ModelFileTest` covers complete/corrupt/incomplete downloads, HTML instead of GGUF, cancellation, storage limits and partial-file cleanup. The native smoke executable loads an actual small model and checks generation, stop, history trimming, oversized prompts and unload/reload:
+`ModelFileTest` covers complete/corrupt/incomplete downloads, HTML instead of GGUF, cancellation, storage limits and partial-file cleanup. `StartupTest` uses Robolectric's Android 9 runtime to check first launch, Chat/Models/Settings navigation, the no-model Send guard, and conversation selection/export/deletion. The native smoke executable loads an actual small model and checks generation, stop, history trimming, oversized prompts and unload/reload:
 
 ```sh
 cmake -S app/src/main/cpp -B build-host -DCMAKE_BUILD_TYPE=Release
