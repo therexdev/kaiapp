@@ -1,3 +1,9 @@
+## Android 0.3.2 · Compact chat composer
+
+- Moved Chats to the top bar and removed the persistent model-ready and voice-ready rows. Conversation details now scroll with messages.
+- Put dictation and voice chat in one picker inside the message bubble, with a small Web globe and send arrow beside it. Active listening, download progress and Stop remain visible.
+- Kept the composer above navigation in portrait and landscape. The chat keyboard hides app navigation temporarily; drafts stay available in short windows and across rotation.
+
 ## Android 0.3.1 · search activity and local voice setup
 
 - Web chat now shows search and thinking activity with the actual provider and source domains. Source details stay collapsed behind a Sources button after the reply; expand for links, snippets, query and retrieval time.

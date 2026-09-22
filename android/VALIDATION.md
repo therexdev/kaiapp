@@ -1,3 +1,12 @@
+# Android 0.3.2 compact chat composer — 2026-09-22
+
+- Passed `:app:testDebugUnitTest :app:lintDebug :app:assembleRelease`: **67 tests**, no failures or lint errors. New coverage checks the inline voice picker, finish/stop controls, composer bounds above navigation and keyboard, a short landscape window with download/error notices, older fitted windows, and draft retention across rotation.
+- Reviewed actual Android View renders for 411 × 891 portrait and 800 × 360 landscape, plus simulated keyboard insets. Every composer icon keeps a 48 dp target. Chats is in the top bar, routine ready/status rows are removed, and conversation metadata scrolls with messages. Chat errors scroll with the conversation to protect input space.
+- API 35 tests apply system-bar and IME insets to the edge-to-edge root; the API 28 fixture measures the older resized-window path. Navigation hides while the chat keyboard is visible and returns after it closes. Short windows cap visible draft lines; the text is retained. Android keyboards are requested not to enter full-screen extraction mode.
+- Existing voice, search, account, route, model, cancellation and source-disclosure regressions pass. Download progress stays inside the bubble; a short completion notice replaces the persistent voice-ready row. Original mascot assets, launcher artwork and native inference code are unchanged.
+- Verified the non-debuggable ARM64 package `io.koinosai.mobile`, version code **7** / **0.3.2-preview**, retained owner certificate and 16 KB APK ZIP alignment. Delivered APK: **17,466,252 bytes**, SHA-256 `ff7ac4b0ef6b61dde34b3550a9fe23d7227d88a5bee8b1efe3baf15574526219`. It updates the existing owner-signed KAI installation without a data migration.
+- These are Robolectric native renders and simulated keyboard/window states, not physical-device tests. Installation, real keyboard behavior and microphone/TTS use on the Pocket 5 or phone still need on-device confirmation. No live account or paid generation was used.
+
 # Android 0.3.1 search activity and local voice setup — 2026-09-22
 
 - Passed `:app:testDebugUnitTest :app:lintDebug :app:assembleRelease`: **62 tests**, no failures or lint errors. The six new regressions cover real provider progress ordering, source disclosure during/after generation, sending a dictated draft with an unloaded model, local voice with Web selected while offline, voice-download visibility, and exactly-once model-load continuation cancelled by backgrounding/navigation/scope changes.

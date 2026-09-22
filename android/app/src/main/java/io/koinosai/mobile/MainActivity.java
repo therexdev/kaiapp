@@ -21,10 +21,13 @@ public final class MainActivity extends Activity {
     private static final int BLUE=0xff155eef, NAVY=0xff14284e, MUTED=0xff61728d, BG=0xfff4f7fd, BORDER=0xffdce5f2, GREEN=0xff168469;
     private static final int IMPORT=10, EXPORT=11, MICROPHONE=12;
     private KaiApp app;
-    private LinearLayout root, body, errorPanel;
-    private TextView status, errorText, modelLabel, routeBadge;
+    private LinearLayout root, body, errorPanel, navigation;
+    private TextView errorText, modelLabel, routeBadge;
     private EditText composer;
-    private Button send,microphone,voiceChat,webButton;
+    private ImageButton send,voiceButton,webButton;
+    private Button chatsButton;
+    private PopupMenu voiceMenu;
+    private boolean keyboardVisible,voicePackWasPending;
     private TextView voiceStatus;
     private TextView thinkingTitle,thinkingDetail;
     private ProgressBar voiceDownloadProgress;
@@ -45,12 +48,13 @@ public final class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state); app=(KaiApp)getApplication();
+        if(Build.VERSION.SDK_INT>=30)getWindow().setDecorFitsSystemWindows(false);
         if(state!=null)tab=state.getString("tab","Chat");
         initVoice();buildShell();
         if(state!=null&&composer!=null)composer.setText(state.getString("draft",""));
     }
     @Override protected void onStart() { super.onStart();foreground=true;initVoice(); app.listener=this::render; app.account.setForeground(true);render(); }
-    @Override protected void onPause(){foreground=false;chatActionEpoch++;endVoice(true);super.onPause();}
+    @Override protected void onPause(){foreground=false;dismissVoiceMenu();chatActionEpoch++;endVoice(true);super.onPause();}
     @Override protected void onResume(){super.onResume();foreground=true;if(resumeVoice){resumeVoice=false;if(tab.equals("Chat"))startVoice(pendingVoiceChat);}}
     @Override protected void onDestroy(){if(voice!=null){voice.close();voice=null;}app.main.removeCallbacks(voiceRender);super.onDestroy();}
     @Override protected void onStop() {
@@ -87,6 +91,14 @@ public final class MainActivity extends Activity {
         states.addState(new int[]{},outline(primary?BLUE:Color.WHITE,primary?BLUE:BORDER));
         b.setBackground(states);b.setStateListAnimator(null);b.setOnClickListener(v->action.run());return b;
     }
+    private ImageButton iconButton(String label,int icon,boolean primary,Runnable action){
+        ImageButton b=new ImageButton(this);b.setScaleType(ImageView.ScaleType.CENTER);b.setMinimumWidth(dp(48));b.setMinimumHeight(dp(48));b.setPadding(dp(12),dp(12),dp(12),dp(12));b.setStateListAnimator(null);
+        iconState(b,label,icon,primary);b.setOnClickListener(v->action.run());return b;
+    }
+    private void iconState(ImageButton button,String label,int resource,boolean selected){
+        button.setContentDescription(label);button.setTooltipText(label);button.setImageResource(resource);button.setImageTintList(android.content.res.ColorStateList.valueOf(selected?Color.WHITE:BLUE));
+        StateListDrawable states=new StateListDrawable();states.addState(new int[]{-android.R.attr.state_enabled},bg(0xffe8edf5,16));states.addState(new int[]{android.R.attr.state_focused},outline(selected?0xff1048be:0xffe5efff,BLUE));states.addState(new int[]{android.R.attr.state_pressed},bg(selected?0xff1048be:0xffdce9ff,16));states.addState(new int[]{},bg(selected?BLUE:Color.TRANSPARENT,16));button.setBackground(states);
+    }
     private void weighted(LinearLayout l,View v) {LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,-2,1);p.setMargins(dp(3),0,dp(3),0);l.addView(v,p);}
     private LinearLayout card(LinearLayout parent) {
         LinearLayout c=column();c.setPadding(dp(18),dp(16),dp(18),dp(16));c.setBackground(outline(Color.WHITE,0xffe7edf7));c.setElevation(dp(1));
@@ -97,28 +109,38 @@ public final class MainActivity extends Activity {
         LinearLayout content=column();content.setPadding(dp(18),dp(18),dp(18),dp(10));scroll.addView(content);return content;
     }
     private void buildShell() {
+        dismissVoiceMenu();
         root=column();root.setBackgroundColor(BG);
         FrameLayout canvas=new FrameLayout(this);canvas.setBackgroundColor(BG);
         int available=getResources().getDisplayMetrics().widthPixels;
         FrameLayout.LayoutParams frame=new FrameLayout.LayoutParams(Math.min(available,dp(840)),-1,Gravity.CENTER_HORIZONTAL);canvas.addView(root,frame);setContentView(canvas);
-        root.setOnApplyWindowInsetsListener((v,insets)-> {root.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop(),insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());return insets;});
-        LinearLayout heading=row();heading.setPadding(dp(18),dp(10),dp(18),dp(10));
-        ImageView icon=new ImageView(this);icon.setImageResource(R.drawable.kai_avatar);icon.getDrawable().setFilterBitmap(true);icon.setContentDescription("KAI robot");heading.addView(icon,new LinearLayout.LayoutParams(dp(48),dp(42)));
-        LinearLayout brand=column();brand.setPadding(dp(12),0,0,0);
-        add(brand,text("KAI",22,NAVY,true));add(brand,text("KOINOS AI",12,MUTED,false));heading.addView(brand,new LinearLayout.LayoutParams(0,-2,1));
-        routeBadge=text("LOCAL",10,BLUE,true);routeBadge.setPadding(dp(10),dp(8),dp(10),dp(8));routeBadge.setBackground(bg(0xffe7efff,20));routeBadge.setMinHeight(dp(48));routeBadge.setGravity(Gravity.CENTER);routeBadge.setFocusable(true);routeBadge.setOnClickListener(v->go("Network"));heading.addView(routeBadge);add(root,heading);
-        status=text(app.status,12,MUTED,false);status.setPadding(dp(18),0,dp(18),dp(10));add(root,status);
-        errorPanel=row();errorPanel.setPadding(dp(16),dp(6),dp(10),dp(6));errorPanel.setBackgroundColor(0xffffeded);
-        errorText=text("",13,0xff9b2636,false);errorPanel.addView(errorText,new LinearLayout.LayoutParams(0,-2,1));
-        Button dismiss=button("Dismiss",false,()->app.clearError());errorPanel.addView(dismiss);add(root,errorPanel);
+        root.setOnApplyWindowInsetsListener((v,insets)-> {
+            if(Build.VERSION.SDK_INT>=30){android.graphics.Insets bars=insets.getInsets(WindowInsets.Type.systemBars()|WindowInsets.Type.displayCutout()),ime=insets.getInsets(WindowInsets.Type.ime());root.setPadding(bars.left,bars.top,bars.right,Math.max(bars.bottom,ime.bottom));keyboardVisible=insets.isVisible(WindowInsets.Type.ime());updateAvailableSpace();return WindowInsets.CONSUMED;}
+            return insets; // Older Android versions resize the fitted window for the keyboard.
+        });
+        root.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob)->updateAvailableSpace());
+        if(Build.VERSION.SDK_INT<30)root.getViewTreeObserver().addOnGlobalLayoutListener(()->{android.graphics.Rect visible=new android.graphics.Rect();root.getWindowVisibleDisplayFrame(visible);boolean shown=getResources().getDisplayMetrics().heightPixels-visible.bottom>dp(100);if(shown!=keyboardVisible){keyboardVisible=shown;updateAvailableSpace();}});
+        LinearLayout heading=row();heading.setTag("top-bar");heading.setPadding(dp(12),dp(4),dp(12),dp(4));
+        ImageView icon=new ImageView(this);icon.setImageResource(R.drawable.kai_avatar);icon.getDrawable().setFilterBitmap(true);icon.setContentDescription("KAI robot");heading.addView(icon,new LinearLayout.LayoutParams(dp(40),dp(38)));
+        LinearLayout brand=column();brand.setPadding(dp(8),0,dp(4),0);
+        add(brand,text("KAI",20,NAVY,true));add(brand,text("KOINOS AI",10,MUTED,false));heading.addView(brand,new LinearLayout.LayoutParams(0,-2,1));
+        chatsButton=button("Chats",false,this::history);chatsButton.setTextSize(12);chatsButton.setPadding(dp(10),0,dp(10),0);LinearLayout.LayoutParams hc=new LinearLayout.LayoutParams(dp(64),dp(48));hc.rightMargin=dp(6);heading.addView(chatsButton,hc);
+        routeBadge=text("LOCAL",9,BLUE,true);routeBadge.setMaxLines(2);routeBadge.setPadding(dp(8),dp(6),dp(8),dp(6));routeBadge.setBackground(bg(0xffe7efff,16));routeBadge.setGravity(Gravity.CENTER);routeBadge.setFocusable(true);routeBadge.setOnClickListener(v->go("Network"));heading.addView(routeBadge,new LinearLayout.LayoutParams(dp(74),dp(48)));add(root,heading);
+        errorPanel=row();errorPanel.setPadding(dp(12),0,dp(6),0);errorPanel.setBackgroundColor(0xffffeded);
+        errorText=text("",13,0xff9b2636,false);errorText.setMaxLines(2);errorText.setEllipsize(android.text.TextUtils.TruncateAt.END);errorText.setOnClickListener(v->new AlertDialog.Builder(this).setTitle("KAI").setMessage(app.error).setPositiveButton("OK",null).show());errorPanel.addView(errorText,new LinearLayout.LayoutParams(0,-2,1));
+        errorPanel.addView(iconButton("Dismiss error",R.drawable.ic_close,false,()->app.clearError()),new LinearLayout.LayoutParams(dp(48),dp(48)));add(root,errorPanel);
         body=column();root.addView(body,new LinearLayout.LayoutParams(-1,0,1));
-        LinearLayout nav=row();nav.setPadding(dp(12),dp(8),dp(12),dp(8));nav.setBackgroundColor(Color.WHITE);
+        LinearLayout nav=row();navigation=nav;nav.setPadding(dp(10),dp(4),dp(10),dp(4));nav.setBackgroundColor(Color.WHITE);
         for(String name:new String[]{"Chat","Models","Network","Accounts","Settings"}) {
-            Button b=button(name,false,()->go(name));b.setTag(name);b.setTextSize(10);b.setPadding(dp(2),dp(7),dp(2),dp(7));
+            Button b=button(name,false,()->go(name));b.setTag(name);b.setTextSize(10);b.setPadding(dp(2),dp(4),dp(2),dp(4));
             int id=name.equals("Chat")?R.drawable.ic_chat:name.equals("Models")?R.drawable.ic_models:name.equals("Network")?R.drawable.ic_network:name.equals("Accounts")?R.drawable.ic_account:R.drawable.ic_settings;
             Drawable iconNav=getDrawable(id).mutate();iconNav.setBounds(0,0,dp(21),dp(21));b.setCompoundDrawables(null,iconNav,null,null);b.setCompoundDrawablePadding(dp(4));b.setContentDescription(name);tabs.add(b);weighted(nav,b);
         }
-        add(root,nav);pageKey="";render();
+        add(root,nav);pageKey="";render();root.requestApplyInsets();
+    }
+    private void updateAvailableSpace(){
+        if(navigation!=null)navigation.setVisibility(keyboardVisible&&tab.equals("Chat")?View.GONE:View.VISIBLE);
+        if(composer!=null){int available=root.getHeight()-root.getPaddingTop()-root.getPaddingBottom();int lines=available>0&&available<dp(300)?1:available>0&&available<dp(450)?2:4;if(composer.getMaxLines()!=lines){composer.setMaxLines(lines);composer.setPadding(dp(12),dp(lines==1?14:8),dp(4),dp(lines==1?14:8));}}
     }
     private void go(String name){if(!tab.equals(name)){chatActionEpoch++;endVoice(true);}hideKeyboard();tab=name;pageKey="";render();}
     private String key() {
@@ -126,7 +148,7 @@ public final class MainActivity extends Activity {
         if(tab.equals("Accounts")||tab.equals("Network"))return tab+auth+app.account.revision+app.grantId+app.busy+accountSection;
         if(tab.equals("Chat")&&!app.account.signedIn())return "gate"+auth+app.account.restoring;
 
-        if(tab.equals("Chat"))return tab+auth+app.current.id+app.current.messages.size()+app.generating+app.searching+(app.active==null?"":app.active.id);
+        if(tab.equals("Chat"))return tab+auth+app.current.id+app.current.messages.size()+app.error+app.busy+app.generating+app.searching+(app.active==null?"":app.active.id);
         if(tab.equals("Settings"))return tab+app.networkAllowed()+app.voicePack.status+app.voicePack.ready();
         StringBuilder k=new StringBuilder(tab+auth).append(app.busy).append(app.importing).append(app.transferStatus).append(app.active==null?"":app.active.id);
         for(KaiApp.Model m:app.models)k.append(m.id).append(m.installed).append(m.downloadId).append(m.downloadStatus).append(m.issue).append(app.verifying.contains(m.id));
@@ -134,19 +156,19 @@ public final class MainActivity extends Activity {
     }
     private void render() {
         syncVoice();
-        routeBadge.setText(app.routeLabel().toUpperCase(Locale.ROOT)+(app.networkAllowed()?"":" · OFFLINE"));
-        status.setVisibility(tab.equals("Chat")?View.VISIBLE:View.GONE);
-        status.setText(app.account.signedIn()?app.status:"Sign in to your KAI account to get started");errorText.setText(app.error);errorPanel.setVisibility(app.error.isEmpty()?View.GONE:View.VISIBLE);
+        routeBadge.setText(app.routeLabel().toUpperCase(Locale.ROOT)+(app.networkAllowed()?"":"\nOFFLINE"));
+        chatsButton.setVisibility(tab.equals("Chat")&&app.account.signedIn()?View.VISIBLE:View.GONE);
+        errorText.setText(app.error);errorPanel.setVisibility(app.error.isEmpty()||(tab.equals("Chat")&&app.account.signedIn())?View.GONE:View.VISIBLE);
         for(Button b:tabs) {boolean selected=b.getText().toString().equals(tab);b.setTextColor(selected?BLUE:MUTED);b.setTypeface(Typeface.DEFAULT,selected?Typeface.BOLD:Typeface.NORMAL);b.setBackground(bg(selected?0xffeaf1ff:Color.WHITE,16));Drawable icon=b.getCompoundDrawables()[1];if(icon!=null)icon.setTint(selected?BLUE:MUTED);}
         String key=key();
         if(!key.equals(pageKey)) {
             if(composer!=null)drafts.put(renderedChatId,composer.getText().toString());
             String draft=drafts.getOrDefault(app.current.id,"");
             int oldScroll=body.getChildCount()>0&&body.getChildAt(0) instanceof ScrollView?body.getChildAt(0).getScrollY():0;
-            body.removeAllViews();composer=null;send=null;modelLabel=null;microphone=null;voiceChat=null;webButton=null;voiceStatus=null;voiceDownloadProgress=null;thinkingTitle=null;thinkingDetail=null;thinkingAnswer=null;bubbles.clear();downloadBars.clear();downloadLabels.clear();pageKey=key;
+            dismissVoiceMenu();body.removeAllViews();composer=null;send=null;modelLabel=null;voiceButton=null;webButton=null;voiceStatus=null;voiceDownloadProgress=null;thinkingTitle=null;thinkingDetail=null;thinkingAnswer=null;bubbles.clear();downloadBars.clear();downloadLabels.clear();pageKey=key;
             if(tab.equals("Chat")){if(app.account.signedIn())buildChat(draft);else buildWelcome();}
             else if(tab.equals("Models"))buildModels();else if(tab.equals("Network"))buildNetwork();else if(tab.equals("Accounts"))buildAccounts();else buildSettings();
-            if(body.getChildCount()>0&&body.getChildAt(0) instanceof ScrollView){ScrollView scroll=(ScrollView)body.getChildAt(0);scroll.post(()->scroll.scrollTo(0,oldScroll));}
+            if(body.getChildCount()>0&&body.getChildAt(0) instanceof ScrollView){ScrollView scroll=(ScrollView)body.getChildAt(0);scroll.post(()->{View notice=scroll.findViewWithTag("chat-error");if(notice!=null)scroll.scrollTo(0,notice.getTop());else scroll.scrollTo(0,oldScroll);});}
         }
         if(tab.equals("Chat")&&composer!=null) {
             if(modelLabel!=null)modelLabel.setText(app.usesRemoteModel()?(!app.networkAllowed()?"Offline · go online or choose Local":app.route.equals("own")?"Your desktop node · encrypted connection":"Koinos network · account spending grant"):(app.active==null?"Local · choose a model in Models":app.active.name+" · on this device"));
@@ -161,18 +183,19 @@ public final class MainActivity extends Activity {
                     t.setText(value);if(atBottom)chatScroll.post(()->chatScroll.fullScroll(View.FOCUS_DOWN));
                 }
             }
-            send.setText(app.busy?"Stop":voice!=null&&voice.active()?"Stop voice":"Send");send.setEnabled(app.busy||(voice!=null&&voice.active())||app.account.signedIn());
-            composer.setEnabled(!app.busy);
+            boolean voiceActive=voice!=null&&voice.active();
+            iconState(send,app.busy?"Stop response":voiceActive?"Stop voice":"Send message",app.busy||voiceActive?R.drawable.ic_stop:R.drawable.ic_send,true);
+            send.setEnabled(app.busy||voiceActive||app.account.signedIn());composer.setEnabled(!app.busy);
             if(!app.retryPrompt.isEmpty()&&composer.getText().length()==0){composer.setText(app.retryPrompt);app.retryPrompt="";}
-            if(microphone!=null){microphone.setText(voice!=null&&voice.listening?"Done":"Mic");microphone.setEnabled(!app.busy);}
-            if(voiceChat!=null){voiceChat.setText(voice!=null&&voice.session?"End voice":"Voice chat");voiceChat.setEnabled(!app.busy||(voice!=null&&voice.session));}
-            if(voiceStatus!=null){String message=voice==null?"":voice.status;
-                if(app.voicePack.installing||app.voicePack.downloadId!=-1)message=app.voicePack.status.isEmpty()?"Checking voice download…":app.voicePack.status;
-                else if(message.isEmpty())message=app.voicePack.ready()?"Voice ready · works offline":app.voicePack.status;
-                if(app.active==null&&!app.usesRemoteModel()&&message.startsWith("Voice input ready"))message="Voice captured · tap Send to load a local model";
-                voiceStatus.setText(message);voiceStatus.setVisibility(message.isEmpty()?View.GONE:View.VISIBLE);voiceStatus.setTextColor(app.voicePack.ready()&&(voice==null||!voice.active())?GREEN:BLUE);
-            }
-            if(voiceDownloadProgress!=null){voiceDownloadProgress.setVisibility(app.voicePack.installing||app.voicePack.downloadId!=-1?View.VISIBLE:View.GONE);voiceDownloadProgress.setIndeterminate(app.voicePack.installing);voiceDownloadProgress.setProgress((int)Math.min(100,app.voicePack.downloaded*100/VoicePack.BYTES));}
+            String voiceAction=!voiceActive?"Voice options":voice.session?"End voice chat":voice.listening?"Finish dictation":"Stop voice";
+            iconState(voiceButton,voiceAction,voiceActive?R.drawable.ic_stop:R.drawable.ic_voice_options,voiceActive);voiceButton.setEnabled(!app.busy||voiceActive);
+            boolean web=app.prefs.getBoolean("webSearch",false);iconState(webButton,web?"Web search on":"Web search off",R.drawable.ic_web,web);webButton.setEnabled(!app.busy);
+            boolean downloading=app.voicePack.installing||app.voicePack.downloadId!=-1;
+            String message=voiceActive?voice.status:"";
+            if(downloading)message=app.voicePack.status.isEmpty()?"Checking voice download…":app.voicePack.status;
+            else if(!app.voicePack.ready()&&!app.voicePack.status.isEmpty())message=app.voicePack.status;
+            voiceStatus.setText(message);voiceStatus.setVisibility(message.isEmpty()?View.GONE:View.VISIBLE);
+            voiceDownloadProgress.setVisibility(downloading?View.VISIBLE:View.GONE);voiceDownloadProgress.setIndeterminate(app.voicePack.installing);voiceDownloadProgress.setProgress((int)Math.min(100,app.voicePack.downloaded*100/VoicePack.BYTES));
             updateThinking();
 
         }
@@ -186,17 +209,18 @@ public final class MainActivity extends Activity {
             ProgressBar p=downloadBars.get(m);p.setIndeterminate(app.verifying.contains(m.id));p.setProgress((int)Math.min(100,100.0*m.downloaded/Math.max(1,m.bytes)));
         }
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        if(app.busy)getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        if(app.busy||(voice!=null&&voice.active()))getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        boolean pending=app.voicePack.installing||app.voicePack.downloadId!=-1;
+        if(voicePackWasPending&&!pending&&app.voicePack.ready()&&foreground)Toast.makeText(this,"Voice input is ready",Toast.LENGTH_SHORT).show();
+        voicePackWasPending=pending;updateAvailableSpace();
     }
     private void buildChat(String draft) {
         renderedChatId=app.current.id;
-        LinearLayout toolbar=row();toolbar.setPadding(dp(18),dp(6),dp(18),dp(8));
-        TextView title=text(app.current.title,16,NAVY,true);title.setMaxLines(1);title.setEllipsize(android.text.TextUtils.TruncateAt.END);toolbar.addView(title,new LinearLayout.LayoutParams(0,-2,1));
-        toolbar.addView(button("Chats",false,this::history));add(body,toolbar);
-        modelLabel=text("",12,MUTED,false);modelLabel.setPadding(dp(18),0,dp(18),dp(8));add(body,modelLabel);
         chatScroll=new ScrollView(this);chatScroll.setFillViewport(true);body.addView(chatScroll,new LinearLayout.LayoutParams(-1,0,1));
-        LinearLayout messages=column();messages.setPadding(dp(18),dp(8),dp(18),dp(12));chatScroll.addView(messages);
-        if(app.current.messages.isEmpty()&&!app.searching) {
+        LinearLayout messages=column();messages.setPadding(dp(16),dp(8),dp(16),dp(4));chatScroll.addView(messages);
+        TextView title=text(app.current.title,16,NAVY,true);title.setMaxLines(1);title.setEllipsize(android.text.TextUtils.TruncateAt.END);add(messages,title);
+        modelLabel=text("",12,MUTED,false);modelLabel.setPadding(0,dp(4),0,dp(12));add(messages,modelLabel);
+        if(app.current.messages.isEmpty()&&!app.busy) {
             LinearLayout welcome=card(messages);hero(welcome,"Hey, I'm KAI.","A little AI. A lot of possibility.");space(welcome,12);
             add(welcome,text(app.usesRemoteModel()?"A bigger world of ideas, powered by your KAI network.":"A space to think, create, and ask anything. Right here on your device.",15,MUTED,false));space(welcome,18);
             if(!app.usesRemoteModel()&&app.active==null)add(welcome,button("Choose a local model",true,()->go("Models")));
@@ -214,24 +238,30 @@ public final class MainActivity extends Activity {
             if(!user&&message.research!=null&&!answering)sourceDisclosure(c,message);
         }
         if(app.searching){LinearLayout question=card(messages);question.setBackground(outline(0xffeaf1ff,0xffd4e3ff));add(question,text("YOU",11,BLUE,true));space(question,6);add(question,text(app.searchQuestion,16,NAVY,false));thinking(card(messages));}
-        LinearLayout controls=row();controls.setPadding(dp(12),dp(4),dp(12),dp(2));controls.setBackgroundColor(Color.WHITE);
-        microphone=button("Mic",false,()->{if(voice!=null&&voice.listening)voice.finishInput();else startVoice(false);});smallIcon(microphone,R.drawable.ic_mic);weighted(controls,microphone);
-        voiceChat=button("Voice chat",false,()->{if(voice!=null&&voice.session)endVoice(true);else startVoice(true);});smallIcon(voiceChat,R.drawable.ic_voice);weighted(controls,voiceChat);
-        webButton=button(app.prefs.getBoolean("webSearch",false)?"Web on":"Web",app.prefs.getBoolean("webSearch",false),this::toggleWeb);smallIcon(webButton,R.drawable.ic_web);weighted(controls,webButton);add(body,controls);
-        voiceStatus=text(voice==null?"":voice.status,12,BLUE,false);voiceStatus.setPadding(dp(18),dp(4),dp(18),0);add(body,voiceStatus);
-        voiceStatus.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
-        voiceDownloadProgress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);voiceDownloadProgress.setMax(100);LinearLayout.LayoutParams vp=new LinearLayout.LayoutParams(-1,dp(6));vp.setMargins(dp(18),0,dp(18),0);body.addView(voiceDownloadProgress,vp);
-        LinearLayout input=row();input.setPadding(dp(14),dp(8),dp(14),dp(8));input.setBackgroundColor(Color.WHITE);
-        composer=new EditText(this);composer.setTextColor(NAVY);composer.setHintTextColor(MUTED);composer.setTextSize(16);composer.setHint("Message KAI…");
+        if(app.busy&&!app.generating)thinking(card(messages));
+        if(!app.error.isEmpty()){
+            LinearLayout notice=card(messages);notice.setTag("chat-error");notice.setBackground(outline(0xffffeded,0xfff5d5da));LinearLayout line=row();add(notice,line);
+            TextView explanation=text(app.error,13,0xff9b2636,false);explanation.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);line.addView(explanation,new LinearLayout.LayoutParams(0,-2,1));
+            line.addView(iconButton("Dismiss chat error",R.drawable.ic_close,false,()->app.clearError()),new LinearLayout.LayoutParams(dp(48),dp(48)));
+        }
+        LinearLayout input=row();input.setTag("composer-row");input.setPadding(dp(10),dp(6),dp(10),dp(6));input.setBackgroundColor(Color.WHITE);
+        LinearLayout bubble=column();bubble.setBackground(outline(BG,BORDER));input.addView(bubble,new LinearLayout.LayoutParams(0,-2,1));
+        voiceStatus=text("",12,BLUE,false);voiceStatus.setMaxLines(2);voiceStatus.setEllipsize(android.text.TextUtils.TruncateAt.END);voiceStatus.setPadding(dp(12),dp(6),dp(8),0);voiceStatus.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);add(bubble,voiceStatus);
+        LinearLayout entry=row();add(bubble,entry);
+        composer=new EditText(this);composer.setTag("message-input");composer.setContentDescription("Message KAI");composer.setTextColor(NAVY);composer.setHintTextColor(MUTED);composer.setTextSize(16);composer.setHint("Message KAI…");
         composer.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE|android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
-        composer.setMinLines(1);composer.setMaxLines(4);composer.setFilters(new InputFilter[]{new InputFilter.LengthFilter(12000)});composer.setText(draft);
-        composer.setPadding(dp(12),dp(8),dp(12),dp(8));composer.setBackground(outline(BG,BORDER));
-        LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(0,-2,1);cp.rightMargin=dp(8);input.addView(composer,cp);
-        send=button("Send",true,()-> {
+        composer.setImeOptions(android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI|android.view.inputmethod.EditorInfo.IME_FLAG_NO_FULLSCREEN);
+        composer.setMinLines(1);composer.setMaxLines(4);composer.setMinHeight(dp(48));composer.setFilters(new InputFilter[]{new InputFilter.LengthFilter(12000)});composer.setText(draft);
+        composer.setPadding(dp(12),dp(8),dp(4),dp(8));composer.setBackgroundColor(Color.TRANSPARENT);
+        entry.addView(composer,new LinearLayout.LayoutParams(0,-2,1));
+        voiceButton=iconButton("Voice options",R.drawable.ic_voice_options,false,this::voiceAction);entry.addView(voiceButton,new LinearLayout.LayoutParams(dp(48),dp(48)));
+        voiceDownloadProgress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);voiceDownloadProgress.setMax(100);LinearLayout.LayoutParams vp=new LinearLayout.LayoutParams(-1,dp(4));vp.setMargins(dp(12),0,dp(12),dp(4));bubble.addView(voiceDownloadProgress,vp);
+        webButton=iconButton("Web search off",R.drawable.ic_web,false,this::toggleWeb);LinearLayout.LayoutParams wp=new LinearLayout.LayoutParams(dp(48),dp(48));wp.leftMargin=dp(4);input.addView(webButton,wp);
+        send=iconButton("Send message",R.drawable.ic_send,true,()-> {
             if(app.busy||(voice!=null&&voice.active())) {chatActionEpoch++;endVoice(false);app.stop();return;}
             String prompt=composer.getText().toString();if(prompt.trim().isEmpty())return;
             submit(prompt);
-        });input.addView(send,new LinearLayout.LayoutParams(-2,dp(48)));add(body,input);
+        });LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(dp(48),dp(48));sp.leftMargin=dp(4);input.addView(send,sp);add(body,input);
         chatScroll.post(()->chatScroll.fullScroll(View.FOCUS_DOWN));
     }
     private void buildModels() {
@@ -292,7 +322,7 @@ public final class MainActivity extends Activity {
         Switch wifi=new Switch(this);wifi.setText("Download on Wi-Fi only");wifi.setTextSize(15);wifi.setTextColor(NAVY);wifi.setChecked(app.prefs.getBoolean("wifi",true));wifi.setPadding(0,dp(8),0,dp(8));wifi.setOnCheckedChangeListener((b,v)->app.prefs.edit().putBoolean("wifi",v).apply());add(downloads,wifi);space(downloads,10);
         add(downloads,text("This applies to new downloads. Android manages downloads in the background. Model files are checked before use.\n\nChats stay in this app's storage and are excluded from Android backup. Generation stops when you leave the app. Local inference stays on this device while your account and downloads stay connected. Enabling Web sends the current search query to search providers. Offline mode separately pauses network access. Your saved sign-in unlocks offline chat for up to 30 days after verification.",14,MUTED,false));
         LinearLayout about=card(content);add(about,text("KAI Mobile",19,NAVY,true));space(about,8);
-        add(about,text("Version 0.3.1 · Android 9+ · ARM64\nMade for a little more possibility.\n\nLocal AI powered by llama.cpp. Connect to your KAI account, chat over the network, and check your nodes. Mining happens on your existing nodes, not on this handheld.",14,MUTED,false));space(about,12);
+        add(about,text("Version 0.3.2 · Android 9+ · ARM64\nMade for a little more possibility.\n\nLocal AI powered by llama.cpp. Connect to your KAI account, chat over the network, and check your nodes. Mining happens on your existing nodes, not on this handheld.",14,MUTED,false));space(about,12);
         add(about,button("Open-source notices",false,()-> {
             try(InputStream input=getAssets().open("third-party-notices.txt")) {
                 new AlertDialog.Builder(this).setTitle("Open-source notices").setMessage(new String(ModelFile.readLimited(input,128*1024),StandardCharsets.UTF_8)).setPositiveButton("Close",null).show();
@@ -325,6 +355,7 @@ public final class MainActivity extends Activity {
     private void updateThinking(){
         if(thinkingTitle==null)return;
         if(app.searching){thinkingTitle.setText(app.searchStopped.get()?"Stopping search…":"Searching the web…");thinkingDetail.setText((app.searchStopped.get()?"Your question will stay in the composer":app.searchProvider.isEmpty()?"Preparing search": "Searching "+app.searchProvider)+"\n“"+WebSearch.limit(WebSearch.query(app.searchQuestion),130)+"”");return;}
+        if(app.busy&&!app.generating){thinkingTitle.setText("Preparing model…");thinkingDetail.setText(app.status);return;}
         thinkingTitle.setText(thinkingAnswer==null||thinkingAnswer.text.isEmpty()?"Thinking…":"Writing answer…");
         if(thinkingAnswer!=null&&thinkingAnswer.research!=null){Set<String> domains=new LinkedHashSet<>();for(WebSearch.Source s:thinkingAnswer.research.sources)domains.add(sourceHost(s.url));thinkingDetail.setText("Using search snippets from\n"+android.text.TextUtils.join(" · ",domains));}
         else thinkingDetail.setText(app.usesRemoteModel()?app.routeLabel():"On this device · "+(app.active==null?"local model":app.active.name));
@@ -370,7 +401,15 @@ public final class MainActivity extends Activity {
         String destination=app.route.equals("own")?"your own desktop node through the Koinos scheduler":"the Koinos AI network";
         confirm("Send to "+app.routeLabel()+"?","This message and this conversation's history will be sent to "+destination+".\n\nModel: "+app.networkModel+".\nGrant remaining: "+money(grant.optDouble("remainingUsd"))+". The server enforces its cap and expiry. "+(app.route.equals("own")?"If your node is unavailable, the request fails without switching to other providers.":"Network usage may spend from this grant.")+(app.prefs.getBoolean("webSearch",false)?"\nWeb search sends the first 400 characters of this question to DuckDuckGo or Bing.":"")+"\n\nYou can stop the response at any time; work already completed may still be charged.","Send message",sendPrompt);
     }
-    private void smallIcon(Button button,int resource){Drawable icon=getDrawable(resource);icon.setTint(button==webButton&&app.prefs.getBoolean("webSearch",false)?Color.WHITE:BLUE);icon.setBounds(0,0,dp(17),dp(17));button.setCompoundDrawables(icon,null,null,null);button.setCompoundDrawablePadding(dp(5));button.setPadding(dp(9),dp(5),dp(9),dp(5));button.setTextSize(12);}
+    private void dismissVoiceMenu(){if(voiceMenu!=null){voiceMenu.dismiss();voiceMenu=null;}}
+    private void voiceAction(){
+        if(voice!=null&&voice.active()){if(voice.listening&&!voice.session)voice.finishInput();else endVoice(true);render();return;}
+        dismissVoiceMenu();voiceMenu=new PopupMenu(this,voiceButton,Gravity.END);
+        voiceMenu.getMenu().add(0,1,0,"Dictate message").setIcon(R.drawable.ic_mic);
+        voiceMenu.getMenu().add(0,2,1,"Voice chat").setIcon(R.drawable.ic_voice);
+        if(Build.VERSION.SDK_INT>=29)voiceMenu.setForceShowIcon(true);
+        voiceMenu.setOnMenuItemClickListener(item->{startVoice(item.getItemId()==2);return true;});voiceMenu.show();
+    }
     private String voiceScope(){return app.account.owner()+"|"+app.current.id+"|"+app.route+"|"+app.grantId+"|"+app.networkModel+"|"+app.prefs.getBoolean("webSearch",false);}
     private void initVoice(){if(voice!=null)return;voice=new VoiceController(new AndroidVoice.Input(app),new AndroidVoice.Speaker(app),new VoiceController.Host(){
         public boolean allowed(){return foreground&&tab.equals("Chat")&&app.account.signedIn();}
@@ -408,7 +447,7 @@ public final class MainActivity extends Activity {
         if(checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)!=android.content.pm.PackageManager.PERMISSION_GRANTED){requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO},MICROPHONE);return;}
         Runnable begin=()->{initVoice();voiceScope=voiceScope();voiceConversation=null;voice.start(conversation);};
         if(!conversation){begin.run();return;}
-        String message="KAI will listen, automatically send each spoken question to "+app.routeLabel()+", speak its reply and listen for your follow-up. The microphone pauses while KAI speaks. Voice chat stops when you leave Chat or the app. Tap End voice at any time.";
+        String message="KAI will listen, automatically send each spoken question to "+app.routeLabel()+", speak its reply and listen for your follow-up. The microphone pauses while KAI speaks. Voice chat stops when you leave Chat or the app. Tap the stop icon at any time.";
         if(app.usesRemoteModel())message+="\n\nUses your selected grant ("+money(grant.optDouble("remainingUsd"))+" remaining). Each response may spend from it; its cap and expiry still apply.";
         if(app.prefs.getBoolean("webSearch",false))message+="\n\nWeb is on: the first 400 characters of each spoken question go to DuckDuckGo or Bing.";
         confirm("Start voice chat?",message,"Start listening",begin);
@@ -416,7 +455,7 @@ public final class MainActivity extends Activity {
     @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results){super.onRequestPermissionsResult(request,permissions,results);if(request==MICROPHONE){if(results.length>0&&results[0]==android.content.pm.PackageManager.PERMISSION_GRANTED&&tab.equals("Chat")){if(foreground)startVoice(pendingVoiceChat);else resumeVoice=true;}else app.fail("Microphone permission is needed for voice input. You can still type.");}}
     private void offerVoicePack(){
         if(!app.account.signedIn()){go("Accounts");return;}
-        if(app.voicePack.installing||app.voicePack.downloadId!=-1){new AlertDialog.Builder(this).setTitle("Setting up voice input").setMessage(app.voicePack.status+"\n\nProgress is shown below the chat controls. When it says Voice ready, tap Mic or Voice chat.").setPositiveButton("OK",null).setNeutralButton("Settings",(d,w)->go("Settings")).show();return;}
+        if(app.voicePack.installing||app.voicePack.downloadId!=-1){new AlertDialog.Builder(this).setTitle("Setting up voice input").setMessage(app.voicePack.status+"\n\nProgress is shown inside the message bubble. When setup finishes, tap the voice icon to choose Dictate message or Voice chat.").setPositiveButton("OK",null).setNeutralButton("Settings",(d,w)->go("Settings")).show();return;}
         if(!app.networkAllowed()){ensureOnline(this::offerVoicePack);return;}
         confirm("Set up offline voice input?","Download the 41 MB English speech pack from Alpha Cephei. Speech recognition then stays on this device. About 110 MB of storage is used during setup. Android supplies the voice for spoken replies.","Download",()->app.voicePack.download());
     }
