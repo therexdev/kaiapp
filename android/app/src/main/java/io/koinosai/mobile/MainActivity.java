@@ -91,7 +91,7 @@ public final class MainActivity extends Activity {
         FrameLayout.LayoutParams frame=new FrameLayout.LayoutParams(Math.min(available,dp(840)),-1,Gravity.CENTER_HORIZONTAL);canvas.addView(root,frame);setContentView(canvas);
         root.setOnApplyWindowInsetsListener((v,insets)-> {root.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop(),insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());return insets;});
         LinearLayout heading=row();heading.setPadding(dp(18),dp(10),dp(18),dp(10));
-        ImageView icon=new ImageView(this);icon.setImageResource(R.drawable.ic_kai);icon.setContentDescription("KAI robot");heading.addView(icon,new LinearLayout.LayoutParams(dp(48),dp(42)));
+        ImageView icon=new ImageView(this);icon.setImageResource(R.drawable.kai_avatar);icon.getDrawable().setFilterBitmap(true);icon.setContentDescription("KAI robot");heading.addView(icon,new LinearLayout.LayoutParams(dp(48),dp(42)));
         LinearLayout brand=column();brand.setPadding(dp(12),0,0,0);
         add(brand,text("KAI",22,NAVY,true));add(brand,text("KOINOS AI",12,MUTED,false));heading.addView(brand,new LinearLayout.LayoutParams(0,-2,1));
         routeBadge=text("LOCAL ONLY",10,BLUE,true);routeBadge.setPadding(dp(10),dp(8),dp(10),dp(8));routeBadge.setBackground(bg(0xffe7efff,20));routeBadge.setMinHeight(dp(48));routeBadge.setGravity(Gravity.CENTER);routeBadge.setFocusable(true);routeBadge.setOnClickListener(v->go("Network"));heading.addView(routeBadge);add(root,heading);
@@ -254,7 +254,7 @@ public final class MainActivity extends Activity {
         Switch wifi=new Switch(this);wifi.setText("Download on Wi-Fi only");wifi.setTextSize(15);wifi.setTextColor(NAVY);wifi.setChecked(app.prefs.getBoolean("wifi",true));wifi.setPadding(0,dp(8),0,dp(8));wifi.setOnCheckedChangeListener((b,v)->app.prefs.edit().putBoolean("wifi",v).apply());add(downloads,wifi);space(downloads,10);
         add(downloads,text("This applies to new downloads. Android manages downloads in the background. Model files are checked before use.\n\nChats stay in this app's storage and are excluded from Android backup. Generation stops when you leave the app. Local only blocks account refresh, downloads, and network chat. Your saved sign-in unlocks offline chat for up to 30 days after verification.",14,MUTED,false));
         LinearLayout about=card(content);add(about,text("KAI Mobile",19,NAVY,true));space(about,8);
-        add(about,text("Version 0.2.0 · Android 9+ · ARM64\nMade for a little more possibility.\n\nLocal AI powered by llama.cpp. Connect to your KAI account, chat over the network, and check your nodes. Mining happens on your existing nodes, not on this handheld.",14,MUTED,false));space(about,12);
+        add(about,text("Version 0.2.1 · Android 9+ · ARM64\nMade for a little more possibility.\n\nLocal AI powered by llama.cpp. Connect to your KAI account, chat over the network, and check your nodes. Mining happens on your existing nodes, not on this handheld.",14,MUTED,false));space(about,12);
         add(about,button("Open-source notices",false,()-> {
             try(InputStream input=getAssets().open("third-party-notices.txt")) {
                 new AlertDialog.Builder(this).setTitle("Open-source notices").setMessage(new String(ModelFile.readLimited(input,128*1024),StandardCharsets.UTF_8)).setPositiveButton("Close",null).show();
@@ -264,7 +264,7 @@ public final class MainActivity extends Activity {
     private void hero(LinearLayout parent,String title,String subtitle){
         LinearLayout hero=row();LinearLayout words=column();add(words,text(title,28,NAVY,true));space(words,8);add(words,text(subtitle,14,MUTED,false));
         hero.addView(words,new LinearLayout.LayoutParams(0,-2,1));
-        ImageView robot=new ImageView(this);robot.setImageResource(R.drawable.kai_mascot);robot.setContentDescription("KAI, your robot companion");robot.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        ImageView robot=new ImageView(this);robot.setImageResource(R.drawable.kai_mascot);robot.getDrawable().setFilterBitmap(true);robot.setContentDescription("KAI, your robot companion");robot.setScaleType(ImageView.ScaleType.FIT_CENTER);
         hero.addView(robot,new LinearLayout.LayoutParams(dp(102),dp(140)));add(parent,hero);
     }
     private void signInCard(LinearLayout parent){
@@ -351,7 +351,7 @@ public final class MainActivity extends Activity {
             }
             return;
         }
-        LinearLayout profile=card(content);LinearLayout heading=row();ImageView face=new ImageView(this);face.setImageResource(R.drawable.ic_kai);heading.addView(face,new LinearLayout.LayoutParams(dp(52),dp(48)));
+        LinearLayout profile=card(content);LinearLayout heading=row();ImageView face=new ImageView(this);face.setImageResource(R.drawable.kai_avatar);face.getDrawable().setFilterBitmap(true);heading.addView(face,new LinearLayout.LayoutParams(dp(52),dp(48)));
         LinearLayout name=column();name.setPadding(dp(12),0,0,0);add(name,text("CONNECTED TO KAI",10,BLUE,true));space(name,4);TextView email=text(a.account.optString("email","KAI account"),17,NAVY,true);email.setMaxLines(2);add(name,email);heading.addView(name,new LinearLayout.LayoutParams(0,-2,1));add(profile,heading);space(profile,14);
         add(profile,text(app.networkAllowed()?"Refresh to see the latest status from your nodes.":"Local only is on. This is your saved sign-in; account updates are paused.",13,MUTED,false));space(profile,12);
         LinearLayout actions=row();Button refresh=button(a.working?"Refreshing…":"Refresh",true,()->{if(app.networkAllowed())a.refresh();else chooseRoute("network");});refresh.setEnabled(!a.working);weighted(actions,refresh);

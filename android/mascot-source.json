@@ -1,0 +1,21 @@
+{
+  "description": "Original desktop KAI rig rendered in its static idle pose. Avatar viewport matches ui/brand.js. Launcher icon is separate.",
+  "renderer": {
+    "sharp": "0.35.4",
+    "librsvg": "2.62.91"
+  },
+  "sources": [
+    {
+      "file": "ui/kai-robot.svg",
+      "sha256": "6a6e949498489b2046a4ec447081bca8a7fc8eb345d347ec0c3d8ef1623f1960"
+    },
+    {
+      "file": "ui/kai-character.css",
+      "sha256": "7e15b0910a609a45f7d5ecbd717e04fc25ee48a16c80a398d5d1069e4b303807"
+    },
+    {
+      "file": "ui/assets/kai-character.png",
+      "sha256": "e0250f98cbf53a1a830dac26ca3aafed8ec96dc059083490243a92e7d69e63f3"
+    }
+  ]
+}

@@ -1,3 +1,13 @@
+# Android 0.2.1 mascot correction — 2026-09-22
+
+- Replaced the in-app vector redraw with direct static exports of the original desktop SVG, stylesheet, and texture. The source artwork matches the latest Test branch inspected (`6d51341`); hashes and renderer versions are in `mascot-source.json`.
+- Reviewed actual Android portrait (411 × 891) and handheld landscape (960 × 540) renders, including the welcome mascot, header/avatar, account fixture, and launcher. The launcher source files are unchanged from 0.2.0. Screenshots use Robolectric native graphics, not a physical device.
+- Passed `:app:assembleRelease`, the two existing `VisualPreviewTest` rendering tests, and `:app:lintDebug` (no errors). Cleared stale local Gradle output/metadata to resolve duplicate generated R classes before the successful build. No new functional tests were added or claimed for this artwork-only revision.
+- Verified non-debuggable ARM64 package `io.koinosai.mobile`, version code 3 / `0.2.1-preview`, 16 KB ZIP alignment, and the same retained owner signing certificate as 0.2.0. This permits an in-place update; no data migration or account/network/inference behavior changed.
+- Delivered APK SHA-256: `623abf5f420571350c611a094d9d66a6373de3f7e15066527bbdcc3da4ab8eaf`.
+
+The prior functional validation and physical-device limitations below still apply.
+
 # Android 0.2 validation — 2026-09-22
 
 ## Passed

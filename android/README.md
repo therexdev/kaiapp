@@ -1,10 +1,16 @@
-# KAI Mobile 0.2 preview
+# KAI Mobile 0.2.1 preview
 
 Native Android model management, local chat, Koinos account sign-in, network chat, and account-scoped AI/mining node monitoring. Android 9+, ARM64; suited to the Retroid Pocket 5 and compatible phones/tablets.
 
+## Mascot artwork
+
+The in-app character and avatar reuse the exact desktop `ui/kai-robot.svg`, `ui/kai-character.css`, and `ui/assets/kai-character.png` used by the website. They are exported as transparent PNGs in the original idle pose, with the same avatar crop as `ui/brand.js`. There is no Android redraw or runtime web dependency. The previously approved launcher icon is unchanged.
+
+To refresh the exports after the shared art changes, install the root npm dependencies and run `node android/scripts/export-mascot.cjs`. The exporter uses the pinned `sharp` dependency and its static SVG renderer. Source hashes and renderer versions are recorded in `android/mascot-source.json`.
+
 ## Install and sign in
 
-Install `KAI-Mobile-0.2.0-ARM64-preview.apk`. This build is named **KAI** (`io.koinosai.mobile`) and installs beside the original **KAI Mobile Preview** (`io.koinosai.mobile.preview`). The original preview used a temporary signing key that was not retained. Android cannot install a differently signed update over it. Keeping a separate app protects the original chats and model files. Export any conversations you want from that preview; download or import models into KAI. Do not uninstall the old preview until you have saved what you need.
+Install `KAI-Mobile-0.2.1-ARM64-preview.apk`. This build is named **KAI** (`io.koinosai.mobile`) and installs beside the original **KAI Mobile Preview** (`io.koinosai.mobile.preview`). **0.2.1 updates the owner-signed 0.2.0 KAI app in place**, preserving accounts, chats and models. The original preview used a temporary signing key that was not retained. Android cannot install a differently signed update over it. Keeping a separate app protects the original chats and model files. Export any conversations you want from that preview; download or import models into KAI. Do not uninstall the old preview until you have saved what you need.
 
 1. Open **Accounts → Sign in with KAI** and enable network access.
 2. Open **koinosai.com/link**, sign in through the existing website, approve the displayed device code, and return to KAI. Passwords, Google sign-in and passkeys stay in the browser.

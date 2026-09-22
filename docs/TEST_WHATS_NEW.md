@@ -1,3 +1,8 @@
+## Android 0.2.1 · Original KAI mascot
+
+- Replaced the Android mascot redraw with direct exports of the original desktop/website KAI artwork, including in-app avatars. The approved launcher icon stays the same.
+- Uses the retained KAI signing key, so this installs over 0.2.0 without resetting accounts, conversations or models.
+
 ## Android 0.2 · KAI accounts and network
 
 - Added KAI robot branding, adaptive home-screen icon, clean native navigation, and portrait/handheld layouts.
