@@ -1,5 +1,7 @@
 "use strict";
 
+const { MAINNET_RPC_URLS } = require("../koinos-rpc");
+
 const POB_ABI = require("./pob-abi.json");
 const TOKEN_ABI = require("./token-abi.json");
 
@@ -22,7 +24,7 @@ const NETWORKS = {
     label: "Mainnet",
     tokenSymbol: "KOIN",
     // Public RPC endpoints tried in order.
-    rpcUrls: ["https://api.koinos.io"],
+    rpcUrls: [...MAINNET_RPC_URLS],
     // Match the current koinos/koinos env.example default. 8080 is commonly
     // occupied by local development servers and caused the packaged Mac node
     // to stop after its other services had already started.

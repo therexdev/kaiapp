@@ -1,5 +1,7 @@
 "use strict";
 
+const { MAINNET_RPC_URLS } = require("./koinos-rpc");
+
 /*
  * Koinos chain facts, vendored.
  *
@@ -25,7 +27,7 @@ const NETWORKS = {
     id: "mainnet",
     label: "Koinos mainnet",
     tokenSymbol: "KOIN",
-    rpcUrls: ["https://api.koinos.io"],
+    rpcUrls: [...MAINNET_RPC_URLS],
     localRpcUrl: "http://127.0.0.1:8080",
     explorer: {
       tx: "https://koinosblocks.com/tx/",

@@ -1,6 +1,7 @@
 "use strict";
 
-const { Provider, Contract, Transaction, utils } = require("koilib");
+const { Contract, Transaction, utils } = require("koilib");
+const { createProvider, rpcUrlsForNetwork } = require("../koinos-rpc");
 const { NETWORKS, POB_ABI, TOKEN_ABI, BURN_MANA_CUSHION } = require("./constants");
 const { cmpSats, subSats, formatAmount } = require("./format");
 
@@ -92,12 +93,11 @@ class ChainService {
   rpcUrls() {
     const net = this.network();
     const custom = this.settings.get(`customRpc.${net.id}`, "");
-    if (custom && /^https?:\/\//.test(custom)) return [custom];
-    return net.rpcUrls.length > 0 ? net.rpcUrls : [net.localRpcUrl];
+    return rpcUrlsForNetwork(net, custom);
   }
 
   provider(urls) {
-    return new Provider(urls ?? this.rpcUrls());
+    return createProvider(urls ?? this.rpcUrls());
   }
 
   isValidAddress(address) {

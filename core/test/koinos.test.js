@@ -10,6 +10,7 @@ const { KoinosService } = require("../lib/koinos");
 const { ChainRead, formatKoin } = require("../lib/chain-read");
 const { JsonStore } = require("../lib/store");
 const { NODE_REQUIREMENTS } = require("../lib/chain-constants");
+const { MAINNET_RPC_URLS } = require("../lib/koinos-rpc");
 
 /*
  * Koinos node tools, stage 1 — read only.
@@ -110,9 +111,9 @@ test("chain-read: address validation and amount formatting", () => {
 test("chain-read: a user's own node wins over the public RPC", () => {
   const s = store();
   const c = new ChainRead(s);
-  assert.deepStrictEqual(c.rpcUrls(), ["https://api.koinos.io"], "public by default");
+  assert.deepStrictEqual(c.rpcUrls(), MAINNET_RPC_URLS, "public priority by default");
   s.set("koinos.rpcUrl", "http://127.0.0.1:8080");
-  assert.deepStrictEqual(c.rpcUrls(), ["http://127.0.0.1:8080"], "…their node when they point at one");
+  assert.deepStrictEqual(c.rpcUrls(), ["http://127.0.0.1:8080", ...MAINNET_RPC_URLS], "their node stays first, with public backups");
 });
 
 test("chain-read: an unreachable node is an ANSWER, not an exception", async () => {

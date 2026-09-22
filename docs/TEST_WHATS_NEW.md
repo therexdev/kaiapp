@@ -1,3 +1,11 @@
+## Koinos AI mainnet API with backups
+
+- Mainnet wallet, node dashboard and Koinos chain tools now try `https://api.koinosai.com` first, then `https://api.koinosblocks.com`, then `https://api.koinos.io`.
+- Requests move to a backup after a timeout, transport/HTTP failure, invalid response or missing RPC method. Each endpoint gets one attempt per request, and later requests try the primary again.
+- Existing custom RPC settings stay first. Default installations pick up the new order automatically without changing wallet or node data. Local-node health checks still test only the local node, and Harbinger/testnet earning connections keep their existing endpoints.
+- Signed transaction retries reuse the same transaction. Chain or contract rejections keep their original error and do not trigger submission through a different provider.
+- Master continues serving its API from its local node; its public gateway and metadata fallback configuration do not need changing for this client update.
+
 ## App interface languages
 
 - Choose English, Español, Português (Brasil), Français or Deutsch when first opening the app. The dialog previews your choice and remembers it after Continue. Existing users see it once after this update.
