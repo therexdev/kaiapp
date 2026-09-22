@@ -1,3 +1,9 @@
+## Android local-model preview
+
+- Added a separate native Android target for local model downloads/imports, load/unload/delete, offline streaming chat, saved conversations and performance settings.
+- Starts with the same pinned Koinos Fast and Koinos Balanced packages as desktop KAI. Downloads are opt-in and verified before use.
+- The Android preview uses its own application identity and build workflow. See `android/README.md` for installation, current scope and physical-device validation requirements.
+
 ## App interface languages
 
 - Choose English, Español, Português (Brasil), Français or Deutsch when first opening the app. The dialog previews your choice and remembers it after Continue. Existing users see it once after this update.
