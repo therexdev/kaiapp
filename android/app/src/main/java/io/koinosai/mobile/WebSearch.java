@@ -10,6 +10,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 import javax.net.ssl.HttpsURLConnection;
 
 /** Read-only, bounded search. Only the user's current query reaches fixed search providers. */
@@ -87,10 +88,14 @@ class WebSearch {
         }finally{connections.remove(c);c.disconnect();}
     }
     Result search(String prompt,AtomicBoolean stop) throws Exception {
+        return search(prompt,stop,provider->{});
+    }
+    Result search(String prompt,AtomicBoolean stop,Consumer<String> progress) throws Exception {
         String q=query(prompt);if(q.isEmpty())throw new IOException("Enter a search question");String encoded=URLEncoder.encode(q,"UTF-8");
         String[] urls={"https://html.duckduckgo.com/html/?q="+encoded,"https://www.bing.com/search?format=rss&setlang=en-US&q="+encoded};
         for(int i=0;i<urls.length;i++){
             if(stop.get())throw new IOException("Search stopped");
+            progress.accept(i==0?"DuckDuckGo":"Bing");
             try{List<Source> sources=parse(fetch(urls[i],stop),i==1,q);if(stop.get())throw new IOException("Stopped");if(!sources.isEmpty())return new Result(i==0?"DuckDuckGo":"Bing",q,System.currentTimeMillis(),sources);}catch(Exception e){if(stop.get())throw e;}
         }
         throw new IOException("Web search did not return usable results. Try specific search terms, retry later, or turn Web off to answer from model knowledge.");

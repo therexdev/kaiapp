@@ -29,7 +29,7 @@ public final class KaiApp extends Application {
     AccountState account;
     NetworkApi chatApi=new NetworkApi();
     WebSearch webApi=new WebSearch();VoicePack voicePack;
-    AtomicBoolean searchStopped=new AtomicBoolean();boolean searching;String retryPrompt="";
+    AtomicBoolean searchStopped=new AtomicBoolean();boolean searching;String retryPrompt="",searchQuestion="",searchProvider="";
     final ExecutorService network=Executors.newSingleThreadExecutor();
     final AtomicBoolean networkStopped=new AtomicBoolean();
     String route="local", grantId="", networkModel="auto";
@@ -272,6 +272,9 @@ public final class KaiApp extends Application {
         if(m.imported) { models.remove(m); saveImports(); } changed();
     }
     void loadModel(Model m) {
+        loadModel(m,null);
+    }
+    void loadModel(Model m,Runnable ready) {
         if(!requireAccount())return;
         if(busy||importing) return;
         if(NativeEngine.unavailable!=null) { fail(NativeEngine.unavailable); return; }
@@ -288,7 +291,7 @@ public final class KaiApp extends Application {
                 main.post(()-> { status="Loading "+m.name+"…"; changed(); });
                 NativeEngine.load(file(m).getAbsolutePath().getBytes(StandardCharsets.UTF_8),context,cpu);
                 if(fileCancelled.get()) { NativeEngine.unload(); throw new IOException("Loading stopped."); }
-                main.post(()-> { active=m; busy=false; status=m.name+" is ready · offline"; changed(); });
+                main.post(()-> { active=m; busy=false; status=m.name+" is ready · offline"; changed();if(!fileCancelled.get()&&ready!=null)ready.run(); });
             } catch(Exception e) {
                 NativeEngine.unload();
                 main.post(()-> { active=null; busy=false; status="No model loaded"; fail(safe(e)); });
@@ -314,16 +317,18 @@ public final class KaiApp extends Application {
         if(withWeb){
             if(!networkAllowed()){fail("Web search needs an internet connection. Turn Web off for offline chat.");return;}
             final String question=prompt,owner=account.owner(),selected=route;final Conversation conversation=current;
-            AtomicBoolean stop=new AtomicBoolean();searchStopped=stop;busy=true;generating=true;searching=true;error="";retryPrompt="";status="Searching the web…";changed();
+            AtomicBoolean stop=new AtomicBoolean();searchStopped=stop;busy=true;generating=true;searching=true;error="";retryPrompt="";searchQuestion=question;searchProvider="";status="Searching the web…";changed();
             network.execute(()->{
-                try{WebSearch.Result result=webApi.search(question,stop);
+                try{WebSearch.Result result=webApi.search(question,stop,provider->main.post(()->{
+                    if(searching&&!stop.get()&&searchStopped==stop&&current==conversation&&owner.equals(account.owner())){searchProvider=provider;status="Searching "+provider+"…";changed();}
+                }));
                     main.post(()->{busy=false;generating=false;searching=false;
-                        if(stop.get()||!networkAllowed()||!owner.equals(account.owner())||!selected.equals(route)||current!=conversation){status="Search stopped";changed();return;}
+                        if(stop.get()||!networkAllowed()||!owner.equals(account.owner())||!selected.equals(route)||current!=conversation){if(owner.equals(account.owner())&&current==conversation)retryPrompt=question;status="Search stopped";changed();return;}
                         if(result==null||result.sources.isEmpty()){retryPrompt=question;fail("No usable web sources. Retry or turn Web off.");return;}
                         if(usesRemoteModel())sendNetwork(question,result);else sendLocal(question,result);
                     });
                 }catch(Exception e){main.post(()->{busy=false;generating=false;searching=false;status="Search stopped";
-                    if(!stop.get()&&owner.equals(account.owner())&&current==conversation){retryPrompt=question;fail(KaiApp.safe(e));}else changed();});}
+                    if(owner.equals(account.owner())&&current==conversation){retryPrompt=question;if(!stop.get()){fail(KaiApp.safe(e));return;}}changed();});}
             });return;
         }
         if(usesRemoteModel())sendNetwork(prompt,null);else sendLocal(prompt,null);

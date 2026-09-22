@@ -141,20 +141,20 @@ public class AccountContractTest {
     @Test public void webGroundingUsesOnlyQuestionAndPersistsRealSources() throws Exception {
         signIn();app.setNetworkEnabled(true);app.setRoute("own");app.grantId="grant-a";
         app.current.messages.add(new KaiApp.ChatMessage("user","Earlier private conversation"));final String[] query={null};
-        app.webApi=new WebSearch(){@Override Result search(String q,AtomicBoolean stop){query[0]=q;return new Result("Test","current news",1,Arrays.asList(new Source("Evidence","https://example.com/news","Current facts")));}};
+        app.webApi=new WebSearch(){@Override Result search(String q,AtomicBoolean stop,java.util.function.Consumer<String> progress){query[0]=q;return new Result("Test","current news",1,Arrays.asList(new Source("Evidence","https://example.com/news","Current facts")));}};
         app.send("current news",true);app.network.submit(()->{}).get();idle();app.network.submit(()->{}).get();idle();
         assertEquals("current news",query[0]);assertTrue(api.streamRequest.toString().contains("WEB_SEARCH_DATA"));assertTrue(api.streamRequest.getBoolean("selfHost"));
         KaiApp.ChatMessage answer=app.current.messages.get(app.current.messages.size()-1);assertNotNull(answer.research);assertTrue(answer.json().has("research"));assertTrue(app.exportChat().contains("https://example.com/news"));
     }
     @Test public void offlineOrStoppedSearchNeverStartsGeneration() throws Exception {
         signIn();app.setRoute("network");final int[] calls={0};
-        app.webApi=new WebSearch(){@Override Result search(String q,AtomicBoolean stop){calls[0]++;return new Result("Test",q,1,Arrays.asList(new Source("Title","https://example.com/","Facts")));}};
+        app.webApi=new WebSearch(){@Override Result search(String q,AtomicBoolean stop,java.util.function.Consumer<String> progress){calls[0]++;return new Result("Test",q,1,Arrays.asList(new Source("Title","https://example.com/","Facts")));}};
         app.send("blocked",true);assertEquals(0,calls[0]);assertNull(api.streamRequest);
         app.setNetworkEnabled(true);app.send("cancelled",true);app.stop();app.network.submit(()->{}).get();idle();app.network.submit(()->{}).get();idle();assertNull(api.streamRequest);assertTrue(app.current.messages.isEmpty());assertFalse(app.busy);
     }
     @Test public void searchFailureIsVisibleAndDoesNotSilentlyAnswerFromMemory() throws Exception {
         signIn();app.setNetworkEnabled(true);app.setRoute("network");
-        app.webApi=new WebSearch(){@Override Result search(String q,AtomicBoolean stop)throws Exception{throw new java.io.IOException("Search unavailable");}};
+        app.webApi=new WebSearch(){@Override Result search(String q,AtomicBoolean stop,java.util.function.Consumer<String> progress)throws Exception{throw new java.io.IOException("Search unavailable");}};
         app.send("latest information",true);app.network.submit(()->{}).get();idle();assertNull(api.streamRequest);assertTrue(app.error.contains("Search unavailable"));assertEquals("latest information",app.retryPrompt);assertTrue(app.current.messages.isEmpty());
     }
 

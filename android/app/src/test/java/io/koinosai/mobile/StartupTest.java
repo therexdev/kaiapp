@@ -59,7 +59,7 @@ public class StartupTest {
         find("Chat").performClick();assertNull(find("Send"));assertNotNull(find("Get started · Sign in"));
     }
     @Test public void signedInLocalChatOpensWithoutSendingAnythingOnline() throws Exception {
-        signIn();assertNotNull(find("Choose a local model"));assertNotNull(find("Mic"));assertNotNull(find("Voice chat"));assertNotNull(find("Web"));assertFalse(find("Send").isEnabled());assertFalse(app.networkAllowed());
+        signIn();assertNotNull(find("Choose a local model"));assertNotNull(find("Mic"));assertNotNull(find("Voice chat"));assertNotNull(find("Web"));assertTrue(find("Send").isEnabled());assertFalse(app.networkAllowed());
         app.send("Hello");assertTrue(app.error.contains("Load a model"));assertFalse(app.generating);
     }
     @Test public void conversationsAreExportableOnlyForTheirAccount() throws Exception {
@@ -76,7 +76,7 @@ public class StartupTest {
             assertTrue(dialog==null||!dialog.isShowing());assertTrue(app.account.signedIn());assertTrue(app.networkAllowed());
         }
         assertEquals("local",app.route);find("Chat").performClick();
-        assertNotNull(find("Choose a local model"));assertFalse(find("Send").isEnabled());
+        assertNotNull(find("Choose a local model"));assertTrue(find("Send").isEnabled());
     }
     @Test public void offlineSettingIsSeparateAndRequiresExplicitConfirmation() throws Exception {
         signIn();app.setNetworkEnabled(true);find("Settings").performClick();
@@ -87,6 +87,40 @@ public class StartupTest {
         ((Switch)find("Offline mode")).setChecked(true);dialog=org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();
         dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE).performClick();Shadows.shadowOf(Looper.getMainLooper()).idle();
         assertFalse(app.networkAllowed());assertTrue(app.account.signedIn());assertEquals("local",app.route);assertTrue(((Switch)find("Offline mode")).isChecked());
+    }
+    private void installedModel()throws Exception{KaiApp.Model model=app.models.get(0);model.installed=true;app.file(model).getParentFile().mkdirs();app.file(model).createNewFile();}
+    private void installedVoice()throws Exception{java.io.File directory=app.voicePack.directory();new java.io.File(directory,"am").mkdirs();new java.io.File(directory,".verified").createNewFile();new java.io.File(directory,"am/final.mdl").createNewFile();}
+    @Test public void dictatedQuestionCanLoadLocalModelWithoutLosingDraftOrGoingOnline()throws Exception{
+        signIn();installedModel();EditText composer=org.robolectric.util.ReflectionHelpers.getField(activity,"composer");composer.setText("Which starter should I choose?");
+        assertTrue(find("Send").isEnabled());find("Send").performClick();android.app.AlertDialog dialog=org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();
+        assertTrue(dialog.isShowing());assertNotNull(find(dialog.getWindow().getDecorView(),"Load & send"));assertFalse(app.networkAllowed());assertEquals("local",app.route);
+        dialog.getButton(android.content.DialogInterface.BUTTON_NEGATIVE).performClick();assertEquals("Which starter should I choose?",composer.getText().toString());assertTrue(app.current.messages.isEmpty());
+        installedVoice();find("Voice chat").performClick();dialog=org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();assertNotNull(find(dialog.getWindow().getDecorView(),"Load & start voice"));assertFalse(app.networkAllowed());
+    }
+    @Test public void localVoiceWithWebEnabledOffersOfflineContinuation()throws Exception{
+        signIn();installedVoice();app.active=app.models.get(0);app.prefs.edit().putBoolean("webSearch",true).apply();app.changed();find("Voice chat").performClick();
+        android.app.AlertDialog dialog=org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();assertEquals("Continue offline",dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE).getText().toString());
+        dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE).performClick();Shadows.shadowOf(Looper.getMainLooper()).idle();assertFalse(app.prefs.getBoolean("webSearch",true));assertFalse(app.networkAllowed());assertEquals("local",app.route);
+    }
+    @Test public void searchShowsActivityThenCollapsesSourcesUntilOpened()throws Exception{
+        signIn();app.searching=true;app.generating=true;app.busy=true;app.searchQuestion="Retroid processor";app.searchProvider="DuckDuckGo";app.changed();assertNotNull(find("Searching the web…"));assertNotNull(find("Searching DuckDuckGo\n“Retroid processor”"));
+        app.searching=false;KaiApp.ChatMessage answer=new KaiApp.ChatMessage("assistant","");answer.incomplete=true;answer.research=new WebSearch.Result("DuckDuckGo","Retroid processor",1,java.util.Arrays.asList(new WebSearch.Source("Device specs","https://example.com/specs","Snapdragon processor")));app.current.messages.add(answer);app.changed();
+        assertNotNull(find("Thinking…"));assertNotNull(find("Using search snippets from\nexample.com"));assertNull(find("Sources · 1 ▾"));assertNull(find("[1] Device specs"));
+        answer.text="The device uses a Snapdragon processor. [1]";answer.incomplete=false;app.generating=false;app.busy=false;app.changed();assertNull(find("Thinking…"));assertNotNull(find("Sources · 1 ▾"));
+        View details=activity.getWindow().getDecorView().findViewWithTag("source-details");assertEquals(View.GONE,details.getVisibility());find("Sources · 1 ▾").performClick();assertEquals(View.VISIBLE,details.getVisibility());assertNotNull(find("Snapdragon processor"));find("Sources · 1 ▴").performClick();assertEquals(View.GONE,details.getVisibility());
+    }
+    @Test public void voiceDownloadProgressAndReadyStateAreVisibleInChat()throws Exception{
+        signIn();app.voicePack.downloadId=99;app.voicePack.downloaded=(VoicePack.BYTES+1)/2;app.voicePack.status="Downloading voice input · 50% of 41 MB";app.changed();assertNotNull(find(app.voicePack.status));
+        ProgressBar progress=org.robolectric.util.ReflectionHelpers.getField(activity,"voiceDownloadProgress");assertEquals(View.VISIBLE,progress.getVisibility());assertEquals(50,progress.getProgress());
+        app.voicePack.downloadId=-1;installedVoice();app.changed();assertNotNull(find("Voice ready · works offline"));assertEquals(View.GONE,progress.getVisibility());
+    }
+    private Runnable afterLoad(Runnable action){return org.robolectric.util.ReflectionHelpers.callInstanceMethod(activity,"afterModelLoad",org.robolectric.util.ReflectionHelpers.ClassParameter.from(Runnable.class,action));}
+    @Test public void loadContinuationRunsOnceAndIsCancelledByBackgroundNavigationOrScopeChange()throws Exception{
+        signIn();int[] sends={0};Runnable send=()->sends[0]++;
+        Runnable ready=afterLoad(send);ready.run();ready.run();assertEquals(1,sends[0]);
+        ready=afterLoad(send);controller.pause();controller.resume();ready.run();assertEquals(1,sends[0]);
+        ready=afterLoad(send);find("Models").performClick();find("Chat").performClick();ready.run();assertEquals(1,sends[0]);
+        ready=afterLoad(send);app.prefs.edit().putBoolean("webSearch",true).apply();ready.run();assertEquals(1,sends[0]);
     }
 
 }

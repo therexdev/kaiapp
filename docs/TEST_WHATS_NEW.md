@@ -1,3 +1,9 @@
+## Android 0.3.1 · search activity and local voice setup
+
+- Web chat now shows search and thinking activity with the actual provider and source domains. Source details stay collapsed behind a Sources button after the reply; expand for links, snippets, query and retrieval time.
+- Send remains actionable after dictation when a local AI model is unloaded. Load & send / Load & start voice load an installed model without changing your route, and preserve the question. Cancel, leaving Chat or backgrounding prevents a deferred send.
+- Voice-pack download and installation progress now appear in Chat, followed by an offline-ready status. Local voice chat offers to turn Web off when offline, with no switch to Network required.
+
 ## Android 0.3.0 · Voice chat and web answers
 
 - Added offline English speech recognition: download the optional 41 MB pack, then tap Mic to dictate or Voice chat for spoken questions, replies and follow-ups. Microphone capture pauses during replies and stops when leaving the app or Chat.

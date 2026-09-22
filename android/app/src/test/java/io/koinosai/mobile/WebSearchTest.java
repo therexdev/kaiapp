@@ -30,6 +30,11 @@ public class WebSearchTest {
         body+="<item><title>Koinos blockchain</title><link>https://koinos.io/</link><description>Koinos network details</description></item></channel></rss>";
         assertEquals(1,WebSearch.parse(body,true,"Koinos blockchain official").size());
     }
+    @Test public void progressNamesOnlyTheProviderActuallyBeingRequested()throws Exception{
+        List<String> events=new ArrayList<>();WebSearch web=new WebSearch(){@Override String fetch(String url,AtomicBoolean stop)throws Exception{events.add("fetch");if(url.contains("duckduckgo"))throw new java.io.IOException("Unavailable");return rss("https://example.com/news","Current news");}};
+        web.search("current news",new AtomicBoolean(),events::add);assertEquals(Arrays.asList("DuckDuckGo","fetch","Bing","fetch"),events);
+        events.clear();try{web.search("current news",new AtomicBoolean(true),events::add);fail();}catch(java.io.IOException expected){}assertTrue(events.isEmpty());
+    }
     @Test public void stopPreventsFallbackAndNoResultsCannotPretendGrounding() throws Exception {
         AtomicBoolean stopped=new AtomicBoolean();List<String> calls=new ArrayList<>();WebSearch web=new WebSearch(){@Override String fetch(String u,AtomicBoolean s)throws Exception{calls.add(u);stopped.set(true);throw new java.io.IOException("Stopped");}};
         try{web.search("query",stopped);fail();}catch(java.io.IOException expected){}assertEquals(1,calls.size());
