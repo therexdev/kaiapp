@@ -1,57 +1,50 @@
-# KAI Mobile Preview
+# KAI Mobile 0.2 preview
 
-Native Android model manager and offline text chat, designed for Android gaming handhelds such as the Retroid Pocket 5 and compatible phones/tablets.
+Native Android model management, local chat, Koinos account sign-in, network chat, and account-scoped AI/mining node monitoring. Android 9+, ARM64; suited to the Retroid Pocket 5 and compatible phones/tablets.
 
-## Install and try
+## Install and sign in
 
-1. Install the ARM64 preview APK on Android 9 or newer. Android may ask you to allow installation from the app you used to download it.
-2. Open **Models → Koinos Fast → Download**. Downloads use Wi-Fi by default and continue through Android's download manager.
-3. Wait for the download and SHA-256 integrity check, then tap **Load model**.
-4. Open **Chat** and send a message. Once the model is downloaded, generation works without an internet connection.
-5. **Stop** cancels loading or generation. **Unload** releases the model's memory. **Delete** removes its downloaded file.
+Install `KAI-Mobile-0.2.0-ARM64-preview.apk`. This build is named **KAI** (`io.koinosai.mobile`) and installs beside the original **KAI Mobile Preview** (`io.koinosai.mobile.preview`). The original preview used a temporary signing key that was not retained. Android cannot install a differently signed update over it. Keeping a separate app protects the original chats and model files. Export any conversations you want from that preview; download or import models into KAI. Do not uninstall the old preview until you have saved what you need.
 
-The Pocket 5 starting profile is Koinos Fast (Qwen 2.5 1.5B Q4_K_M), 2,048 context tokens, four CPU threads, and 384 reply tokens. Koinos Balanced (Llama 3.2 3B Q4_K_M) is also included. These are the existing desktop catalog packages with the same expected sizes and hashes. Pocket 5 performance and battery use must be measured on physical hardware; no device-specific latency is promised.
+1. Open **Accounts → Sign in with KAI** and enable network access.
+2. Open **koinosai.com/link**, sign in through the existing website, approve the displayed device code, and return to KAI. Passwords, Google sign-in and passkeys stay in the browser.
+3. **Models** downloads or imports the same Fast/Balanced GGUF packages as the desktop. Download, verify and load a model.
+4. Choose **Network → Local only** for on-device chat. Account refresh, downloads and remote chat are blocked in this mode. Choosing it cancels unfinished downloads. Previously completed downloads remain installed.
+5. To chat remotely, select **Network** or **My node**, choose an existing account spending grant under **Accounts → Access**, and optionally select a live network model. Review and confirm each send. No grant is created or widened by Android.
+6. **Accounts → AI nodes / Mining** shows the account's linked compute workers and block-producer snapshots. Refresh while network access is enabled. These are your existing nodes; the handheld does not start mining or serve earning jobs.
 
-## Included
+## Privacy and behavior
 
-- Explicit, opt-in model downloads with Android download notifications, progress, retry and cancel.
-- Complete size/hash verification before installation and again before each model load.
-- Single-file text GGUF import via Android's document picker (including SD cards). Imports are copied into app-specific storage, bounded by available storage/device memory, and fingerprinted; this does not certify their origin or guarantee architecture compatibility.
-- CPU inference using a pinned llama.cpp revision, compiled into the APK. No terminal, separate server, cloud API or login is needed.
-- Streamed responses, cancellation during prefill/generation, bounded context, whole-turn history trimming with a visible notice, and preservation of partial responses.
-- Up to 30 saved conversations, new/select/delete controls, and user-selected plain-text export.
-- Context, thread count, reply length, temperature, system instructions, Wi-Fi preference and memory/storage information.
-- Touch/controller-focusable native controls, portrait/landscape layout, selectable message text, and offline open-source notices.
+- Both local inference and network inference require a signed-in account. Models can be browsed while signed out; load, download and import operations require sign-in.
+- A saved, previously verified session permits offline local use for up to 30 days, matching the website session lifetime. Reconnect to verify after expiry. A server rejection locks use until verification/sign-in succeeds. Revocations made elsewhere cannot be learned while offline.
+- Sessions and the associated account profile are encrypted with an AES-GCM key in Android Keystore. There is no plaintext credential fallback. Account files live in `noBackupFilesDir`; Android backup and device transfer are disabled for app data.
+- Local conversations are stored only on this device and partitioned by account. Sign-out hides them and locks both inference paths. Signing back into that account restores access. Explicit export is available in Chat → Chats.
+- Switching chat mode opens an empty conversation. Local history is never silently uploaded. My Node sets the server's `selfHost` flag and never falls back to paid providers. Its grant selects the wallet/node, just as on the website.
+- Remote chat uses the existing session-and-grant scheduler contract, with server-side cap/expiry enforcement, cancellation, bounded SSE parsing, partial-reply preservation, and reported final cost. Remote conversations are saved locally; they are not synchronized into the website's chat list.
+- Network access is off by default. The selected mode is remembered. Local only makes no account/scheduler requests. Opening a website link is an explicit external-browser action. Sign-out attempts server revocation only if network access was enabled when requested, then removes the local credential even if revocation fails.
+- Node cards show a timestamped snapshot. Refresh failures retain the last snapshot and show an error; they do not replace it with a misleading empty/healthy state. Mining estimates are the existing node's reported estimates, with measured-history and stale-price flags preserved.
+- No wallet keys, wallet transfers, node control, phone mining, voice, desktop tools, or automatic local/network fallback are included.
 
-Model-proposed actions are never executed. This preview has no tools, wallet, remote inference, earning, microphone, vision or desktop synchronization. It does not modify the desktop application, its profile or release version. Model and chat data are removed if the app is uninstalled or its storage is cleared. Conversation export is explicit; automatic Android backup is disabled.
+## Local model engine
 
-Generation stops when the app leaves the foreground. Downloads can continue in the background. A downloaded model is never loaded automatically at launch.
+Pinned llama.cpp revision `ec5a12b85ae32fbccfa4276051382330a8e6458b`, CPU-only ARMv8-A compatibility baseline, 16 KB native page alignment. Koinos Fast and Balanced use the exact desktop catalog sizes/hashes; imports are bounded, verified GGUF files copied from a document picker. No model weights are bundled. Models never autoload. Generation stops when the app leaves the foreground; Android can continue explicitly authorized downloads when Network is enabled.
 
-## Build
+## Build and signing
 
-Requirements: JDK 17, Android SDK 35, NDK 27.2.12479018, CMake 3.22.1. The Gradle wrapper uses Gradle 8.9 and Android Gradle Plugin 8.7.3.
+JDK 17, SDK/build tools 35, NDK 27.2.12479018, CMake 3.22.1, Gradle 8.9, AGP 8.7.3:
 
 ```sh
 git submodule update --init android/vendor/llama.cpp
 cd android
-# Set ANDROID_HOME, or create local.properties containing sdk.dir=/path/to/sdk
-./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
+./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 ```
 
-APK: `android/app/build/outputs/apk/debug/app-debug.apk`. The application ID is `io.koinosai.mobile.preview` and it is signed with the developer's Android debug key. This is a sideloadable testing build, not a production release. Rebuilds require the same signing key to install as updates; production signing and an update channel must be established before public distribution. Never commit private signing keys.
+The delivered APK is a non-debuggable release build signed with a retained owner key. Its private signing recovery bundle is kept separately from Git. To produce compatible updates, restore that key and point `KAI_SIGNING_PROPERTIES` at a private Java properties file with `storeFile`, `storePassword`, `keyAlias`, and `keyPassword`, then run `:app:assembleRelease`. Never commit the key, passwords, or properties file. Increment `versionCode` for every delivered update. CI debug APKs use the CI debug signer and cannot update the owner-signed installation.
 
-For an x86_64 emulator build, pass `-PkaiAbi=x86_64`. The normal distributable targets only ARM64. 16 KB native page alignment is enabled. CPU-only ARMv8-A is the compatibility baseline; this preview does not claim GPU or NPU acceleration.
+Default ABI: ARM64. Pass `-PkaiAbi=x86_64` for an emulator. Output: `app/build/outputs/apk/release/app-release.apk`. Without owner signing configuration, the release is unsigned.
 
-The native dependency is pinned by Git submodule to `ec5a12b85ae32fbccfa4276051382330a8e6458b`. When updating it, verify native API changes, the model-template path, cancellation and both ABI builds. Catalog integrity is verified by `python3 scripts/check-catalog.py` from this directory.
+## Service contracts and verification
 
-## Verification
+Uses the existing public website source in `therexdev/kai`: device start/poll, bearer `/auth/session`, bearer `/account/api/nodes`, `/scheduler/network/models`, and `/scheduler/consume/chat/completions` with `sessionToken`, `grantId`, `selfHost`, and server SSE frames. All app requests use the fixed HTTPS origin `https://koinosai.com`; redirects are not followed and credentials are never put in URLs. No website deployment is needed.
 
-`ModelFileTest` covers complete/corrupt/incomplete downloads, HTML instead of GGUF, cancellation, storage limits and partial-file cleanup. `StartupTest` uses Robolectric's Android 9 runtime to check first launch, Chat/Models/Settings navigation, the no-model Send guard, and conversation selection/export/deletion. The native smoke executable loads an actual small model and checks generation, stop, history trimming, oversized prompts and unload/reload:
-
-```sh
-cmake -S app/src/main/cpp -B build-host -DCMAKE_BUILD_TYPE=Release
-cmake --build build-host -j4
-./build-host/kai-engine-smoke /path/to/SmolLM2-135M-Instruct-Q8_0.gguf
-```
-
-Before promoting a production build, test Koinos Fast and Balanced on a real Pocket 5: download interruption, process restart, airplane-mode chat, Stop, model switching, full storage, low memory, export, portrait/landscape, background/foreground, controller navigation, thermals and battery life. The tiny native smoke model is for runtime testing, not evidence of assistant quality.
+Tests cover authentication gates, device linking, expiry/rejection, account separation, Local-only egress blocking, full-chat-limit route isolation, grants, own-node routing, interrupted streams, file verification, and navigation. `VisualPreviewTest` renders the actual Android layouts in portrait and handheld landscape using Robolectric native graphics. Its account data is explicitly synthetic. See `VALIDATION.md` for tested scope and remaining physical-device checks.

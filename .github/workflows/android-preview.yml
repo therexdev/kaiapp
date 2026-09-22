@@ -30,7 +30,7 @@ jobs:
           ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug --no-daemon
       - uses: actions/upload-artifact@v4
         with:
-          name: KAI-Mobile-0.1.0-ARM64-preview
+          name: KAI-Mobile-0.2.0-ARM64-ci-debug
           path: android/app/build/outputs/apk/debug/app-debug.apk
       - uses: actions/upload-artifact@v4
         if: always()
@@ -38,4 +38,5 @@ jobs:
           name: android-verification
           path: |
             android/app/build/reports/tests/
+            android/app/build/reports/screenshots/
             android/app/build/reports/lint-results-debug.*

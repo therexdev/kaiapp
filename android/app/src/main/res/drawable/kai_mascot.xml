@@ -1,4 +1,11 @@
-<vector xmlns:android="http://schemas.android.com/apk/res/android" xmlns:aapt="http://schemas.android.com/aapt" android:width="100dp" android:height="78dp" android:viewportWidth="100" android:viewportHeight="78">
+<vector xmlns:android="http://schemas.android.com/apk/res/android" xmlns:aapt="http://schemas.android.com/aapt" android:width="100dp" android:height="142dp" android:viewportWidth="100" android:viewportHeight="142"><path android:fillColor="#0C57E7" android:pathData="M33,62Q20,72 13,105Q19,114 34,107Q50,117 66,107Q81,114 87,105Q80,72 67,62Z"/>
+<path android:fillColor="#B5CDF7" android:strokeColor="#3766AC" android:strokeWidth="1" android:pathData="M35,98L30,123L44,125L49,103ZM65,98L70,123L56,125L51,103Z"/>
+<path android:fillColor="#1063E9" android:pathData="M29,120Q19,132 24,135L44,133L44,122ZM71,120Q81,132 76,135L56,133L56,122Z"/>
+<path android:fillColor="#E5EEFF" android:strokeColor="#9DBCEA" android:strokeWidth="1" android:pathData="M34,66L28,78L37,99L48,105H52L63,99L72,78L66,66Z"/>
+<path android:fillColor="#F4F8FF" android:strokeColor="#97B8EC" android:strokeWidth="1" android:pathData="M31,68Q24,67 21,77L15,88L24,93L36,76ZM69,68Q76,67 79,77L85,88L76,93L64,76Z"/>
+<path android:fillColor="#244A7B" android:pathData="M15,86Q7,91 9,101Q10,105 14,102L18,97L20,103Q27,102 27,96L23,90ZM85,86Q93,91 91,101Q90,105 86,102L82,97L80,103Q73,102 73,96L77,90Z"/>
+<path android:fillColor="#067CF6" android:strokeColor="#32D9FF" android:strokeWidth="1" android:pathData="M60,81a10,10 0,1 1,-20 0a10,10 0,1 1,20 0"/>
+<path android:fillColor="@android:color/transparent" android:strokeColor="#62F2FF" android:strokeWidth="3" android:strokeLineCap="round" android:pathData="M46,76v10M54,76l-8,8M51,81l4,5"/>
 <path android:fillColor="#007DF4" android:pathData="M12,29L12,14Q12,8 16,8Q20,8 20,15L20,31ZM80,31L80,15Q80,8 84,8Q88,8 88,14L88,29Z"/>
 <path android:fillColor="#31DFFB" android:pathData="M15,14Q16,11 17,14L17,29H15ZM83,14Q84,11 85,14L85,29H83Z"/>
 <path android:fillColor="#1263E9" android:pathData="M12,28Q4,28 4,41Q4,54 14,53L20,47V34ZM88,28Q96,28 96,41Q96,54 86,53L80,47V34Z"/>

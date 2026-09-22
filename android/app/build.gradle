@@ -1,24 +1,38 @@
 plugins { id 'com.android.application' }
 
+def signingPath = System.getenv('KAI_SIGNING_PROPERTIES')
+def ownerSigning = new Properties()
+if (signingPath) file(signingPath).withInputStream { ownerSigning.load(it) }
+
 android {
     namespace 'io.koinosai.mobile'
     compileSdk 35
     buildToolsVersion '35.0.0'
     ndkVersion '27.2.12479018'
     defaultConfig {
-        applicationId 'io.koinosai.mobile.preview'
+        applicationId 'io.koinosai.mobile'
         minSdk 28
         targetSdk 35
-        versionCode 1
-        versionName '0.1.0-preview'
+        versionCode 2
+        versionName '0.2.0-preview'
         ndk { abiFilters providers.gradleProperty('kaiAbi').getOrElse('arm64-v8a') }
         externalNativeBuild {
             cmake { arguments '-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON'; cppFlags '-std=c++17' }
         }
     }
+    signingConfigs {
+        if (signingPath) {
+            owner {
+                storeFile file(ownerSigning.getProperty('storeFile'))
+                storePassword ownerSigning.getProperty('storePassword')
+                keyAlias ownerSigning.getProperty('keyAlias')
+                keyPassword ownerSigning.getProperty('keyPassword')
+            }
+        }
+    }
     buildTypes {
         debug { debuggable true }
-        release { minifyEnabled false }
+        release { minifyEnabled false; if (signingPath) signingConfig signingConfigs.owner }
     }
     externalNativeBuild { cmake { path 'src/main/cpp/CMakeLists.txt'; version '3.22.1' } }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }

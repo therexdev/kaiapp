@@ -1,3 +1,11 @@
+## Android 0.2 · KAI accounts and network
+
+- Added KAI robot branding, adaptive home-screen icon, clean native navigation, and portrait/handheld layouts.
+- Accounts uses the existing website device sign-in and displays your linked AI nodes and mining/block-producer snapshots, with separate AI nodes, Mining, and Access views.
+- Sign-in now unlocks both local and remote inference. Local only blocks network activity and supports offline use with a saved verified session for up to 30 days.
+- Network and My Node use existing spending grants, live model prices, explicit send confirmation, streamed responses and Stop. Switching modes starts an empty conversation; local history never silently moves online.
+- Owner-signed KAI installs alongside the original temporary-key Android preview. See `android/README.md` for installation and retained-signing instructions.
+
 ## Android local-model preview
 
 - Added a separate native Android target for local model downloads/imports, load/unload/delete, offline streaming chat, saved conversations and performance settings.

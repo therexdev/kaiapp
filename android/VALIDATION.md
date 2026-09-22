@@ -1,22 +1,23 @@
-# Preview validation — 2026-09-22
+# Android 0.2 validation — 2026-09-22
 
-Validated locally with JDK 17, SDK 35, NDK 27.2.12479018 and the pinned llama.cpp revision.
+## Passed
 
-| Check | Result |
-| --- | --- |
-| ARM64 APK assembly | Passed |
-| Android model file tests | 6 passed |
-| Android startup/navigation/conversation tests (Robolectric, API 28) | 2 passed |
-| Android lint | No errors; non-blocking compatibility, storage and localization warnings |
-| APK signature verification | Passed, Android debug signer, v2 signature |
-| APK ZIP alignment and native ELF 16 KB page alignment | Passed |
-| Android catalog vs desktop pinned model identities | Both packages match |
-| Native generation with SmolLM2 135M Q8_0 on the build host | Passed; generated a real response |
-| Native cancellation, context trimming, oversized prompt rejection, unload/reload | Passed |
-| x86_64 emulator APK assembly | Passed |
-| Full Android emulator smoke test | Not completed: emulator System UI/package services became unresponsive without hardware acceleration |
-| Physical Retroid Pocket 5 | Not available; performance, battery and full download/inference flow remain to be tested |
+- Non-debuggable, ARM64 release APK build with the retained owner signing key; local Gradle unit-test and Android lint gates.
+- 23 Android tests: six file-integrity/import tests, eight account/route contract tests, four network-stream tests, three startup/navigation tests, and two actual-layout rendering tests.
+- Device-link request/response contract, saved session, expired/rejected session gates, retry after expired link code, sign-out, account separation, Local-only request blocking, empty conversation on route changes including the 30-chat limit, explicit grant and own-node request shape, partial-response preservation, bounded/Unicode/multiline SSE handling.
+- Native Android layout render review at 411 × 891 portrait and 960 × 540 handheld landscape, including the adaptive launcher icon, sign-in, model library, account overview/mining fixtures, mode selection, and settings. Account screenshots contain synthetic data only.
+- Catalog check: both Android packages match the desktop model identity, byte size and SHA-256.
+- APK signature and 16 KB ZIP/native-library alignment checks. Manifest inspected for the application ID, version, ARM64 ABI and disabled debugging.
+- Live, unauthenticated read-only checks: `/auth/session` and `/account/api/nodes` returned 401; `/scheduler/network/models` returned a live model/price catalog. No user credentials were used and no paid request was submitted.
+- Website API contracts inspected in `therexdev/kai` commit `13a7ba436a67a6442f0311f065898b744538f71f`; Android changes are based on the existing Android branch and the latest Test base `125182907e9aa9b4d4275df3634d7921f9a59fe4`.
+- No desktop application source, dependencies, wallet, mining, or server code changed. No service deployment is required.
 
-The broader desktop `npm test` attempt produced 769 passing test lines and six failing test lines in the unchanged Smart-Turn cache/node-folder tests before it was stopped. Desktop source and dependencies were not changed. Those results are not treated as a passing desktop release gate; this preview is isolated on its Android feature branch.
+Lint has no errors; remaining warnings concern optional ChromeOS ABI coverage, storage-space APIs, English strings, and unused small vector resources. These are not runtime or signing failures.
 
-The APK is an initial testing build with its own app ID (`io.koinosai.mobile.preview`). It is not a production Android release or evidence of desktop feature parity. A production signing key and update channel must be configured before wider release. The native test does not measure Pocket 5 inference speed, and the tiny smoke model is not part of the user-facing model catalog.
+## Scope and remaining device checks
+
+The user confirmed the original 0.1 local-model APK works on their device. The native inference implementation and pinned llama.cpp revision are unchanged in 0.2. The earlier native smoke tests passed, but were not rerun as part of this UI/account revision.
+
+Robolectric rendering is actual Android View rendering, not an installed emulator or physical device. A real website account sign-in, Android Keystore round trip, account-node refresh and remote/own-node inference must still be exercised on the Pocket 5. No end-to-end account login or paid generation is claimed. Check return from browser sign-in, cached-session airplane mode, model downloads, Stop, portrait/landscape and controller focus on the device.
+
+The delivered package installs as **KAI** beside the original **KAI Mobile Preview** because that initial preview's temporary signing key is unavailable. The new owner signing material is retained separately so subsequent delivered APKs can update this installation. CI debug APKs are signed differently and are only for development.

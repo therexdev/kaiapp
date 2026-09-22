@@ -16,7 +16,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class KaiApp extends Application {
     static final long GB = 1024L * 1024 * 1024;
-    static final String SYSTEM = "You are KAI, a helpful local AI companion. Be clear, friendly, and concise. You cannot browse the web or operate apps. Never claim to have performed an action you cannot perform.";
+    static final String SYSTEM = "You are KAI, a helpful AI companion. Be clear, friendly, and concise. You cannot browse the web or operate apps. Never claim to have performed an action you cannot perform.";
     final Handler main = new Handler(Looper.getMainLooper());
     final ExecutorService inference = Executors.newSingleThreadExecutor();
     final ExecutorService disk = Executors.newSingleThreadExecutor();
@@ -26,6 +26,42 @@ public final class KaiApp extends Application {
     final AtomicBoolean fileCancelled = new AtomicBoolean();
     final Set<String> verifying = new HashSet<>();
     SharedPreferences prefs;
+    AccountState account;
+    NetworkApi chatApi=new NetworkApi();
+    final ExecutorService network=Executors.newSingleThreadExecutor();
+    final AtomicBoolean networkStopped=new AtomicBoolean();
+    String route="local", grantId="", networkModel="auto";
+    boolean networkGenerating;
+    boolean networkAllowed(){return !route.equals("local");}
+    boolean requireAccount(){if(account.signedIn())return true;fail("Sign in from Accounts to use KAI.");return false;}
+    String routeLabel(){return route.equals("local")?"Local only":route.equals("own")?"My node":"Network";}
+    void setRoute(String value){
+        if(!Arrays.asList("local","network","own").contains(value))return;
+        if(busy){fail("Stop the current task before switching modes.");return;}
+        if(!route.equals(value)&&current!=null&&!current.messages.isEmpty()&&visibleChats().size()>=30){fail("Delete a saved conversation before starting a chat in another mode.");return;}
+        boolean different=!route.equals(value);route=value;prefs.edit().putString("route",route).apply();
+        if(!networkAllowed()){
+            account.cancelRequests();networkStopped.set(true);chatApi.cancel();
+            for(Model m:models)if(m.downloadId!=-1&&!verifying.contains(m.id))cancelDownload(m);
+        }
+        if(different&&current!=null&&!current.messages.isEmpty())newChat();
+        if(current!=null)current.route=route;
+        status=networkAllowed()?"Network access enabled":"Local only · no network requests";changed();
+    }
+    List<Conversation> visibleChats(){List<Conversation> result=new ArrayList<>();if(account.signedIn())for(Conversation c:chats)if(c.owner.equals(account.owner()))result.add(c);return result;}
+    void hideAccountChats(){current=new Conversation();grantId="";changed();}
+    void accountChanged(){
+        String owner=account.owner();if(owner.isEmpty())return;
+        // One-time adoption of the original device-only chats. No content is uploaded.
+        for(Conversation c:chats)if(c.owner.isEmpty())c.owner=owner;
+        if(!current.owner.equals(owner)){
+            current=visibleChats().stream().filter(c->c.route.equals(route)).findFirst().orElse(null);
+            if(current==null){current=new Conversation();current.owner=owner;current.route=route;}
+        }
+        if(account.grant(grantId)==null)grantId="";
+        saveChats();changed();
+    }
+
     DownloadManager downloads;
     Runnable listener;
     Conversation current;
@@ -68,18 +104,19 @@ public final class KaiApp extends Application {
         }
     }
     static final class Conversation {
-        String id=UUID.randomUUID().toString(), title="New conversation", modelName="";
+        String id=UUID.randomUUID().toString(), title="New conversation", modelName="", owner="", route="local";
         final List<ChatMessage> messages=new ArrayList<>();
         JSONObject json() {
             JSONObject o=new JSONObject(); JSONArray a=new JSONArray();
             for(ChatMessage m:messages) a.put(m.json());
-            try { o.put("id",id).put("title",title).put("modelName",modelName).put("messages",a); } catch(JSONException ignored){}
+            try { o.put("id",id).put("title",title).put("modelName",modelName).put("owner",owner).put("route",route).put("messages",a); } catch(JSONException ignored){}
             return o;
         }
     }
 
     @Override public void onCreate() {
         super.onCreate(); prefs=getSharedPreferences("kai",MODE_PRIVATE); downloads=getSystemService(DownloadManager.class);
+        String savedRoute=prefs.getString("route","local");route=Arrays.asList("local","network","own").contains(savedRoute)?savedRoute:"local";
         try (InputStream input=getAssets().open("models.json")) {
             JSONArray a=new JSONArray(new String(ModelFile.readLimited(input,256*1024),StandardCharsets.UTF_8));
             for(int i=0;i<a.length();i++) models.add(new Model(a.getJSONObject(i)));
@@ -93,8 +130,10 @@ public final class KaiApp extends Application {
                 m.installed=prefs.getBoolean("installed."+m.id,false) && file(m).isFile();
             }
         } catch(Exception e) { error="Could not read the model catalog: "+safe(e); }
-        loadChats(); if(current==null) newChat();
+        account=new AccountState(this);loadChats(); current=new Conversation();account.restore();
         if(NativeEngine.unavailable!=null) error=NativeEngine.unavailable;
+        pollDownloads();
+        if(!networkAllowed())for(Model m:models)if(m.downloadId!=-1&&!verifying.contains(m.id))cancelDownload(m);
         main.post(downloadPoll);
     }
     File modelDir() {
@@ -114,6 +153,8 @@ public final class KaiApp extends Application {
     static String size(long bytes) { return String.format(Locale.US,"%.1f GB",bytes/(double)GB); }
 
     void download(Model m) {
+        if(!requireAccount())return;
+        if(!networkAllowed()){fail("Enable network access to download models. You can switch back to Local only afterward.");return;}
         if(m.downloadId!=-1 || m.installed || m.imported) return;
         if(file(m).getParentFile().getUsableSpace()<m.bytes+256*1024*1024L) { fail("Free up storage before downloading this model."); return; }
         try {
@@ -171,6 +212,7 @@ public final class KaiApp extends Application {
         });
     }
     void importModel(Uri uri) {
+        if(!requireAccount())return;
         if(importing || busy) return;
         importing=true; fileCancelled.set(false); transferStatus="Importing model…"; changed();
         String id="import-"+UUID.randomUUID();
@@ -213,6 +255,7 @@ public final class KaiApp extends Application {
         if(m.imported) { models.remove(m); saveImports(); } changed();
     }
     void loadModel(Model m) {
+        if(!requireAccount())return;
         if(busy||importing) return;
         if(NativeEngine.unavailable!=null) { fail(NativeEngine.unavailable); return; }
         if(!m.installed||!file(m).isFile()) { m.installed=false; fail("Download or import this model first."); return; }
@@ -240,13 +283,17 @@ public final class KaiApp extends Application {
         busy=true; status="Unloading model…"; changed();
         inference.execute(()-> { NativeEngine.unload(); main.post(()-> {active=null; busy=false; status="Model unloaded · memory released"; changed();}); });
     }
-    void stop() { fileCancelled.set(true); if(NativeEngine.unavailable==null) NativeEngine.cancel(); if(busy) status="Stopping…"; changed(); }
+    void stop() { networkStopped.set(true);chatApi.cancel();fileCancelled.set(true); if(NativeEngine.unavailable==null) NativeEngine.cancel(); if(busy) status="Stopping…"; changed(); }
     void send(String prompt) {
+        if(!requireAccount())return;
+        if(networkAllowed()){sendNetwork(prompt);return;}
         prompt=prompt.trim();
         if(busy||prompt.isEmpty()) return;
         if(active==null) { fail("Load a model in Models to start chatting."); return; }
+        if(!current.route.equals("local")&&!current.messages.isEmpty()){fail("Start a new local conversation to continue.");return;}
         if(prompt.length()>12000) { fail("Please keep each message below 12,000 characters."); return; }
         if(current.messages.size()>=100) { fail("This conversation is full. Start a new chat; this one stays saved."); return; }
+        if(!chats.contains(current)){if(visibleChats().size()>=30){fail("Delete a saved chat before starting another.");return;}current.owner=account.owner();current.route=route;chats.add(0,current);}
         error="";
         if(current.messages.isEmpty()) current.title=prompt.substring(0,Math.min(44,prompt.length()));
         // An interrupted empty assistant turn is omitted from the next prompt.
@@ -288,18 +335,71 @@ public final class KaiApp extends Application {
             }
         });
     }
+    void sendNetwork(String prompt) {
+        if(!requireAccount()||!networkAllowed()||busy)return;
+        prompt=prompt.trim();if(prompt.isEmpty())return;
+        if(prompt.length()>12000){fail("Please keep each message below 12,000 characters.");return;}
+        if(current.messages.size()>=100){fail("Start a new conversation to continue.");return;}
+        if(!chats.contains(current)&&visibleChats().size()>=30){fail("Delete a saved chat before starting another.");return;}
+        JSONObject grant=account.grant(grantId);
+        if(grant==null){fail("Choose an active spending grant in Accounts before using the network.");return;}
+        if(!current.route.equals(route)&&!current.messages.isEmpty()){fail("Start a new chat for this mode. Local history is never sent automatically.");return;}
+        if(current.messages.isEmpty())current.title=prompt.substring(0,Math.min(44,prompt.length()));
+        current.owner=account.owner();current.route=route;
+        if(!chats.contains(current))chats.add(0,current);
+        current.messages.add(new ChatMessage("user",prompt));current.modelName=routeLabel();
+        final JSONObject request;
+        try{
+            JSONArray messages=new JSONArray();
+            messages.put(new JSONObject().put("role","system").put("content",prefs.getString("system",SYSTEM)));
+            for(ChatMessage m:current.messages)if(!m.text.isEmpty())messages.put(new JSONObject().put("role",m.role).put("content",m.text));
+            request=new JSONObject().put("messages",messages).put("model",networkModel).put("stream",true)
+                .put("max_tokens",Math.max(64,Math.min(1024,prefs.getInt("tokens",384))))
+                .put("sessionToken",account.token).put("grantId",grantId).put("selfHost",route.equals("own"));
+        }catch(JSONException e){fail("Could not prepare this request.");return;}
+        ChatMessage answer=new ChatMessage("assistant","");answer.incomplete=true;Conversation conversation=current;conversation.messages.add(answer);
+        busy=true;generating=true;networkGenerating=true;networkStopped.set(false);error="";status="Connecting to "+routeLabel()+"…";
+        generationStarted=SystemClock.elapsedRealtime();checkpoint=generationStarted;saveChats();changed();
+        final String requestOwner=account.owner();
+        network.execute(()->{
+            StringBuilder output=new StringBuilder();final JSONObject[] completed={null};
+            try{
+                chatApi.stream(request,networkStopped,frame->{
+                    if(frame.has("delta"))output.append(frame.optString("delta"));
+                    if(frame.optBoolean("done")){output.setLength(0);output.append(frame.optString("output"));completed[0]=frame;}
+                    if(output.length()>64000)throw new IOException("Reply exceeded the saved message limit.");
+                    String text=output.toString();
+                    main.post(()->{answer.text=text;if(account.owner().equals(requestOwner))status="KAI is replying over the network…";
+                        if(SystemClock.elapsedRealtime()-checkpoint>1500){saveChats();checkpoint=SystemClock.elapsedRealtime();}changed();});
+                });
+                main.post(()->{
+                    answer.incomplete=completed[0]==null;busy=false;generating=false;networkGenerating=false;
+                    JSONObject done=completed[0];
+                    status=done==null?"Reply interrupted":String.format(Locale.US,"Complete · %s · $%.6f",done.optString("servedModel","network"),done.optDouble("costUsd",0));
+                    saveChats();changed();if(account.owner().equals(requestOwner)&&networkAllowed())account.refresh();
+                });
+            }catch(Exception e){main.post(()->{
+                busy=false;generating=false;networkGenerating=false;status=networkStopped.get()?"Stopped · partial reply saved":"Network reply interrupted";
+                saveChats();
+                boolean wasStopped=networkStopped.get();
+                if(e instanceof NetworkApi.ApiError&&((NetworkApi.ApiError)e).status==401)account.reject();
+                if(!wasStopped)fail(e instanceof IOException?safe(e):"Could not read the network response.");else changed();
+            });}
+        });
+    }
     void newChat() {
         if(busy) return;
-        if(chats.size()>=30) { fail("You have 30 saved chats. Delete a chat before starting another."); return; }
-        current=new Conversation(); chats.add(0,current); saveChats(); changed();
+        if(visibleChats().size()>=30) { fail("You have 30 saved chats. Delete a chat before starting another."); return; }
+        current=new Conversation();current.owner=account.owner();current.route=route;if(account.signedIn())chats.add(0,current);saveChats();changed();
     }
-    void selectChat(Conversation c) { if(busy)return; current=c; saveChats(); changed(); }
+    void selectChat(Conversation c) { if(busy||!account.signedIn()||!c.owner.equals(account.owner()))return; if(!c.route.equals(route)){fail("Switch to "+(c.route.equals("local")?"Local only":c.route.equals("own")?"My node":"Network")+" before opening this conversation.");return;}current=c;saveChats();changed(); }
     void deleteChat(Conversation c) {
-        if(busy)return; chats.remove(c);
-        if(current==c) current=chats.isEmpty()?null:chats.get(0);
+        if(busy||!account.signedIn()||!c.owner.equals(account.owner()))return; chats.remove(c);
+        if(current==c) current=visibleChats().isEmpty()?null:visibleChats().get(0);
         if(current==null) newChat(); else {saveChats(); changed();}
     }
     String exportChat() {
+        if(!account.signedIn()||!current.owner.equals(account.owner()))return "";
         StringBuilder s=new StringBuilder("KAI · "+current.title+"\nModel: "+current.modelName+"\n\n");
         for(ChatMessage m:current.messages) s.append(m.role.equals("user")?"You":"KAI").append(m.incomplete?" (partial)":"").append(":\n").append(m.text).append("\n\n");
         return s.toString();
@@ -309,9 +409,9 @@ public final class KaiApp extends Application {
         try(InputStream in=new AtomicFile(path).openRead()) {
             JSONObject root=new JSONObject(new String(ModelFile.readLimited(in,16*1024*1024),StandardCharsets.UTF_8));
             JSONArray a=root.getJSONArray("chats");
-            for(int i=0;i<Math.min(30,a.length());i++) {
+            for(int i=0;i<Math.min(300,a.length());i++) {
                 JSONObject o=a.getJSONObject(i); Conversation c=new Conversation();
-                c.id=o.getString("id"); c.title=o.getString("title"); c.modelName=o.optString("modelName");
+                c.id=o.getString("id"); c.title=o.getString("title"); c.modelName=o.optString("modelName");c.owner=o.optString("owner");c.route=o.optString("route","local");
                 JSONArray messages=o.getJSONArray("messages");
                 for(int n=0;n<Math.min(102,messages.length());n++) {
                     JSONObject m=messages.getJSONObject(n); String role=m.getString("role"), text=m.getString("text");
