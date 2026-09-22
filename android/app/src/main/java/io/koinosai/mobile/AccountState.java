@@ -114,6 +114,7 @@ final class AccountState {
         String old=token;boolean revoke=app.networkAllowed();cancelRequests();
         token="";account=new JSONObject();nodes=new JSONArray();networkModels=new JSONArray();nodesAt=0;validUntil=0;rejected=false;notice="Signed out on this device";error="";
         app.stop();app.hideAccountChats();app.route="local";app.prefs.edit().putString("route","local").apply();app.networkModel="auto";
+        if(app.voicePack!=null)app.voicePack.cancel();
         for(KaiApp.Model m:app.models)if(m.downloadId!=-1&&!app.verifying.contains(m.id))app.cancelDownload(m);changed();
         worker.execute(()->{vault.clear();if(revoke&&!old.isEmpty()){try{api.json("/auth/logout",old,new JSONObject(),new AtomicBoolean());}catch(Exception ignored){}}});
     }

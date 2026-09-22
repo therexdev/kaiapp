@@ -36,6 +36,20 @@ public class StartupTest {
     }
     private TextView find(String label) {return find(activity.getWindow().getDecorView(),label);}
     private void signIn() throws Exception {app.account.token="test-only";app.account.account=new JSONObject().put("id","test-account").put("email","test@example.invalid");app.account.validUntil=System.currentTimeMillis()+60000;app.accountChanged();}
+    private VoiceController fakeVoice(boolean conversation){
+        VoiceController previous=org.robolectric.util.ReflectionHelpers.getField(activity,"voice");previous.close();
+        VoiceController voice=new VoiceController(new VoiceControllerTest.Mic(),new VoiceControllerTest.Speaker(),new VoiceControllerTest.Host());
+        org.robolectric.util.ReflectionHelpers.setField(activity,"voice",voice);
+        String scope=org.robolectric.util.ReflectionHelpers.callInstanceMethod(activity,"voiceScope");org.robolectric.util.ReflectionHelpers.setField(activity,"voiceScope",scope);
+        voice.start(conversation);return voice;
+    }
+    @Test public void leavingChatAndPausingActivityStopVoice()throws Exception{
+        signIn();VoiceController voice=fakeVoice(true);assertTrue(voice.listening);find("Accounts").performClick();assertFalse(voice.active());
+        find("Chat").performClick();voice=fakeVoice(true);controller.pause();assertFalse(voice.active());controller.resume();assertFalse(voice.active());
+    }
+    @Test public void dictationStillWorksOfflineWithWebSelected()throws Exception{
+        signIn();app.prefs.edit().putBoolean("webSearch",true).apply();VoiceController voice=fakeVoice(false);app.changed();assertTrue(voice.listening);assertFalse(app.networkAllowed());
+    }
     @Test public void firstLaunchRequiresAccountAndAllFiveTabsOpen() {
         assertNotNull(find("Get started · Sign in"));assertNull(app.active);assertEquals(2,app.models.size());
         find("Models").performClick();assertNotNull(find("Koinos Fast"));assertNotNull(find("Koinos Balanced"));assertNotNull(find("Import GGUF"));
@@ -45,7 +59,7 @@ public class StartupTest {
         find("Chat").performClick();assertNull(find("Send"));assertNotNull(find("Get started · Sign in"));
     }
     @Test public void signedInLocalChatOpensWithoutSendingAnythingOnline() throws Exception {
-        signIn();assertNotNull(find("Choose a local model"));assertFalse(find("Send").isEnabled());assertFalse(app.networkAllowed());
+        signIn();assertNotNull(find("Choose a local model"));assertNotNull(find("Mic"));assertNotNull(find("Voice chat"));assertNotNull(find("Web"));assertFalse(find("Send").isEnabled());assertFalse(app.networkAllowed());
         app.send("Hello");assertTrue(app.error.contains("Load a model"));assertFalse(app.generating);
     }
     @Test public void conversationsAreExportableOnlyForTheirAccount() throws Exception {

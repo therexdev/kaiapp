@@ -24,7 +24,7 @@ class NetworkApi {
         if(stop.get())throw new IOException("Stopped");
         HttpsURLConnection c=(HttpsURLConnection)new URL(ORIGIN+path).openConnection();
         c.setInstanceFollowRedirects(false);c.setConnectTimeout(20000);c.setReadTimeout(path.endsWith("/chat/completions")?150000:20000);c.setUseCaches(false);
-        c.setRequestProperty("Accept","application/json, text/event-stream");c.setRequestProperty("User-Agent","KAI-Mobile/0.2.2");
+        c.setRequestProperty("Accept","application/json, text/event-stream");c.setRequestProperty("User-Agent","KAI-Mobile/0.3.0");
         if(token!=null&&!token.isEmpty())c.setRequestProperty("Authorization","Bearer "+token);
         connections.add(c);
         try {

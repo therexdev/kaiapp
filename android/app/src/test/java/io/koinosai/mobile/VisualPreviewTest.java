@@ -32,7 +32,12 @@ public class VisualPreviewTest {
         tab("Accounts");capture("sign-in");
         app.account.token="preview-fixture";app.account.validUntil=System.currentTimeMillis()+60000;app.account.account=new JSONObject().put("id","fixture").put("email","you@koinos.example");app.accountChanged();app.setNetworkEnabled(true);
         app.account.nodesAt=System.currentTimeMillis();app.account.nodes=new JSONArray().put(new JSONObject().put("address","1KAIExampleNodeForVisualReview").put("online",true).put("ramGb",32).put("models",new JSONArray().put("koinos-fast")).put("producer",new JSONObject().put("producingVhp",125000).put("vhpSats","12500000000000").put("koinSats","140000000").put("reportedAt","2026-09-22T18:50:00Z").put("sharePct",0.0032).put("blocksPerDay",0.65)));app.account.changed();capture("account-fixture");tab("Mining");capture("mining-fixture");
-        tab("Chat");capture("chat");tab("Models");capture("models");tab("Network");capture("network");tab("Settings");capture("settings");app.setNetworkEnabled(false);tab("Network");capture("offline-modes");
+        tab("Chat");capture("chat");
+        KaiApp.ChatMessage question=new KaiApp.ChatMessage("user","What processor does the Retroid Pocket 5 use?");
+        KaiApp.ChatMessage answer=new KaiApp.ChatMessage("assistant","The Retroid Pocket 5 uses the Snapdragon 865. [1]");
+        answer.research=new WebSearch.Result("Preview fixture","Retroid Pocket 5",System.currentTimeMillis(),java.util.Arrays.asList(new WebSearch.Source("Retroid Pocket 5 · specifications","https://www.goretroid.com/","Snapdragon 865 processor.")));
+        app.current.messages.add(question);app.current.messages.add(answer);app.prefs.edit().putBoolean("webSearch",true).apply();app.changed();capture("web-answer-fixture");
+        tab("Models");capture("models");tab("Network");capture("network");tab("Settings");capture("settings");app.setNetworkEnabled(false);tab("Network");capture("offline-modes");
     }
     @Test @Config(qualifiers="w960dp-h540dp-land-mdpi") public void handheldLandscape() throws Exception {capture("handheld-welcome");tab("Accounts");capture("handheld-account");}
 }

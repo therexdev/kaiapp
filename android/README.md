@@ -1,6 +1,6 @@
-# KAI Mobile 0.2.2 preview
+# KAI Mobile 0.3.0 preview
 
-Native Android model management, local chat, Koinos account sign-in, network chat, and account-scoped AI/mining node monitoring. Android 9+, ARM64; suited to the Retroid Pocket 5 and compatible phones/tablets.
+Native Android model management, local and network chat, offline voice recognition, spoken conversations, optional web search, Koinos account sign-in, and account-scoped AI/mining node monitoring. Android 9+, ARM64; suited to the Retroid Pocket 5 and compatible phones/tablets.
 
 ## Mascot artwork
 
@@ -10,16 +10,27 @@ To refresh the exports after the shared art changes, install the root npm depend
 
 ## Install and sign in
 
-Install `KAI-Mobile-0.2.2-ARM64-preview.apk`. This build is named **KAI** (`io.koinosai.mobile`) and installs beside the original **KAI Mobile Preview** (`io.koinosai.mobile.preview`). **0.2.2 updates the owner-signed 0.2.0 / 0.2.1 KAI app in place**, preserving accounts, chats and models. The original preview used a temporary signing key that was not retained. Android cannot install a differently signed update over it. Keeping a separate app protects the original chats and model files. Export any conversations you want from that preview; download or import models into KAI. Do not uninstall the old preview until you have saved what you need.
+Install `KAI-Mobile-0.3.0-ARM64-preview.apk`. This build is named **KAI** (`io.koinosai.mobile`) and installs beside the original **KAI Mobile Preview** (`io.koinosai.mobile.preview`). **0.3.0 updates the owner-signed 0.2.x KAI app in place**, preserving accounts, chats and models. The original preview used a temporary signing key that was not retained. Android cannot install a differently signed update over it. Keeping a separate app protects the original chats and model files. Export any conversations you want from that preview; download or import models into KAI. Do not uninstall the old preview until you have saved what you need.
 
 1. Open **Accounts → Sign in with KAI** and enable network access.
 2. Open **koinosai.com/link**, sign in through the existing website, approve the displayed device code, and return to KAI. Passwords, Google sign-in and passkeys stay in the browser.
 3. **Models** downloads or imports the same Fast/Balanced GGUF packages as the desktop. Download, verify and load a model.
 4. Choose **Network → Local** for on-device chat. You stay signed in, and account updates and model downloads remain available while online. Switch freely between **Local**, **Network**, and **My node** without disconnecting or cancelling downloads. A loaded local model stays loaded.
-5. To chat remotely, select **Network** or **My node**, choose an existing account spending grant under **Accounts → Access**, and optionally select a live network model. Review and confirm each send. No grant is created or widened by Android.
+5. To chat remotely, select **Network** or **My node**, choose an existing account spending grant under **Accounts → Access**, and optionally select a live network model. Review and confirm each typed send; voice chat authorizes spoken follow-ups for the current foreground session. No grant is created or widened by Android.
 6. **Accounts → AI nodes / Mining** shows the account's linked compute workers and block-producer snapshots. Refresh while network access is enabled. These are your existing nodes; the handheld does not start mining or serve earning jobs.
 
 7. **Settings → Offline mode** is a separate choice that stops account/network requests and cancels unfinished downloads while keeping your saved sign-in. Turn it off to reconnect without changing the selected model. A fresh install starts offline until sign-in or an explicit Go online action. Upgrades preserve the previous Local-only privacy setting.
+
+## Voice and web search
+
+- In **Settings → Voice & spoken replies**, download the optional **41 MB English voice pack**. It is pinned by size and SHA-256, verified before installation, and works offline afterward. Setup needs 160 MB free. Downloading follows the Wi-Fi-only preference and never changes the selected model route.
+- **Mic** transcribes locally into the composer so you can review and send. Grant microphone permission when prompted. Handhelds without a microphone need a connected headset or microphone.
+- **Voice chat** starts a visible, foreground conversation: listen, automatically send the recognized question to the selected model, speak the reply, then listen for a follow-up. The microphone pauses during playback. **End voice** / **Stop**, leaving Chat, leaving the app, a route/account/grant change, or 60 seconds without a recognized question ends the session. There is no background wake word or spoken interruption in this version.
+- **Read replies aloud** also speaks typed replies. Playback uses an installed **offline English Android TTS voice**, with Bright, Natural and Lower pitch options. Open **Android voice settings** to install/configure a voice if needed. It does not include desktop Azelma/Pocket TTS and never falls back to a network speech engine. Audio is not saved or uploaded; recognized text follows your selected chat route.
+- **Web** is off by default. Enabling it discloses that each question's first 400 characters go to DuckDuckGo HTML search, with Bing RSS as a fallback. Earlier chat history and account credentials are not sent to search providers. Query terms appear in the provider's HTTPS request URL and are subject to that provider's handling.
+- Search snippets are passed to the selected model as untrusted evidence, with numbered source links and retrieval time saved in the chat. KAI does not automatically open or fetch result pages. Sources are search snippets, not verified full-page reading; small local models can still misinterpret evidence. Obviously unrelated results are filtered. If search is blocked or finds no usable result, KAI shows an error and restores the question instead of silently answering from old model knowledge.
+- Web works with **Local**, **Network**, or **My node** while network access is enabled. Local inference stays on the device; the explicit Web option still sends the current search query to its providers. **Offline mode** blocks search. Turn Web off to continue entirely offline.
+- Voice chat confirms the chosen route, selected spending grant and Web setting at session start. Spoken follow-ups may spend from the grant, with server cap/expiry enforcement. Changing that scope ends the session; it must be explicitly started again.
 
 ## Privacy and behavior
 
@@ -29,9 +40,9 @@ Install `KAI-Mobile-0.2.2-ARM64-preview.apk`. This build is named **KAI** (`io.k
 - Local conversations are stored only on this device and partitioned by account. Sign-out hides them and locks both inference paths. Signing back into that account restores access. Explicit export is available in Chat → Chats.
 - Switching chat mode opens an empty conversation. Local history is never silently uploaded. My Node sets the server's `selfHost` flag and never falls back to paid providers. Its grant selects the wallet/node, just as on the website.
 - Remote chat uses the existing session-and-grant scheduler contract, with server-side cap/expiry enforcement, cancellation, bounded SSE parsing, partial-reply preservation, and reported final cost. Remote conversations are saved locally; they are not synchronized into the website's chat list.
-- Model choice and network permission are saved independently. Local inference never sends chat messages online, even when account connectivity is enabled. Offline mode makes no account/scheduler requests. Signing in, refreshing an account, or downloading a model does not change the selected model route. Opening a website link is an explicit external-browser action. Sign-out attempts server revocation only if network access was enabled when requested, then removes the local credential even if revocation fails.
+- Model choice and network permission are saved independently. Local inference stays on the device. With Web off, local chat text is not sent online; Web on explicitly sends the current query to search providers. Offline mode makes no account/scheduler requests. Signing in, refreshing an account, or downloading a model does not change the selected model route. Opening a website link is an explicit external-browser action. Sign-out attempts server revocation only if network access was enabled when requested, then removes the local credential even if revocation fails.
 - Node cards show a timestamped snapshot. Refresh failures retain the last snapshot and show an error; they do not replace it with a misleading empty/healthy state. Mining estimates are the existing node's reported estimates, with measured-history and stale-price flags preserved.
-- No wallet keys, wallet transfers, node control, phone mining, voice, desktop tools, or automatic local/network fallback are included.
+- No wallet keys, wallet transfers, node control, phone mining, desktop tools, or automatic local/network fallback are included.
 
 ## Local model engine
 
@@ -53,6 +64,6 @@ Default ABI: ARM64. Pass `-PkaiAbi=x86_64` for an emulator. Output: `app/build/o
 
 ## Service contracts and verification
 
-Uses the existing public website source in `therexdev/kai`: device start/poll, bearer `/auth/session`, bearer `/account/api/nodes`, `/scheduler/network/models`, and `/scheduler/consume/chat/completions` with `sessionToken`, `grantId`, `selfHost`, and server SSE frames. All app requests use the fixed HTTPS origin `https://koinosai.com`; redirects are not followed and credentials are never put in URLs. No website deployment is needed.
+Uses the existing public website source in `therexdev/kai`: device start/poll, bearer `/auth/session`, bearer `/account/api/nodes`, `/scheduler/network/models`, and `/scheduler/consume/chat/completions` with `sessionToken`, `grantId`, `selfHost`, and server SSE frames. Account/scheduler requests use the fixed HTTPS origin `https://koinosai.com`; redirects are not followed and credentials are never put in URLs. Search uses fixed HTTPS DuckDuckGo/Bing endpoints, without account credentials or redirect following. The optional voice pack downloads from Alpha Cephei through Android DownloadManager and is checked against its pinned hash. No website deployment is needed.
 
-Tests cover authentication gates, device linking, expiry/rejection, account separation, independent route/connectivity persistence, switching without sign-out or download cancellation, Offline-mode egress blocking, full-chat-limit route isolation, grants, own-node routing, interrupted streams, file verification, and navigation. `VisualPreviewTest` renders the actual Android layouts in portrait and handheld landscape using Robolectric native graphics. Its account data is explicitly synthetic. See `VALIDATION.md` for tested scope and remaining physical-device checks.
+Tests also cover voice turn sequencing, Stop and late callbacks, offline TTS voice selection, speech-pack integrity/path traversal, bounded search parsing, relevance filtering, provider fallback, search cancellation and source persistence. Tests cover authentication gates, device linking, expiry/rejection, account separation, independent route/connectivity persistence, switching without sign-out or download cancellation, Offline-mode egress blocking, full-chat-limit route isolation, grants, own-node routing, interrupted streams, file verification, and navigation. `VisualPreviewTest` renders the actual Android layouts in portrait and handheld landscape using Robolectric native graphics. Its account data is explicitly synthetic. See `VALIDATION.md` for tested scope and remaining physical-device checks.

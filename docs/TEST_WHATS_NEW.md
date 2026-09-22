@@ -1,3 +1,10 @@
+## Android 0.3.0 · Voice chat and web answers
+
+- Added offline English speech recognition: download the optional 41 MB pack, then tap Mic to dictate or Voice chat for spoken questions, replies and follow-ups. Microphone capture pauses during replies and stops when leaving the app or Chat.
+- Spoken replies use an installed offline Android voice, with KAI Bright, Natural and Lower pitch options. Read replies aloud is also available for typed chat. Desktop Azelma/Pocket TTS is not bundled.
+- Added opt-in Web search for Local, Network and My node. Only the current question reaches search providers; answers include saved source links and retrieval time. Blocked, empty or obviously unrelated searches fail visibly. Offline mode blocks search.
+- Preserves sign-in across model choices, existing downloads, original KAI artwork and the retained signing key for an in-place update.
+
 ## Android 0.2.2 · Stay signed in across model choices
 
 - Local, Network and My node now select where chat runs without disconnecting your account, cancelling model downloads, or unloading your local model.
