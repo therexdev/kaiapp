@@ -12,10 +12,6 @@ on:
 jobs:
   build-apk:
     runs-on: ubuntu-latest
-    env:
-      ANDROID_HOME: /usr/local/lib/android/sdk
-      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-      SDKMANAGER: /usr/local/lib/android/sdk/cmdline-tools/16.0/bin/sdkmanager
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -31,10 +27,13 @@ jobs:
         with:
           gradle-version: "8.9"
 
+      - name: Set up Android command line tools
+        uses: android-actions/setup-android@v3
+        with:
+          packages: ""
+
       - name: Install Android 35
-        run: |
-          yes | "$SDKMANAGER" --licenses >/dev/null || true
-          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0"
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
       - name: Build APK
         working-directory: oled-drift
