@@ -6,14 +6,21 @@ import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.RectF;
 import android.view.Choreographer;
+import android.view.MotionEvent;
 import android.view.View;
 
 import java.util.Random;
 
 public class DriftView extends View implements Choreographer.FrameCallback {
+    public interface OnDotTapListener {
+        void onDotTap(float x, float y);
+    }
+
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Random random = new Random();
     private final RectF shape = new RectF();
+
+    private OnDotTapListener onDotTapListener;
 
     private float x = 120f;
     private float y = 120f;
@@ -25,6 +32,7 @@ public class DriftView extends View implements Choreographer.FrameCallback {
     private long lastFrameNanos = 0L;
     private long lastDrawNanos = 0L;
     private boolean running = false;
+    private boolean dotPressed = false;
 
     private static final long FRAME_INTERVAL_NANOS = 41_666_667L;
 
@@ -32,6 +40,11 @@ public class DriftView extends View implements Choreographer.FrameCallback {
         super(context);
         setBackgroundColor(Color.BLACK);
         paint.setStyle(Paint.Style.FILL);
+        setClickable(true);
+    }
+
+    public void setOnDotTapListener(OnDotTapListener listener) {
+        onDotTapListener = listener;
     }
 
     public void start() {
@@ -117,6 +130,47 @@ public class DriftView extends View implements Choreographer.FrameCallback {
         }
 
         hue = (hue + dt * 1.7f) % 360f;
+    }
+
+    @Override
+    public boolean onTouchEvent(MotionEvent event) {
+        float hitRadius = Math.max(size * 1.65f, 58f);
+
+        switch (event.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                dotPressed = distanceSquared(event.getX(), event.getY(), x, y)
+                        <= hitRadius * hitRadius;
+                return dotPressed;
+
+            case MotionEvent.ACTION_UP:
+                if (dotPressed) {
+                    dotPressed = false;
+                    performClick();
+                    if (onDotTapListener != null) {
+                        onDotTapListener.onDotTap(x, y);
+                    }
+                    return true;
+                }
+                break;
+
+            case MotionEvent.ACTION_CANCEL:
+                dotPressed = false;
+                break;
+        }
+
+        return false;
+    }
+
+    private float distanceSquared(float x1, float y1, float x2, float y2) {
+        float dx = x1 - x2;
+        float dy = y1 - y2;
+        return dx * dx + dy * dy;
+    }
+
+    @Override
+    public boolean performClick() {
+        super.performClick();
+        return true;
     }
 
     @Override
