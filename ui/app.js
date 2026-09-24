@@ -99,6 +99,7 @@ async function refresh() {
     setStatus("ok", "Desktop provider ready");
     $("status-model").textContent = KaiProviders.label(composedChatModel());
   }
+  $("status-model").title = $("status-model").textContent;
 
   // Route: onboarding until the model file is on disk — but only until the user
   // goes somewhere themselves. This poll runs every few seconds, and it used to
@@ -469,7 +470,10 @@ function composedChatModel() {
 
 function setStatus(kind, text) {
   $("status-dot").className = `dot ${kind}`;
+  $("status-pane").dataset.state = kind;
+  $("status-pane").removeAttribute("title");
   KaiI18n.setText($("status-text"), text);
+  $("status-text").title = $("status-text").textContent;
 }
 
 // ---------- views ----------
@@ -1570,6 +1574,11 @@ async function earnPost(path, body) {
     earnErr(j.error);
     throw new Error(j.error);
   }
+  if (path === "/core/earn/wallet/restore" || path === "/core/earn/wallet") {
+    sidebarWalletSummary = null;
+    paintSidebarWallet(null);
+    refreshSidebarWallet();
+  }
   return j;
 }
 
@@ -1683,8 +1692,8 @@ $("btn-earn-lock").addEventListener("click", async () => {
 
 /* ---- Wallet: send & receive KOIN/VHP on mainnet (Pi request 2026-08-19).
  * Rides the node bridge's chain:balances / chain:send channels, which work
- * on every build — no node required. Nothing here polls: balances load only
- * when asked (off means inert), and send needs the password every time. */
+ * on every build — no node required. The sidebar reads the balance while
+ * visible; sending still needs the password every time. */
 function walletMsg(text, ok) {
   const el = $("wallet-msg");
   el.hidden = !text;
@@ -1705,6 +1714,69 @@ async function walletRpc(channel, payload) {
   return j.data;
 }
 
+let sidebarWalletTimer = null;
+let sidebarWalletPending = false;
+let sidebarWalletSummary = null;
+function paintSidebarWallet(summary) {
+  const card = $("sidebar-wallet");
+  const dollars = $("sidebar-wallet-usd");
+  const amount = $("sidebar-wallet-koin");
+  const locale = document.documentElement.lang || "en";
+  const usd = summary?.usd;
+  dollars.textContent = Number.isFinite(usd) && usd >= 0
+    ? (usd > 0 && usd < 0.01 ? "<" : "") + new Intl.NumberFormat(locale, { style: "currency", currency: "USD", currencyDisplay: "narrowSymbol" }).format(usd > 0 && usd < 0.01 ? 0.01 : usd)
+    : "—";
+  const koin = summary?.koin;
+  if (koin != null && /^\d+(\.\d+)?$/.test(koin)) {
+    amount.textContent = `${new Intl.NumberFormat(locale, { maximumFractionDigits: 8 }).format(koin)} ${summary.tokenSymbol || "KOIN"}`;
+  } else {
+    KaiI18n.setText(amount, summary && !summary.address ? "Set up wallet" : "— KOIN");
+  }
+  let note = "Open wallet";
+  if (!summary) note = "Wallet balance unavailable";
+  else if (!summary.address) note = "Set up wallet";
+  else if (summary.network !== "mainnet") note = "Testnet balance has no USD value";
+  else if (summary.price?.stale) note = "KOIN price is out of date";
+  else if (usd == null) note = "KOIN price unavailable";
+  else note = "Estimated wallet value in USD";
+  card.title = KaiI18n.t(note);
+  card.setAttribute("aria-label", `${card.title}: ${dollars.textContent}, ${amount.textContent}`);
+}
+async function refreshSidebarWallet() {
+  clearTimeout(sidebarWalletTimer);
+  if (sidebarWalletPending || document.hidden) return;
+  sidebarWalletPending = true;
+  try {
+    const response = await fetch("/core/koinos/rpc", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ channel: "wallet:summary", payload: {} }),
+      signal: AbortSignal.timeout(15000),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error("Wallet unavailable");
+    sidebarWalletSummary = result.data;
+  } catch {
+    sidebarWalletSummary = null;
+  } finally {
+    sidebarWalletPending = false;
+    paintSidebarWallet(sidebarWalletSummary);
+    sidebarWalletTimer = setTimeout(refreshSidebarWallet, 30000);
+  }
+}
+$("sidebar-wallet").addEventListener("click", () => {
+  showView("earn");
+  refreshSidebarWallet();
+});
+document.addEventListener("visibilitychange", () => {
+  clearTimeout(sidebarWalletTimer);
+  if (!document.hidden) refreshSidebarWallet();
+});
+document.addEventListener("kai:language-changed", () => {
+  paintSidebarWallet(sidebarWalletSummary);
+  $("status-text").title = $("status-text").textContent;
+});
+refreshSidebarWallet();
+
 $("btn-wallet-copy").addEventListener("click", async () => {
   const addr = $("wallet-address").value;
   if (!addr) return;
@@ -1722,6 +1794,7 @@ $("btn-wallet-balances").addEventListener("click", async () => {
   $("btn-wallet-balances").disabled = true;
   try {
     const b = await walletRpc("chain:balances");
+    refreshSidebarWallet();
     const rows = [
       ["KOIN", b.formatted?.koin ?? "0"],
       ["VHP", b.formatted?.vhp ?? "0"],

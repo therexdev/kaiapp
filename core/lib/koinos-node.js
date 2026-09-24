@@ -15,7 +15,7 @@ const { RewardEngine } = require("./koinos/rewards");
 const { createProducerCache } = require("./koinos/network-producers");
 const { ProducerStats } = require("./koinos/producer-stats");
 const { projectReturns } = require("./koinos/profit-metrics");
-const { valuation, createPriceCache } = require("./koinos/koin-price");
+const { valuation, createPriceCache, satsToUsd } = require("./koinos/koin-price");
 const { parseAmount, formatAmount, subSats, cmpSats } = require("./koinos/format");
 const { weiToEth } = require("./koinos/eth");
 const { BridgeOrchestrator, MAX_BRIDGE_ETH } = require("./koinos/bridge-orchestrator");
@@ -169,6 +169,26 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
   handle("wallet:lock", () => wallet.lock());
   handle("wallet:revealWif", ({ password }) => wallet.revealWif(password));
   handle("wallet:remove", ({ password, confirm }) => wallet.remove({ password, confirm }));
+
+  // The sidebar values the earning wallet, never the external producer or
+  // its VHP. This read needs neither an unlocked signer nor a running node.
+  handle("wallet:summary", async () => {
+    const address = wallet.address || null;
+    const net = chain.network();
+    const out = { address, network: net.id, tokenSymbol: net.tokenSymbol, koin: null, usd: null, price: null };
+    if (!address) return out;
+    if (net.id === "mainnet") priceCache.snapshot(); // warm the shared quote without blocking balances
+    const balances = await chain.balances(address);
+    if (wallet.address !== address || chain.network().id !== net.id) throw new Error("Wallet or network changed; retry the balance.");
+    if (balances.error || !/^\d+$/.test(String(balances.koin ?? ""))) throw new Error("Wallet balance unavailable.");
+    out.koin = formatAmount(balances.koin, { grouping: false });
+    out.price = net.id === "mainnet" ? priceCache.snapshot() : null;
+    const price = out.price;
+    if (price && !price.stale && Number.isFinite(price.usdPerKoin) && price.usdPerKoin > 0) {
+      out.usd = satsToUsd(balances.koin, price.usdPerKoin);
+    }
+    return out;
+  });
 
   // ----- chain -----
   handle("producer:balances", async () => {

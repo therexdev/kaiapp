@@ -1228,5 +1228,12 @@
   "Koinos AI {0} is available and ready to download.": "Koinos AI {0} est disponible au téléchargement.",
   "{0} — updates install themselves.": "{0} — les mises à jour s’installent automatiquement.",
   "{0} — up to date ({1}), installed from source.": "{0} — à jour ({1}), installé à partir du code source.",
-  "{0} — installed from source, {1}. {2}": "{0} — installé à partir du code source, {1}. {2}"
+  "{0} — installed from source, {1}. {2}": "{0} — installé à partir du code source, {1}. {2}",
+  "Open wallet": "Ouvrir le portefeuille",
+  "Set up wallet": "Configurer le portefeuille",
+  "Wallet balance unavailable": "Solde du portefeuille indisponible",
+  "Testnet balance has no USD value": "Le solde du réseau de test n’a pas de valeur en USD",
+  "KOIN price is out of date": "Le prix du KOIN n’est plus à jour",
+  "KOIN price unavailable": "Prix du KOIN indisponible",
+  "Estimated wallet value in USD": "Valeur estimée du portefeuille en USD"
 }

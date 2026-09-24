@@ -1,3 +1,9 @@
+## Sidebar wallet balance and compact model status
+
+- A wallet card between Launch KAI and the model row shows the estimated USD value of your app wallet's liquid KOIN, with the KOIN amount underneath. Click it to open the wallet in Earn KAI.
+- Balances refresh every 30 seconds while the window is visible, including while the wallet is locked. Pricing reuses the node dashboard's cached KOIN quote; unavailable or expired prices show a dash. Testnet tokens receive no USD valuation, and external producer balances, VHP and KAI credits are excluded.
+- Model status and the model name share one compact row. Long errors still expand so their details remain readable.
+
 ## Koinos AI mainnet API with backups
 
 - Mainnet wallet, node dashboard and Koinos chain tools now try `https://api.koinosai.com` first, then `https://api.koinosblocks.com`, then `https://api.koinos.io`.
