@@ -1764,7 +1764,7 @@ async function refreshSidebarWallet() {
   }
 }
 $("sidebar-wallet").addEventListener("click", () => {
-  showView("earn");
+  activateView("earn");
   refreshSidebarWallet();
 });
 document.addEventListener("visibilitychange", () => {

@@ -1,3 +1,7 @@
+## Wallet card navigation fix
+
+- Clicking the sidebar balance now loads the wallet controls and keeps Earn KAI open through background refreshes. Wallet setup, unlock and send/receive views follow the same navigation as the Earn KAI menu button.
+
 ## Sidebar wallet balance and compact model status
 
 - A wallet card between Launch KAI and the model row shows the estimated USD value of your app wallet's liquid KOIN, with the KOIN amount underneath. Click it to open the wallet in Earn KAI.

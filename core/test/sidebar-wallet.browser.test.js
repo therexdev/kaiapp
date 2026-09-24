@@ -57,7 +57,23 @@ test("sidebar wallet renders money, unknowns, translations and a compact model r
   offline = false; summary = { address: null };
   await page.evaluate(() => refreshSidebarWallet());
   assert.equal(await page.locator("#sidebar-wallet-koin").innerText(), "Wallet einrichten");
-  await page.click("#sidebar-wallet");
-  await page.locator("#view-earn:not([hidden])").waitFor();
+  let wallet = {};
+  await page.route("**/core/earn", route => route.fulfill({ json: { wallet, worker: { running: false } } }));
+  for (const example of [
+    { wallet: { exists: false, unlocked: false }, control: "#earn-setup" },
+    { wallet: { exists: true, unlocked: false, address: "earning-wallet" }, control: "#earn-unlock" },
+    { wallet: { exists: true, unlocked: true, address: "earning-wallet" }, control: "#wallet-address" },
+  ]) {
+    wallet = example.wallet;
+    await page.click("#nav-settings");
+    await page.locator("#view-settings:not([hidden])").waitFor();
+    await page.click("#sidebar-wallet");
+    // Exercise the same polls that used to restore the previous page a
+    // second after the click. The wallet contents must also initialize.
+    await page.evaluate(async () => { await refresh(); await refreshSidebarWallet(); await refresh(); });
+    assert.equal(await page.locator("#view-earn").isVisible(), true, "wallet navigation survives background refreshes");
+    await page.locator(example.control).waitFor({ state: "visible", timeout: 5000 });
+    if (wallet.unlocked) assert.equal(await page.inputValue("#wallet-address"), wallet.address);
+  }
   assert.deepEqual(errors, []);
 });
