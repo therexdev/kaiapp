@@ -13,6 +13,20 @@ Master uses KAI's Docker project names. Free Node has different project names,
 but the migrated chain directory and several ports are shared: never run two
 controllers against the same node directory. Stop Free Node's containers first.
 
+## Sidebar balances
+
+Version `0.54.9-master.9` adds a balance card between Launch KAI and the compact
+model status row. It shows the estimated combined KOIN + VHP value in USD, with
+both token amounts underneath. The account is the node's configured producer:
+the local wallet in local custody, or the watch-only address in external custody.
+The card opens the node dashboard and stays there through background refreshes.
+
+Balances refresh every 30 seconds while the app is visible. The card shares the
+node dashboard's KOIN price cache and values VHP at the same KOIN rate; mana is
+not added. Missing balances, missing/stale prices and testnet USD values display
+as unknown rather than zero. Reading the card never unlocks a wallet, signs a
+transaction or starts/stops a node. Updating the app does not restart Docker.
+
 ## Node access and AI privacy
 
 Koinos Node works while AI Privacy remains Local-Only. Enable Run Koinos Node

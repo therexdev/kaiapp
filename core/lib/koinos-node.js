@@ -18,7 +18,7 @@ const { RewardEngine } = require("./koinos/rewards");
 const { createProducerCache } = require("./koinos/network-producers");
 const { ProducerStats } = require("./koinos/producer-stats");
 const { projectReturns } = require("./koinos/profit-metrics");
-const { valuation, createPriceCache } = require("./koinos/koin-price");
+const { valuation, satsToUsd, createPriceCache } = require("./koinos/koin-price");
 const { parseAmount, formatAmount, subSats, cmpSats } = require("./koinos/format");
 const { weiToEth } = require("./koinos/eth");
 const { BridgeOrchestrator, MAX_BRIDGE_ETH } = require("./koinos/bridge-orchestrator");
@@ -178,6 +178,29 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
   handle("producer:balances", async () => {
     const address = producerAddress();
     return address ? { address, ...await chain.balances(address) } : { address: null };
+  });
+  // Sidebar reads the same producer account and price as the node dashboard,
+  // without polling Docker/stats or requiring a signer in external custody.
+  handle("producer:summary", async () => {
+    const net = chain.network(), address = producerAddress();
+    const out = { address: address || null, network: net.id, tokenSymbol: net.tokenSymbol,
+      koin: null, vhp: null, usd: null, price: null };
+    if (!address) return out;
+    const b = await chain.balances(address);
+    if (address !== producerAddress() || net.id !== chain.network().id) throw new Error("Producer or network changed during balance read");
+    if (b?.error || ![b?.koin, b?.vhp].every(value => typeof value === "string" && /^\d+$/.test(value))) {
+      throw new Error("Producer balances unavailable");
+    }
+    out.koin = formatAmount(b.koin, { grouping: false });
+    out.vhp = formatAmount(b.vhp, { grouping: false });
+    if (net.id === "mainnet") {
+      out.price = priceCache.snapshot();
+      if (!out.price.stale && Number.isFinite(out.price.usdPerKoin) && out.price.usdPerKoin > 0) {
+        const usd = satsToUsd((BigInt(b.koin) + BigInt(b.vhp)).toString(), out.price.usdPerKoin);
+        if (Number.isFinite(usd)) out.usd = usd;
+      }
+    }
+    return out;
   });
   handle("chain:balances", async () => {
     const address = wallet.address;

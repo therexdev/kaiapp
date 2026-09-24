@@ -35,6 +35,9 @@ test("earn wallet UI: create -> lock -> unlock -> restore -> unlock (real browse
 
   const { createCore } = require("../server");
   const core = await createCore({ dataDir: dir, port: 0, llamaBin: FAKE_BIN, onEvent: () => {} });
+  // This wallet-form fixture must not start live market-price requests.
+  // The producer summary and sidebar are covered by master-sidebar-balance tests.
+  core.gateway.koinosNode.channels.set("producer:summary", async () => { throw new Error("Offline wallet-form fixture"); });
   const base = `http://127.0.0.1:${await core.start()}`;
   const PW = "correct horse 9";
 
@@ -107,6 +110,9 @@ test("wallet card: receive address shown, sends demand a password and a second c
 
   const { createCore } = require("../server");
   const core = await createCore({ dataDir: dir, port: 0, llamaBin: FAKE_BIN, onEvent: () => {} });
+  // This wallet-form fixture must not start live market-price requests.
+  // The producer summary and sidebar are covered by master-sidebar-balance tests.
+  core.gateway.koinosNode.channels.set("producer:summary", async () => { throw new Error("Offline wallet-form fixture"); });
   const base = `http://127.0.0.1:${await core.start()}`;
   const PW = "correct horse 9";
   // Wallet by API — this test is about the wallet CARD, not creation.
@@ -164,6 +170,8 @@ test("account card: signed-out state renders, and Local-Only privacy is explaine
   fs.writeFileSync(path.join(dir, "models", "smollm2-135m-instruct-q8_0.gguf"), "weights");
   const { createCore } = require("../server");
   const core = await createCore({ dataDir: dir, port: 0, llamaBin: FAKE_BIN, onEvent: () => {} });
+  // Keep the account fixture independent of live sidebar prices.
+  core.gateway.koinosNode.channels.set("producer:summary", async () => { throw new Error("Offline account fixture"); });
   const base = `http://127.0.0.1:${await core.start()}`;
   await fetch(`${base}/core/earn/wallet`, {
     method: "POST",
