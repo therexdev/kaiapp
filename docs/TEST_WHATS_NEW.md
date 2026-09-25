@@ -1,3 +1,9 @@
+## KOIN shadow job protocol
+
+- Adds an opt-in developer path for testing quoted network jobs. It requires `KAI_KOIN_SHADOW_JOBS=1` and an explicitly configured master; normal earning continues on the existing protocol.
+- Shadow jobs use an approved public model, an exact output limit and a prompt/tokenizer comparison before generation. Stop cancels shadow inference. Signed results bind the quote and dispatch attempt and do not authorize wallet spending.
+- Shadow jobs are separate from legacy job/reward totals. KOIN purchases, paid requests and payouts remain inactive while real pricing, funding and deployment are prepared.
+
 ## KOIN earnings and wallet foundation
 
 - Earn KAI becomes **KOIN**, with the existing mainnet wallet and separate rows for reward estimates, claimable rewards and AI usage credits. Legacy test KAI stays in a collapsed history section; it is not converted to KOIN.

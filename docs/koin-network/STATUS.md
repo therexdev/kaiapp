@@ -1,7 +1,15 @@
 # KOIN implementation status
 
-This is the first Test implementation of the approved plan. It is a contract
-prototype and shadow protocol, not an activated KOIN payment system.
+This is the Test implementation of the approved plan. It includes contract
+prototypes and shadow protocols, not an activated KOIN payment system.
+
+The master draft now includes a durable synthetic job ledger, a pinned Qwen
+tokenizer loader and an operator-controlled HTTP job flow. This Test worker can
+opt in with `KAI_KOIN_SHADOW_JOBS=1`. It checks the public model hash, exact
+quote/prompt commitment and local llama.cpp token IDs, then uses raw completion
+with the quoted output limit. Shadow receipts and job totals stay separate from
+legacy rewards. Normal workers remain opted out. See the master repository's
+`docs/koin-paid-jobs.md` for configuration and current integration limits.
 
 ## Implemented
 
@@ -56,11 +64,15 @@ still needs tested backup, disk-loss recovery, retention and load limits.
 
 1. Implement and calibrate master-observed token metering, tariffs, SLA/challenge
    results and a durable per-job reservation ledger inside each on-chain grant.
-   Provider token counts and signed presence are not proof of useful work.
-   The current shadow implementation intentionally has no paid-work ingestion.
+   The master has a synthetic reservation/receipt flow and pinned tokenizer
+   support, but funded grants, measured tariffs and real paid-work ingestion
+   remain disabled. Provider token counts and signed presence are not proof of
+   useful work. The Qwen tokenizer has reference vectors; hardware costs and
+   accepted SLA/challenge rules still need measurements.
 2. Implement finality-aware reconciliation, signed reward manifests, keeper
-   recovery and sponsored claim submission. The current manifest is hashed,
-   not signed. Exercise fork/restart/timeout and duplicate-job recovery.
+   recovery and sponsored claim submission. Read-only finality reconciliation
+   and synthetic restart/fork/replay tests are implemented in the master draft.
+   The current reward manifest remains hashed, not signed; no keeper broadcasts.
 3. Benchmark real providers and complete at least seven days of shadow data.
    Validate capacity deduplication, model-switch observations, workload costs
    and collusive/self-funded work. The work cap is not a proof that all economic
