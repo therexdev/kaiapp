@@ -1,6 +1,7 @@
 "use strict";
 
 const crypto = require("crypto");
+const { presenceHash } = require("./koin-network/presence");
 
 /*
  * Earn worker (M2 step 3, §5.7): started by the Earn toggle. Connects
@@ -331,6 +332,7 @@ class Worker {
       const j = await r.json();
       if (!j.ok) throw new Error(`Scheduler refused registration: ${j.error}`);
       this.token = j.token;
+      this._koinAvailable = j.koinShadow === true;
       // The old token just died server-side: recall the in-flight poll so
       // the loop re-polls with the fresh token immediately instead of
       // waiting out a hold to receive a 401.
@@ -348,6 +350,11 @@ class Worker {
 
     await this._register();
     this.running = true;
+    this._koinSession = crypto.randomBytes(16).toString("hex");
+    this._koinSequence = 0;
+    this._koinPresence().catch(() => {});
+    this._koinTimer = setInterval(() => this._koinPresence().catch(() => {}), 25000);
+    this._koinTimer.unref?.();
     this.stats.since = new Date().toISOString();
     this.onEvent({ type: "worker:started", scheduler: this.schedulerUrl });
     this._startLoop();
@@ -443,11 +450,36 @@ class Worker {
 
   async stop() {
     this.running = false;
+    clearInterval(this._koinTimer);
+    this._koinAbort?.abort();
     clearInterval(this._watchdog);
     this._pollAbort?.abort();
     this.onEvent({ type: "worker:stopped" });
     await this._loop?.catch(() => {});
     this._loop = null;
+  }
+
+  async _koinPresence() {
+    if (!this.running || !this._koinAvailable || this._koinSending) return;
+    this._koinSending = true;
+    this._koinAbort = new AbortController();
+    try {
+      const status = this.runtime?.status?.();
+      const alias = status?.activeAlias;
+      const definition = this.models?.catalog?.aliases?.[alias];
+      const pack = this.models?.catalog?.packages?.[definition?.package];
+      const allowed = !!definition && !definition.custom && !definition.dev && !alias.startsWith("dev-") && /^[a-f0-9]{64}$/.test(pack?.sha256 || "");
+      const report = { schema: 1, session: this._koinSession, sequence: ++this._koinSequence,
+        at: Date.now(), model: allowed ? alias : "", modelHash: allowed ? pack.sha256 : "",
+        ready: !!(allowed && status.runtime?.running && !status.loading && !this._backoff) };
+      const signature = await this.wallet.signHash(presenceHash(this.wallet.address, this.schedulerUrl, report));
+      if (!this.running) return;
+      await fetch(`${this.schedulerUrl}/koin/presence`, {
+        method: "POST", headers: { "content-type": "application/json", connection: "close" },
+        signal: AbortSignal.any([this._koinAbort.signal, AbortSignal.timeout(4000)]),
+        body: JSON.stringify({ address: this.wallet.address, report, signature }),
+      });
+    } finally { this._koinSending = false; }
   }
 
   async _run() {

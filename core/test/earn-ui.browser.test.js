@@ -61,6 +61,19 @@ test("earn wallet UI: create -> lock -> unlock -> restore -> unlock (real browse
     await page.click("#btn-earn-wif-done");
     await page.waitForSelector("#earn-ready:not([hidden])");
 
+    // KOIN transition never presents test-KAI as a mainnet balance.
+    assert.match(await page.textContent("#view-earn h1"), /KOIN/);
+    assert.match(await page.textContent("#koin-stats"), /Not active/);
+    assert.equal(await page.locator("#btn-koin-purchase").isDisabled(), true);
+    assert.equal(await page.locator("#btn-koin-claim").isDisabled(), true);
+    assert.equal(await page.locator("#earn-legacy").getAttribute("open"), null);
+    assert.equal(await page.locator("#earn-deposit-amt").count(), 0);
+    assert.equal(await page.locator("#wallet-send-pass").isVisible(), true);
+    if (process.env.KAI_MASCOT_QA_DIR) {
+      const qa = path.resolve(process.env.KAI_MASCOT_QA_DIR); fs.mkdirSync(qa, { recursive: true });
+      await page.screenshot({ path: path.join(qa, "koin-earn-wallet.png"), fullPage: true });
+    }
+
     // Lock -> unlock card names the account and file time.
     await page.click("#btn-earn-lock");
     await page.waitForSelector("#earn-unlock:not([hidden])");

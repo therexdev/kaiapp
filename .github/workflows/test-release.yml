@@ -64,6 +64,24 @@ jobs:
             core/lib/agent-network/contract-abi.json
             docs/agent-network/*
           if-no-files-found: error
+      - name: Verify KOIN custody contracts
+        working-directory: contracts/koin-network
+        run: |
+          npm ci --ignore-scripts
+          npm audit --audit-level=high
+          npm test
+          npm run build
+          node scripts/probe-runtime.js
+      - name: Save KOIN custody contract build
+        uses: actions/upload-artifact@v4
+        with:
+          name: koin-custody-contracts
+          path: |
+            contracts/koin-network/build/release/credits.wasm
+            contracts/koin-network/build/release/rewards.wasm
+            contracts/koin-network/abi/*.json
+            docs/koin-network/*
+          if-no-files-found: error
       - name: Verify natural voice inference
         run: node scripts/verify-neural-voice.js
         env:

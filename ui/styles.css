@@ -413,6 +413,10 @@ button.primary:hover:not(:disabled) { box-shadow: 0 4px 16px rgba(21, 94, 239, 0
   border: 1px solid var(--border); border-radius: var(--radius);
   background: var(--bg-raised); font-weight: 600;
 }
+.koin-overview { padding: 16px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-raised); }
+.koin-overview h2 { margin-top: 0; }
+#earn-legacy { margin: 16px 0; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); }
+#earn-legacy summary { cursor: pointer; color: var(--text-dim); }
 .dot.pulse { animation: pulse 1.8s ease-in-out infinite; }
 @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.45); } 50% { box-shadow: 0 0 0 7px rgba(52, 211, 153, 0); } }
 

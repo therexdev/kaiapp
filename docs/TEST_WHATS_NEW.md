@@ -1,3 +1,10 @@
+## KOIN earnings and wallet foundation
+
+- Earn KAI becomes **KOIN**, with the existing mainnet wallet and separate rows for reward estimates, claimable rewards and AI usage credits. Legacy test KAI stays in a collapsed history section; it is not converted to KOIN.
+- KOIN rewards are in preparation. Purchases and claims remain inactive, and the old test-KAI deposit action is disabled. Worker service continues on the existing network; the online indicator now says “serving.”
+- While serving, the app can send signed reports of its currently loaded public model to the new master shadow endpoint. These reports cannot authorize wallet spending and are insufficient by themselves to qualify for rewards. Local-Only and Stop retain their existing boundaries.
+- Includes separate credits and rewards contract prototypes, integer accounting, replay checks, a 24-hour root review period and 48-hour policy notice. The contract build is attached to CI for review; nothing is deployed or funded by installing Test.
+
 ## Brain memory corrections and tasks from chat
 
 - Ask main Chat or desktop KAI to correct a saved personal memory. KAI searches for the existing note, shows the old and new text for review, and updates that note while keeping its identity, tags and pins. Imported source material and longer notes remain editable through their Brain screens.

@@ -1,0 +1,7 @@
+{
+  "schema": 1,
+  "mode": "shadow",
+  "network": "mainnet",
+  "deployment": null,
+  "notice": "KOIN settlement is awaiting contract deployment and verification. Legacy test KAI is not KOIN."
+}

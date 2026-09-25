@@ -1,0 +1,41 @@
+syntax = "proto3";
+package koin;
+message Config {
+ bytes chain_id = 1; bytes token = 2; bytes admin = 3; bytes verifier = 4;
+ bytes treasury = 5; bytes credits = 6; bytes mining = 7; bytes operations = 8;
+ uint64 version = 9; uint32 daily_bps = 10; uint32 availability_bps = 11;
+ uint32 reward_bps = 12; uint32 mining_bps = 13; uint32 operations_bps = 14;
+ uint32 work_cap_bps = 15; uint64 effective_at = 16;
+}
+message Amount { uint64 value = 1; }
+message Balance { uint64 available = 1; uint64 reserved = 2; }
+message Session {
+ bytes id = 1; bytes owner = 2; bytes verifier = 3; bytes policy_hash = 4;
+ uint64 remaining = 5; uint64 per_job = 6; uint64 max_jobs = 7; uint64 jobs = 8;
+ uint64 expires = 9; uint64 settle_until = 10; uint64 revoked_at = 11;
+ uint64 nonce = 12; bool closed = 13; bytes treasury = 14; bytes mining = 15;
+ bytes operations = 16; uint32 reward_bps = 17; uint32 mining_bps = 18;
+ uint64 version = 19; uint64 opened_at = 20;
+}
+message Charge {
+ bytes id = 1; bytes session_id = 2; bytes provider = 3; bytes policy_hash = 4;
+ bytes receipt_hash = 5; uint64 amount = 6; uint64 dispatched_at = 7; uint64 nonce = 8;
+}
+message Node { bytes hash = 1; uint64 availability = 2; uint64 work = 3; bool left = 4; }
+message Epoch {
+ uint64 id = 1; uint64 opened_at = 2; uint64 version = 3;
+ uint64 budget = 4; uint64 availability_budget = 5; uint64 work_budget = 6;
+ uint32 work_cap_bps = 7; bytes credits = 8; bytes verifier = 9;
+ Node root = 10; uint64 review_until = 11; bool finalized = 12; bool expired = 13;
+ uint64 paid = 14;
+}
+message Request {
+ Config config = 1; bytes account = 2; bytes id = 3; uint64 amount = 4;
+ Session session = 5; Charge charge = 6; uint64 epoch = 7; Node root = 8;
+ uint64 availability = 9; uint64 work = 10; repeated Node proof = 11; bool paused = 12;
+}
+message Result {
+ Config config = 1; Balance balance = 2; Session session = 3; Epoch epoch = 4;
+ uint64 amount = 5; uint64 liabilities = 6; uint64 liquid = 7; bool paused = 8;
+ bool claimed = 9;
+}

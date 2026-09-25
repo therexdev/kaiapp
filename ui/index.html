@@ -72,7 +72,7 @@
             <span>Contribute</span><svg class="nav-group-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m5 3 5 5-5 5"/></svg>
           </button>
           <div class="nav-group-items" id="nav-items-contribute" aria-hidden="true" inert><div class="nav-group-inner">
-        <button class="nav-item" data-view="earn"><svg class="nav-symbol" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V13h4v7M10 20V8h4v12M16 20V3h4v17"/></svg><span>Earn KAI</span> <span class="soon">alpha</span></button>
+        <button class="nav-item" data-view="earn"><svg class="nav-symbol" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V13h4v7M10 20V8h4v12M16 20V3h4v17"/></svg><span>KOIN</span> <span class="soon">alpha</span></button>
         <button class="nav-item koinos-nav" data-view="koinos" id="nav-koinos" hidden><svg class="nav-symbol" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 3 8v9l9 5 9-5V8ZM3 8l9 5 9-5M12 13v9"/></svg><span>Koinos Node</span></button>
           </div></div>
         </div>
@@ -391,8 +391,14 @@
       <!-- Earn (M2 alpha) -->
       <section id="view-earn" class="view" hidden>
         <div class="api-card">
-          <h1>Earn with your hardware</h1>
-          <p class="lede">Run approved AI jobs for the network and earn KAI. Alpha runs on the Koinos testnet — rewards are test tokens while the network hardens.</p>
+          <h1>KOIN · Earnings &amp; wallet</h1>
+          <p class="lede">Contribute AI capacity, track network rewards and manage your KOIN wallet.</p>
+          <div class="koin-overview">
+            <h2>KOIN rewards are in preparation</h2>
+            <p class="hint">This Test build measures availability without paying KOIN rewards. Purchases and claims will open after contract verification. Your existing mainnet wallet remains available below.</p>
+            <div class="hw-summary" id="koin-stats" aria-live="polite"></div>
+            <p class="hint">Launch policy: up to 5% of the free reward pool per day; 70% for verified availability and 30% for paid work. Unused rewards remain in the pool.</p>
+          </div>
 
           <div id="earn-setup" hidden>
             <h2>Create your earning account</h2>
@@ -449,12 +455,17 @@
               <button id="btn-earn-toggle" class="primary">Start Earning</button>
             </div>
             <p class="hint">Stopping is immediate — no job runs after you press Stop.</p>
-            <h2>Network usage &amp; balance</h2>
-            <p class="hint">Network AI is billed like any modern AI API — by input and output tokens, per model — and settles in KAI underneath. Add funds by converting KAI at the current reference price, or keep earning: serving the network covers your own usage.</p>
+            <h2>AI usage credits</h2>
+            <p class="hint">Credits will be prepaid with KOIN. Unused funds stay reserved; only consumed usage is split: 60% to rewards, 25% to mining and 15% to operations.</p>
             <div class="form-row">
-              <input id="earn-deposit-amt" type="number" min="0" step="0.1" placeholder="KAI to convert" />
-              <button id="btn-earn-deposit" class="primary small">Add funds</button>
+              <button id="btn-koin-purchase" class="primary small" disabled>Purchases not active</button>
+              <button id="btn-koin-claim" class="small" disabled>Claims not active</button>
             </div>
+            <details id="earn-legacy">
+              <summary>Legacy test KAI</summary>
+              <p class="hint">Historical test balances are separate from KOIN. No conversion or distribution has been applied.</p>
+              <div class="hw-summary" id="earn-legacy-stats"></div>
+            </details>
             <p class="hint">Your wallet stays unlocked on this computer. <button id="btn-earn-lock" class="linklike">Lock wallet</button> · <button id="btn-earn-reveal" class="linklike">Show backup code</button></p>
             <div class="form-row" id="earn-reveal-row" hidden>
               <input id="earn-reveal-pass" type="password" placeholder="Wallet password (required to reveal)" />

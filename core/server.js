@@ -138,6 +138,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
       if (j.ok) {
         data = {
           kai: j.kai,
+          koinShadow: j.koinShadow === true,
           pendingReceipts: j.pendingReceipts ?? 0,
           tokensProcessed: j.tokensProcessed ?? null,
           pendingKai: j.pendingKai ?? null,
@@ -158,6 +159,23 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     earningsCache = { at: !data.error ? Date.now() : Date.now() - 27000, data };
     return data;
   };
+  const { inactiveStatus, shadowStatus } = require("./lib/koin-network/status");
+  let koinCache = { key: "", at: 0, data: null };
+  const fetchKoinStatus = async () => {
+    if (!worker?.running && settings.get("network.privacyMode", "local-only") === "local-only") return inactiveStatus("local-only");
+    if (!worker?._koinAvailable && !earningsCache.data?.koinShadow) return inactiveStatus("unavailable");
+    const url = settings.get("earn.schedulerUrl", DEFAULT_SCHEDULER_URL).replace(/\/$/, "");
+    const address = wallet.address, key = `${url}|${address}`;
+    if (!address) return inactiveStatus();
+    if (koinCache.key === key && Date.now() - koinCache.at < 30000) return koinCache.data;
+    let data = inactiveStatus("unavailable");
+    try {
+      const response = await fetch(`${url}/koin/status?address=${encodeURIComponent(address)}`, { signal: AbortSignal.timeout(4000) });
+      if (response.ok) data = shadowStatus(await response.json());
+    } catch { /* old masters do not expose shadow telemetry */ }
+    koinCache = { key, at: Date.now(), data };
+    return data;
+  };
   const earn = {
     status: async () => ({
       wallet: wallet.status(),
@@ -165,6 +183,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
       guard: loadGuard ? loadGuard.status() : null,
       schedulerUrl: settings.get("earn.schedulerUrl", DEFAULT_SCHEDULER_URL),
       earnings: await fetchEarnings(),
+      koin: await fetchKoinStatus(),
       /*
        * Why this machine's Koinos node is — or is not — on the dashboard,
        * independently of whether it is earning (#84). "My node disappeared"
@@ -233,32 +252,9 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
       events({ type: "wallet:locked" });
       return earn.status();
     },
-    // §21/§23: deposit KAI for network credits. The scheduler prepares the tx
-    // (operator pays MANA), the wallet signs it HERE — the key never leaves —
-    // and the signed tx goes back for the operator's co-signature.
-    deposit: async ({ amountKai }) => {
-      const url = settings.get("earn.schedulerUrl", DEFAULT_SCHEDULER_URL);
-      if (!url) throw new Error("Set the scheduler URL first");
-      const s = wallet.status();
-      if (!s.unlocked) throw new Error("Unlock your earning account first");
-      const amt = Number(amountKai);
-      if (!(amt > 0)) throw new Error("Enter a positive KAI amount");
-      const base = url.replace(/\/$/, "");
-      const post = async (p, body) =>
-        (await fetch(`${base}${p}`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(body),
-          signal: AbortSignal.timeout(30000),
-        })).json();
-      const prep = await post("/deposit/prepare", { address: s.address, amountKai: amt });
-      if (!prep.ok) throw new Error(prep.error || "Deposits are not available on this scheduler yet");
-      const signed = await wallet.signer.signTransaction(prep.transaction);
-      const sub = await post("/deposit/submit", { address: s.address, transaction: signed });
-      if (!sub.ok) throw new Error(sub.error || "Deposit failed");
-      earningsCache = { at: 0, data: null }; // pick up new credits promptly
-      events({ type: "wallet:deposited", message: `${amt} KAI tx ${sub.txId}` });
-      return { txId: sub.txId, amountKai: amt };
+    // Legacy test-token deposits must never become a native KOIN signing path.
+    deposit: async () => {
+      throw new Error("Credit purchases are unavailable during the KOIN transition. No funds were moved.");
     },
     start: async () => {
       const s = wallet.status();

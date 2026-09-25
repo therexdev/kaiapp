@@ -1418,6 +1418,21 @@ async function renderEarn() {
     earnErr("Core unreachable");
     return;
   }
+  const formatAtoms = value => {
+    if (typeof value !== "string" || !/^(0|[1-9]\d*)$/.test(value)) return "—";
+    const n = BigInt(value);
+    return `${n / 100000000n}.${(n % 100000000n).toString().padStart(8, "0")} KOIN`;
+  };
+  const koin = s.koin;
+  const quality = { "qualified-shadow": "Verified for shadow scoring", "awaiting-verification": "Awaiting capacity verification",
+    "local-only": "Local-Only mode", "unreported": "No capacity report", "unavailable": "Awaiting master integration" };
+  const koinRows = [
+    ["Available to claim", "Not active"], ["Usage credits", "Not active"],
+    ["Availability estimate (simulation)", koin?.estimate?.simulated ? formatAtoms(koin.estimate.availability) : "Awaiting verified data"],
+    ["Paid-work estimate (simulation)", koin?.estimate?.simulated ? formatAtoms(koin.estimate.work) : "Awaiting verified data"],
+    ["Capacity status", quality[koin?.qualification] || "Awaiting master integration"],
+  ];
+  $("koin-stats").innerHTML = koinRows.map(([k, v]) => KaiI18n.html`<span class="k">${k}</span><span>${esc(v)}</span>`).join("");
   const wifShowing = !$("earn-wif").hidden;
   $("earn-setup").hidden = s.wallet.exists && !wifShowing;
   $("earn-unlock").hidden = !s.wallet.exists || s.wallet.unlocked;
@@ -1455,7 +1470,7 @@ async function renderEarn() {
       const ago = s.worker.lastPollOkAt
         ? Math.max(0, Math.round((Date.now() - new Date(s.worker.lastPollOkAt).getTime()) / 1000))
         : null;
-      KaiI18n.setText(stateEl, KaiI18n.message`Online — earning${ago != null ? ` · last contact ${ago}s ago` : ""}`);
+      KaiI18n.setText(stateEl, KaiI18n.message`Online — serving${ago != null ? ` · last contact ${ago}s ago` : ""}`);
     }
     // Honest power guidance: if the OS suspended us, say so and name the
     // fix — a silently flapping node looks like our bug, but it's a
@@ -1491,24 +1506,6 @@ async function renderEarn() {
               : "")
           : "—",
       ],
-      ["KAI balance", earnErrMsg ? earnErrMsg : s.earnings?.kai != null ? `${s.earnings.kai} KAI` : "—"],
-      ["Prepaid balance", s.earnings?.balanceUsd != null ? `$${Number(s.earnings.balanceUsd).toFixed(4)}` : "—"],
-      [
-        "This epoch",
-        s.earnings && !earnErrMsg
-          ? `${s.earnings.pendingReceipts} jobs${s.earnings.tokensProcessed != null ? ` · ${s.earnings.tokensProcessed.toLocaleString()} tokens processed` : ""}${s.earnings.pendingKai != null ? ` · ≈${Number(s.earnings.pendingKai).toFixed(4)} KAI pending` : ""}`
-          : "—",
-      ],
-      [
-        "Network usage",
-        s.earnings?.usage
-          ? `${s.earnings.usage.inputTokens.toLocaleString()} in / ${s.earnings.usage.outputTokens.toLocaleString()} out tokens · $${Number(s.earnings.usage.costUsd).toFixed(4)}`
-          : "—",
-      ],
-      [
-        "Free allowance",
-        s.earnings?.freeTokensRemaining != null ? `${s.earnings.freeTokensRemaining.toLocaleString()} tokens left this epoch` : "—",
-      ],
       /*
        * What this machine is telling the network about its Koinos block
        * producer — which is exactly what draws the card on the dashboard.
@@ -1538,6 +1535,27 @@ async function renderEarn() {
             : s.worker.producerNote || "—",
       ],
     ];
+    const legacyRows = [
+      ["Legacy test KAI balance", earnErrMsg ? earnErrMsg : s.earnings?.kai != null ? `${s.earnings.kai} KAI` : "—"],
+      ["Legacy prepaid balance", s.earnings?.balanceUsd != null ? `$${Number(s.earnings.balanceUsd).toFixed(4)}` : "—"],
+      [
+        "Legacy epoch",
+        s.earnings && !earnErrMsg
+          ? `${s.earnings.pendingReceipts} jobs${s.earnings.tokensProcessed != null ? ` · ${s.earnings.tokensProcessed.toLocaleString()} tokens processed` : ""}${s.earnings.pendingKai != null ? ` · ≈${Number(s.earnings.pendingKai).toFixed(4)} KAI pending` : ""}`
+          : "—",
+      ],
+      [
+        "Network usage",
+        s.earnings?.usage
+          ? `${s.earnings.usage.inputTokens.toLocaleString()} in / ${s.earnings.usage.outputTokens.toLocaleString()} out tokens · $${Number(s.earnings.usage.costUsd).toFixed(4)}`
+          : "—",
+      ],
+      [
+        "Free allowance",
+        s.earnings?.freeTokensRemaining != null ? `${s.earnings.freeTokensRemaining.toLocaleString()} tokens left this epoch` : "—",
+      ],
+    ];
+    $("earn-legacy-stats").innerHTML = legacyRows.map(([k, v]) => KaiI18n.html`<span class="k">${k}</span><span>${esc(v)}</span>`).join("");
     $("earn-stats").innerHTML = rows.map(([k, v]) => KaiI18n.html`<span class="k">${k}</span><span>${esc(v)}</span>`).join("");
     // The wallet card's receive address — same wallet the worker earns with.
     if ($("wallet-address") && s.wallet.address) $("wallet-address").value = s.wallet.address;
@@ -1642,25 +1660,6 @@ $("btn-earn-unlock").addEventListener("click", async () => {
     $("earn-unlock-count").textContent = "";
     renderEarn();
   } catch { /* error shown */ }
-});
-
-$("btn-earn-deposit").addEventListener("click", async () => {
-  const amt = Number($("earn-deposit-amt").value);
-  if (!(amt > 0)) return earnErr("Enter a positive KAI amount to deposit");
-  const btn = $("btn-earn-deposit");
-  btn.disabled = true;
-  KaiI18n.setText(btn, "Converting…");
-  try {
-    const j = await earnPost("/core/earn/deposit", { amountKai: amt });
-    $("earn-deposit-amt").value = "";
-    // A deposit that silently clears the input reads as "did that work?" —
-    // confirm with the amount and the on-chain receipt.
-    earnOk(`Deposited ${j.amountKai ?? amt} KAI${j.txId ? ` — tx ${j.txId.slice(0, 18)}…` : ""}. Credits update within a minute.`);
-    renderEarn();
-  } catch { /* error shown */ } finally {
-    btn.disabled = false;
-    KaiI18n.setText(btn, "Add funds");
-  }
 });
 
 $("btn-earn-reveal").addEventListener("click", () => {

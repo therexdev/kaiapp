@@ -1,0 +1,23 @@
+{
+  "targets": {
+    "credits": {
+      "binaryFile": "build/release/credits.wasm",
+      "textFile": "build/release/credits.wat",
+      "sourceMap": true,
+      "optimizeLevel": 3,
+      "shrinkLevel": 0,
+      "converge": false,
+      "noAssert": false
+    },
+    "rewards": {
+      "binaryFile": "build/release/rewards.wasm",
+      "textFile": "build/release/rewards.wat",
+      "sourceMap": true,
+      "optimizeLevel": 3,
+      "shrinkLevel": 0,
+      "converge": false,
+      "noAssert": false
+    }
+  },
+  "options": {}
+}
