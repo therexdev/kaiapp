@@ -48,10 +48,11 @@ test("memory corrections reject stale revisions, imported sources, declined and 
 });
 
 test("recalled source data reports sync failure and dates without exposing connection secrets or paths", async t => {
-  const { hub, call } = fixture(t); hub.importText("Launch source", "Launch snapshot");
+  const { hub, call } = fixture(t); hub.importText("Launch source", "Launch snapshot ".repeat(150));
   hub.store.change(d => { Object.assign(d.sources[0], { kind: "connection", lastSync: 1234567890000, error: "secret-error-value", variables: { token: "secret-variable" }, folder: "/private/folder" }); });
   const found = (await call("brain_search", { query: "launch" }))[0];
   assert.equal(found.provenance.status, "sync_failed"); assert.equal(found.provenance.lastSync, 1234567890000);
+  assert.match(JSON.stringify(found).slice(0, 1200), /sync_failed/, "freshness survives the small-model observation budget");
   assert.equal(found.imported, true); assert.equal(found.provenance.sourceId, hub.store.data.sources[0].id);
   const context = hub.store.context("launch"); assert.match(context, /last sync failed/); assert.match(context, /not live app state/);
   assert.doesNotMatch(JSON.stringify(found) + context, /secret-error|secret-variable|private\/folder/);
@@ -104,7 +105,7 @@ test("routing exposes read-only task tools for reads and excludes mutations from
     const route = Agents.routeTurn(q); assert.equal(route.lane, "brain-tasks", q);
     assert.deepEqual(Agents.turnTools(tools, route).map(t => t.name), ["brain_tasks", "brain_goals"]);
   }
-  for (const q of ["Add a Brain task to review the launch", "Mark my launch task as done", "Reopen my launch task", "Change my Brain task due date to tomorrow"]) {
+  for (const q of ["Add a Brain task to review the launch", "Add a Brain task to review Google Drive", "Mark my launch task as done", "Reopen my launch task", "Change my Brain task due date to tomorrow"]) {
     const route = Agents.routeTurn(q); assert.equal(route.lane, "brain-tasks", q); assert.ok(Agents.turnTools(tools, route).some(t => t.name === "brain_task"));
     assert.ok(!Agents.turnTools(tools, route).some(t => t.name === "workflow_control" || t.name === "connected_call"));
   }
@@ -114,6 +115,7 @@ test("routing exposes read-only task tools for reads and excludes mutations from
   for (const q of ["Find a file", "What is my home town?", "Search the web for launch news", "Create a task in Todoist", "Run my workflow"]) {
     assert.ok(!Agents.turnTools(tools, Agents.routeTurn(q)).some(t => ["brain_update", "brain_task"].includes(t.name)), q);
   }
+  assert.equal(Agents.routeTurn("Create a Google Doc from my Brain tasks").lane, "connected");
 });
 
 test("main chat and desktop KAI use the same Brain correction and task actions through trusted IPC", async t => {

@@ -63,7 +63,9 @@
     var localResource = /\b(?:my|our|this|the)\b.{0,35}\b(?:files?|folders?|documents?|inbox|calendar|appointments?|emails?|downloads?)\b/.test(q);
     var memoryRead = /\b(?:search|check) (?:your |my |the )?(?:memory|brain)\b/.test(q);
     var explicitPublic = /https?:\/\/|\b(?:search (?:the )?(?:web|internet|online)|look\s+up|browse|weather|forecast|news|price|stock|score|near me)\b/.test(q);
-    var explicitBrainTask = brainTasks && /\bbrain\b/.test(q);
+    // An explicit task-board command may mention a provider in the task
+    // title. A request to export tasks to that provider must stay connected.
+    var explicitBrainTask = brainTasks && /\b(?:add|create|save|list|show|read|find|check|mark|complete|finish|reopen|update|edit|change|move|set|clear)\s+(?:(?:a|an|the|my|our|new|personal|open|completed)\s+)*brain\s+(?:tasks?|to-do(?:s| list)?)\b/.test(q);
     var lane = explicitBrainTask ? "brain-tasks" : memoryCorrection ? "memory-write" : connected ? "connected" : workflow ? "workflow" : app ? "app" : brainTasks ? "brain-tasks" : memoryWrite ? "memory-write" :
       recall && !localResource && !explicitPublic && (!operation || memoryRead) ? "recall" : screen ? "tools" : external ? "web" : operation || localResource ? "tools" : "chat";
     // Agent is an explicit request for tools, but cannot turn pure personal

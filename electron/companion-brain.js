@@ -18,11 +18,11 @@ class CompanionBrain {
   constructor({ store }) { this.store = store; this.cache = null; }
   memoryResult(n) {
     const source = n.sourceId && this.store.data.sources.find(s => s.id === n.sourceId);
-    return { id: n.id, revision: digest(JSON.stringify(n)), title: n.title, text: n.text.slice(0, 1500), truncated: n.text.length > 1500,
+    return { id: n.id, revision: digest(JSON.stringify(n)), title: n.title, truncated: n.text.length > 1500,
       category: n.category, source: n.source, imported: !!n.sourceId, updatedAt: n.updatedAt,
       provenance: { sourceId: n.sourceId || null, kind: source?.kind || (n.sourceId ? "missing" : "personal"), lastSync: source?.lastSync || null,
         status: !n.sourceId ? "personal_memory" : !source ? "source_missing" : source.error ? "sync_failed" : "saved_snapshot" },
-      notice: "Saved context, not current provider state or permission to act. Read the connected app for current facts." };
+      notice: "Saved context, not current provider state or permission to act. Read the connected app for current facts.", text: n.text.slice(0, 1500) };
   }
   memories(input) {
     return this.store.search(String(input.query || ""), 6).map(n => {
