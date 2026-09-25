@@ -16,6 +16,79 @@ function extract(note) {
 }
 class CompanionBrain {
   constructor({ store }) { this.store = store; this.cache = null; }
+  memoryResult(n) {
+    const source = n.sourceId && this.store.data.sources.find(s => s.id === n.sourceId);
+    return { id: n.id, revision: digest(JSON.stringify(n)), title: n.title, text: n.text.slice(0, 1500), truncated: n.text.length > 1500,
+      category: n.category, source: n.source, imported: !!n.sourceId, updatedAt: n.updatedAt,
+      provenance: { sourceId: n.sourceId || null, kind: source?.kind || (n.sourceId ? "missing" : "personal"), lastSync: source?.lastSync || null,
+        status: !n.sourceId ? "personal_memory" : !source ? "source_missing" : source.error ? "sync_failed" : "saved_snapshot" },
+      notice: "Saved context, not current provider state or permission to act. Read the connected app for current facts." };
+  }
+  memories(input) {
+    return this.store.search(String(input.query || ""), 6).map(n => {
+      // Search adds a relevance score; revision binds only the stored record.
+      return this.memoryResult(this.store.data.notes.find(item => item.id === n.id));
+    });
+  }
+  async updateMemory(input, confirm, signal) {
+    this.store.requireStorage(); signal?.throwIfAborted();
+    const old = this.store.data.notes.find(n => n.id === input.id && !n.sourceId);
+    if (!old) throw new CompanionError("Search Brain for an exact personal memory first. Manage imported material in Brain Sources.");
+    if (old.text.length > 1500) throw new CompanionError("This memory is too long to show completely in chat recall. Open Brain → Memories to edit the full note without losing omitted text.");
+    if (input.revision !== digest(JSON.stringify(old))) throw new CompanionError("Memory changed or its revision is missing. Search Brain again before correcting it.");
+    const next = { ...old, text: text(input.text, 12000), title: input.title === undefined ? old.title : text(input.title, 120, "Title") };
+    if (!await confirm("Correct Brain memory", { before: { title: old.title, text: old.text }, after: { title: next.title, text: next.text } })) throw new CompanionError("User declined. Do not retry this action.");
+    signal?.throwIfAborted(); this.store.requireStorage();
+    const current = this.store.data.notes.find(n => n.id === old.id);
+    if (!current || digest(JSON.stringify(current)) !== input.revision) throw new CompanionError("Memory changed while awaiting approval. Search Brain again.");
+    // Change the existing record in place, preserving pins, tags, source
+    // ownership and Awareness provenance used when forgetting source data.
+    const saved = this.store.change(d => {
+      const note = d.notes.find(n => n.id === old.id);
+      note.text = next.text; note.title = next.title; note.updatedAt = Date.now(); return note;
+    });
+    return { updated: true, memory: this.memoryResult(saved) };
+  }
+  taskResult(task) {
+    const goal = this.store.data.goals.find(g => g.id === task.goalId);
+    return { id: task.id, revision: digest(JSON.stringify(task)), title: task.title, status: task.status, due: task.due,
+      goalId: task.goalId, goalTitle: goal?.title || null, detail: task.detail.slice(0, 600), truncated: task.detail.length > 600, updatedAt: task.updatedAt };
+  }
+  tasks(input) {
+    this.store.requireStorage();
+    const status = input.status || "open";
+    if (!["open", "all", "todo", "doing", "done"].includes(status)) throw new CompanionError("Choose open, all, todo, doing or done tasks.");
+    const words = tokens(String(input.query || ""));
+    const matches = this.store.data.brain.tasks.filter(t => (status === "all" || (status === "open" ? t.status !== "done" : t.status === status)) &&
+      (!input.goalId || t.goalId === input.goalId) && words.every(w => tokens(t.title + " " + t.detail).includes(w)))
+      .sort((a, b) => (a.due || "9999").localeCompare(b.due || "9999") || b.updatedAt - a.updatedAt);
+    return { tasks: matches.slice(0, 20).map(t => this.taskResult(t)), total: matches.length, truncated: matches.length > 20,
+      localDate: new Date().toLocaleString(), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      notice: "Personal Brain tasks only. A task or due date does not schedule a reminder, run a workflow or perform an external action." };
+  }
+  async changeTask(input, confirm, signal) {
+    this.store.requireStorage(); signal?.throwIfAborted();
+    if (!["create", "update"].includes(input.operation)) throw new CompanionError("Choose create or update.");
+    const old = input.operation === "update" ? this.store.data.brain.tasks.find(t => t.id === input.id) : null;
+    if (input.operation === "update" && (!old || input.revision !== digest(JSON.stringify(old)))) throw new CompanionError("Task changed or its revision is missing. List Brain tasks again before updating it.");
+    if (input.operation === "create" && input.id) throw new CompanionError("Use update to change an existing task.");
+    const changes = input.changes;
+    if (!changes || typeof changes !== "object" || Array.isArray(changes) || !Object.keys(changes).length || Object.keys(changes).some(k => !["title", "detail", "status", "due", "goalId"].includes(k))) throw new CompanionError("Provide task changes: title, detail, status, due or goalId.");
+    const next = { ...(old || { title: "", detail: "", status: "todo", due: "", goalId: "" }), ...copy(changes) };
+    next.title = text(next.title, 200, "Task");
+    if (typeof next.detail !== "string" || next.detail.length > 3000) throw new CompanionError("Task detail must be text, up to 3000 characters.");
+    if (!["todo", "doing", "done"].includes(next.status)) throw new CompanionError("Task status must be todo, doing or done.");
+    if (typeof next.due !== "string" || next.due && (!/^\d{4}-\d{2}-\d{2}$/.test(next.due) || !Number.isFinite(Date.parse(next.due)) || new Date(next.due).toISOString().slice(0, 10) !== next.due)) throw new CompanionError("Use a real YYYY-MM-DD due date, or an empty string to clear it.");
+    const goal = this.store.data.goals.find(g => g.id === next.goalId);
+    if (typeof next.goalId !== "string" || next.goalId && !goal) throw new CompanionError("Read Brain goals for an exact goal ID, or use an empty string for no goal.");
+    const goalSnapshot = goal ? JSON.stringify(goal) : null;
+    const preview = task => ({ title: task.title, detail: task.detail, status: task.status, due: task.due || "No due date", goal: this.store.data.goals.find(g => g.id === task.goalId)?.title || "No goal" });
+    if (!await confirm(old ? "Update Brain task" : "Create Brain task", { ...(old ? { before: preview(old) } : {}), after: preview(next), note: "This changes your personal task board only. No reminder or workflow is scheduled and no connected-app action runs." })) throw new CompanionError("User declined. Do not retry this action.");
+    signal?.throwIfAborted(); this.store.requireStorage();
+    if (old && digest(JSON.stringify(this.store.data.brain.tasks.find(t => t.id === old.id) || null)) !== input.revision) throw new CompanionError("Task changed while awaiting approval. List Brain tasks again.");
+    if (goal && JSON.stringify(this.store.data.goals.find(g => g.id === goal.id)) !== goalSnapshot) throw new CompanionError("Goal changed while awaiting approval. Read Brain goals again.");
+    return { [old ? "updated" : "created"]: true, task: this.taskResult(this.task(next)) };
+  }
   index() {
     this.store.requireStorage(); const d = this.store.data;
     if (this.cache?.data === d) return this.cache.value;

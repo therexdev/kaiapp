@@ -44,14 +44,17 @@
     if (/^(?:explain|how does|how do (?:i|you)|what is|what are)\b/.test(q) && /\b(?:work|works|working|use|using|send|create|write|mean|difference)\b/.test(q) && !/\b(?:my|our|please|for me)\b/.test(q)) {
       return { lane: "chat", needsTools: false, memoryWrite: false, web: false, maxSteps: 0 };
     }
-    var memoryWrite = /\b(?:remember (?:that|this|my|i |we |the )|save .{0,100}(?:memory|brain)|forget (?:that|my|the|what))/.test(q) && !/\b(?:do|can|did|could) you remember\b/.test(q);
+    var memoryCorrection = /\b(?:correct|update|change|edit|fix) .{0,70}(?:memory|remembered|saved fact|brain)\b/.test(q);
+    var memoryWrite = (memoryCorrection || /\b(?:remember (?:that|this|my|i |we |the )|save .{0,100}(?:memory|brain)|forget (?:that|my|the|what))/.test(q)) && !/\b(?:do|can|did|could) you remember\b/.test(q);
+    var brainTasks = /\b(?:tasks?|to-do(?:s| list)?)\b/.test(q) && /\b(?:brain|my|our|add|create|mark|complete|reopen|update|edit|list|show)\b/.test(q);
+    var taskWrite = brainTasks && /\b(?:add|create|save|mark|complete|finish|reopen|update|edit|change|move|set|clear)\b/.test(q);
     var connected = /\b(?:google\s+(?:drive|calendar|docs?|sheets?)|spreadsheets?|gmail|outlook|one\s*drive|dropbox|slack|discord|notion|todoist|github|excel|teams|connected\s+(?:app|account)|(?:my|the)\s+calendar)\b/.test(q) && /\b(?:add|book|create|delete|edit|export|find|list|look\s+up|make|message|move|open|organize|populate|put|read|rename|research|save|schedule|send|show|update|upload|write|check)\b/.test(q);
     var workflow = /\bworkflow\b/.test(q) && /\b(?:run|start|stop|resume|cancel|inspect|find|show|status|create|save)\b/.test(q);
     var app = /\b(?:wallet|balance|earnings?|earned|models?|node|privacy|settings|koin|vhp|mana)\b/.test(q) && /\b(?:my|app|installed|available|running|status|earned|earning|balance|start|stop|install|download|remove|change|list|show|how much|how many)\b/.test(q);
     var external = /https?:\/\/|\b(?:search (?:the )?(?:web|internet|online)|look\s+up|browse|weather|forecast|latest|current|today|tomorrow|news|price|stock|score|near me)\b/.test(q);
     external = external || /\b(?:find|search|research|gather)\b.{0,100}\b(?:businesses|dentists?|restaurants?|websites?|information|online)\b/.test(q);
     var operation = /\b(?:open|find|read|search|create|save|delete|update|edit|move|rename|send|run|install|download|schedule|book|check|list)\b/.test(q) && /\b(?:files?|folders?|documents?|workspace|calendar|email|inbox|messages?|screen|desktop|browser|website|computer|server|tool|account|dentists?|restaurants?|businesses)\b/.test(q);
-    var recall = !memoryWrite && !connected && !workflow && !app && (
+    var recall = !memoryWrite && !brainTasks && !connected && !workflow && !app && (
       /\b(?:what (?:is|was|are|were)|whats|whos|who is|tell me|do you (?:know|remember))\b.{0,70}\b(?:my|our)\b/.test(q) ||
       /\b(?:where (?:do|did) i live|when (?:is|was) my|how old (?:am i|is my)|what did (?:i|we) (?:tell|say|decide)|(?:search|check) (?:your |my |the )?(?:memory|brain)|(?:recall|remember) (?:about me|my .{0,40}\?))/.test(q));
     operation = operation || /\b(?:turn (?:on|off)|take a screenshot|click|scroll|press|type into|use (?:the )?.{0,30}tool|on (?:the|my) screen|my desktop)\b/.test(q);
@@ -60,24 +63,27 @@
     var localResource = /\b(?:my|our|this|the)\b.{0,35}\b(?:files?|folders?|documents?|inbox|calendar|appointments?|emails?|downloads?)\b/.test(q);
     var memoryRead = /\b(?:search|check) (?:your |my |the )?(?:memory|brain)\b/.test(q);
     var explicitPublic = /https?:\/\/|\b(?:search (?:the )?(?:web|internet|online)|look\s+up|browse|weather|forecast|news|price|stock|score|near me)\b/.test(q);
-    var lane = connected ? "connected" : workflow ? "workflow" : app ? "app" : memoryWrite ? "memory-write" :
+    var explicitBrainTask = brainTasks && /\bbrain\b/.test(q);
+    var lane = explicitBrainTask ? "brain-tasks" : memoryCorrection ? "memory-write" : connected ? "connected" : workflow ? "workflow" : app ? "app" : brainTasks ? "brain-tasks" : memoryWrite ? "memory-write" :
       recall && !localResource && !explicitPublic && (!operation || memoryRead) ? "recall" : screen ? "tools" : external ? "web" : operation || localResource ? "tools" : "chat";
     // Agent is an explicit request for tools, but cannot turn pure personal
     // recall into research or authorize an unsolicited memory write.
     if (opts.mode === "agent" && lane === "chat") lane = "tools";
     var needsTools = !["chat", "recall"].includes(lane);
-    return { lane: lane, needsTools: needsTools, memoryWrite: memoryWrite,
+    return { lane: lane, needsTools: needsTools, memoryWrite: memoryWrite, taskWrite: taskWrite,
       web: external || lane === "tools" && opts.mode === "agent",
-      maxSteps: lane === "connected" || lane === "workflow" ? 18 : lane === "memory-write" ? 2 : lane === "web" ? 5 : 6 };
+      maxSteps: lane === "connected" || lane === "workflow" ? 18 : lane === "memory-write" ? 4 : lane === "web" ? 5 : 6 };
   }
   function turnTools(tools, route) {
     return (tools || []).filter(function(t) {
       var n = t.name;
       if (/^memory_(save|search)$/.test(n)) return false;
-      if (!route.memoryWrite && /^(?:brain_remember|brain_forget)$/.test(n)) return false;
+      if (!route.memoryWrite && /^(?:brain_remember|brain_forget|brain_update)$/.test(n)) return false;
+      if (!route.taskWrite && n === "brain_task") return false;
       if (route.lane === "recall") return /^(?:brain_search)$/.test(n);
       if (route.lane === "chat") return false;
-      if (route.lane === "memory-write") return /^(?:brain_search|brain_remember|brain_forget)$/.test(n);
+      if (route.lane === "memory-write") return /^(?:brain_search|brain_remember|brain_forget|brain_update)$/.test(n);
+      if (route.lane === "brain-tasks") return /^(?:brain_tasks|brain_task|brain_goals)$/.test(n);
       if (route.lane === "connected" || route.lane === "workflow") return /^(?:connected_|instant_workflow$|workflow_control$)/.test(n);
       if (route.lane === "web") return /^(?:web_search|read_page)$/.test(n);
       if (route.lane === "app") return /^app_/.test(n);
@@ -507,6 +513,8 @@
       lines.join("\n") +
       '\n\nRespond with ONLY a JSON object, nothing else.\nTo use a tool: {"tool": "tool_name", "args": {...}}\nWhen you have enough to answer: {"answer": true}\n' +
       (all.indexOf("connected_find") !== -1 ? "Connected actions: use connected_find, connected_actions, then connected_describe for exact schemas before connected_call. Chain with returned IDs; never guess recipients, accounts, dates, duration or folder IDs. Use connected_history for earlier results. Verify writes with a read, and distinguish returned/partial/uncertain from verified completion. Use connected_research after private data enters a turn; it sends only a reviewed query/URL. A declined action ends the attempt. Workflow control finds/inspects/runs saved revisions. instant_workflow runs dependent selected actions or saves a disabled draft. You may ask one concise clarification instead of guessing. Local date: " + new Date().toLocaleString() + " (" + Intl.DateTimeFormat().resolvedOptions().timeZone + "). " : "") +
+      (all.indexOf("brain_update") !== -1 ? "Brain corrections: first brain_search, then brain_update with the exact id and revision, and complete corrected text. Preserve unrelated facts. Do not replace a truncated memory; direct the user to Brain Memories for a full edit. Ask if multiple memories could match. Imported sources are read-only. " : "") +
+      (all.indexOf("brain_tasks") !== -1 ? "Brain tasks: brain_tasks defaults to open; use status all or done to find completed tasks. Narrow query to title words. For brain_task use operation create or update, changes:{title,detail,status,due,goalId}. Updates require the exact id and revision from brain_tasks; omit unchanged fields. Status is todo, doing or done. Due is YYYY-MM-DD, empty clears it; confirm ambiguous dates. Read brain_goals for a goalId, never invent one. Do not guess between matching tasks. A task records intended work, not a completed external action; dates do not schedule reminders. Local date: " + new Date().toLocaleString() + " (" + Intl.DateTimeFormat().resolvedOptions().timeZone + "). " : "") +
       "Copy the tool name exactly as written above. Use at most one tool per response. Prefer answering as soon as you can."
     );
   }

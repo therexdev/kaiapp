@@ -1,3 +1,11 @@
+## Brain memory corrections and tasks from chat
+
+- Ask main Chat or desktop KAI to correct a saved personal memory. KAI searches for the existing note, shows the old and new text for review, and updates that note while keeping its identity, tags and pins. Imported source material and longer notes remain editable through their Brain screens.
+- Ask “What are my open tasks?”, “Add a Brain task to review the launch”, or “Mark my launch task as done.” KAI can create, update, complete and reopen personal Brain tasks, set due dates and link them to existing goals. Updates preserve fields you did not change and appear in Brain → Goals & tasks.
+- Corrections and task changes require their own exact review; the existing Always allow remember preference does not authorize them. If a note, task or linked goal changes during review, KAI stops and asks for a fresh lookup.
+- Recall now includes source sync dates and failed-sync status. Saved source text is explicitly a snapshot, so KAI should check the connected app when current data is needed.
+- Brain tasks record work to do. A due date does not schedule a notification, and creating or completing a task does not run a workflow or connected-app action. These tools remain private to eligible desktop models.
+
 ## Wallet card navigation fix
 
 - Clicking the sidebar balance now loads the wallet controls and keeps Earn KAI open through background refreshes. Wallet setup, unlock and send/receive views follow the same navigation as the Earn KAI menu button.

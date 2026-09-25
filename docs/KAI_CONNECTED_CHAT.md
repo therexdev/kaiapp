@@ -19,6 +19,14 @@ Supported discovery profiles cover Calendar, Docs, Sheets, Drive, Discord Bot, S
 
 ## Results and recovery
 
+### Brain continuity in chat
+
+Main Chat and desktop KAI can now correct personal memories in place and manage the existing Brain task board. Try “Correct my saved memory: the launch is Monday”, “What are my open tasks?”, “Add a Brain task to review the launch” or “Mark my launch task as done”. Completed tasks can be listed and reopened; tasks can have a calendar due date and an existing Brain goal. These are personal tasks, not scheduled notifications or workflow jobs. To execute work, request the connected action or reviewed workflow separately.
+
+Memory corrections and task changes show exact native review. Their approvals are separate from Always allow remember. The tool must use the ID and revision returned by a current lookup; editing/deleting the record or changing its linked goal during review rejects the pending change. Corrections preserve note identity, tags, pins and source-derived ownership. Task updates preserve omitted fields. Multiple matching names need clarification rather than a guessed ID. Imported text is managed in Sources, and memories longer than the 1,500-character chat recall excerpt must be edited in Brain → Memories.
+
+Brain search returns source kind, last successful sync time and failed-sync status without exposing source credentials or local paths. Automatic reply context includes the same freshness warning. A saved snapshot does not establish current account state or grant permission to act. Live connected-provider state still requires an appropriate read.
+
 Expand **KAI actions** in the conversation for receipts and returned links. Connections → Connected apps retains recent action details after restart. Provider-returned results are distinguished from verified content: KAI should read back a created event, file or row before claiming its contents are correct. A provider accepting a message does not prove the recipient read it.
 
 If a connection stops after dispatching a write, the outcome is uncertain. The same action is blocked from automatic retry across chat turns, including after permissions change. Inspect the provider yourself, then use **I inspected the destination** on the uncertain receipt. This records your review; it does not declare success or rerun the action. Retrying later still requires a new exact review. Earlier created objects remain available for targeted recovery; KAI does not delete them automatically as rollback.

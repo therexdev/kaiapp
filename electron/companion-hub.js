@@ -78,10 +78,13 @@ class CompanionHub {
   toolList(model) {
     if (!this.canUseModel(model) || this.store.locked || !this.store.available()) return [];
     const tools = [...this.actions.tools(),
-      { name: "brain_search", description: "Search private Brain notes, people, projects, preferences, and imported sources.", params: { query: "what to find" } },
+      { name: "brain_search", description: "Find Brain memories with IDs, revisions and source freshness. Saved snapshots are not current app state.", params: { query: "what to find; narrow the query to resolve ambiguous memories" } },
       { name: "brain_remember", description: "Ask the user to approve a fact for persistent Brain memory.", params: { text: "fact to remember", title: "short title", category: "notes | preferences | people | projects" } },
+      { name: "brain_update", description: "Correct one personal memory after review. Search first; keep unrelated facts, never guess between matches.", params: { id: "memory ID from brain_search", revision: "exact revision from brain_search", text: "complete corrected memory, preserving other facts; no imported source edits", title: "optional new title" } },
       { name: "brain_forget", description: "Forget one personal Brain memory by its exact ID after user approval. Search Brain first. Imported source text must be managed in Brain Sources.", params: { id: "memory ID from brain_search" } },
       { name: "brain_goals", description: "Read the user's active goals from Brain.", params: {} },
+      { name: "brain_tasks", description: "Read personal Brain tasks with IDs and revisions. Narrow ambiguous matches; these are not scheduled jobs.", params: { query: "optional title/detail words", status: "open (default) | all | todo | doing | done", goalId: "optional exact goal ID" } },
+      { name: "brain_task", description: "Create or update a personal Brain task after review. Does not run workflows, send messages or schedule reminders.", params: { operation: "create | update", id: "required for update, from brain_tasks", revision: "required for update, exact brain_tasks revision", changes: "object: title, detail, status (todo/doing/done), due (YYYY-MM-DD or empty), goalId (brain_goals ID or empty); omitted fields preserved" } },
       { name: "workflow_propose", description: "Save a disabled workflow draft for the user to review in Workflows. Cannot run or enable it.", params: { name: "workflow name", model: "installed local model alias", graph: "optional v2 canvas {version:2,nodes:[{id,type,label,position,config}],edges:[{id,from,to,port,input}]}; prefer workflow builder Copilot for complex graphs", steps: "array of {type,label,text}; types brain_search,prompt,approval,remember,output; use {{input}} and {{previous}}" } },
     ];
     for (const c of this.connections.list().filter(c => c.enabled && c.allowAgent)) for (const o of c.operations) tools.push({
@@ -92,7 +95,10 @@ class CompanionHub {
   async tool(name, args, model, confirm, signal, session) {
     if (!this.toolList(model).some(t => t.name === name)) throw new CompanionError("This private tool is unavailable for the selected model.");
     if (this.actions.tools().some(t => t.name === name)) return this.actions.tool(session?.owner, session?.id, name, args, model, confirm, signal);
-    if (name === "brain_search") return this.store.search(String(args.query || ""), 6).map(n => ({ id: n.id, title: n.title, text: n.text.slice(0, 1500), source: n.source, imported: !!n.sourceId }));
+    if (name === "brain_search") return this.brain.memories(args);
+    if (name === "brain_update") return this.brain.updateMemory(args, confirm, signal);
+    if (name === "brain_tasks") return this.brain.tasks(args);
+    if (name === "brain_task") return this.brain.changeTask(args, confirm, signal);
     if (name === "brain_goals") return this.store.data.goals.filter(g => g.status === "active");
     if (name === "brain_forget") {
       const note = this.store.data.notes.find(n => n.id === args.id && !n.sourceId);
