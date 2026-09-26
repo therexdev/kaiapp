@@ -1,8 +1,15 @@
+## KOIN rehearsal through existing chat
+
+- Developers can connect normal Network chat to an explicitly configured KOIN rehearsal master using the existing account login and wallet spending grant. Each request runs within a separate simulated session budget; no per-message review dialog is required.
+- Answers are shown only after the master accepts the work and the desktop verifies the worker signature, request, token usage and quoted cost. Chat labels these answers as a rehearsal with no KOIN spent. This path buffers the answer until verification completes.
+- Local-Only and Stop cancel pending requests. Errors never retry through legacy billing; reusing a request ID retrieves the existing result without creating another job. Existing grants are not permission to spend real KOIN.
+- This developer path is off by default. Set `KAI_KOIN_SHADOW_CONSUMER_URL` only for an isolated, configured master; the normal scheduler setting must match exactly. Installing Test does not activate KOIN payments or change live token prices.
+
 ## KOIN spending review preview
 
 - Open **KOIN → Preview review** in the desktop app to inspect an example model, token limits, maximum cost, session budget and expiry in a native dialog. The prices and wallet shown are illustrative, not live rates or your wallet balance.
 - Cancel is the default. Expired, changed, revoked or over-budget terms fail review; hiding, minimizing or reloading the app also cancels it. A second click cannot open another review while one is pending.
-- This is a local rehearsal only: it does not unlock a wallet, sign, send a request or spend KOIN. Paid requests still need a consumer service, verified deployment and real tariffs before they can be enabled.
+- This is a local preview only: it does not unlock a wallet, sign, send a request or spend KOIN. It is an example of reviewing session terms, not a required popup for every chat. Paid requests still need funded authorization, verified deployment and real tariffs before they can be enabled.
 - Fixes an Ethereum price-lookup cleanup issue that left failed RPC retries running and blocked the previous Test installer verification. RPC discovery now has a timeout, and completed background price lookups release their connection.
 
 ## KOIN shadow job protocol

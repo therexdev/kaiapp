@@ -240,6 +240,27 @@ class AccountService {
   }
 
   /* --------------------------------------------------- spend grants ---- */
+  // Private Core-to-scheduler credential handoff for the explicitly pinned
+  // rehearsal. Never returned by status(), IPC, a tool or a public API.
+  async shadowAuthorization(pinnedScheduler, signal) {
+    const { scheduler } = require("./koin-network/grant-chat");
+    const pinned = scheduler(pinnedScheduler);
+    const current = () => scheduler(this.settings.get("earn.schedulerUrl", process.env.KAI_SCHEDULER_URL || "https://koinosai.com/scheduler"));
+    const allowed = () => this.settings.get("network.privacyMode", "local-only") !== "local-only" && current() === pinned;
+    if (!allowed()) throw Error("KOIN rehearsal requires its pinned scheduler and online privacy mode");
+    const token = this._token(), owner = this.wallet?.address;
+    if (!token || !owner) throw Error("Sign in and link this wallet before using the KOIN rehearsal");
+    const response = await fetch(new URL(pinned).origin + "/auth/session", {
+      headers: { authorization: `Bearer ${token}` }, redirect: "error", signal,
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok || !result.account?.wallets?.some(w => w.address === owner)) throw Error("Sign in and link this wallet before using the KOIN rehearsal");
+    const grant = result.account.grants?.find(g => g.live && g.address === owner);
+    if (!grant) throw Error("Authorize a spending grant in Accounts before using the KOIN rehearsal");
+    if (!allowed() || token !== this._token() || owner !== this.wallet?.address) throw Error("Account or network settings changed");
+    return { sessionToken: token, grantId: grant.id, owner };
+  }
+
   /*
    * Authorise koinosai.com to spend from this wallet, up to a cap, until a
    * date. This lives HERE, in the desktop app, for one unavoidable reason:

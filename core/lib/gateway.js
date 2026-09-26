@@ -1903,6 +1903,9 @@ class Gateway {
     const netModel =
       overflowFrom ||
       (picked.startsWith("koinos-network:") ? picked.slice("koinos-network:".length) : picked && picked !== "koinos-network" ? picked : "auto");
+    if (this.network.status().koinRehearsal) {
+      return this._chatKoinRehearsal(body, req, res, { schedulerUrl, netModel, fail });
+    }
     // §7 context: refuse an oversized prompt BEFORE buying tokens — the
     // provider would fail on it and the failure would still be billed.
     const netCtx = (await this._networkRates(schedulerUrl, netModel)).ctxTokens;
@@ -2018,6 +2021,44 @@ class Gateway {
       return res.end();
     }
     return this._json(res, 200, j);
+  }
+
+  async _chatKoinRehearsal(body, req, res, { schedulerUrl, netModel, fail }) {
+    const key = req._apiKey || null;
+    if (key && this.keys.budgetRemainingMicro(key.id) <= 0) return fail(429, "This API key's monthly network budget is exhausted.", "insufficient_quota");
+    let id;
+    try { id = require("./koin-network/job-protocol").digest(body.koin_request_id ?? require("crypto").randomBytes(32).toString("hex")); }
+    catch { return fail(400, "Invalid KOIN rehearsal request ID", "koin_shadow_error"); }
+    const controller = new AbortController(), stop = () => controller.abort();
+    const release = this.network.trackShadowRequest(controller);
+    res.on("close", stop);
+    try {
+      const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(190000)]);
+      const authorization = await this.network.shadowAuthorization(signal);
+      signal.throwIfAborted();
+      const current = this.network.status();
+      if (current.privacyMode === "local-only" || current.schedulerUrl !== schedulerUrl) throw Error("Network settings changed");
+      const j = await require("./koin-network/grant-chat").consume({ schedulerUrl, authorization,
+        messages: body.messages, model: netModel, maxOutput: body.max_tokens,
+        requestId: id, signal });
+      signal.throwIfAborted();
+      if (key) this.keys.recordUsage(key.id, { inTok: j.usage.prompt_tokens, outTok: j.usage.completion_tokens, costMicro: 0 });
+      if (body.stream) {
+        res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store" });
+        res.write(`data: ${JSON.stringify({ object: "chat.completion.chunk", model: "koinos-network", servedModel: j.servedModel,
+          choices: [{ index: 0, delta: { content: j.choices[0].message.content } }] })}\n\n`);
+        res.write(`data: ${JSON.stringify({ object: "chat.completion.chunk", model: "koinos-network", servedModel: j.servedModel,
+          choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: j.usage, koin: j.koin, requestId: id, warning: j.warning })}\n\n`);
+        return res.end("data: [DONE]\n\n");
+      }
+      return this._json(res, 200, j);
+    } catch (e) {
+      if (res.destroyed) return;
+      // No legacy retry/fallback: that could make a separately billed job.
+      return fail(502, `KOIN rehearsal stopped: ${String(e.message).slice(0, 230)}. Request ID: ${id}`, "koin_shadow_error");
+    } finally {
+      res.removeListener("close", stop); release();
+    }
   }
 
   /** Published network token rates + class context, cached for an hour;

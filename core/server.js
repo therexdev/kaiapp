@@ -355,12 +355,17 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     }
   };
 
+  const koinShadowConsumerUrl = process.env.KAI_KOIN_SHADOW_CONSUMER_URL || "";
+  const shadowRequests = new Set();
   const network = {
     status: () => ({
       privacyMode: settings.get("network.privacyMode", "local-only"),
       schedulerUrl: settings.get("earn.schedulerUrl", DEFAULT_SCHEDULER_URL),
       walletUnlocked: wallet.status().unlocked,
+      koinRehearsal: Boolean(koinShadowConsumerUrl),
     }),
+    shadowAuthorization: signal => account.shadowAuthorization(koinShadowConsumerUrl, signal),
+    trackShadowRequest: controller => { shadowRequests.add(controller); return () => shadowRequests.delete(controller); },
     // §23: network requests are signed by the earning account — identity and
     // metering in one. Null when there's no unlocked wallet to sign with.
     signConsume: async (messages) => {
@@ -380,6 +385,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
         throw new Error("privacyMode must be local-only, local-first, or network");
       }
       settings.set("network.privacyMode", m);
+      if (m === "local-only") for (const controller of shadowRequests) controller.abort();
       // §32: the moment network participation is allowed, fetch the
       // safety list — don't wait out the poll interval.
       if (m !== "local-only") syncKillSwitch().catch(() => {});
@@ -729,6 +735,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
       return p;
     },
     async stop() {
+      for (const controller of shadowRequests) controller.abort();
       this.remote?.stop();
       speech.close();
       turn.close();

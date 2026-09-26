@@ -62,6 +62,41 @@ still needs tested backup, disk-loss recovery, retention and load limits.
 
 ## Required before paid activation
 
+### Existing chat integration (rehearsal only)
+
+Normal Network chat can use the master draft's account-grant consumer route.
+Set `KAI_KOIN_SHADOW_CONSUMER_URL` before starting Core to a deliberately
+configured test master; `earn.schedulerUrl` must match that URL. HTTPS is
+required except on loopback. The master must explicitly bind the signed-in
+account's existing linked-wallet grant to a separate synthetic session, pinned
+model/version and output ceiling. No operator secret is sent to the desktop.
+Worker opt-in remains `KAI_KOIN_SHADOW_JOBS=1`.
+
+The existing grant establishes identity and revocation state. Its USD cap is
+neither converted to KOIN nor charged by this path. Synthetic session limits
+bound reservations independently. Requests use the usual chat screen with no
+per-message confirmation. Replies carry a visible no-KOIN-spent label and arrive
+after verification, without token-by-token generation streaming. Credentials
+remain in Core; worker payloads contain no account token or grant secret.
+
+The client verifies the quote, signed output, receipt ownership and arithmetic.
+Master-observed tokenization and challenge acceptance remain trusted master
+responsibilities. Stop and Local-Only abort pending HTTP; an already accepted
+job retains its hold. A caller can reuse a 64-character lowercase SHA-256
+`koin_request_id` to retrieve the same result, never to change the prompt or
+restart cancelled work. The ordinary UI does not automatically retry errors.
+Results are private, transient and retained for up to five minutes (32 results).
+After restart or eviction, a completed request reports its missing answer and
+does not run again; durable encrypted delivery is still future work.
+
+The opt-in route refuses fallback to legacy billing. Installation alone enables
+nothing on the live master. Regression coverage includes real account grants,
+HTTP cancellation/revocation, isolated worker execution, receipt tampering and
+cross-repository desktop/master integration. These use fixture inference and
+prices; they are not provider benchmarks or evidence of deployed payments.
+
+### Remaining activation work
+
 1. Implement and calibrate master-observed token metering, tariffs, SLA/challenge
    results and a durable per-job reservation ledger inside each on-chain grant.
    The master has a synthetic reservation/receipt flow and pinned tokenizer
