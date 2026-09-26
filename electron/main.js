@@ -130,6 +130,7 @@ async function start() {
     getMainWindow: () => win, getMascotWindow: () => mascot?.getWindow(), origin,
     onChange: () => refreshLanguageMenu() });
   const tr = text => nativeI18n.t(text, [], languagePrefs.status().language);
+  require("./koin-review").registerKoinReviewIPC({ ipcMain, dialog, getMainWindow: () => win, origin, tr });
   ipcMain.handle("dialog:pick-gguf", async (event) => {
     requireMain(event);
     const r = await dialog.showOpenDialog(win, {

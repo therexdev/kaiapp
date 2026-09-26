@@ -152,8 +152,9 @@ function valuation({ balances, windows, usdPerKoin } = {}) {
 async function fetchUsdPerKoin({ provider, probeUsdt = DEFAULT_PROBE_USDT, now = Date.now() } = {}) {
   const { quoteVkoinOut } = require("./eth-swap");
   const usdtSats = BigInt(Math.round(probeUsdt * USDT_UNITS));
+  let p;
   try {
-    const p = provider || (await require("./eth-bridge").makeProvider());
+    p = provider || (await require("./eth-bridge").makeProvider());
     const vkoinSats = await quoteVkoinOut({ usdtSats, provider: p });
     const executable = computeUsdPerKoin({ usdtSats, vkoinSats });
     if (executable == null) {
@@ -170,6 +171,10 @@ async function fetchUsdPerKoin({ provider, probeUsdt = DEFAULT_PROBE_USDT, now =
     };
   } catch (e) {
     return { usdPerKoin: null, at: now, probeUsdt, error: String(e?.shortMessage || e?.message || e) };
+  } finally {
+    // A background quote owns only the provider it created. Failed or complete
+    // quotes must not leave discovery/retry timers running after Core stops.
+    if (!provider) p?.destroy();
   }
 }
 

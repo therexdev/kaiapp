@@ -9,6 +9,10 @@
  */
 
 const { contextBridge, ipcRenderer } = require("electron");
+// Fixed local example only. No caller-supplied quote, transport or signing.
+contextBridge.exposeInMainWorld("kaiKoinReviewBridge", {
+  preview: () => ipcRenderer.invoke("koin:preview-review"),
+});
 contextBridge.exposeInMainWorld("kaiLanguageBridge", {
   get: () => ipcRenderer.invoke("shell:language"),
   save: language => ipcRenderer.invoke("shell:set-language", language),

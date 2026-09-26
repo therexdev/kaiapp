@@ -1,3 +1,10 @@
+## KOIN spending review preview
+
+- Open **KOIN → Preview review** in the desktop app to inspect an example model, token limits, maximum cost, session budget and expiry in a native dialog. The prices and wallet shown are illustrative, not live rates or your wallet balance.
+- Cancel is the default. Expired, changed, revoked or over-budget terms fail review; hiding, minimizing or reloading the app also cancels it. A second click cannot open another review while one is pending.
+- This is a local rehearsal only: it does not unlock a wallet, sign, send a request or spend KOIN. Paid requests still need a consumer service, verified deployment and real tariffs before they can be enabled.
+- Fixes an Ethereum price-lookup cleanup issue that left failed RPC retries running and blocked the previous Test installer verification. RPC discovery now has a timeout, and completed background price lookups release their connection.
+
 ## KOIN shadow job protocol
 
 - Adds an opt-in developer path for testing quoted network jobs. It requires `KAI_KOIN_SHADOW_JOBS=1` and an explicitly configured master; normal earning continues on the existing protocol.

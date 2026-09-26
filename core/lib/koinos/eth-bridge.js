@@ -42,15 +42,26 @@ function normPriv(hex) {
   return "0x" + h;
 }
 
-async function makeProvider(rpcUrls = ETH_RPCS) {
+async function makeProvider(rpcUrls = ETH_RPCS, { timeoutMs = 8000 } = {}) {
   let lastErr;
   for (const url of rpcUrls) {
+    let p, timer;
     try {
-      const p = new ethers.JsonRpcProvider(url, undefined, { staticNetwork: true });
-      await p.getBlockNumber(); // liveness probe
+      const request = new ethers.FetchRequest(url);
+      request.timeout = timeoutMs;
+      p = new ethers.JsonRpcProvider(request, undefined, { staticNetwork: true });
+      // Failed network discovery otherwise retries forever inside ethers,
+      // keeping Core (and the browser test process) alive after shutdown.
+      await Promise.race([
+        Promise.all([p.getNetwork(), p.getBlockNumber()]),
+        new Promise((_resolve, reject) => { timer = setTimeout(() => reject(new Error("Ethereum RPC timed out")), timeoutMs); }),
+      ]);
       return p;
     } catch (e) {
+      p?.destroy();
       lastErr = e;
+    } finally {
+      clearTimeout(timer);
     }
   }
   throw new Error(`No Ethereum RPC reachable: ${lastErr?.shortMessage || lastErr?.message || lastErr}`);
