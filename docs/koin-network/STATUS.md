@@ -169,6 +169,23 @@ Production signing, broadcasts, purchases and refunds remain disconnected.
 These signatures use a rehearsal-only domain and must never be accepted as
 live-payment authorization.
 
+### Automatic reward payouts
+
+Automatic sponsored claims are the intended default, confirmed by the owner.
+After daily rewards finalize and their 24-hour review hold ends, the master
+should submit valid claims and cover Mana, delivering KOIN to the committed
+provider wallet. Users should not need to click Claim or sign each reward
+payment. A manual claim remains a fallback. The rewards contract already fixes
+the recipient and permits a relayer to submit the proof; the automatic claim
+runner and signed reward manifests are still pending.
+
+The new master settlement outbox concerns **customer usage charges**, not
+provider reward payouts. It atomically saves the full signed transaction with
+its held charge, returns only identical bytes on retry, limits sponsored Mana
+and clears holds only after exact irreversible transaction/accounting checks.
+Its tests simulate submission with deterministic fixture keys. No production
+signer, broadcast route or automatic claim service is activated.
+
 ### Remaining activation work
 
 1. Implement and calibrate master-observed token metering, tariffs, SLA/challenge
@@ -182,7 +199,11 @@ live-payment authorization.
 2. Implement finality-aware reconciliation, signed reward manifests, keeper
    recovery and sponsored claim submission. Read-only finality reconciliation
    and synthetic restart/fork/replay tests are implemented in the master draft.
-   The current reward manifest remains hashed, not signed; no keeper broadcasts.
+   The master now also has a durable signed-settlement outbox, exact-envelope
+   retry decisions, bounded sponsorship accounting and crash/restart tests.
+   Its recovery helper has no signing or submission transport; only fixture
+   tests simulate sending. The current reward manifest remains hashed, not
+   signed; no keeper broadcasts.
 3. Benchmark real providers and complete at least seven days of shadow data.
    Validate capacity deduplication, model-switch observations, workload costs
    and collusive/self-funded work. The work cap is not a proof that all economic

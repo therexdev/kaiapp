@@ -20,7 +20,7 @@ The master node's existing reburn, retained-wallet and distribution settings are
 | Work payout ceiling | 80% of that provider's eligible, actually charged KOIN, also limited by its proportional work allocation | Limits simple purchased self-work farming; no fixed per-job payout promise |
 | Unused allocations | Return to free rewards treasury | No forced distribution or same-day transfer between reward categories |
 | Presence samples | 60-second accounting intervals; 15-minute sealed telemetry batches | Off-chain measurement; no transaction per minute or generated token |
-| Reward settlement | Daily root after the reward day ends, with a 24-hour review hold | Daily contributions; automatic claims may arrive later |
+| Reward settlement | Daily root after the reward day ends, with a 24-hour review hold | Automatic sponsored claims after finalization; daily contributions are not immediately spendable |
 | Trust adjustment | 0.90 to 1.00; new qualified providers start at 0.95 | Reliability matters without a large incumbent advantage |
 | Scarcity adjustment | 0.75 to 1.50, only for approved useful model families | Bounded coverage incentive |
 | Mainnet monetary governance | Owner-held administrative keys; separate restricted service keys | Owner decision; future DAO transfer supported, DAO voting design deferred |
@@ -147,7 +147,7 @@ Maintain free reward funds, open-day reserved budgets, pending-root obligations,
 
 Use native KOIN transfers for claims. Do not reuse the test-token mint operation with a renamed symbol. No unbacked rewards, credit against estimated future mining, or ability to spend estimated earnings before a claim is final and funded.
 
-Any caller may relay a valid claim, but payment always goes to the leaf's committed provider address. The master can sponsor automatic claims. A failed claim transaction leaves the same entitlement available for retry. Claimed state and transfer success must commit atomically. Claims have no short forfeiture timer in v1; their reserves remain excluded until paid.
+Any caller may relay a valid claim, but payment always goes to the leaf's committed provider address. The master will sponsor automatic claims as the default payout experience, as confirmed by the owner. Providers should not need to click Claim or sign each reward payment; a manual claim remains a recovery option. A failed claim transaction leaves the same entitlement available for retry. Claimed state and transfer success must commit atomically. Claims have no short forfeiture timer in v1; their reserves remain excluded until paid.
 
 Owner withdrawals from this contract may use free, uncommitted funds only. Standard administrative functions cannot withdraw customer or claim liabilities. Because the owner retains upgrade authority, these are guarantees of the deployed code under the declared governance model, not protection against every possible owner-installed replacement.
 
@@ -255,7 +255,7 @@ Model/creator royalties, if applicable, must be explicit quote line items before
 
 Make Earn a dedicated KOIN earning and wallet destination. Keep the existing wallet identity and signing controls. Do not create a replacement wallet, merge blockchain networks, or make KOIN spendable merely by renaming old test balances.
 
-The top of the screen should show **wallet KOIN** with an optional fresh USD estimate, **claimable KOIN**, and **estimated current-day rewards** as distinct amounts. An unavailable price should show no estimate, not zero dollars. Do not add those amounts together into one spendable balance. Provide Receive, Send and Claim actions using existing wallet approval flows; sponsored auto-claims can deliver to the same committed address without signing a user transfer.
+The top of the screen should show **wallet KOIN** with an optional fresh USD estimate, **claimable KOIN**, and **estimated current-day rewards** as distinct amounts. An unavailable price should show no estimate, not zero dollars. Do not add those amounts together into one spendable balance. Provide Receive and Send actions using existing wallet approval flows. Automatic sponsored claims deliver to the committed provider address without a user signature for each payment. Keep Claim available as a manual recovery option.
 
 Show availability and completed-work earnings separately, with the model/slot being credited, qualifying uptime, reliability/coverage adjustments, accepted paid jobs and weighted usage. Explain non-earning states: paused by user, model loading, failed qualification, no verified capacity, verifier unavailable, or empty reward pool. A machine busy on a valid network job should not look offline.
 
