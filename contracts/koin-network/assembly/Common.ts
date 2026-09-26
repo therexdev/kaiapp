@@ -150,8 +150,13 @@ export class Base {
     );
     this.configs.put(KEY, c);
   }
-  token(): Token {
-    return new Token(this.config().token!);
+  nativeTransfer(from: Uint8Array, to: Uint8Array, n: u64): bool {
+    const out = System.call(this.config().token!, 0x27f576ca,
+      Protobuf.encode(new token.transfer_arguments(from, to, n), token.transfer_arguments.encode));
+    if (out.code != 0 && out.res.error !== null && out.res.error!.message !== null) {
+      System.log(out.res.error!.message!);
+    }
+    return out.code == 0;
   }
   nativeBalance(): u64 {
     const out = System.call(
@@ -180,10 +185,9 @@ export class Base {
   transfer(to: Uint8Array, n: u64): void {
     if (n == 0) return;
     System.require(!equal(to, this.id), "self transfer");
-    const t = this.token(),
-      before = this.nativeBalance();
+    const before = this.nativeBalance();
     System.require(
-      before >= n && t.transfer(this.id, to, n),
+      before >= n && this.nativeTransfer(this.id, to, n),
       "KOIN transfer failed",
     );
     System.require(
@@ -194,9 +198,8 @@ export class Base {
   deposit(from: Uint8Array, n: u64): void {
     auth(from);
     System.require(n > 0 && !equal(from, this.id), "invalid funding");
-    const t = this.token(),
-      before = this.nativeBalance();
-    System.require(t.transfer(from, this.id, n), "KOIN deposit failed");
+    const before = this.nativeBalance();
+    System.require(this.nativeTransfer(from, this.id, n), "KOIN deposit failed");
     System.require(
       this.nativeBalance() == add(before, n),
       "KOIN deposit mismatch",
