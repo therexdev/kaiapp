@@ -25,6 +25,10 @@ legacy rewards. Normal workers remain opted out. See the master repository's
   encoding, including initial deposits and refunds that empty custody.
 - Closing paid-work totals requires the configured Rewards contract as the
   immediate caller. A treasury key signature alone cannot impersonate that call.
+- Reward-budget opening now requires its intended UTC day in `Request.epoch`;
+  a delayed transaction cannot open the following day's budget. Finalization
+  requires the exact reviewed `Request.root` (hash and both category totals).
+  Old unbound opening/finalization drafts are rejected by this prototype build.
 - Owner policy changes have a 48-hour notice and UTC-day boundary. Emergency
   pause blocks new spending and reward commitments; refunds, expired-session
   releases and finalized claims remain available.
@@ -249,8 +253,11 @@ verifying the fresh genesis marker. Normal deployment remains unconfigured.
    A restricted driver now exercises settlement submission and automatic claims
    with fixture-only signing/transport. Signed rehearsal reward manifests and
    a durable claim/signing/Mana journal are implemented; production manifest
-   ingestion, epoch/root writes, key custody, broadcasting and monitoring remain
-   unconnected. The original shadow-report route still returns hashed simulation
+   ingestion, key custody, production broadcasting and monitoring remain
+   unconnected. The master draft now rehearses daily budget/root/finalization
+   writes with a durable outbox, exact-envelope recovery, dedicated payer nonce
+   and automatic claim handoff. It preserves the full review hold and irreversible
+   state checks. The original shadow-report route still returns hashed simulation
    data. No production keeper broadcasts.
 3. Benchmark real providers and complete at least seven days of shadow data.
    Validate capacity deduplication, model-switch observations, workload costs

@@ -160,7 +160,7 @@ function settle(c: Credits): void {
 function opened(): Rewards {
   const r = setupRewards();
   MockVM.setCallContractResults([balance(100000)]);
-  r.open();
+  r.open(1);
   return r;
 }
 function publish(r: Rewards, a: u64 = 3000, w: u64 = 1000): K.Node {
@@ -298,7 +298,7 @@ describe("KOIN reward treasury", () => {
   it("rejects a provider's work payout above its own paid charge even inside a valid root", () => {
     expect(() => {
       const r = opened(); publish(r); clock(3 * DAY);
-      MockVM.setCallContractResults([balance(100000)]); r.finalize(1);
+      MockVM.setCallContractResults([balance(100000)]); r.finalize(1, r.epochs.get(key(1))!.root!);
       const q = new K.Request(); q.epoch = 1; q.account = provider; q.availability = 3000; q.work = 1000;
       MockVM.setCallContractResults([answer(100)]); r.claim(q);
     }).toThrow();
@@ -309,14 +309,14 @@ describe("KOIN reward treasury", () => {
     expect(r.totals.get(KEY)!.value).toBe(5000);
     clock(2 * DAY + DAY / 2);
     MockVM.setCallContractResults([balance(100000)]);
-    const e = r.open();
+    const e = r.open(2);
     expect(e.budget).toBe(2375);
     expect(e.availability_budget).toBe(1662);
   });
   it("rejects duplicate epoch opening", () => {
     expect(() => {
       const r = opened();
-      r.open();
+      r.open(1);
     }).toThrow();
   });
   it("cannot commit unbacked or oversized work allocations", () => {
@@ -340,7 +340,7 @@ describe("KOIN reward treasury", () => {
     publish(r);
     clock(3 * DAY);
     MockVM.setCallContractResults([balance(100000)]);
-    r.finalize(1);
+    r.finalize(1, r.epochs.get(key(1))!.root!);
     expect(r.totals.get(KEY)!.value).toBe(4000);
     expect(r.epochs.get(key(1))!.finalized).toBe(true);
   });
@@ -349,7 +349,7 @@ describe("KOIN reward treasury", () => {
     publish(r);
     clock(3 * DAY);
     MockVM.setCallContractResults([balance(100000)]);
-    r.finalize(1);
+    r.finalize(1, r.epochs.get(key(1))!.root!);
     const q = new K.Request();
     q.epoch = 1;
     q.account = provider;
@@ -371,14 +371,14 @@ describe("KOIN reward treasury", () => {
     expect(() => {
       const r = opened();
       publish(r);
-      r.finalize(1);
+      r.finalize(1, r.epochs.get(key(1))!.root!);
     }).toThrow();
     expect(() => {
       const r = opened();
       publish(r);
       clock(3 * DAY);
       MockVM.setCallContractResults([balance(100000)]);
-      r.finalize(1);
+      r.finalize(1, r.epochs.get(key(1))!.root!);
       const q = new K.Request();
       q.epoch = 1;
       q.account = buyer;
@@ -391,7 +391,7 @@ describe("KOIN reward treasury", () => {
       publish(r);
       clock(3 * DAY);
       MockVM.setCallContractResults([balance(100000)]);
-      r.finalize(1);
+      r.finalize(1, r.epochs.get(key(1))!.root!);
       r.claims.put(periodAccount(1, provider), new K.Amount(4000));
       const q = new K.Request();
       q.epoch = 1;

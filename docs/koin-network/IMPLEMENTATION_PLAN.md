@@ -161,7 +161,7 @@ Koinos execution consumes Mana and has compute, network and storage limits. Use 
 
 ### 4.1 Daily budget and timing
 
-Use UTC reward-day IDs; display the user's local settlement time in the app. `open_epoch` fixes that day's free-balance snapshot, settings version and budget once. A master keeper normally opens the period at its start. The contract uses chain time and rejects duplicate or future epochs.
+Use UTC reward-day IDs; display the user's local settlement time in the app. `open_epoch` fixes that day's free-balance snapshot, settings version and budget once. A master keeper normally opens the period at its start. The contract requires the explicitly requested epoch to equal the current chain day and rejects duplicate, past or future epochs. `finalize_root` binds the exact reviewed root hash and both category totals, so a delayed draft cannot finalize a replacement root.
 
 If opening occurs late, eligible contribution starts at the actual opening time and the 5% ceiling is prorated to the remaining fraction of that UTC day. Do not retroactively create full daily budgets for missed days. Deposits after the opening snapshot enter a later budget. This removes any need to reconstruct a historical raw token balance when the keeper was offline. A master outage may delay or reduce rewards; show this instead of inventing continuity.
 

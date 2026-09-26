@@ -71,11 +71,12 @@ export class Rewards extends Base {
     K.Amount.decode,
     K.Amount.encode,
   );
-  open(): K.Epoch {
+  open(expected: u64): K.Epoch {
     this.running();
     const c = this.config(),
       time = now(),
       id = time / DAY;
+    System.require(expected == id, "reward day changed");
     System.require(this.epochs.get(key(id)) === null, "epoch already opened");
     const e = new K.Epoch();
     e.id = id;
@@ -133,7 +134,7 @@ export class Rewards extends Base {
     this.epochs.put(key(id), e!);
     this.invariant();
   }
-  finalize(id: u64): void {
+  finalize(id: u64, expected: K.Node): void {
     const e = this.epochs.get(key(id));
     System.require(
       e !== null &&
@@ -143,6 +144,9 @@ export class Rewards extends Base {
         now() >= e!.review_until,
       "root not ready",
     );
+    System.require(equal(e!.root!.hash, expected.hash) &&
+      e!.root!.availability == expected.availability && e!.root!.work == expected.work && !expected.left,
+      "reward root changed");
     this.running();
     const total = add(e!.root!.availability, e!.root!.work);
     this.liability(sub(e!.budget, total), false);
@@ -255,12 +259,15 @@ export class Rewards extends Base {
     }
     if (method == E.fund) this.deposit(addr(r.account), r.amount);
     else if (method == E.open_epoch) {
-      out.epoch = this.open();
+      out.epoch = this.open(r.epoch);
       return out;
     } else if (method == E.propose_root) {
       System.require(r.root !== null, "root required");
       this.propose(r.epoch, r.root!);
-    } else if (method == E.finalize_root) this.finalize(r.epoch);
+    } else if (method == E.finalize_root) {
+      System.require(r.root !== null, "expected root required");
+      this.finalize(r.epoch, r.root!);
+    }
     else if (method == E.cancel_root) this.cancel(r.epoch);
     else if (method == E.expire_epoch) this.expire(r.epoch);
     else if (method == E.claim) this.claim(r);

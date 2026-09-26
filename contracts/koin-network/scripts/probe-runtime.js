@@ -82,8 +82,11 @@ test("credits WASM preserves principal after a failed transfer and permits refun
 test("JavaScript Merkle-sum allocation settles through compiled rewards WASM and cannot be claimed twice", async () => {
   const vm = await initialized("rewards"), DAY = 86400000;
   const clock = timestamp => put(vm, "BLOCK_KEY", koinos.protocol.block.encode({ header: { timestamp } }).finish());
-  clock(DAY); calls(vm, [await amount("100000")]);
-  const opened = await run(vm, "rewards", "open_epoch"); assert.equal(opened.epoch.budget, "5000");
+  clock(DAY);
+  await assert.rejects(run(vm, "rewards", "open_epoch", { epoch: "2" }), /reward day changed/);
+  await assert.rejects(run(vm, "rewards", "open_epoch"), /reward day changed/);
+  calls(vm, [await amount("100000")]);
+  const opened = await run(vm, "rewards", "open_epoch", { epoch: "1" }); assert.equal(opened.epoch.budget, "5000");
   const { build } = require("../../../core/lib/koin-network/merkle");
   const provider = utils.encodeBase58(addr(8));
   const tree = build({ chainId: b64(chain), contract: utils.encodeBase58(addr(3)), epoch: 1, version: 1 },
@@ -92,8 +95,12 @@ test("JavaScript Merkle-sum allocation settles through compiled rewards WASM and
   clock(2 * DAY); authority(vm, addr(5));
   calls(vm, [Buffer.alloc(0), await serializer.serialize({ amount: "1000" }, "koin.Result"), await amount("100000"), await amount("100000")]);
   await run(vm, "rewards", "propose_root", { epoch: "1", root: wire(tree.root) });
-  clock(3 * DAY); calls(vm, [await amount("100000"), await amount("100000")]);
-  await run(vm, "rewards", "finalize_root", { epoch: "1" });
+  clock(3 * DAY);
+  await assert.rejects(run(vm, "rewards", "open_epoch", { epoch: "2" }), /reward day changed/);
+  await assert.rejects(run(vm, "rewards", "finalize_root", { epoch: "1" }), /expected root required/);
+  await assert.rejects(run(vm, "rewards", "finalize_root", { epoch: "1", root: { ...wire(tree.root), availability: "1501" } }), /reward root changed/);
+  calls(vm, [await amount("100000"), await amount("100000")]);
+  await run(vm, "rewards", "finalize_root", { epoch: "1", root: wire(tree.root) });
   const claim = tree.claims.find(x => x.address === provider);
   const request = { epoch: "1", account: b64(addr(8)), availability: claim.availability, work: claim.work, proof: claim.proof.map(wire) };
   calls(vm, [await serializer.serialize({ amount: "1000" }, "koin.Result"), await amount("100000"), Buffer.alloc(0), await amount("98500"), await amount("98500"), await amount("98500")]);
