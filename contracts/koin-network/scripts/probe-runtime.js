@@ -52,6 +52,15 @@ for (const kind of ["credits", "rewards"]) test(kind + " shipped WASM initialize
   await assert.rejects(run(vm, kind, "config", {}, Buffer.from([32, 0])), /noncanonical/);
   await assert.rejects(run(vm, kind, "config", {}, Buffer.alloc(16385)), /request too large/);
 });
+test("only the configured rewards contract can seal a closed paid-work day", async () => {
+  const vm = await initialized("credits"), DAY = 86400000;
+  put(vm, "BLOCK_KEY", koinos.protocol.block.encode({ header: { timestamp: 2 * DAY } }).finish());
+  authority(vm, addr(3)); // A key signature cannot impersonate the contract caller.
+  const caller = account => put(vm, "CALLER_KEY", koinos.chain.caller_data.encode({ caller: account, caller_privilege: koinos.chain.privilege.user_mode }).finish());
+  caller(addr(8)); await assert.rejects(run(vm, "credits", "seal_day", { epoch: "1" }), /treasury caller required/);
+  caller(addr(3)); await run(vm, "credits", "seal_day", { epoch: "1" });
+  await assert.rejects(run(vm, "credits", "seal_day", { epoch: "2" }), /current charge period/);
+});
 test("credits WASM preserves principal after a failed transfer and permits refunds while paused", async () => {
   const vm = await initialized("credits"), buyer = addr(8), account = b64(buyer);
   authority(vm, buyer); calls(vm, [await amount("0"), Buffer.alloc(0), await amount("100"), await amount("100"), await amount("100")]);

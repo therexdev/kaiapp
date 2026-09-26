@@ -23,6 +23,8 @@ legacy rewards. Normal workers remain opted out. See the master repository's
   MockVM fixtures masked. Zero custody balances and empty credits-call results
   now decode safely; compiled-WASM regressions use the native omitted-field
   encoding, including initial deposits and refunds that empty custody.
+- Closing paid-work totals requires the configured Rewards contract as the
+  immediate caller. A treasury key signature alone cannot impersonate that call.
 - Owner policy changes have a 48-hour notice and UTC-day boundary. Emergency
   pause blocks new spending and reward commitments; refunds, expired-session
   releases and finalized claims remain available.

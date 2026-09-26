@@ -247,7 +247,7 @@ export class Credits extends Base {
       )!.value;
       return out;
     } else if (method == E.seal_day) {
-      auth(this.config().treasury!);
+      System.require(equal(System.getCaller().caller, this.config().treasury), "treasury caller required");
       System.require(
         r.epoch < now() / DAY,
         "current charge period cannot seal",
