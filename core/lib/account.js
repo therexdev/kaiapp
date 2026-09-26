@@ -242,7 +242,7 @@ class AccountService {
   /* --------------------------------------------------- spend grants ---- */
   // Private Core-to-scheduler credential handoff for the explicitly pinned
   // rehearsal. Never returned by status(), IPC, a tool or a public API.
-  async shadowAuthorization(pinnedScheduler, signal) {
+  async shadowAuthorization(pinnedScheduler, signal, { grantId = null, allowInactive = false } = {}) {
     const { scheduler } = require("./koin-network/grant-chat");
     const pinned = scheduler(pinnedScheduler);
     const current = () => scheduler(this.settings.get("earn.schedulerUrl", process.env.KAI_SCHEDULER_URL || "https://koinosai.com/scheduler"));
@@ -254,11 +254,14 @@ class AccountService {
       headers: { authorization: `Bearer ${token}` }, redirect: "error", signal,
     });
     const result = await response.json();
-    if (!response.ok || !result.ok || !result.account?.wallets?.some(w => w.address === owner)) throw Error("Sign in and link this wallet before using the KOIN rehearsal");
-    const grant = result.account.grants?.find(g => g.live && g.address === owner);
+    if (!response.ok || !result.ok || !result.account?.id || (!allowInactive && !result.account.wallets?.some(w => w.address === owner))) throw Error("Sign in and link this wallet before using the KOIN rehearsal");
+    // A saved certificate may still be inspected/revoked after unlinking or
+    // grant revocation. This private option grants no new spending authority.
+    const grant = allowInactive && grantId ? { id: require("./koin-network/session-delegation").identity(grantId) } :
+      result.account.grants?.find(g => g.live && g.address === owner && (!grantId || g.id === grantId));
     if (!grant) throw Error("Authorize a spending grant in Accounts before using the KOIN rehearsal");
     if (!allowed() || token !== this._token() || owner !== this.wallet?.address) throw Error("Account or network settings changed");
-    return { sessionToken: token, grantId: grant.id, owner };
+    return { sessionToken: token, accountId: result.account.id, grantId: grant.id, owner };
   }
 
   /*

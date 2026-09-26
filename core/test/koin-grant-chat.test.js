@@ -63,7 +63,7 @@ async function fixture(t) {
     calls.push({ url: req.url, authorization: req.headers.authorization, body });
     res.setHeader("content-type", "application/json");
     if (req.url === "/auth/session") {
-      res.end(JSON.stringify({ ok: true, account: { wallets: [{ address: core.account.wallet.address }],
+      res.end(JSON.stringify({ ok: true, account: { id: "acc_fixture", wallets: [{ address: core.account.wallet.address }],
         grants: [{ id: authorization.grantId, live: true, address: core.account.wallet.address }] } })); return;
     }
     if (req.url === "/scheduler/consume/chat/completions") {

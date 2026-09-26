@@ -1,3 +1,10 @@
+## One approval per KOIN session
+
+- Adds private desktop controls for a deliberately configured funded-session accounting rehearsal: review limits once, refresh status, retry a saved approval or revoke it. The native confirmation lists the wallet, account, model, budget, per-request cap, request count, expiry and deployment pins; Cancel is the default.
+- The master verifies the wallet signature and finalized funding evidence. Multiple reservations can reuse the session approval without per-message wallet prompts. Existing USD account grants are not converted into KOIN authority.
+- A saved approval survives a lost response or restart. Retry checks the existing approval first; it cannot reset the budget. Revocation releases queued reservations and preserves dispatched or uncertain work. Closing during submission reports an uncertain result and offers recovery.
+- These controls appear only with explicit developer configuration. They do not fund a session, enable paid chat, broadcast transactions or spend KOIN. The live network and normal chat continue on their current paths.
+
 ## KOIN rehearsal through existing chat
 
 - Developers can connect normal Network chat to an explicitly configured KOIN rehearsal master using the existing account login and wallet spending grant. Each request runs within a separate simulated session budget; no per-message review dialog is required.

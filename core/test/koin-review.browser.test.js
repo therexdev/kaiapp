@@ -16,6 +16,7 @@ test("Earn review preview is desktop-only, disables repeat clicks and explains e
   await page.goto(base);
   await navClick(page, '.nav-item[data-view="earn"]');
   assert.equal(await page.locator("#koin-review-preview").isVisible(), false);
+  assert.equal(await page.locator("#koin-session-rehearsal").isVisible(), false);
   await page.addInitScript(() => {
     window.previewCalls = 0;
     window.kaiKoinReviewBridge = { preview() {
@@ -45,4 +46,27 @@ test("Earn review preview is desktop-only, disables repeat clicks and explains e
   }
   assert.equal(await page.locator("#btn-koin-purchase").isDisabled(), true);
   assert.equal(await page.locator("#btn-koin-claim").isDisabled(), true);
+  await page.addInitScript(() => {
+    window.sessionCalls = [];
+    const base = { enabled: true, mode: "funded-rehearsal", paymentsEnabled: false };
+    window.kaiKoinSessionBridge = {
+      status: async () => ({ ...base, state: "unapproved" }),
+      review: () => { window.sessionCalls.push("review"); return new Promise(r => { window.finishSession = r; }); },
+      retry: async () => ({ ...base, state: "active" }), revoke: async () => ({ ...base, state: "revoked" }),
+    };
+  });
+  await page.reload(); await navClick(page, '.nav-item[data-view="earn"]');
+  const sessionButton = page.locator("#btn-koin-session-review");
+  assert.equal(await sessionButton.isVisible(), true); await sessionButton.click();
+  assert.equal(await sessionButton.isDisabled(), true);
+  await page.evaluate(() => document.getElementById("btn-koin-session-review").click());
+  assert.equal(await page.evaluate(() => window.sessionCalls.length), 1);
+  await page.evaluate(() => window.finishSession({ enabled: true, mode: "funded-rehearsal", paymentsEnabled: false, state: "uncertain", error: "<img src=x onerror=alert(1)>" }));
+  await page.waitForFunction(() => document.getElementById("koin-session-status").textContent.includes("uncertain"));
+  assert.equal(await page.locator("#koin-session-status img").count(), 0);
+  await page.locator("#btn-koin-session-retry").click();
+  await page.waitForFunction(() => document.getElementById("koin-session-status").textContent.includes("Paid chat remains disabled"));
+  await page.locator("#btn-koin-session-revoke").click();
+  await page.waitForFunction(() => document.getElementById("koin-session-status").textContent.includes("revoked"));
+  assert.equal(await page.locator("#btn-koin-purchase").isDisabled(), true);
 });

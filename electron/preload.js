@@ -13,6 +13,14 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("kaiKoinReviewBridge", {
   preview: () => ipcRenderer.invoke("koin:preview-review"),
 });
+// Native review reads pinned configuration itself; the renderer supplies no
+// amount, account token, deployment, signature or arbitrary signing request.
+contextBridge.exposeInMainWorld("kaiKoinSessionBridge", {
+  status: () => ipcRenderer.invoke("koin:session-status"),
+  review: () => ipcRenderer.invoke("koin:session-review"),
+  retry: () => ipcRenderer.invoke("koin:session-retry"),
+  revoke: () => ipcRenderer.invoke("koin:session-revoke"),
+});
 contextBridge.exposeInMainWorld("kaiLanguageBridge", {
   get: () => ipcRenderer.invoke("shell:language"),
   save: language => ipcRenderer.invoke("shell:set-language", language),

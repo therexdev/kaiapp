@@ -95,6 +95,55 @@ HTTP cancellation/revocation, isolated worker execution, receipt tampering and
 cross-repository desktop/master integration. These use fixture inference and
 prices; they are not provider benchmarks or evidence of deployed payments.
 
+### One-time funded-session approval (accounting rehearsal)
+
+The master funded ledger now accepts an owner-signed, account-bound session
+certificate, separate from both USD grants and per-job signatures. It binds
+chain/credits bytecode/policy/domain, funded session, wallet, account, grant,
+model/version, output limit, total amount, per-request cap, maximum requests and
+expiry. Each funded session permits one durable certificate. Revocation leaves
+a tombstone; replay and a new certificate cannot reset its budget. Atomic
+reservations count pending holds and settled charges across processes/restarts.
+The native review also shows input/output prices per million tokens, checked
+against the pinned tariff-policy commitment before signing.
+
+For isolated developer use, set `KAI_KOIN_FUNDED_REHEARSAL_CONFIG` to a local JSON
+file before starting Electron. It must contain exactly `schedulerUrl`, `target`,
+`session`, `model`, `version`, `maxOutput`, `amount`, `perJob`, `maxJobs`, `expires`.
+`target` has exactly `chainId`, `credits`, `creditsHash`, `domain`, `policyHash`.
+Use reviewed pins for the isolated deployment, atom amounts as decimal strings,
+and UTC epoch milliseconds for expiry. The configured account scheduler must
+match the pinned URL. The master requires its explicit `koinFundedSessions`
+configuration and the existing signed-in, linked-wallet grant. The app wallet
+must be unlocked through its existing wallet controls to sign the certificate.
+
+The KOIN screen then exposes **Review session limits**, **Retry saved approval**,
+**Refresh session** and **Revoke session approval**. Native confirmation is
+restricted to the trusted main document and accepts no renderer-supplied terms
+or signing bytes. Hiding, minimizing, navigation, Local-Only or shutdown aborts
+the operation. Once a saved approval may have reached the master, cancellation
+reports uncertainty instead of claiming the server did nothing.
+
+The exact signed certificate is saved privately in
+`koin-funded-session-approval.json` before submission. It contains no account
+session token or private key. Retry first queries the existing approval; a
+missing approval can resend the same certificate without another signature.
+Server funding observations are transient. After a server restart a retry may
+need to observe again and wait for finality. Configuration changes cannot
+silently replace a saved approval. This developer prototype supports one
+configured session per profile; it is not a general session-management screen.
+
+Revocation stops new reservations and cancels undispatched ones. Dispatched,
+accepted and uncertain work keeps its liability and may still be settled by
+the accounting rehearsal. This is not on-chain session revocation or a refund.
+History remains accessible to its account after unlinking/grant revocation.
+
+The existing chat bridge still uses **synthetic** sessions. The funded-session
+controls prepare the distinct authority needed by the funded ledger; funded
+worker/chat dispatch, production signing, broadcasts, purchases and refunds
+remain disconnected. These signatures use a rehearsal-only domain and must
+never be accepted as live-payment authorization.
+
 ### Remaining activation work
 
 1. Implement and calibrate master-observed token metering, tariffs, SLA/challenge
