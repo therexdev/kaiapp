@@ -19,6 +19,10 @@ legacy rewards. Normal workers remain opted out. See the master repository's
   reserve bounded session grants, accept verifier settlements, and refund
   available principal. Rewards reserve daily budgets, review roots for 24
   hours, validate Merkle-sum claims and preserve committed liabilities.
+- Native-node integration exposed empty protobuf result traps that the original
+  MockVM fixtures masked. Zero custody balances and empty credits-call results
+  now decode safely; compiled-WASM regressions use the native omitted-field
+  encoding, including initial deposits and refunds that empty custody.
 - Owner policy changes have a 48-hour notice and UTC-day boundary. Emergency
   pause blocks new spending and reward commitments; refunds, expired-session
   releases and finalized claims remain available.

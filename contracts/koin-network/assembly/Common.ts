@@ -5,6 +5,8 @@ import {
   authority,
   Token,
   Crypto,
+  Protobuf,
+  token,
 } from "@koinos/sdk-as";
 import { koin as K } from "./proto/koin";
 export const DAY: u64 = 86400000;
@@ -151,13 +153,24 @@ export class Base {
   token(): Token {
     return new Token(this.config().token!);
   }
+  nativeBalance(): u64 {
+    const out = System.call(
+      this.config().token!,
+      0x5c721497,
+      Protobuf.encode(new token.balance_of_arguments(this.id), token.balance_of_arguments.encode),
+    );
+    System.require(out.code == 0, "failed to retrieve token balance");
+    // Native zero balances have an empty protobuf result. sdk-as Token's
+    // balanceOf assumes a non-null buffer and traps on that valid response.
+    return out.res.object === null ? 0 : Protobuf.decode<token.balance_of_result>(out.res.object!, token.balance_of_result.decode).value;
+  }
   liability(n: u64, increase: bool): void {
     const t = this.totals.get(KEY)!;
     t.value = increase ? add(t.value, n) : sub(t.value, n);
     this.totals.put(KEY, t);
   }
   invariant(): u64 {
-    const b = this.token().balanceOf(this.id);
+    const b = this.nativeBalance();
     System.require(b >= this.totals.get(KEY)!.value, "custody underfunded");
     return b;
   }
@@ -168,13 +181,13 @@ export class Base {
     if (n == 0) return;
     System.require(!equal(to, this.id), "self transfer");
     const t = this.token(),
-      before = t.balanceOf(this.id);
+      before = this.nativeBalance();
     System.require(
       before >= n && t.transfer(this.id, to, n),
       "KOIN transfer failed",
     );
     System.require(
-      t.balanceOf(this.id) == before - n,
+      this.nativeBalance() == before - n,
       "KOIN transfer mismatch",
     );
   }
@@ -182,10 +195,10 @@ export class Base {
     auth(from);
     System.require(n > 0 && !equal(from, this.id), "invalid funding");
     const t = this.token(),
-      before = t.balanceOf(this.id);
+      before = this.nativeBalance();
     System.require(t.transfer(from, this.id, n), "KOIN deposit failed");
     System.require(
-      t.balanceOf(this.id) == add(before, n),
+      this.nativeBalance() == add(before, n),
       "KOIN deposit mismatch",
     );
   }

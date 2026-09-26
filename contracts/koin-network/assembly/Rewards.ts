@@ -102,7 +102,7 @@ export class Rewards extends Base {
       Protobuf.encode(r, K.Request.encode),
     );
     System.require(out.code == 0, "credits call failed");
-    return Protobuf.decode<K.Result>(out.res.object!, K.Result.decode);
+    return out.res.object === null ? new K.Result() : Protobuf.decode<K.Result>(out.res.object!, K.Result.decode);
   }
   propose(id: u64, root: K.Node): void {
     this.running();

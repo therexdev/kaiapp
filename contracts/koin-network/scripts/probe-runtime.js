@@ -13,7 +13,7 @@ const config = { chain_id: b64(chain), token: b64(addr(1)), credits: b64(addr(2)
 function put(vm, key, value) { vm.db.putObject(C.METADATA_SPACE, C[key], value); }
 function authority(vm, account) { put(vm, "AUTHORITY_KEY", koinos.chain.list_type.encode({ values: [{ bool_value: true, bytes_value: account, int32_value: koinos.chain.authorization_type.contract_call }] }).finish()); }
 function calls(vm, results) { put(vm, "CALL_CONTRACT_RESULTS_KEY", koinos.chain.list_type.encode({ values: results.map(object => ({ bytes_value: koinos.chain.exit_arguments.encode({ code: 0, res: { object } }).finish() })) }).finish()); }
-const amount = async value => serializer.serialize({ value }, "koin.Amount");
+const amount = async value => serializer.serialize(value === "0" ? {} : { value }, "koin.Amount");
 async function run(vm, kind, method, args = {}, raw) {
   const a = require("../abi/" + kind + ".json");
   put(vm, "ENTRY_POINT_KEY", koinos.chain.value_type.encode({ int32_value: a.methods[method].entry_point }).finish());
@@ -22,6 +22,13 @@ async function run(vm, kind, method, args = {}, raw) {
   imports.invoke_system_call = (id, rp, rl, ap, al, size) => {
     const result = invoke(id, rp, rl, ap, al, size);
     if (new DataView(vm.memory.buffer).getUint32(size, true) > rl) throw Error("VM return buffer overflow");
+    // Native Koinos omits an empty call_result.value. MockVM/protobufjs emits
+    // a length-zero field, masking sdk-as null-result traps on zero balances.
+    if (id === koinos.chain.system_call_id.call && result === 0) {
+      const sizeView = new DataView(vm.memory.buffer), length = sizeView.getUint32(size, true);
+      const value = koinos.chain.call_result.decode(new Uint8Array(vm.memory.buffer, rp, length)).value;
+      if (!value?.length) sizeView.setUint32(size, 0, true);
+    }
     return result;
   };
   const module = new WebAssembly.Module(fs.readFileSync(path.join(__dirname, "../build/release", kind + ".wasm")));
@@ -59,6 +66,9 @@ test("credits WASM preserves principal after a failed transfer and permits refun
   authority(vm, buyer); calls(vm, [await amount("100"), Buffer.alloc(0), await amount("50"), await amount("50"), await amount("50")]);
   const refunded = await run(vm, "credits", "refund", { account, amount: "50" });
   assert.equal(refunded.balance.available, "50"); assert.equal(refunded.liabilities, "50");
+  calls(vm, [await amount("50"), Buffer.alloc(0), await amount("0"), await amount("0"), await amount("0")]);
+  const empty = await run(vm, "credits", "refund", { account, amount: "50" });
+  assert.equal(empty.balance.available, "0"); assert.equal(empty.liabilities, "0");
 });
 test("JavaScript Merkle-sum allocation settles through compiled rewards WASM and cannot be claimed twice", async () => {
   const vm = await initialized("rewards"), DAY = 86400000;
