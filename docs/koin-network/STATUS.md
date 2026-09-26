@@ -176,15 +176,26 @@ After daily rewards finalize and their 24-hour review hold ends, the master
 should submit valid claims and cover Mana, delivering KOIN to the committed
 provider wallet. Users should not need to click Claim or sign each reward
 payment. A manual claim remains a fallback. The rewards contract already fixes
-the recipient and permits a relayer to submit the proof; the automatic claim
-runner and signed reward manifests are still pending.
+the recipient and permits a relayer to submit the proof. The master draft now
+includes signed rehearsal reward manifests and an automatic claim queue with
+injected fixture signing and submission. It verifies the irreversible root,
+review hold, exact recipient/proof, custody and per-provider paid-work cap before
+requesting a sponsor signature. It saves the full signed envelope and bounded
+Mana attempt before submission, retries the same bytes after a lost response,
+and records payment only after exact irreversible transaction and claimed-state
+checks. A manual claim skips unsigned work; an outstanding sponsor nonce remains
+fenced until its own outcome is resolved. Restart during signing requires the
+original envelope to be recovered, rather than another signature.
 
 The new master settlement outbox concerns **customer usage charges**, not
 provider reward payouts. It atomically saves the full signed transaction with
 its held charge, returns only identical bytes on retry, limits sponsored Mana
 and clears holds only after exact irreversible transaction/accounting checks.
-Its tests simulate submission with deterministic fixture keys. No production
-signer, broadcast route or automatic claim service is activated.
+An explicit rehearsal driver now connects this outbox and the provider claim
+queue. Its tests simulate submission with deterministic fixture keys; it has no
+production key loader, RPC write transport, HTTP endpoint or background timer.
+The live master and app enable no payment behavior. See the master repository's
+`docs/koin-automatic-claims.md` for the interface and recovery limits.
 
 ### Remaining activation work
 
@@ -201,9 +212,12 @@ signer, broadcast route or automatic claim service is activated.
    and synthetic restart/fork/replay tests are implemented in the master draft.
    The master now also has a durable signed-settlement outbox, exact-envelope
    retry decisions, bounded sponsorship accounting and crash/restart tests.
-   Its recovery helper has no signing or submission transport; only fixture
-   tests simulate sending. The current reward manifest remains hashed, not
-   signed; no keeper broadcasts.
+   A restricted driver now exercises settlement submission and automatic claims
+   with fixture-only signing/transport. Signed rehearsal reward manifests and
+   a durable claim/signing/Mana journal are implemented; production manifest
+   ingestion, epoch/root writes, key custody, broadcasting and monitoring remain
+   unconnected. The original shadow-report route still returns hashed simulation
+   data. No production keeper broadcasts.
 3. Benchmark real providers and complete at least seven days of shadow data.
    Validate capacity deduplication, model-switch observations, workload costs
    and collusive/self-funded work. The work cap is not a proof that all economic
