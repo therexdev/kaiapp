@@ -138,19 +138,45 @@ accepted and uncertain work keeps its liability and may still be settled by
 the accounting rehearsal. This is not on-chain session revocation or a refund.
 History remains accessible to its account after unlinking/grant revocation.
 
-The existing chat bridge still uses **synthetic** sessions. The funded-session
-controls prepare the distinct authority needed by the funded ledger; funded
-worker/chat dispatch, production signing, broadcasts, purchases and refunds
-remain disconnected. These signatures use a rehearsal-only domain and must
-never be accepted as live-payment authorization.
+With that explicit Electron configuration, normal Network chat now uses the
+saved funded-session approval. Before approval, or if configuration is invalid,
+it fails closed rather than using legacy billing. The master also requires
+`koinFundedSessions.work: { qualify, waitMs }` and an independent `accept`
+callback. Workers opt in separately with `KAI_KOIN_FUNDED_REHEARSAL_JOBS=1`.
+Default chat, synthetic-session configuration and live token prices are unchanged.
+
+Each request checks current account/grant authority and fresh irreversible
+funding before reservation and dispatch. Worker payloads contain only public
+pins, session/request IDs, quote and prompt; no account token, grant certificate
+or private-wallet capability. The approved public model and exact local token
+IDs must match before raw llama.cpp inference. Funded result signatures have a
+distinct rehearsal domain. The master independently counts output tokens and
+checks acceptance; the desktop verifies the signed result, approved tariff
+policy, request, usage arithmetic and prepared settlement commitment.
+
+Accepted work prepares an unsigned settlement intent with the next session
+nonce. Later accepted jobs remain verified while that nonce is unresolved.
+There is no keeper, signing or broadcast route. A prepared intent is not a
+payment. Dispatched timeouts, disconnects and restarts retain their holds and
+never requeue automatically. Only undispatched work can release its hold on
+Stop. Accepted answers are transient (32 answers/up to five minutes); replaying
+the same valid accepted worker result can restore an evicted answer without a
+new charge. Otherwise retry reports that the answer is no longer available.
+Durable encrypted delivery and automatic retry UI remain future work. Callers
+can preserve the existing `koin_request_id` to recover a request safely.
+
+Production signing, broadcasts, purchases and refunds remain disconnected.
+These signatures use a rehearsal-only domain and must never be accepted as
+live-payment authorization.
 
 ### Remaining activation work
 
 1. Implement and calibrate master-observed token metering, tariffs, SLA/challenge
    results and a durable per-job reservation ledger inside each on-chain grant.
-   The master has a synthetic reservation/receipt flow and pinned tokenizer
-   support, but funded grants, measured tariffs and real paid-work ingestion
-   remain disabled. Provider token counts and signed presence are not proof of
+   The master now connects synthetic and funded-session rehearsal reservations,
+   worker receipts and unsigned settlement preparation with pinned tokenizer
+   support. Measured production tariffs and real paid-work ingestion remain
+   disabled. Provider token counts and signed presence are not proof of
    useful work. The Qwen tokenizer has reference vectors; hardware costs and
    accepted SLA/challenge rules still need measurements.
 2. Implement finality-aware reconciliation, signed reward manifests, keeper

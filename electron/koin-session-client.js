@@ -138,6 +138,26 @@ class FundedSessionClient {
     const result = await this.#call("status", { id: r.id }, auth, signal);
     return this.#status(result, r);
   }
+  async consume({ schedulerUrl, messages, model, maxOutput, requestId, signal }) {
+    if (scheduler(schedulerUrl) !== this.#config.schedulerUrl) throw Error("Funded scheduler pin changed");
+    const auth = await this.#auth(signal), r = this.#owner(auth);
+    if (r.phase !== "active" || this.#clock() < r.terms.issuedAt || this.#clock() >= r.terms.expires) throw Error("An active session approval is required");
+    let result;
+    try {
+      result = await require("../core/lib/koin-network/funded-chat").consume({ schedulerUrl, authorization: auth,
+        terms: r.terms, observationId: r.observationId, messages, model, maxOutput, requestId, signal, fetchImpl: this.#fetch });
+    } catch (e) {
+      if (/^Unknown or expired observation/.test(e.message)) {
+        const observation = await this.#call("observe", { grantId: auth.grantId, session: r.terms.session }, auth, signal);
+        this.#save({ ...r, observationId: P.digest(observation.observationId) });
+        throw Error("Funding observed again. Retry the same request ID after finality");
+      }
+      throw e;
+    }
+    const current = await this.#auth(signal); this.#owner(current);
+    if (current.sessionToken !== auth.sessionToken) throw Error("Account changed during chat");
+    signal?.throwIfAborted(); return result;
+  }
   hasSavedApproval() { return !!this.#record; }
   async revoke(signal) {
     const auth = await this.#auth(signal, true), r = this.#owner(auth);

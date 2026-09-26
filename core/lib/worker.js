@@ -42,12 +42,13 @@ class Worker {
     return crypto.createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 16);
   }
 
-  constructor({ schedulerUrl, wallet, runtime, hardware, models, producer, onEvent, koinShadowJobs = process.env.KAI_KOIN_SHADOW_JOBS === "1" }) {
+  constructor({ schedulerUrl, wallet, runtime, hardware, models, producer, onEvent, koinShadowJobs = process.env.KAI_KOIN_SHADOW_JOBS === "1", koinFundedRehearsalJobs = process.env.KAI_KOIN_FUNDED_REHEARSAL_JOBS === "1" }) {
     this.schedulerUrl = String(schedulerUrl || "").replace(/\/$/, "");
     this.wallet = wallet; // WalletService (unlocked)
     this.runtime = runtime; // RuntimeManager
     this.hardware = hardware;
     this.models = models || null; // ModelManager — advertises what this machine can serve
+    this.koinFundedRehearsalJobs = koinFundedRehearsalJobs === true;
     this.koinShadowJobs = koinShadowJobs === true; // explicit experiment opt-in
     /*
      * Optional: an async () => producer snapshot, so the account page can show
@@ -319,6 +320,7 @@ class Worker {
           capabilities: {
             ...(this.hardware?.capabilities ?? {}),
             koinShadowJobs: this.koinShadowJobs ? 1 : 0,
+            koinFundedRehearsalJobs: this.koinFundedRehearsalJobs ? 1 : 0,
             ...(ramGb ? { ramGb: Math.round(ramGb) } : {}),
             ...(this.preferredModel ? { preferredModel: this.preferredModel } : {}),
           },
@@ -555,7 +557,8 @@ class Worker {
       }, 25000);
       try {
         const t0 = Date.now();
-        const shadow = job.type === "koin-shadow-chat";
+        const funded = job.type === "koin-funded-rehearsal-chat";
+        const shadow = funded || job.type === "koin-shadow-chat";
         // Post generation deltas as they're produced — the consumer's
         // words appear live instead of arriving as one block. Batched
         // (~4/s) so a fast model doesn't turn into HTTP spam.
@@ -583,12 +586,12 @@ class Worker {
         // scheduler treats it as provider-reported, like usage).
         const ms = Math.max(1, Date.now() - t0);
         const perf = { ms, tokPerSec: +((usage.completion_tokens / (ms / 1000)) || 0).toFixed(2) };
-        const hash = shadow
+        const hash = funded ? require("./koin-network/funded-protocol").fundedResultHash(job.target, job, output) : shadow
           ? require("./koin-network/job-protocol").resultHash(job.quote.domain, job.id, job.attempt, job.quote.hash, output)
           : crypto.createHash("sha256").update(`${job.id}|${output}`).digest();
         if (shadow && !this.running) throw Error("Shadow worker stopped");
         const signature = await this.wallet.signHash(hash);
-        const resultRoute = shadow ? "/koin/shadow/jobs/result" : "/worker/result";
+        const resultRoute = funded ? "/koin/funded/rehearsal/result" : shadow ? "/koin/shadow/jobs/result" : "/worker/result";
         const res = await fetch(`${this.schedulerUrl}${resultRoute}?token=${this.token}`, {
           method: "POST",
           headers: { "content-type": "application/json", connection: "close" },
@@ -597,9 +600,10 @@ class Worker {
         });
         const jr = await res.json();
         if (shadow) {
-          if (!res.ok || jr.mode !== "shadow" || jr.paymentsEnabled !== false || jr.accepted !== true) throw Error(jr.error || "Shadow result was not accepted");
-          this.stats.shadowJobsDone = (this.stats.shadowJobsDone || 0) + 1;
-          this.onEvent({ type: "worker:shadow-job-done", jobId: job.id });
+          if (!res.ok || jr.mode !== (funded ? "funded-rehearsal" : "shadow") || jr.paymentsEnabled !== false || jr.accepted !== true) throw Error(jr.error || "Shadow result was not accepted");
+          const counter = funded ? "fundedRehearsalJobsDone" : "shadowJobsDone";
+          this.stats[counter] = (this.stats[counter] || 0) + 1;
+          this.onEvent({ type: funded ? "worker:funded-rehearsal-job-done" : "worker:shadow-job-done", jobId: job.id });
           continue;
         }
         this.stats.jobsDone += 1;
@@ -619,8 +623,8 @@ class Worker {
 
   /** §31: only approved profiles execute — anything else is refused. */
   async _execute(job, onDelta) {
-    if (job.type === "koin-shadow-chat") {
-      if (!this.koinShadowJobs) throw Error("Shadow jobs require explicit opt-in");
+    if (["koin-shadow-chat", "koin-funded-rehearsal-chat"].includes(job.type)) {
+      if (job.type === "koin-funded-rehearsal-chat" ? !this.koinFundedRehearsalJobs : !this.koinShadowJobs) throw Error("Shadow jobs require explicit opt-in");
       this._shadowAbort = new AbortController();
       return require("./koin-network/shadow-worker").executeShadow({ job, catalog: this.models?.catalog,
         runtime: this.runtime, signal: this._shadowAbort.signal });

@@ -1,3 +1,10 @@
+## KOIN session chat and settlement rehearsal
+
+- An approved, explicitly configured KOIN session can now serve normal Network chat through opted-in workers. Its model and spending limits apply to every request without another wallet dialog.
+- The desktop verifies the approved tariff, worker signature, token usage and charge before showing the answer. The master prepares an unsigned settlement record; no KOIN moves and existing token prices remain unchanged.
+- Stop releases work that has not been dispatched. Dispatched work stays held if the connection is lost, and retries cannot create another job with the same request ID. Revocation stops new work while preserving earlier liabilities.
+- This developer path remains off by default. Worker participation requires `KAI_KOIN_FUNDED_REHEARSAL_JOBS=1`; installation does not activate payments. Replies are buffered until verification and labelled as rehearsals.
+
 ## One approval per KOIN session
 
 - Adds private desktop controls for a deliberately configured funded-session accounting rehearsal: review limits once, refresh status, retry a saved approval or revoke it. The native confirmation lists the wallet, account, model, budget, per-request cap, request count, expiry and deployment pins; Cancel is the default.

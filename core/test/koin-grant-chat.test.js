@@ -123,3 +123,26 @@ test("Stop and switching to Local-Only abort in-flight rehearsal HTTP without fa
     assert.equal(f.calls.filter(c => c.url.endsWith("/consume/chat/completions")).length, 1);
   }
 });
+
+
+test("funded chat closure shares the Local-Only and Stop boundary without billing fallback", async t => {
+  for (const reason of ["stop", "privacy"]) {
+    const f = await fixture(t); f.mode("wait");
+    f.core.gateway.koinFundedConsume = async ({ signal }) => {
+      await fetch(f.remote + "/consume/chat/completions", { method: "POST", signal,
+        headers: { "content-type": "application/json" }, body: JSON.stringify({ billing: "koin-funded-rehearsal" }) });
+      throw Error("Unexpected completion");
+    };
+    assert.equal((await f.chat()).status, 400); assert.equal(f.calls.length, 0);
+    f.core.settings.set("network.privacyMode", "network");
+    const started = f.started(), closed = f.closed(), controller = new AbortController();
+    const pending = f.chat({}, { signal: controller.signal }).catch(e => e);
+    await started;
+    if (reason === "stop") controller.abort();
+    else await (await f.post("/core/network/config", { privacyMode: "local-only" })).text();
+    await pending;
+    await Promise.race([closed, new Promise((_, reject) => { const timer = setTimeout(() => reject(Error("Funded request did not stop")), 3000); timer.unref(); })]);
+    assert.equal(f.calls.filter(c => c.url.endsWith("/consume/chat/completions")).length, 1);
+    assert.ok(f.calls.every(c => c.body?.billing === "koin-funded-rehearsal"));
+  }
+});

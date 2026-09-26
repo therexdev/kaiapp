@@ -1903,7 +1903,7 @@ class Gateway {
     const netModel =
       overflowFrom ||
       (picked.startsWith("koinos-network:") ? picked.slice("koinos-network:".length) : picked && picked !== "koinos-network" ? picked : "auto");
-    if (this.network.status().koinRehearsal) {
+    if (this.koinFundedConsume || this.network.status().koinRehearsal) {
       return this._chatKoinRehearsal(body, req, res, { schedulerUrl, netModel, fail });
     }
     // §7 context: refuse an oversized prompt BEFORE buying tokens — the
@@ -2034,11 +2034,12 @@ class Gateway {
     res.on("close", stop);
     try {
       const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(190000)]);
-      const authorization = await this.network.shadowAuthorization(signal);
+      const authorization = this.koinFundedConsume ? null : await this.network.shadowAuthorization(signal);
       signal.throwIfAborted();
       const current = this.network.status();
       if (current.privacyMode === "local-only" || current.schedulerUrl !== schedulerUrl) throw Error("Network settings changed");
-      const j = await require("./koin-network/grant-chat").consume({ schedulerUrl, authorization,
+      const consume = this.koinFundedConsume || require("./koin-network/grant-chat").consume;
+      const j = await consume({ schedulerUrl, authorization,
         messages: body.messages, model: netModel, maxOutput: body.max_tokens,
         requestId: id, signal });
       signal.throwIfAborted();

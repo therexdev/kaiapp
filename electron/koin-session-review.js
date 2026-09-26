@@ -71,6 +71,12 @@ function registerSessionReviewIPC({ ipcMain, dialog, core, getMainWindow, origin
         sign: hash => core.account.wallet.signHash(hash) });
     } catch { problem = "Funded session rehearsal configuration is unavailable. Check the configured pins and saved approval."; }
   }
+  // A private consume closure reuses the saved certificate. It cannot sign or
+  // select new limits, and no public Core endpoint can install/replace it.
+  if (configPath) core.gateway.koinFundedConsume = request => {
+    if (!client) throw Error(problem);
+    return client.consume(request);
+  };
   const run = client && createSessionReview({ client, dialog, tr, track: controller => core.gateway.network.trackShadowRequest(controller) });
   for (const action of ["status", "review", "retry", "revoke"]) ipcMain.handle("koin:session-" + action, async (event, ...args) => {
     const window = getMainWindow();

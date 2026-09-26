@@ -12,7 +12,7 @@ async function readJson(response, max = 1500000) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 async function executeShadow({ job, catalog, runtime, signal }) {
-  const j = validateJob(job, catalog), q = j.quote;
+  const j = job?.type === "koin-funded-rehearsal-chat" ? require("./funded-protocol").validateJob(job, catalog) : validateJob(job, catalog), q = j.quote;
   const abort = AbortSignal.any([signal || new AbortController().signal, AbortSignal.timeout(Math.max(1, j.deadline - Date.now()))]);
   abort.throwIfAborted();
   if (typeof runtime.acquireFor !== "function") throw Error("Shadow work requires a managed runtime lease");
