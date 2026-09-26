@@ -30,6 +30,12 @@ legacy rewards. Normal workers remain opted out. See the master repository's
   releases and finalized claims remain available.
 - Chain client checks native-token identity, pinned chain/bytecode/roles and
   exact transaction intent. This client is not connected to desktop signing.
+- Credit purchases and reward-pool funding now prepare one atomic transaction:
+  native-token approval for the exact amount/owner/custody contract, followed
+  by the matching deposit. Verification rejects partial, reordered, enlarged,
+  redirected or additional operations, even with a recomputed transaction ID.
+  Native-token identity is checked on every supported network. Submission
+  rechecks pause state and uses an immutable snapshot of the reviewed request.
 - Signed resident-model telemetry with timestamp, sequence and scheduler
   domain binding. Collection requires an operator-issued capacity qualification.
   Full minute coverage is conservative: a model switch, report gap or missing
@@ -203,6 +209,28 @@ production key loader, RPC write transport, HTTP endpoint or background timer.
 The live master and app enable no payment behavior. See the master repository's
 `docs/koin-automatic-claims.md` for the interface and recovery limits.
 
+### Funding review rehearsal
+
+`electron/koin-funding-review.js` provides an in-process native preview for the
+exact transaction prepared by `KoinChain`. Customer usage-credit deposits and
+reward-pool funding have distinct explanations; funding the pool does not
+create a refundable customer balance. The dialog shows the precise amount,
+wallet, custody and token addresses, chain, Mana payer/ceiling, nonce and full
+transaction ID. Cancel is the default.
+
+The preview expires after three minutes. Changed terms, nonce, code, authorities,
+policy or pause state invalidate it, as do hiding/minimizing, navigation, a
+renderer crash or cancellation. It returns only a preview receipt, not signing
+authority or reusable transaction bytes. No IPC, UI control, signer, wallet
+unlock, persistent permission or submission transport is attached to it. The
+existing purchase button remains disabled. Production wiring still needs the
+existing password/external-wallet confirmation, durable signed-envelope
+recovery, fresh checks and irreversible deposit/credit reconciliation.
+
+The explicit `isolated` chain-client mode requires an injected provider; the
+disposable-node harness supplies its peerless loopback transport only after
+verifying the fresh genesis marker. Normal deployment remains unconfigured.
+
 ### Remaining activation work
 
 1. Implement and calibrate master-observed token metering, tariffs, SLA/challenge
@@ -228,14 +256,19 @@ The live master and app enable no payment behavior. See the master repository's
    Validate capacity deduplication, model-switch observations, workload costs
    and collusive/self-funded work. The work cap is not a proof that all economic
    manipulation is impossible.
-4. Review and test both contracts on an isolated chain, including actual native
-   token transfers and resource costs. Unit and WASM tests use the SDK MockVM;
+4. The first [isolated native-transfer run](https://github.com/therexdev/kai/actions/runs/36260927761)
+   passed 12 checks, including automatic sponsor-only payouts and real resource
+   receipts. Broader proof sizes, load and production Mana calibration still
+   need testing; fixture measurements are not production costs. Contract review
+   remains required. Unit and WASM tests use the SDK MockVM;
    they are not an independent audit. Custody currently trusts owner-held
    contract keys, which can upload replacement code; the policy notice does
    not constrain that key's upgrade authority. Decide the upgrade guard before
    deployment and keep the final bytecode pins under review.
 5. Implement the reviewed desktop purchase/session/refund/claim flows with
    password or external-wallet confirmation and exact transaction previews.
+   Exact approval/deposit validation and native funding preview are implemented;
+   signing, durable recovery and finality-aware credit activation remain disconnected.
    No scheduler setting may enable the old arbitrary-transaction deposit flow.
 6. Complete a concrete deployment manifest: chain ID, native KOIN contract,
    credits/rewards addresses and bytecode hashes, owner/verifier/sponsor roles,
