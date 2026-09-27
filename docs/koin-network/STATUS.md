@@ -228,8 +228,12 @@ renderer crash or cancellation. It returns only a preview receipt, not signing
 authority or reusable transaction bytes. No IPC, UI control, signer, wallet
 unlock, persistent permission or submission transport is attached to it. The
 existing purchase button remains disabled. Production wiring still needs the
-existing password/external-wallet confirmation, durable signed-envelope
-recovery, fresh checks and irreversible deposit/credit reconciliation.
+existing password/external-wallet confirmation and shared wallet nonce coordination.
+The [durable funding rehearsal](FUNDING_RECOVERY.md) now saves the exact signed
+bundle, fences uncertain signing/submission, bounds retries and confirms deposits
+only from exact irreversible native receipts and backed custody observations.
+It supports owner-paid fixture transactions on an explicitly isolated client;
+production signing and credit activation remain disconnected.
 
 The explicit `isolated` chain-client mode requires an injected provider; the
 disposable-node harness supplies its peerless loopback transport only after
@@ -275,7 +279,8 @@ verifying the fresh genesis marker. Normal deployment remains unconfigured.
 5. Implement the reviewed desktop purchase/session/refund/claim flows with
    password or external-wallet confirmation and exact transaction previews.
    Exact approval/deposit validation and native funding preview are implemented;
-   signing, durable recovery and finality-aware credit activation remain disconnected.
+   durable funding recovery and finality/backing checks are implemented for the
+   isolated driver. Production signing and credit activation remain disconnected.
    No scheduler setting may enable the old arbitrary-transaction deposit flow.
 6. Complete a concrete deployment manifest: chain ID, native KOIN contract,
    credits/rewards addresses and bytecode hashes, owner/verifier/sponsor roles,

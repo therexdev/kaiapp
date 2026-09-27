@@ -137,7 +137,10 @@ class KoinChain {
     const r = await this.provider.readContract(
       await this.operation(kind, method, args),
     );
-    return this.serializer.deserialize(r.result, "koin.Result");
+    if (!r || typeof r !== "object" || Array.isArray(r) || r.error || r.rpc_error ||
+        (r.result !== undefined && (typeof r.result !== "string" || r.result.length > 32768)))
+      throw Error("Invalid KOIN contract read");
+    return this.serializer.deserialize(r.result ?? "", "koin.Result");
   }
   async verify() {
     const d = this.d;
@@ -154,9 +157,8 @@ class KoinChain {
         throw Error(kind + " bytecode changed");
       if (
         kind !== "token" &&
-        (m.value.authorizes_call_contract ||
-          m.value.authorizes_transaction_application ||
-          m.value.authorizes_upload_contract)
+        ["system", "authorizes_call_contract", "authorizes_transaction_application", "authorizes_upload_contract"]
+          .some(key => ![undefined, false].includes(m.value[key]))
       )
         throw Error("Unexpected contract authority override");
     }
