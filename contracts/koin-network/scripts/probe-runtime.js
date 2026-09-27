@@ -49,6 +49,9 @@ async function initialized(kind) {
 for (const kind of ["credits", "rewards"]) test(kind + " shipped WASM initializes, dispatches reads, rejects noncanonical and oversized requests", async () => {
   const vm = await initialized(kind), result = await run(vm, kind, "config");
   assert.equal(result.config.token, config.token); assert.equal(result.config.version, "1");
+  calls(vm, [await amount("0")]);
+  const empty = await run(vm, kind, "balances", kind === "credits" ? { account: b64(addr(8)) } : {});
+  assert.equal(empty.liquid ?? "0", "0"); assert.equal(empty.liabilities ?? "0", "0");
   await assert.rejects(run(vm, kind, "config", {}, Buffer.from([32, 0])), /noncanonical/);
   await assert.rejects(run(vm, kind, "config", {}, Buffer.alloc(16385)), /request too large/);
 });

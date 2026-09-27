@@ -45,7 +45,9 @@ class FundingObserver {
   }
   async #capture(r) {
     const c = this.#client, before = this.#head(await c.provider.getHeadInfo());
-    const config = await c.verify(), balances = await c.read(r.kind, "balances", { account: encodedAddress(r.actor) });
+    // Rewards expose aggregate custody only; only credits have account balances.
+    const config = await c.verify(), balances = await c.read(r.kind, "balances",
+      r.kind === "credits" ? { account: encodedAddress(r.actor) } : {});
     const liquid = num((await this.#native("balanceOf", { owner: c.d[r.kind] })).value);
     const allowance = num((await this.#native("allowance", { owner: r.actor, spender: c.d[r.kind] })).value);
     const liabilities = num(balances.liabilities), available = num(balances.balance?.available), reserved = num(balances.balance?.reserved);

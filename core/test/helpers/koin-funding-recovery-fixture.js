@@ -32,6 +32,8 @@ function fixture(t, options = {}) {
         const value = op.entry_point === utils.tokenAbi.methods.allowance.entry_point ? state.allowance : state.liquid;
         return value === "0" ? {} : { result: utils.encodeBase64url(await native.serialize({ value }, "token.uint64")) };
       }
+      if (op.contract_id === d.rewards && op.entry_point === creditsABI.methods.balances.entry_point && op.args !== "")
+        throw Error("Reward custody is aggregate; no customer account parameter");
       const value = op.entry_point === creditsABI.methods.config.entry_point ? { config, paused: state.paused } : {
         liquid: state.liquid, liabilities: state.liabilities, balance: { available: state.available, reserved: "0" } };
       return { result: utils.encodeBase64url(await client.serializer.serialize(value, "koin.Result")) };
