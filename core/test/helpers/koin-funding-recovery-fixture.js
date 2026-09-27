@@ -14,13 +14,17 @@ function fixture(t, options = {}) {
   const config = { chain_id: d.chainId, token: encodedAddress(d.token), credits: encodedAddress(d.credits), treasury: encodedAddress(d.rewards),
     admin: encodedAddress(d.admin), verifier: encodedAddress(d.verifier), mining: encodedAddress(d.mining), operations: encodedAddress(d.operations), version: "1" };
   const state = { now: 1000000, height: 10, lib: 10, nonce: "KAE=", paused: false, record: null, block: null, fork: false, liquid: "0", liabilities: "0", available: "0", allowance: "0", signed: 0, submissions: [] };
-  const headBlock = height => ({ block_id: blockId(height), block_height: String(height),
-    block: { id: blockId(height), header: { height: String(height), timestamp: String(state.now) }, transactions: [] } });
+  const blockTimes = new Map();
+  const headBlock = height => {
+    if (!blockTimes.has(height)) blockTimes.set(height, state.now);
+    return { block_id: blockId(height), block_height: String(height),
+      block: { id: blockId(height), header: { height: String(height), timestamp: String(blockTimes.get(height)) }, transactions: [] } };
+  };
   const provider = {
     getChainId: async () => d.chainId, getNextNonce: async () => state.nonce,
     invokeGetContractAddress: async () => ({ value: { address: d.token } }),
     invokeGetContractMetadata: async () => ({ value: { hash: d.tokenHash } }),
-    getHeadInfo: async () => ({ head_topology: { id: blockId(state.height), height: String(state.height) }, last_irreversible_block: String(state.lib), head_block_time: String(state.now) }),
+    getHeadInfo: async () => ({ head_topology: { id: blockId(state.height), height: String(state.height) }, last_irreversible_block: String(state.lib), head_block_time: headBlock(state.height).block.header.timestamp }),
     getTransactionsById: async () => state.record ? { transactions: [structuredClone(state.record)] } : {},
     getBlocksById: async () => ({ block_items: state.block ? [{ block_id: state.block.block_id, block_height: state.block.block_height }] : [] }),
     getBlocks: async (height, _count, _head, opts) => {

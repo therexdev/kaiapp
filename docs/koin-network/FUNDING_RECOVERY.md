@@ -8,7 +8,7 @@ use this path in the master repository's disposable-chain harness.
 
 This is an isolated rehearsal. Construction requires `mode: "isolated-rehearsal"`
 and an actual `KoinChain` configured for the injected loopback `isolated` network.
-There is no IPC registration, wallet key loader, timer, purchase control or
+There is no IPC registration, wallet key loader, background runner, purchase control or
 production signer. The existing native funding preview still returns only a
 preview receipt and cannot authorize this driver or a real payment.
 
@@ -47,6 +47,46 @@ signal; their default timeout is five seconds (bounded to 50–30,000 ms). Trans
 timeouts/errors keep the saved request uncertain. Acknowledgments never confirm
 funding. Restart resumes with `tick`; repeating `start` does not sign again.
 
+## Native approval, Stop and resume
+
+`createFundingApproval` in `electron/koin-funding-approval.js` connects a native
+dialog to this journal for isolated fixture wallets. It requires the same client
+instance as the journal, explicit fixture signing/transport callbacks and a
+trusted main-process intent supplier. The existing preview receipt is never an
+approval input. No renderer or production wallet imports this coordinator.
+
+`approve(window, id, supplier)` displays the exact purpose, amount, owner/Mana
+payer, custody and native-token addresses/code pins, chain, transaction ID, nonce,
+resource ceiling and three-minute review deadline. After confirmation it checks
+the intent, policy and nonce again. The journal's final preparation must match
+the reviewed transaction before it commits the signing fence. Cancel before
+that fence creates no deposit. Window hide, close, minimize, navigation, renderer
+failure and explicit `cancel()` stop the operation.
+
+Stop after the fence persists `held: true`. A late valid signing response can
+still save the original envelope, but cannot send it. A process exit before the
+envelope is saved leaves the existing signing fence for exact-envelope recovery;
+there is no replacement signature. Signer and transport calls are bounded. Stop
+aborts their signals but cannot retract an already transmitted transaction.
+
+`check(id)` reconciles read-only through `advance(id, { allowSubmit: false })`.
+It never reserves an attempt or returns bytes to transport. It can confirm a
+held deposit or its revert from exact irreversible evidence. The coordinator
+holds every nonterminal request after one send decision, including uncertain
+transport responses; it never starts unattended retries.
+
+`resume(window, id, supplier)` requires a new native review of the original saved
+draft and sends only its saved signature. It can renew the initial-submission
+review deadline for that same transaction. It preserves nonce fences, retry
+counts, cooldown and daily Mana reservations; it cannot reset changed-policy,
+external-nonce or attempt-limit failures. A signed envelope remains held after a
+cancelled review. Shared journal handles elect one initial signer. Cross-host
+coordination and coordination with other wallet actions remain deferred.
+
+The lower-level runner remains available to the trusted isolated harness. Its
+automatic exact retry decisions respect durable holds. It is not exposed as a
+user-facing bypass of native approval.
+
 ## Confirmation and failure behavior
 
 Confirmation needs the original transaction in a canonical block at or below
@@ -75,7 +115,12 @@ coordination with all other wallet actions, key custody, reviewed repairs for
 abandoned signatures, rollback-resistant backups, cross-host fencing and monitoring.
 No mainnet deposit, funding configuration or live payment setting is changed.
 
-Run `node --test core/test/koin-funding-recovery.test.js core/test/koin-funding.test.js`.
+Run `node --test core/test/koin-funding-approval.test.js core/test/koin-funding-recovery.test.js core/test/koin-funding.test.js core/test/koin-chain.test.js`.
 The focused suite covers both purposes, lost responses, restart, concurrent
 handles, exact retries, resource limits, forks, reverts, altered signatures/terms,
-expiry, custody backing, changed code, malformed reads and journal damage.
+expiry, custody backing, changed code, malformed reads and journal damage. Native
+approval tests also cover Cancel, window lifecycle, late signatures, signing
+timeout, Stop during transport, read-only restart, exact resume, concurrent
+controllers, changed reviews and preserved resource limits.
+Each hold/resume also advances a durable review version: Stop through another
+journal handle invalidates a resume dialog that was already open.

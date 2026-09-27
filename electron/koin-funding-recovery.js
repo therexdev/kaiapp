@@ -71,7 +71,11 @@ class FundingRecovery {
     if (r.id !== id || r.intent.actor !== saved.owner || r.draft.id !== saved.tx_id || r.state !== saved.state ||
         !["signing", "staged", "unknown", "needs_review", "funded", "reverted"].includes(r.state) ||
         JSON.stringify(intent(r.intent)) !== JSON.stringify(r.intent) || r.draftHash !== hash(JSON.stringify(r.draft))) throw Error("Damaged funding binding");
-    nonce(r.draft.header.nonce); integer(r.createdAt); integer(r.updatedAt, r.createdAt); integer(r.expires, r.createdAt + 180000, r.createdAt + 180000);
+    nonce(r.draft.header.nonce); integer(r.createdAt); integer(r.updatedAt, r.createdAt);
+    const reviewedAt = r.reviewedAt ?? r.createdAt;
+    integer(reviewedAt, r.createdAt, r.updatedAt); integer(r.expires, reviewedAt + 180000, reviewedAt + 180000);
+    if (r.held !== undefined && typeof r.held !== "boolean") throw Error("Damaged funding hold");
+    integer(r.holdVersion ?? 0);
     integer(r.attempts, 0, this.#policy.maxAttempts);
     if (r.transaction && (r.transaction.id !== r.draft.id || r.transactionHash !== hash(JSON.stringify(r.transaction)))) throw Error("Damaged funding envelope");
     if (!r.transaction && r.state !== "signing") throw Error("Missing signed funding envelope");
@@ -87,9 +91,35 @@ class FundingRecovery {
   status(id) {
     const r = this.#row(id);
     return { id, state: r.state, reason: r.reason, txId: r.draft.id, attempts: r.attempts, kind: r.intent.kind,
-      amount: r.intent.args.amount, actor: r.intent.actor, finality: structuredClone(r.finality), paymentsEnabled: false };
+      amount: r.intent.args.amount, actor: r.intent.actor, held: r.held === true, finality: structuredClone(r.finality), paymentsEnabled: false };
   }
-  async begin(id, value) {
+  assertClient(client) { if (client !== this.#client) throw Error("Funding review must use the journal's client"); }
+  saved(id) {
+    digest(id); this.#time();
+    if (!this.#db.prepare("SELECT 1 FROM deposits WHERE id=?").get(id)) return null;
+    const r = this.#row(id);
+    return structuredClone({ intent: r.intent, draft: r.draft, policyHash: r.policyHash, holdVersion: r.holdVersion ?? 0, signed: !!r.transaction, ...this.status(id) });
+  }
+  hold(id) {
+    return this.#tx(() => {
+      if (!this.saved(id)) return false;
+      const r = this.#row(id);
+      if (!terminal(r.state)) { r.held = true; r.holdVersion = integer((r.holdVersion ?? 0) + 1); this.#save(r); } return true;
+    });
+  }
+  #review(review, draft, policyHash, active) {
+    const now = this.#time();
+    if (!review || review.txId !== draft.id || review.policyHash !== policyHash ||
+        !Number.isSafeInteger(review.startedAt) || review.startedAt < 0 || now < review.startedAt ||
+        review.expires !== review.startedAt + 180000 || now >= review.expires || !active()) throw Error("Funding review changed or expired");
+  }
+  // Internal trusted-main-process boundary, never an IPC approval receipt.
+  async beginReviewed(id, value, review, active) {
+    if (!review || typeof active !== "function") throw Error("Native funding review required");
+    return this.#begin(id, value, structuredClone(review), active);
+  }
+  async begin(id, value) { return this.#begin(id, value); }
+  async #begin(id, value, review, active) {
     digest(id); const request = intent(value);
     if (uint(request.maxRc) > uint(this.#policy.maxRcPerDay)) throw Error("Funding exceeds daily RC budget");
     if (this.#db.prepare("SELECT 1 FROM deposits WHERE id=?").get(id)) {
@@ -111,10 +141,29 @@ class FundingRecovery {
       for (const prior of this.#db.prepare("SELECT id FROM deposits WHERE owner=?").all(request.actor))
         if (nonce(draft.header.nonce) <= nonce(this.#row(prior.id).draft.header.nonce)) throw Error("Funding nonce did not advance");
       const now = this.#time();
+      if (review) this.#review(review, draft, hash(JSON.stringify(state)), active);
       this.#save({ id, intent: request, state: "signing", reason: null, draft, draftHash: hash(JSON.stringify(draft)),
         policyHash: hash(JSON.stringify(state)), transaction: null, transactionHash: null, createdAt: now, expires: now + 180000,
-        attempts: 0, lastAttemptAt: null, days: [], finality: null });
+        held: false, attempts: 0, lastAttemptAt: null, days: [], finality: null });
       return { action: "prepare_funding", id, transaction: structuredClone(draft), intent: request, paymentsEnabled: false };
+    });
+  }
+  async resumeReviewed(id, review, active) {
+    review = structuredClone(review);
+    const initial = this.#row(id);
+    if (!initial.transaction) throw Error("Recover the original signed funding envelope first");
+    await this.#validate(initial.transaction, initial);
+    const config = await this.#client.verify(), next = await this.#client.provider.getNextNonce(initial.intent.actor);
+    return this.#tx(() => {
+      const r = this.#row(id);
+      if (terminal(r.state)) return this.status(id);
+      this.#review(review, r.draft, r.policyHash, active);
+      if (review.holdVersion !== (r.holdVersion ?? 0)) throw Error("Funding was stopped or resumed during this review");
+      if (config.paused || hash(JSON.stringify(config)) !== r.policyHash || next !== r.draft.header.nonce ||
+          (r.state === "needs_review" && r.reason !== "funding_review_expired")) throw Error("Funding cannot resume with changed policy, nonce or exhausted attempts");
+      r.held = false; r.holdVersion = integer((r.holdVersion ?? 0) + 1); r.reviewedAt = this.#time(); r.expires = r.reviewedAt + 180000;
+      if (r.state === "needs_review") { r.state = "staged"; r.reason = null; }
+      this.#save(r); return this.status(id);
     });
   }
   async #validate(tx, r) {
@@ -138,7 +187,8 @@ class FundingRecovery {
     });
     return this.status(id);
   }
-  async advance(id) {
+  async advance(id, { allowSubmit = true } = {}) {
+    if (typeof allowSubmit !== "boolean") throw Error("Explicit funding submission mode required");
     const initial = this.#row(id);
     if (terminal(initial.state)) return { action: "done", ...this.status(id) };
     if (!initial.transaction) return { action: "review", ...this.status(id), reason: "recover_signing_envelope" };
@@ -157,8 +207,10 @@ class FundingRecovery {
         r.finality = finality; r.state = finality.state === "finalized" ? "funded" : "reverted"; r.reason = null; this.#save(r);
         return { action: "done", ...this.status(id) };
       }
+      if (r.held) return { action: "review", ...this.status(id), reason: "funding_user_stopped" };
       if (r.state === "needs_review") return { action: "review", ...this.status(id) };
       if (finality.state !== "unknown") return { action: "wait", reason: "funding_" + finality.state, paymentsEnabled: false };
+      if (!allowSubmit) return { action: "review", ...this.status(id), reason: "funding_resume_review_required" };
       let reason = null;
       if (hash(JSON.stringify(evidence.config)) !== r.policyHash) reason = "funding_policy_changed";
       else if (nonce(nextNonce) !== nonce(r.draft.header.nonce)) reason = "wallet_nonce_changed";

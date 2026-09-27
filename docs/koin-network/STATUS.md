@@ -232,8 +232,12 @@ existing password/external-wallet confirmation and shared wallet nonce coordinat
 The [durable funding rehearsal](FUNDING_RECOVERY.md) now saves the exact signed
 bundle, fences uncertain signing/submission, bounds retries and confirms deposits
 only from exact irreversible native receipts and backed custody observations.
-It supports owner-paid fixture transactions on an explicitly isolated client;
-production signing and credit activation remain disconnected.
+It supports owner-paid fixture transactions on an explicitly isolated client.
+The isolated native approval coordinator now binds review to the journal's exact
+draft, persists Stop across restart, saves late signatures without broadcasting,
+and requires a fresh review to resume the saved transaction without resigning.
+Read-only reconciliation can still confirm a stopped transaction. Production
+signing and credit activation remain disconnected.
 
 The explicit `isolated` chain-client mode requires an injected provider; the
 disposable-node harness supplies its peerless loopback transport only after
@@ -280,7 +284,8 @@ verifying the fresh genesis marker. Normal deployment remains unconfigured.
    password or external-wallet confirmation and exact transaction previews.
    Exact approval/deposit validation and native funding preview are implemented;
    durable funding recovery and finality/backing checks are implemented for the
-   isolated driver. Production signing and credit activation remain disconnected.
+   isolated driver. Native review, durable Stop and exact-transaction resume are
+   connected for fixture wallets. Production signing and credit activation remain disconnected.
    No scheduler setting may enable the old arbitrary-transaction deposit flow.
 6. Complete a concrete deployment manifest: chain ID, native KOIN contract,
    credits/rewards addresses and bytecode hashes, owner/verifier/sponsor roles,
