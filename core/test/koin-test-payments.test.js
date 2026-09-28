@@ -67,6 +67,11 @@ test("Test actions enforce deposit, refund and session limits before signatures"
   await assert.rejects(f.controller.run(window(), "reserve", { amount: "1" }), /manifest/);
   assert.equal(f.journal.nonceCoordinator.list().length, 0);
 });
+test("a rejected Test host lease prevents deposits and refunds before any local signing fence", async t => {
+  const f = setup(t, { authorizeHost: async () => { throw Error("Another installation owns this Test wallet"); } });
+  for (const action of ["purchase", "fund-rewards", "refund", "reserve"]) await assert.rejects(f.controller.run(window(), action, action === "reserve" ? undefined : "1"), /Another installation/);
+  assert.equal(f.journal.nonceCoordinator.list().length, 0); assert.equal(f.state.submissions.length, 0);
+});
 test("Test reserve binds configured per-request and total limits into the on-chain operation", async t => {
   const f = setup(t); const result = await f.controller.run(window(), "reserve");
   assert.equal(result.state, "signed");

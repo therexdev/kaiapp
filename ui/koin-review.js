@@ -71,7 +71,12 @@
     }
     const state = result?.state || result?.status || (result?.configured ? "Ready" : "Action complete");
     status.textContent = result?.error || String(state).replaceAll("_", " ");
-    if (result?.answer) document.getElementById("koin-test-answer").textContent = result.answer;
+    if (result?.payouts) status.textContent = result.payouts.length ? result.payouts.map(p => `Day ${p.epoch}: ${p.state} · ${amount((BigInt(p.availability || "0") + BigInt(p.work || "0")).toString())} test KOIN`).join("; ") : "No daily payouts yet. Rewards are automatic after the review period.";
+    if (result?.answer) {
+      document.getElementById("koin-test-answer").textContent = result.answer;
+      const charge = result.koin?.receipt?.usage?.amount;
+      status.textContent = `Answer verified · Input tokens: ${result.usage?.prompt_tokens || 0} · Output tokens: ${result.usage?.completion_tokens || 0}${charge ? " · Charge: " + amount(charge) + " test KOIN (awaiting settlement)" : ""}`;
+    }
     if (result?.deposit) status.textContent += ` · Deposit: ${result.deposit.state}`;
     if (result?.state === "active") status.textContent = `Test spending approved. Spent: ${amount(result.spent)} · Held: ${amount(result.held)} · Remaining requests: ${result.remainingJobs}`;
   }

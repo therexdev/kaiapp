@@ -99,7 +99,7 @@ class WalletNonceCoordinator {
       draft.header.rc_limit = r.draft.header.rc_limit; draft.id = r.draft.id;
       return isDeepStrictEqual(draft, r.draft);
     }
-    return hash(JSON.stringify(draft)) === r.draftHash;
+    return isDeepStrictEqual(draft, r.draft);
   }
   envelope(id) { return structuredClone(this.#row(id).transaction); }
   draft(id) { return structuredClone(this.#row(id).draft); }

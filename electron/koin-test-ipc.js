@@ -28,13 +28,13 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     if (!payments) {
       const config = readConfig(configFile), client = new KoinChain(config.deployment);
       journal = new FundingRecovery(journals, { mode: config.mode, client, maxRcPerDay: config.maxRcPerDay });
-      payments = new TestPayments({ config, client, journal, wallet: core.account.wallet, dialog });
       access = new TestAccess({ file: path.join(root, "test-access.enc"), config, wallet: core.account.wallet, settings: core.account.settings, safeStorage: core.account.safeStorage });
+      payments = new TestPayments({ config, client, journal, wallet: core.account.wallet, dialog, authorizeHost: () => access.claimHost() });
     }
     return payments;
   };
   const getSession = async () => {
-    const config = await open().session(); if (!config) throw Error("Reserve a Test session and wait for irreversible confirmation first");
+    const config = await open().session(); await access.claimHost(); if (!config) throw Error("Reserve a Test session and wait for irreversible confirmation first");
     if (sessionId !== config.session) {
       sessionClient = new FundedSessionClient({ config, file: path.join(root, "session-" + config.session + ".json"),
         authorize: (pin, signal) => access.authorize(pin, signal),
@@ -141,6 +141,14 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
         const guard = new JournalSet(journals, { maintenance: true });
         try { const m = guard.snapshot(path.join(picked.filePaths[0], "koin-test-backup-" + Date.now())); return { state: "backed_up", id: m.id }; }
         finally { guard.close(); }
+      }
+      if (action === "payouts") {
+        const config = readConfig(configFile), auth = access.authorize(config.schedulerUrl);
+        const response = await fetch(config.schedulerUrl + "/koin/test/status", { redirect: "error", signal: AbortSignal.timeout(10000), headers: { authorization: "Bearer " + auth.sessionToken } });
+        const chunks = []; let size = 0; for await (const part of response.body) { size += part.length; if (size > 65536) throw Error("Test payout response too large"); chunks.push(part); }
+        const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+        if (!response.ok || value.mode !== "test-deployment" || value.mainnetPaymentsEnabled !== false || !Array.isArray(value.payouts)) throw Error("Test payout status unavailable");
+        return { enabled: true, ...value, state: "payout_status" };
       }
       if (action === "status") return { worker: worker?.status() || null, configured: true, ...await controller.status(), session: await controller.session() };
       if (["session-review", "session-status", "session-retry", "session-revoke"].includes(action)) return (await getSession())(window, action.slice(8));

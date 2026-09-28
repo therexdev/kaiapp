@@ -12,9 +12,11 @@ const { koin } = require("./koin-review");
 const enc = hex => utils.encodeBase64url(Buffer.from(hex, "hex"));
 const terminal = s => ["finalized", "reverted", "consumed_elsewhere"].includes(s);
 class TestPayments {
-  #config; #client; #journal; #wallet; #dialog; #funding; #task; #clock;
-  constructor({ config, client, journal, wallet, dialog, clock = Date.now }) {
+  #config; #client; #journal; #wallet; #dialog; #funding; #task; #clock; #authorizeHost;
+  constructor({ config, client, journal, wallet, dialog, clock = Date.now, authorizeHost = null }) {
     assertPaymentMode(config.mode, client); journal.assertMode(config.mode); journal.assertClient(client);
+    if (config.mode === "test-deployment" && typeof authorizeHost !== "function") throw Error("Test signing requires a persistent host lease");
+    this.#authorizeHost = authorizeHost;
     this.#config = structuredClone(config); this.#client = client; this.#journal = journal; this.#wallet = wallet; this.#dialog = dialog; this.#clock = clock;
     this.#funding = createFundingApproval({ mode: config.mode, client, journal, dialog, clock,
       sign: async d => this.#sign(d.transaction), submit: d => {
@@ -98,6 +100,7 @@ class TestPayments {
     window.webContents.on("did-start-navigation", navigation); window.webContents.on("render-process-gone", stop);
     try {
       this.#owner(); guard();
+      if (["purchase", "fund-rewards", "reserve", "refund", "revoke", "release", "resume"].includes(action)) { await this.#authorizeHost?.(); guard(); }
       if (["purchase", "fund-rewards", "reserve", "refund", "revoke", "release"].includes(action) && this.#wallet.signer.getAddress() !== this.#owner()) throw Error("Unlock the configured Test wallet");
       if (action === "purchase" || action === "fund-rewards") {
         const amount = atoms(input), kind = action === "purchase" ? "credits" : "rewards";
