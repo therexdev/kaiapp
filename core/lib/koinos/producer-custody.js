@@ -3,6 +3,7 @@ const fs = require("fs"), path = require("path"), crypto = require("crypto");
 const { validateSigned, fresh } = require("../../../ui/producer-signer/validation");
 const { Signer, Transaction, utils } = require("koilib");
 const { parseAmount, cmpSats } = require("./format");
+const { hash } = require("../koin-network/job-protocol");
 const keyText = value => value ? Buffer.from(value, "base64").toString("base64url") : null;
 const settingsHealth = settings => typeof settings.health === "function" ? settings.health() : { ok: true, error: null, recoveredFromBackup: false, backupError: null };
 const requireHealthySettings = settings => { const health = settingsHealth(settings); if (!health.ok) throw new Error("Producer custody settings could not be loaded safely. Production and producer wallet actions are disabled until you stop the node and explicitly save the intended custody mode again."); return health; };
@@ -166,6 +167,12 @@ class ProducerCustody {
     await tx.prepare();
     const createdAt = Date.now(), offline = input.offlineSigning === true;
     const draft = { format: "kai-producer-transaction-v1", createdAt, signingWindow: offline ? "offline-24h" : "standard-15m", expiresAt: createdAt + (offline ? 24 * 60 : 15) * 60000, summary, transaction: tx.transaction };
+    if (this.chain.nonceCoordinator) {
+      this.chain.nonceCoordinator.assertProvider(provider);
+      draft.nonceReservation = hash("wallet:external:" + tx.transaction.id);
+      const decision = await this.chain.nonceCoordinator.reserve(draft.nonceReservation, "external", tx.transaction);
+      if (decision.action !== "sign_original") throw Error("Recover the existing external signing request; do not sign another draft");
+    }
     this.state.set("producerDraft", draft);
     return draft;
   }
@@ -183,6 +190,17 @@ class ProducerCustody {
     const current = this.state.get("producerDraft", null);
     if (!current || current.transaction.id !== draft.transaction.id || current.expiresAt !== draft.expiresAt || current.expiresAt <= Date.now() || this.config().mode !== "external" || this.config().address !== draft.summary.producer || this.chain.network().id !== draft.summary.network) throw new Error("The draft changed or expired. Prepare a fresh transaction.");
     if (draft.summary.action === "register" && draft.summary.publicKey !== this.hotPublicKey()) throw new Error("The hot key changed. Prepare a new registration.");
+    if (this.chain.nonceCoordinator) {
+      this.chain.nonceCoordinator.assertProvider(provider);
+      // Isolated coordinated drafts require the exact reviewed RC limit too.
+      // Production's existing lower-RC external-signing path is unchanged.
+      await this.chain.nonceCoordinator.stage(draft.nonceReservation, transaction);
+      const latest = this.state.get("producerDraft", null);
+      if (!latest || latest.transaction.id !== draft.transaction.id || latest.expiresAt !== draft.expiresAt || latest.expiresAt <= Date.now() ||
+          this.config().mode !== "external" || this.config().address !== draft.summary.producer || this.chain.network().id !== draft.summary.network)
+        throw Error("The external signing request changed during nonce validation");
+      if (draft.summary.action === "register" && draft.summary.publicKey !== this.hotPublicKey()) throw Error("The hot key changed during nonce validation");
+    }
     this.state.set("producerDraft", null);
     const tx = new Transaction({ provider, transaction });
     await tx.send();

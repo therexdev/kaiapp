@@ -4,6 +4,7 @@ const { Contract, Transaction, utils } = require("koilib");
 const { createProvider, rpcUrlsForNetwork } = require("../koinos-rpc");
 const { NETWORKS, POB_ABI, TOKEN_ABI, BURN_MANA_CUSHION } = require("./constants");
 const { cmpSats, subSats, formatAmount } = require("./format");
+const { hash } = require("../koin-network/job-protocol");
 
 const RC_LIMIT_CAP = 1000000000n; // never ask for more than 10 KOIN of mana
 const MIN_MANA = 5000000n;        // refuse to send with < 0.05 KOIN of mana
@@ -32,8 +33,13 @@ const CONTRACT_NAMES = ["koin", "vhp", "pob"];
 const RESOLVE_TTL_MS = 60 * 60 * 1000;
 
 class ChainService {
-  constructor(settings) {
+  constructor(settings, { nonceCoordinator = null } = {}) {
+    if (nonceCoordinator !== null) {
+      const { WalletNonceCoordinator } = require("./wallet-nonce");
+      if (!(nonceCoordinator instanceof WalletNonceCoordinator)) throw Error("Isolated wallet nonce coordinator required");
+    }
     this.settings = settings;
+    this.nonceCoordinator = nonceCoordinator;
     this._resolved = {}; // { [networkId]: { addrs, at } }
   }
 
@@ -226,6 +232,24 @@ class ChainService {
     return out;
   }
 
+  // Opt-in isolated adapter. Normal wallet construction does not install it.
+  // Reserve before signing, persist the exact signature before transport, and
+  // retain uncertain requests. There is no automatic retry or new signature.
+  async _coordinatedSend(tx, purpose) {
+    const nonces = this.nonceCoordinator; nonces.assertProvider(tx.provider);
+    await tx.prepare();
+    const id = hash("wallet:" + purpose + ":" + tx.transaction.id);
+    const decision = await nonces.reserve(id, purpose, tx.transaction);
+    if (decision.action === "sign_original") {
+      await tx.sign(); await nonces.stage(id, tx.transaction);
+      nonces.assertReservation(id, tx.transaction);
+      await tx.send();
+    }
+    const status = await nonces.reconcile(id);
+    return { txId: status.txId, confirmed: status.state === "finalized", reverted: status.state === "reverted",
+      nonceReservation: id, note: ["finalized", "reverted"].includes(status.state) ? "Irreversible wallet receipt verified." : "Saved transaction awaits irreversible confirmation. Recover this request before another wallet operation." };
+  }
+
   // How much KOIN can actually be burned/sent right now given current mana.
   // On-chain, both operations require mana >= amount (mana recharges over
   // ~5 days); we keep a small cushion for the transaction's own resource cost.
@@ -277,6 +301,7 @@ class ChainService {
         burn_address: address,
         vhp_address: vhpAddress || address,
       });
+      if (this.nonceCoordinator) return await this._coordinatedSend(tx, "burn");
       await tx.send();
       return await this._finalizeTx(tx);
     } catch (e) {
@@ -299,6 +324,11 @@ class ChainService {
     const rcLimit = await this._rcLimit(provider, address);
     const contract = await this._contract(token, { signer, provider });
     try {
+      if (this.nonceCoordinator) {
+        const tx = new Transaction({ signer, provider, options: { rcLimit } });
+        await tx.pushOperation(contract.functions.transfer, { from: address, to: String(to).trim(), value: String(amountSat) });
+        return await this._coordinatedSend(tx, "send");
+      }
       const { transaction } = await contract.functions.transfer(
         { from: address, to: String(to).trim(), value: String(amountSat) },
         { rcLimit }
@@ -318,6 +348,11 @@ class ChainService {
     const rcLimit = await this._rcLimit(provider, producer);
     const pob = await this._contract("pob", { signer, provider });
     try {
+      if (this.nonceCoordinator) {
+        const tx = new Transaction({ signer, provider, options: { rcLimit } });
+        await tx.pushOperation(pob.functions.register_public_key, { producer, public_key: String(publicKeyB64url).trim() });
+        return await this._coordinatedSend(tx, "register");
+      }
       const { transaction } = await pob.functions.register_public_key(
         { producer, public_key: String(publicKeyB64url).trim() },
         { rcLimit }

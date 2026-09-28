@@ -238,6 +238,11 @@ draft, persists Stop across restart, saves late signatures without broadcasting,
 and requires a fresh review to resume the saved transaction without resigning.
 Read-only reconciliation can still confirm a stopped transaction. Production
 signing and credit activation remain disconnected.
+The [shared nonce rehearsal](WALLET_NONCES.md) now coordinates owner-paid funding
+with ordinary sends, burns, producer registration and exported offline drafts.
+It holds uncertain requests across restart and releases only after exact
+irreversible success/revert. These adapters require explicit isolated injection;
+sponsored bridge/Koin Vault coordination and live activation remain deferred.
 
 The explicit `isolated` chain-client mode requires an injected provider; the
 disposable-node harness supplies its peerless loopback transport only after

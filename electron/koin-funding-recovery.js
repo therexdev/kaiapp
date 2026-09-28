@@ -5,23 +5,13 @@ const { KoinChain } = require("../core/lib/koin-network/chain");
 const { FundingObserver, intent } = require("../core/lib/koin-network/funding-observer");
 const { hash, digest, integer } = require("../core/lib/koin-network/job-protocol");
 const { uint, DAY } = require("../core/lib/koin-network/policy");
+const { WalletNonceCoordinator, nonce } = require("../core/lib/koinos/wallet-nonce");
 const terminal = s => ["funded", "reverted"].includes(s);
-function nonce(value) {
-  if (typeof value !== "string") throw Error("Canonical funding nonce required");
-  const b = Buffer.from(value, "base64url"); let n = 0n;
-  if (b.length < 2 || b.length > 11 || b[0] !== 40) throw Error("Invalid funding nonce");
-  for (let i = 1; i < b.length; i++) n |= BigInt(b[i] & 127) << BigInt(7 * (i - 1));
-  uint(n); if (!n) throw Error("Positive funding nonce required");
-  let rest = n; const canonical = [40];
-  do { const byte = Number(rest & 127n); rest >>= 7n; canonical.push(byte | (rest ? 128 : 0)); } while (rest);
-  if (utils.encodeBase64url(Uint8Array.from(canonical)) !== value) throw Error("Noncanonical funding nonce");
-  return n;
-}
 
 // No wallet keys, IPC, timer or broadcast transport. Only the isolated driver
 // may supply a fixture signer. Production approvals remain disconnected.
 class FundingRecovery {
-  #db; #client; #observer; #clock; #identity; #policy;
+  #db; #client; #observer; #clock; #identity; #policy; #nonces;
   constructor(directory, { mode, client, clock = Date.now, maxRcPerDay, maxAttempts = 3, minRetryMs = 1000 }) {
     if (mode !== "isolated-rehearsal" || !(client instanceof KoinChain) || client.d.network !== "isolated")
       throw Error("Explicit isolated funding client required");
@@ -45,8 +35,12 @@ class FundingRecovery {
         }
       }, false);
       if (this.#db.prepare("PRAGMA quick_check").get().quick_check !== "ok") throw Error("Corrupt funding journal");
+      if (this.#db.prepare("SELECT 1 FROM deposits LIMIT 1").get() && !fs.existsSync(path.join(directory, "wallet-nonces.sqlite")))
+        throw Error("Shared wallet nonce journal missing; restore both journals before recovery");
+      this.#nonces = new WalletNonceCoordinator(directory, { mode, client, clock });
     } catch (e) { this.#db.close(); throw e; }
   }
+  get nonceCoordinator() { return this.#nonces; }
   #time() {
     const row = this.#db.prepare("SELECT data,clock FROM identity WHERE id=1").get(), now = integer(this.#clock());
     if (row?.data !== this.#identity) throw Error("Funding identity mismatch");
@@ -86,6 +80,7 @@ class FundingRecovery {
       const m = this.#db.prepare("SELECT owner,amount FROM mana WHERE day=? AND id=?").get(day, id);
       if (uint(day) > BigInt(Math.floor(r.lastAttemptAt / DAY)) || m?.owner !== r.intent.actor || m?.amount !== r.intent.maxRc) throw Error("Funding Mana journal mismatch");
     }
+    this.#nonces.assertReservation(id, r.draft);
     return r;
   }
   status(id) {
@@ -131,6 +126,10 @@ class FundingRecovery {
     if (state.paused) throw Error("Funding is paused");
     const draft = await this.#client.prepare(request.kind, request.method, request.args, { actor: request.actor, rcLimit: request.maxRc });
     await this.#client.verifyTransaction(draft, request); nonce(draft.header.nonce);
+    if (this.#db.prepare("SELECT 1 FROM deposits WHERE owner=? AND id<>? AND state NOT IN ('funded','reverted')").get(request.actor, id))
+      throw Error("Another deposit owns this wallet nonce; recover it first");
+    if (review) this.#review(review, draft, hash(JSON.stringify(state)), active);
+    const reservation = await this.#nonces.reserve(id, "funding", draft, () => !review || (active() && this.#time() < review.expires));
     return this.#tx(() => {
       if (this.#db.prepare("SELECT 1 FROM deposits WHERE id=?").get(id)) {
         if (JSON.stringify(this.#row(id).intent) !== JSON.stringify(request)) throw Error("Cannot replace funding intent");
@@ -145,6 +144,7 @@ class FundingRecovery {
       this.#save({ id, intent: request, state: "signing", reason: null, draft, draftHash: hash(JSON.stringify(draft)),
         policyHash: hash(JSON.stringify(state)), transaction: null, transactionHash: null, createdAt: now, expires: now + 180000,
         held: false, attempts: 0, lastAttemptAt: null, days: [], finality: null });
+      if (reservation.action !== "sign_original") return { action: "recover_existing", ...this.status(id) };
       return { action: "prepare_funding", id, transaction: structuredClone(draft), intent: request, paymentsEnabled: false };
     });
   }
@@ -176,6 +176,7 @@ class FundingRecovery {
   }
   async stage(id, transaction) {
     const tx = structuredClone(transaction), r = this.#row(id); await this.#validate(tx, r);
+    await this.#nonces.stage(id, tx);
     this.#tx(() => {
       const current = this.#row(id);
       if (current.transaction) {
@@ -189,15 +190,18 @@ class FundingRecovery {
   }
   async advance(id, { allowSubmit = true } = {}) {
     if (typeof allowSubmit !== "boolean") throw Error("Explicit funding submission mode required");
-    const initial = this.#row(id);
-    if (terminal(initial.state)) return { action: "done", ...this.status(id) };
+    let initial = this.#row(id);
+    if (terminal(initial.state)) { await this.#nonces.reconcile(id); return { action: "done", ...this.status(id) }; }
+    // A crash between the two envelope writes can recover the first durable
+    // copy. It must never invoke the signer again.
+    if (!initial.transaction && this.#nonces.envelope(id)) { await this.stage(id, this.#nonces.envelope(id)); initial = this.#row(id); }
     if (!initial.transaction) return { action: "review", ...this.status(id), reason: "recover_signing_envelope" };
     await this.#validate(initial.transaction, initial);
     const finality = await this.#observer.finality(initial.transaction, initial.intent);
     const confirmed = ["finalized", "reverted"].includes(finality.state);
     const evidence = await this.#observer.inspect(initial.intent, confirmed ? finality.height : "0");
     const nextNonce = confirmed ? null : await this.#client.provider.getNextNonce(initial.intent.actor);
-    return this.#tx(() => {
+    const result = this.#tx(() => {
       const r = this.#row(id);
       if (terminal(r.state)) return { action: "done", ...this.status(id) };
       if (evidence.state !== "verified") return { action: "wait", reason: "funding_" + evidence.state, paymentsEnabled: false };
@@ -229,8 +233,10 @@ class FundingRecovery {
       r.attempts++; r.lastAttemptAt = now; r.state = "unknown"; this.#save(r);
       return { action: "submit_exact_transaction", id, transaction: structuredClone(r.transaction), intent: structuredClone(r.intent), paymentsEnabled: false };
     });
+    if (result.action === "done") await this.#nonces.reconcile(id);
+    return result;
   }
-  close() { this.#db.close(); }
+  close() { this.#db.close(); this.#nonces.close(); }
 }
 
 class FundingRecoveryRunner {

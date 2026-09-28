@@ -24,6 +24,8 @@ Only owner-paid transactions are supported here; sponsored funding is deferred.
 exactly `{ kind, method, args: { account, amount }, actor, maxRc }`. It prepares the
 two-operation draft locally and commits a signing fence before returning it.
 One unresolved request fences that owner's deposits across both custody contracts.
+The [shared wallet nonce journal](WALLET_NONCES.md) extends that fence to the
+isolated adapters for ordinary sends, burns, registration and offline drafts.
 Reusing an ID recovers its existing deposit; different terms under that ID fail.
 New IDs after a confirmed/reverted deposit require a new explicit signing call.
 
@@ -111,7 +113,7 @@ clock watermark detect damaged records and backwards clocks.
 
 The observer trusts its pinned RPC; it is not a consensus light client. Production
 still requires the native password/external-wallet approval flow, shared nonce
-coordination with all other wallet actions, key custody, reviewed repairs for
+coordination with sponsored/remote-wallet actions, key custody, reviewed repairs for
 abandoned signatures, rollback-resistant backups, cross-host fencing and monitoring.
 No mainnet deposit, funding configuration or live payment setting is changed.
 
