@@ -1,3 +1,10 @@
+## Node startup and local RPC recovery
+
+- Node startup waits for the internal RabbitMQ service to be ready. Health checks now include RabbitMQ and the local RPC, including unhealthy containers that still appear running.
+- Memory-saver mode reduces service jobs and keeps the local RPC available. Monitoring resumes for an already-running node when the app reopens.
+- Failed restarts and software panics no longer label chain data as corrupted or recommend repeated Quick Sync. Current-process chain validation failures still require attention.
+- Health checks ignore errors from before a container's latest restart. Recovery reports restart failures and waits for RPC confirmation before calling the node healthy. Manual Stop and snapshot restore remain protected from concurrent recovery.
+
 ## KOIN session chat and settlement rehearsal
 
 - An approved, explicitly configured KOIN session can now serve normal Network chat through opted-in workers. Its model and spending limits apply to every request without another wallet dialog.
