@@ -57,3 +57,16 @@ test("an interrupted dual commit is blocked by the independent generation witnes
   db.exec("UPDATE recovery_generation SET generation=generation+1"); db.close();
   assert.throws(() => f.open(), /generation mismatch/);
 });
+test("OS parent aliases share one physical journal identity but linked journals and internal backups are refused", { skip: process.platform === "win32" }, t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "kai-parent-alias-")); t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "physical")); fs.symlinkSync(path.join(root, "physical"), path.join(root, "alias"));
+  const directory = path.join(root, "alias", "journals"), files = ["test.sqlite"];
+  const first = new JournalSet(directory, { files }), db = new DatabaseSync(path.join(directory, files[0]));
+  db.exec("CREATE TABLE identity(id INTEGER PRIMARY KEY, value TEXT)"); first.attach(db);
+  first.write(db, () => db.prepare("INSERT INTO identity VALUES(1,?)").run("original"));
+  assert.throws(() => first.snapshot(path.join(directory, "inside")), /external backup/);
+  db.close(); first.close();
+  const reopened = new JournalSet(path.join(root, "physical", "journals"), { files }); reopened.close();
+  fs.symlinkSync(path.join(root, "physical", "journals"), path.join(root, "linked-journal"));
+  assert.throws(() => new JournalSet(path.join(root, "linked-journal"), { files }), /symlink/);
+});
