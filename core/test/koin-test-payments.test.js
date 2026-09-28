@@ -79,6 +79,13 @@ test("Test reserve binds configured per-request and total limits into the on-cha
   assert.equal(s.remaining, f.config.limits.amount); assert.equal(s.per_job, f.config.limits.perJob);
   assert.equal(s.max_jobs, String(f.config.limits.maxJobs)); assert.equal(s.expires, String(f.state.now + 3600000));
 });
+test("desktop and backend derive the same protocol-valid session domain from deployment pins", t => {
+  const f = setup(t), { testDomain } = require("../lib/koin-network/payment-mode"), D = require("../lib/koin-network/session-delegation");
+  const domain = testDomain(f.d, f.config.schedulerUrl);
+  assert.equal(D.target({ chainId: f.d.chainId, credits: f.d.credits, creditsHash: f.d.creditsHash, domain, policyHash: f.config.policyHash }).domain, domain);
+  assert.notEqual(domain, testDomain(f.d, "https://other.example/scheduler"));
+  assert.notEqual(domain, testDomain({ ...f.d, chainId: "another-chain" }, f.config.schedulerUrl));
+});
 test("journal backup survives a read-only reopen, and changed host identity blocks copied state", async t => {
   const { JournalSet } = require("../lib/koin-network/journal-set"), fs = require("fs"), path = require("path"), { DatabaseSync } = require("node:sqlite");
   const f = setup(t), destination = f.dir + "-backup"; t.after(() => fs.rmSync(destination, { recursive: true, force: true }));

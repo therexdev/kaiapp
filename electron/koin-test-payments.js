@@ -4,7 +4,7 @@
 const crypto = require("crypto");
 const { utils } = require("koilib");
 const { encodedAddress } = require("../core/lib/koin-network/chain");
-const { assertPaymentMode } = require("../core/lib/koin-network/payment-mode");
+const { assertPaymentMode, testDomain } = require("../core/lib/koin-network/payment-mode");
 const { hash, digest } = require("../core/lib/koin-network/job-protocol");
 const { createFundingApproval } = require("./koin-funding-approval");
 const { atoms } = require("./koin-test-config");
@@ -61,7 +61,7 @@ class TestPayments {
       if (!state.session || state.session.closed || BigInt(state.session.revoked_at || "0") > 0n || Number(s.expires) <= this.#clock()) return null;
       return { schedulerUrl: this.#config.schedulerUrl,
         target: { chainId: this.#client.d.chainId, credits: this.#client.d.credits, creditsHash: this.#client.d.creditsHash,
-          domain: this.#config.schedulerUrl, policyHash: this.#config.policyHash }, session,
+          domain: testDomain(this.#client.d, this.#config.schedulerUrl), policyHash: this.#config.policyHash }, session,
         model: this.#config.model, version: this.#config.version, maxOutput: this.#config.maxOutput,
         amount: s.remaining, perJob: s.per_job, maxJobs: Number(s.max_jobs), expires: Number(s.expires) };
     }
