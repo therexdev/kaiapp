@@ -8,7 +8,7 @@
 // reference client (VortexBridge/interface-bridge Redeem.jsx) exactly; koilib
 // encodes the byte fields via the ABI's btype annotations.
 
-const { Contract } = require("koilib");
+const { Contract, Transaction } = require("koilib");
 const BRIDGE_ABI = require("./abi/koinos-bridge-abi.json");
 const { BRIDGE } = require("./bridge-constants");
 
@@ -44,7 +44,7 @@ function recordToRedeemArgs(record) {
 // payer. Returns the transaction JSON (one signature so far — the user's) for the
 // relayer to co-sign as payer and broadcast. sendTransaction:false means build +
 // user-sign only; nothing is broadcast here.
-async function buildRedeemTransaction({ userSigner, record, sponsorAddress, rcLimit, network = "mainnet", provider } = {}) {
+async function buildRedeemTransaction({ userSigner, record, sponsorAddress, rcLimit, network = "mainnet", provider, nonceCoordinator = null } = {}) {
   const cfg = BRIDGE[network];
   if (!cfg || !cfg.koinosBridge) throw new Error(`Bridge not configured for ${network}`);
   if (!userSigner) throw new Error("User signer required");
@@ -58,6 +58,12 @@ async function buildRedeemTransaction({ userSigner, record, sponsorAddress, rcLi
     signer: userSigner,
   });
 
+  if (nonceCoordinator) {
+    const tx = new Transaction({ signer: userSigner, provider: provider || userSigner.provider,
+      options: { payer: sponsorAddress, payee: userSigner.getAddress(), rcLimit: String(rcLimit || DEFAULT_REDEEM_RC) } });
+    await tx.pushOperation(bridge.functions.complete_transfer, args);
+    return require("./sponsored-nonce").signSponsored(tx, nonceCoordinator);
+  }
   const { transaction } = await bridge.functions.complete_transfer(args, {
     payer: sponsorAddress, // sponsor pays mana
     payee: userSigner.getAddress(), // user's nonce increments (avoids sponsor nonce races)

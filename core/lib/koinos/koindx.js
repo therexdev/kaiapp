@@ -82,7 +82,7 @@ async function quoteSwap({ amountInSats, slippageBps = DEFAULT_SLIPPAGE_BPS, net
 // Build the sponsored swap transaction: approve(vETH -> router) + swap_tokens_in,
 // USER-signed as payee with the sponsor as payer. Returns the tx for the relayer
 // to co-sign and broadcast. Nothing is broadcast here.
-async function buildSwapTransaction({ userSigner, amountInSats, amountOutMin, sponsorAddress, rcLimit, network = "mainnet", provider } = {}) {
+async function buildSwapTransaction({ userSigner, amountInSats, amountOutMin, sponsorAddress, rcLimit, network = "mainnet", provider, nonceCoordinator = null } = {}) {
   const cfg = KOINDX[network];
   if (!cfg || !cfg.router) throw new Error(`KoinDX not configured for ${network}`);
   if (!userSigner) throw new Error("User signer required");
@@ -110,6 +110,7 @@ async function buildSwapTransaction({ userSigner, amountInSats, amountOutMin, sp
     amountOutMin: String(amountOutMin),
     path: swapPath(network),
   });
+  if (nonceCoordinator) return require("./sponsored-nonce").signSponsored(tx, nonceCoordinator);
   await tx.prepare();
   await tx.sign();
   return tx.transaction;

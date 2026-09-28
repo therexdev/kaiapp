@@ -29,12 +29,28 @@ async function walletRequest(route, body, method = "POST") {
 }
 
 class ProducerVault {
-  constructor({ custody, chain, request = walletRequest, now = Date.now }) {
-    Object.assign(this, { custody, chain, request, now }); this.session = null; this.draft = null; this.pending = null;
+  constructor({ custody, chain, request = walletRequest, now = Date.now, recovery = null }) {
+    if (recovery) {
+      const { VaultRecovery } = require("./vault-recovery");
+      if (!(recovery instanceof VaultRecovery) || request === walletRequest) throw Error("Isolated vault recovery requires an injected fixture transport");
+      recovery.assertChain(chain);
+    }
+    Object.assign(this, { custody, chain, request, now, recovery }); this.session = null; this.draft = null; this.pending = null;
+    this.restorePending();
+  }
+  restorePending() {
+    if (this.recovery && this.custody.config().address) {
+      const saved = this.recovery.pending(this.custody.config().address);
+      if (saved && saved.nonceReservation !== this.pending?.nonceReservation) this.pending = saved;
+    }
   }
   pair() { if (!this.session || this.session.expiresAt <= this.now()) throw new Error("Connect Koin Vault again."); return { sessionId: this.session.sessionId, secret: this.session.secret }; }
-  requireNetwork() { if (this.chain.network().id !== "mainnet") throw new Error("Koin Vault producer signing currently supports Mainnet only."); }
-  hasPending() { return !!this.pending && ["sending", "pending", "submitting", "unknown"].includes(this.pending.status) && this.pending.expiresAt > this.now(); }
+  requireNetwork() { if (this.recovery) return this.recovery.assertChain(this.chain); if (this.chain.network().id !== "mainnet") throw new Error("Koin Vault producer signing currently supports Mainnet only."); }
+  hasPending() {
+    this.restorePending();
+    if (this.recovery && this.pending?.nonceReservation) return ["signing", "signed"].includes(this.recovery.nonces.status(this.pending.nonceReservation).state);
+    return !!this.pending && ["sending", "pending", "submitting", "unknown"].includes(this.pending.status) && this.pending.expiresAt > this.now();
+  }
   guardMutation() { if (this.hasPending()) throw new Error("Finish or cancel the Koin Vault approval before changing the producer, hot key or network."); this.draft = null; }
   view() {
     const active = this.session && this.session.expiresAt > this.now();
@@ -46,14 +62,16 @@ class ProducerVault {
     this.requireNetwork();
     if (this.session) throw new Error("Disconnect the existing Koin Vault connection before creating a new QR.");
     const config = await this.request("config", null, "GET");
-    if (config.demo || config.network !== "mainnet" || config.features?.kaiProducer !== true) throw new Error("Koin Vault's KAI producer update is not available yet. Try again after the wallet backend updates.");
+    if (config.demo || config.network !== this.chain.network().id || config.features?.kaiProducer !== true) throw new Error("Koin Vault's KAI producer update is not available yet. Try again after the wallet backend updates.");
     const made = await this.request("dapp/create", { name: "Koinos AI Test · Producer", icon: ORIGIN + "/favicon.ico" });
     if (!/^[A-Za-z0-9_-]{24}$/.test(made.sessionId) || !/^[A-Za-z0-9_-]{43}$/.test(made.secret) || !Number.isSafeInteger(made.expiresAt) || made.expiresAt <= this.now() || made.expiresAt > this.now() + 31 * 60000) throw new Error("Invalid Koin Vault connection response.");
     this.session = { sessionId: made.sessionId, secret: made.secret, expiresAt: made.expiresAt,
-      uri: WALLET + "/?connect=" + made.sessionId + "&secret=" + made.secret };
-    this.pending = null; this.draft = null; return this.view();
+      uri: this.recovery ? "about:blank#isolated-wallet-fixture" : WALLET + "/?connect=" + made.sessionId + "&secret=" + made.secret };
+    if (!this.recovery) this.pending = null; this.draft = null; return this.view();
   }
   async status() {
+    this.restorePending();
+    if (this.recovery && this.pending?.nonceReservation) await this.verifySubmitted();
     if (!this.session) return this.view();
     if (this.session.expiresAt <= this.now()) { this.session = null; this.draft = null; return this.view(); }
     try {
@@ -125,14 +143,20 @@ class ProducerVault {
     const draft = this.draft;
     if (!draft || draft.id !== draftId || draft.expiresAt <= this.now()) throw new Error("Prepare a fresh Koin Vault transaction.");
     await this.status(); this.assertContext(draft.summary);
-    const pair = this.pair(); this.draft = null;
-    this.pending = { ...draft, status: "sending", expiresAt: Math.min(this.session.expiresAt, this.now() + 10 * 60000) };
+    const pair = this.pair();
+    const active = () => this.draft === draft && draft.expiresAt > this.now() && this.session?.sessionId === pair.sessionId && this.session?.secret === pair.secret && this.session.expiresAt > this.now();
+    if (!active()) throw new Error("Prepare a fresh Koin Vault transaction.");
+    const reservation = this.recovery ? await this.recovery.begin(draft, () => { this.assertContext(draft.summary); return active(); }) : null;
+    this.assertContext(draft.summary);
+    if (!active()) { this.restorePending(); throw new Error("Wallet request stopped; recover the retained approval."); }
+    this.draft = null;
+    this.pending = { ...draft, ...(reservation ? { nonceReservation: reservation } : {}), status: "sending", expiresAt: Math.min(this.session.expiresAt, this.now() + 10 * 60000) };
     try {
-      const result = await this.request("dapp/request", { ...pair, operations: draft.operations, summary: { network: "mainnet" } });
+      const result = await this.request("dapp/request", { ...pair, operations: draft.operations, summary: { network: this.chain.network().id } });
       if (!/^[A-Za-z0-9_-]{24}$/.test(result.requestId) || !Number.isSafeInteger(result.expiresAt)) throw new Error("Invalid approval response.");
       this.pending.requestId = result.requestId; this.pending.expiresAt = Math.min(this.pending.expiresAt, result.expiresAt); this.pending.status = "pending";
       return this.view();
-    } catch (e) { this.pending.status = "unknown"; this.pending.note = "Request delivery is uncertain. Check Koin Vault, or disconnect before retrying."; throw e; }
+    } catch (e) { this.pending.status = "unknown"; this.pending.note = this.recovery ? "Request delivery is uncertain. Recover the original transaction from wallet history; the wallet remains reserved." : "Request delivery is uncertain. Check Koin Vault, or disconnect before retrying."; throw e; }
   }
   async disconnect() {
     if (this.session && this.session.expiresAt > this.now()) {
@@ -144,6 +168,12 @@ class ProducerVault {
   }
   async verifySubmitted() {
     const p = this.pending;
+    if (this.recovery && p?.nonceReservation) {
+      this.requireNetwork();
+      const r = await this.recovery.check(p.nonceReservation, p.txId);
+      if (["finalized", "reverted"].includes(r.state)) { p.status = r.state === "finalized" ? "confirmed" : "reverted"; p.txId = r.txId; p.note = "Original wallet transaction verified irreversible."; }
+      return;
+    }
     try {
       const provider = this.chain.provider(), result = await provider.getTransactionsById([p.txId]);
       const entry = result.transactions?.find(x => x.transaction?.id === p.txId), tx = entry?.transaction;
@@ -162,6 +192,14 @@ class ProducerVault {
         p.status = "confirmed"; p.note = "Transaction verified on-chain."; return;
       }
     } catch { p.note = "Wallet submitted. Chain confirmation is not available yet; use Verify registration or check the explorer."; }
+  }
+  // Fixture-only read-only recovery after session loss. Never reconnects or resends.
+  async recover({ reservationId, txId }) {
+    if (!this.recovery) throw Error("Explicit isolated wallet recovery required");
+    this.requireNetwork(); const saved = this.recovery.restore(reservationId);
+    if (saved.summary.producer !== this.custody.config().address) throw Error("Wallet recovery owner changed");
+    await this.recovery.check(reservationId, txId);
+    this.pending = { ...saved, txId: txId || saved.txId }; await this.verifySubmitted(); return this.view();
   }
 }
 module.exports = { ProducerVault, walletRequest, ORIGIN, WALLET };

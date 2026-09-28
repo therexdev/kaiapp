@@ -242,7 +242,12 @@ The [shared nonce rehearsal](WALLET_NONCES.md) now coordinates owner-paid fundin
 with ordinary sends, burns, producer registration and exported offline drafts.
 It holds uncertain requests across restart and releases only after exact
 irreversible success/revert. These adapters require explicit isolated injection;
-sponsored bridge/Koin Vault coordination and live activation remain deferred.
+sponsored bridge/swap builders and Koin Vault now have explicit isolated adapters
+using the same durable payee reservation. Remote approval delivery survives
+restart without session credentials, and original-transaction recovery requires
+the pinned sponsor, operations, nonce, bounded RC and irreversible receipt.
+Production orchestrator/UI wiring, backend policy agreement and live activation
+remain deferred. See [the nonce recovery boundaries](WALLET_NONCES.md).
 
 The explicit `isolated` chain-client mode requires an injected provider; the
 disposable-node harness supplies its peerless loopback transport only after
