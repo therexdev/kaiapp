@@ -18,6 +18,20 @@ function setup(t, extra = {}) {
     clock: () => f.state.now, dialog: { showMessageBox: async () => ({ response: 1 }) }, ...extra });
   return { ...f, config, wallet, controller };
 }
+test("Test payment IPC rejects other documents and keeps stable builds disabled", async t => {
+  const fs = require("fs"), path = require("path"), os = require("os"), { registerTestPaymentIPC } = require("../../electron/koin-test-ipc");
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "kai-test-ipc-")); t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const w = window(); w.webContents.mainFrame = { url: "http://127.0.0.1:9000/" };
+  let handler; const options = { dataDir: root, core: {}, dialog: {}, origin: "http://127.0.0.1:9000", getMainWindow: () => w,
+    ipcMain: { handle: (_name, h) => { handler = h; } } };
+  const stable = registerTestPaymentIPC({ ...options, isTest: false }), event = { sender: w.webContents, senderFrame: w.webContents.mainFrame };
+  assert.equal((await handler(event, "purchase", "1")).enabled, false);
+  await assert.rejects(handler({ ...event, senderFrame: { url: w.webContents.mainFrame.url } }, "status"), /access denied/); stable.dispose();
+  const testBuild = registerTestPaymentIPC({ ...options, isTest: true });
+  assert.equal((await handler(event, "status")).configured, false);
+  w.webContents.mainFrame.url = "http://127.0.0.1:9000/mascot.html";
+  await assert.rejects(handler(event, "import"), /access denied/); testBuild.dispose();
+});
 test("Test manifests reject mainnet, changed chain identity, arbitrary fields and imprecise amounts", t => {
   const f = setup(t), c = structuredClone(f.config); c.mode = "test-deployment";
   c.deployment.network = "foundation-testnet"; c.deployment.rpc = ["https://testnet.koinosfoundation.org/jsonrpc"];

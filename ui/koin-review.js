@@ -79,6 +79,9 @@
     }
     if (result?.deposit) status.textContent += ` · Deposit: ${result.deposit.state}`;
     if (result?.state === "active") status.textContent = `Test spending approved. Spent: ${amount(result.spent)} · Held: ${amount(result.held)} · Remaining requests: ${result.remainingJobs}`;
+    if (result?.state === "request_cancelled") status.textContent = "Request was cancelled before dispatch. You can send a new request.";
+    if (result?.state === "request_settled") status.textContent = `Request settled once · Charge: ${amount(result.amount)} test KOIN. You can send a new request.`;
+    if (result?.state === "request_unknown") status.textContent = "Request remains uncertain. Retry its original prompt; no new request has been started.";
   }
   async function run(action) {
     if (busy && action !== "stop") return;

@@ -111,10 +111,21 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
         if (fs.statSync(picked.filePaths[0]).size > 16384) throw Error("Test access file too large");
         return access.install(JSON.parse(fs.readFileSync(picked.filePaths[0], "utf8")));
       }
-      if (action === "chat" || action === "chat-retry") {
-        if (typeof input !== "string" || !input.trim() || Buffer.byteLength(input) > 12000) throw Error("Enter a Test prompt up to 12 KB");
+      if (["chat", "chat-retry", "chat-status"].includes(action)) {
+        if (action !== "chat-status" && (typeof input !== "string" || !input.trim() || Buffer.byteLength(input) > 12000)) throw Error("Enter a Test prompt up to 12 KB");
         await getSession();
-        const config = await controller.session(), file = path.join(root, "last-request.json"), requestHash = P.hash(input);
+        const config = await controller.session(), file = path.join(root, "request-" + config.session + ".json");
+        // Preserve old pending requests across an explicitly approved new session.
+        const legacy = path.join(root, "last-request.json");
+        if (!fs.existsSync(file) && fs.existsSync(legacy)) { const old = JSON.parse(fs.readFileSync(legacy, "utf8")); if (old.session === config.session) save(file, old); }
+        if (action === "chat-status") {
+          const pending = JSON.parse(fs.readFileSync(file, "utf8"));
+          if (pending.session !== config.session) throw Error("Pending request belongs to another Test session");
+          const result = await sessionClient.requestStatus(pending.id, AbortSignal.timeout(10000));
+          if (["cancelled", "settled"].includes(result.state)) save(file, { ...pending, state: result.state });
+          return { ...result, state: "request_" + result.state };
+        }
+        const requestHash = P.hash(input);
         let pending;
         if (action === "chat-retry") {
           pending = JSON.parse(fs.readFileSync(file, "utf8"));

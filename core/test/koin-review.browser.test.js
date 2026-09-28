@@ -70,4 +70,28 @@ test("Earn review preview is desktop-only, disables repeat clicks and explains e
   await page.locator("#btn-koin-session-revoke").click();
   await page.waitForFunction(() => document.getElementById("koin-session-status").textContent.includes("revoked"));
   assert.equal(await page.locator("#btn-koin-purchase").isDisabled(), true);
+  await page.addInitScript(() => {
+    window.testPaymentCalls = [];
+    window.kaiKoinTestBridge = { run: async (action, input) => {
+      window.testPaymentCalls.push({ action, input });
+      if (action === "status") return { enabled: true, mode: "test-deployment", configured: false };
+      if (action === "stop") return { state: "stopped" };
+      if (action === "chat-status") return { state: "request_cancelled", amount: "0" };
+      return new Promise(r => { window.finishTestPayment = r; });
+    } };
+  });
+  await page.reload(); await navClick(page, '.nav-item[data-view="earn"]');
+  assert.equal(await page.locator("#koin-test-payments").isVisible(), true);
+  await page.fill("#koin-test-amount", "0.12345678");
+  const purchase = page.locator('[data-koin-test="purchase"]'); await purchase.click();
+  assert.equal(await purchase.isDisabled(), true);
+  assert.equal(await page.locator('[data-koin-test="stop"]').isDisabled(), false);
+  await page.evaluate(() => document.querySelector('[data-koin-test="purchase"]').click());
+  assert.deepEqual(await page.evaluate(() => window.testPaymentCalls.filter(c => c.action === "purchase")), [{ action: "purchase", input: "0.12345678" }]);
+  await page.locator('[data-koin-test="stop"]').click();
+  await page.evaluate(() => window.finishTestPayment({ state: "uncertain", error: "<img src=x onerror=alert(1)>" }));
+  await page.waitForFunction(() => !document.querySelector('[data-koin-test="purchase"]').disabled);
+  assert.equal(await page.locator("#koin-test-payment-status img").count(), 0);
+  await page.locator('[data-koin-test="chat-status"]').click();
+  await page.waitForFunction(() => document.getElementById("koin-test-payment-status").textContent.includes("cancelled before dispatch"));
 });

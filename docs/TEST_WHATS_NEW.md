@@ -5,6 +5,7 @@
 - Pending transactions stay blocked after an uncertain response. Review the original saved transaction, recover it from chain history, or review irreversible evidence that another transaction consumed its nonce. A conflict never credits a purchase as successful.
 - Backups contain both funding and nonce journals. Restore requires the retained recovery anchor and a backup current with that anchor; older backups cannot reset spending history. Copying journals to another host or OS is blocked by their stored binding. A persistent Test backend lease also binds each invited wallet to one encrypted installation identity. Going offline does not release that lease or authorize another host. Moving a Test wallet requires reviewed migration.
 - Rewards are automatic; the previous disabled Claim placeholder is removed. Purchases remain inactive on the live network. The Test backend and custody contracts must be configured and verified separately before the new panel can transact.
+- Check a pending Test request after Stop or a lost response. Confirmed cancellation or settlement permits a new request; unknown or dispatched work stays pending. Each approved session keeps its own request recovery record.
 
 ## Node startup and local RPC recovery
 

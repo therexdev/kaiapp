@@ -70,6 +70,16 @@ test("one session signature survives a lost acknowledgment and restart without m
   assert.equal((await restarted.revoke()).state, "revoked");
   assert.equal((await f.open().retry()).state, "revoked"); assert.equal(f.signs(), 1);
 });
+test("pending request status is bound to its saved session and rejects a charged cancellation", async t => {
+  const f = await fixture(t), client = f.open(), review = await client.prepare(); await client.approve(review);
+  const requestId = P.hash("pending-request");
+  f.change((action, result) => { if (action === "request-status") Object.assign(result, { requestId, state: "cancelled", amount: "0" }); });
+  assert.equal((await client.requestStatus(requestId)).state, "cancelled"); assert.equal(f.signs(), 1);
+  f.change((action, result) => { if (action === "request-status") Object.assign(result, { requestId, state: "cancelled", amount: "1" }); });
+  await assert.rejects(client.requestStatus(requestId), /differs/);
+  f.change((action, result) => { if (action === "request-status") Object.assign(result, { requestId: P.hash("another"), state: "settled", amount: "1" }); });
+  await assert.rejects(client.requestStatus(requestId), /differs/); assert.equal(f.signs(), 1);
+});
 
 test("an approval that never arrived is retransmitted with exactly the same signed terms", async t => {
   const f = await fixture(t), client = f.open(); f.drop();

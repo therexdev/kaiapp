@@ -159,6 +159,15 @@ class FundedSessionClient {
     signal?.throwIfAborted(); return result;
   }
   hasSavedApproval() { return !!this.#record; }
+  async requestStatus(requestId, signal) {
+    P.digest(requestId); const auth = await this.#auth(signal, true), r = this.#owner(auth);
+    const result = await this.#call("request-status", { id: r.id, requestId }, auth, signal);
+    if (result.id !== r.id || result.session !== r.terms.session || result.requestId !== requestId ||
+        !["unknown", "reserved", "cancelled", "dispatched", "verified", "prepared", "submitted", "settled"].includes(result.state) ||
+        typeof result.amount !== "string" || !/^(0|[1-9]\d{0,19})$/.test(result.amount) || BigInt(result.amount) > BigInt(r.terms.perJob) ||
+        (result.state === "cancelled" && result.amount !== "0")) throw Error("Request status differs from the approved session");
+    return { requestId, session: result.session, state: result.state, amount: result.amount };
+  }
   async revoke(signal) {
     const auth = await this.#auth(signal, true), r = this.#owner(auth);
     const status = this.#status(await this.#call("revoke", { id: r.id }, auth, signal), r);
