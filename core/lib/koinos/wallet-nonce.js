@@ -1,13 +1,15 @@
 "use strict";
-// Explicit isolated rehearsal only; construction never loads a wallet or key.
+// Explicit rehearsal or Foundation Test configuration; never loads a wallet or key.
 const fs = require("fs"), path = require("path"), { DatabaseSync } = require("node:sqlite");
 const { isDeepStrictEqual } = require("node:util");
 const { Transaction, Signer, utils } = require("koilib");
 const { KoinChain } = require("../koin-network/chain");
 const { hash, digest, integer } = require("../koin-network/job-protocol");
 const { uint } = require("../koin-network/policy");
-const terminal = state => ["finalized", "reverted"].includes(state);
-const purposes = ["funding", "send", "burn", "register", "external", "sponsored", "vault"];
+const { assertPaymentMode } = require("../koin-network/payment-mode");
+const { JournalSet } = require("../koin-network/journal-set");
+const terminal = state => ["finalized", "reverted", "consumed_elsewhere"].includes(state);
+const purposes = ["funding", "send", "burn", "register", "external", "sponsored", "vault", "credits"];
 const ownerOf = tx => tx.header.payee || tx.header.payer;
 const objectId = v => { if (typeof v !== "string" || !/^0x1220[a-f0-9]{64}$/.test(v)) throw Error("Invalid wallet transaction ID"); return v; };
 const response = v => { if (!v || typeof v !== "object" || Array.isArray(v) || v.error || v.rpc_error) throw Error("Invalid wallet nonce RPC response"); return v; };
@@ -25,28 +27,32 @@ function nonce(value) {
 function unsigned(tx) { return { id: tx.id, header: structuredClone(tx.header), operations: structuredClone(tx.operations), signatures: [] }; }
 
 class WalletNonceCoordinator {
-  #db; #client; #clock; #identity;
+  #db; #client; #clock; #identity; #guard;
   constructor(directory, { mode, client, clock = Date.now }) {
-    if (mode !== "isolated-rehearsal" || !(client instanceof KoinChain) || client.d.network !== "isolated") throw Error("Explicit isolated wallet nonce client required");
+    assertPaymentMode(mode, client);
     this.#client = client; this.#clock = clock;
     this.#identity = JSON.stringify({ schema: 1, mode, chainId: client.d.chainId, rpc: client.d.rpc });
     fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
-    const file = path.join(directory, "wallet-nonces.sqlite"); this.#db = new DatabaseSync(file); fs.chmodSync(file, 0o600);
+    this.#guard = new JournalSet(directory);
     try {
+      const file = path.join(directory, "wallet-nonces.sqlite"); this.#db = new DatabaseSync(file); fs.chmodSync(file, 0o600);
       this.#db.exec(`PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
         CREATE TABLE IF NOT EXISTS identity(id INTEGER PRIMARY KEY CHECK(id=1), data TEXT NOT NULL, clock INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS reservations(id TEXT PRIMARY KEY, owner TEXT NOT NULL, state TEXT NOT NULL, tx_id TEXT NOT NULL, hash TEXT NOT NULL, data TEXT NOT NULL);
         CREATE UNIQUE INDEX IF NOT EXISTS active_wallet ON reservations(owner) WHERE state IN ('signing','signed');`);
-      this.#db.exec("BEGIN IMMEDIATE");
-      const saved = this.#db.prepare("SELECT data FROM identity WHERE id=1").get();
-      if (saved && saved.data !== this.#identity) throw Error("Wallet nonce chain identity changed");
-      if (!saved) {
-        if (this.#db.prepare("SELECT 1 FROM reservations LIMIT 1").get()) throw Error("Missing wallet nonce identity");
-        this.#db.prepare("INSERT INTO identity VALUES(1,?,?)").run(this.#identity, integer(clock()));
-      }
-      this.#db.exec("COMMIT");
+      this.#guard.attach(this.#db);
+      const existing = this.#db.prepare("SELECT data FROM identity WHERE id=1").get();
+      if (existing && existing.data !== this.#identity) throw Error("Wallet nonce chain identity changed");
+      if (!existing) this.#guard.write(this.#db, () => {
+        const saved = this.#db.prepare("SELECT data FROM identity WHERE id=1").get();
+        if (saved && saved.data !== this.#identity) throw Error("Wallet nonce chain identity changed");
+        if (!saved) {
+          if (this.#db.prepare("SELECT 1 FROM reservations LIMIT 1").get()) throw Error("Missing wallet nonce identity");
+          this.#db.prepare("INSERT INTO identity VALUES(1,?,?)").run(this.#identity, integer(clock()));
+        }
+      });
       if (this.#db.prepare("PRAGMA quick_check").get().quick_check !== "ok") throw Error("Corrupt wallet nonce journal");
-    } catch (e) { this.#db.close(); throw e; }
+    } catch (e) { this.#db?.close(); this.#guard.close(); throw e; }
   }
   assertClient(client) { if (client !== this.#client) throw Error("Wallet nonce client mismatch"); }
   assertProvider(provider) { if (provider !== this.#client.provider) throw Error("Wallet nonce provider mismatch"); }
@@ -56,9 +62,7 @@ class WalletNonceCoordinator {
     return now;
   }
   #tx(fn) {
-    this.#db.exec("BEGIN IMMEDIATE");
-    try { this.#db.prepare("UPDATE identity SET clock=? WHERE id=1").run(this.#now()); const r = fn(); this.#db.exec("COMMIT"); return r; }
-    catch (e) { this.#db.exec("ROLLBACK"); throw e; }
+    return this.#guard.write(this.#db, () => { this.#db.prepare("UPDATE identity SET clock=? WHERE id=1").run(this.#now()); return fn(); });
   }
   #save(r) {
     r.updatedAt = this.#now(); const data = JSON.stringify(r);
@@ -72,9 +76,9 @@ class WalletNonceCoordinator {
     if (r.id !== id || r.owner !== saved.owner || r.state !== saved.state || r.draft.id !== saved.tx_id ||
         r.owner !== ownerOf(r.draft) || r.draft.header.chain_id !== this.#client.d.chainId ||
         !purposes.includes(r.purpose) || (r.remote !== undefined && r.remote !== true) || (r.remote && r.purpose !== "vault") ||
-        !["signing", "signed", "finalized", "reverted"].includes(r.state) || r.draftHash !== hash(JSON.stringify(r.draft)) ||
+        !["signing", "signed", "finalized", "reverted", "consumed_elsewhere"].includes(r.state) || r.draftHash !== hash(JSON.stringify(r.draft)) ||
         (r.transaction && (r.transactionHash !== hash(JSON.stringify(r.transaction)) || !this.#matches(r, r.transaction))) ||
-        (!r.transaction && r.state !== "signing")) throw Error("Damaged wallet nonce binding");
+        (!r.transaction && !["signing", "consumed_elsewhere"].includes(r.state))) throw Error("Damaged wallet nonce binding");
     nonce(r.draft.header.nonce); objectId(r.draft.id); integer(r.createdAt); integer(r.updatedAt, r.createdAt);
     return r;
   }
@@ -98,6 +102,30 @@ class WalletNonceCoordinator {
     return hash(JSON.stringify(draft)) === r.draftHash;
   }
   envelope(id) { return structuredClone(this.#row(id).transaction); }
+  draft(id) { return structuredClone(this.#row(id).draft); }
+  // Called immediately before transport. Persist attempts even if the caller
+  // crashes before sending; an uncertain acknowledgment never resets a budget.
+  authorizeSubmission(id, { maxRcPerDay, maxAttempts = 3, minRetryMs = 1000 }) {
+    const budget = uint(maxRcPerDay); integer(maxAttempts, 1, 20); integer(minRetryMs, 1000, 3600000);
+    if (!budget) throw Error("Positive wallet resource budget required");
+    return this.#tx(() => {
+      const r = this.#row(id), now = this.#now(), day = String(Math.floor(now / 86400000));
+      if (r.state !== "signed") throw Error("Unresolved signed envelope required");
+      const policy = { maxRcPerDay, maxAttempts, minRetryMs };
+      if (r.submissionPolicy && JSON.stringify(r.submissionPolicy) !== JSON.stringify(policy)) throw Error("Wallet submission policy changed");
+      const attempts = r.submissions || [];
+      if (attempts.length >= maxAttempts || (attempts.length && now < attempts.at(-1).at + minRetryMs)) throw Error("Wallet retry limit reached");
+      let spent = 0n;
+      for (const row of this.#db.prepare("SELECT id FROM reservations WHERE owner=?").all(r.owner)) {
+        const other = this.#row(row.id);
+        if ((other.submissions || []).some(a => a.day === day)) spent += uint(other.draft.header.rc_limit);
+      }
+      if (!attempts.some(a => a.day === day) && spent + uint(r.draft.header.rc_limit) > budget) throw Error("Daily wallet resource budget exhausted");
+      r.submissionPolicy = policy; r.submissions = [...attempts, { at: now, day }]; this.#save(r);
+      return structuredClone(r.transaction);
+    });
+  }
+  list() { return this.#db.prepare("SELECT id FROM reservations ORDER BY rowid DESC LIMIT 200").all().map(r => this.status(r.id)); }
   assertReservation(id, tx) {
     const r = this.#row(id);
     if (!this.#matches(r, tx)) throw Error("Wallet reservation requires the original transaction");
@@ -161,6 +189,7 @@ class WalletNonceCoordinator {
         if (terminal(r.state) || r.remote || r.transaction.id !== tx.id || r.transaction.signatures.length >= tx.signatures.length ||
             r.transaction.signatures.some(sig => !tx.signatures.includes(sig))) throw Error("Cannot replace wallet signature");
       }
+      if (terminal(r.state)) throw Error("Resolved wallet reservations cannot receive new signatures");
       r.transaction = tx; r.transactionHash = hash(JSON.stringify(tx)); r.state = "signed"; this.#save(r); return this.status(id);
     });
   }
@@ -192,12 +221,22 @@ class WalletNonceCoordinator {
   // elapsed time, acknowledgments, user Stop and a later tip nonce cannot.
   async reconcile(id) {
     const r = this.#row(id); if (terminal(r.state) || !r.transaction) return this.status(id);
-    const tx = r.transaction, p = this.#client.provider;
+    const proof = await this.#inspectFinality(r.transaction);
+    if (!proof) return this.status(id);
+    return this.#tx(() => {
+      this.#fresh(proof); const current = this.#row(id);
+      if (!terminal(current.state)) { current.state = proof.state; current.finality = proof.finality; this.#save(current); }
+      return this.status(id);
+    });
+  }
+  #fresh(proof) { if (this.#now() < proof.checkedAt || this.#now() - proof.checkedAt > 5000) throw Error("Stale wallet finality evidence"); }
+  async #inspectFinality(tx) {
+    const p = this.#client.provider;
     if (await p.getChainId() !== this.#client.d.chainId) throw Error("Wallet nonce chain changed");
     const lookup = response(await p.getTransactionsById([tx.id])).transactions ?? [];
     if (!Array.isArray(lookup)) throw Error("Invalid wallet transaction lookup");
     const records = lookup.filter(v => v.transaction?.id === tx.id);
-    if (!records.length) return this.status(id);
+    if (!records.length) return null;
     if (records.length !== 1) throw Error("Ambiguous wallet transaction lookup");
     const verify = async v => { await this.#verify(v); this.#signatures(v, true); if (v.id !== tx.id) throw Error("Wallet finality transaction changed"); };
     await verify(records[0].transaction);
@@ -221,15 +260,46 @@ class WalletNonceCoordinator {
       await verify(included[0]); const receipt = receipts[0];
       if (receipt.rpc_error || receipt.payer !== tx.header.payer || ![undefined, false, true].includes(receipt.reverted) || uint(receipt.rc_used ?? "0") > uint(tx.header.rc_limit)) throw Error("Invalid wallet receipt");
       if (await p.getChainId() !== this.#client.d.chainId) throw Error("Wallet chain changed during finality");
-      return this.#tx(() => {
-        if (this.#now() < now || this.#now() - now > 5000) throw Error("Stale wallet finality evidence");
-        const current = this.#row(id); current.state = receipt.reverted ? "reverted" : "finalized";
-        current.finality = { txId: tx.id, blockId: b.block_id, height: h.toString(), irreversibleHeight: lib.toString() };
-        this.#save(current); return this.status(id);
-      });
+      return { state: receipt.reverted ? "reverted" : "finalized", checkedAt: now,
+        finality: { txId: tx.id, blockId: b.block_id, height: h.toString(), irreversibleHeight: lib.toString() } };
     }
-    return this.status(id);
+    return null;
   }
-  close() { this.#db.close(); }
+  async recoverOriginal(id, txId) {
+    objectId(txId); const r = this.#row(id);
+    if (r.remote) return this.observeRemote(id, txId);
+    if (txId !== r.draft.id) throw Error("Original transaction ID required");
+    const records = response(await this.#client.provider.getTransactionsById([txId])).transactions ?? [];
+    if (!Array.isArray(records)) throw Error("Invalid wallet transaction lookup");
+    const found = records.filter(x => x.transaction?.id === txId);
+    if (found.length !== 1) throw Error("Original transaction is not uniquely available");
+    await this.stage(id, found[0].transaction); return this.reconcile(id);
+  }
+  async reviewConsumed(id, txId) {
+    const r = this.#row(id); objectId(txId);
+    if (terminal(r.state)) throw Error("Wallet reservation already resolved");
+    const records = response(await this.#client.provider.getTransactionsById([txId])).transactions ?? [];
+    if (!Array.isArray(records)) throw Error("Invalid repair lookup");
+    const found = records.filter(x => x.transaction?.id === txId);
+    if (found.length !== 1) throw Error("Consuming transaction is not uniquely available");
+    const tx = found[0].transaction; await this.#verify(tx); this.#signatures(tx, true);
+    if (ownerOf(tx) !== r.owner || tx.header.nonce !== r.draft.header.nonce || this.#matches(r, tx)) throw Error("Repair needs a different transaction consuming this exact owner nonce");
+    const proof = await this.#inspectFinality(tx); if (!proof) throw Error("Repair requires irreversible nonce consumption");
+    this.#fresh(proof);
+    return { id, owner: r.owner, nonce: r.draft.header.nonce, originalTxId: r.transaction?.id || (r.remote ? null : r.draft.id),
+      consumingTxId: txId, draftHash: r.draftHash, checkedAt: proof.checkedAt, finality: proof.finality };
+  }
+  async repairConsumed(review) {
+    if (!review || this.#now() < review.checkedAt || this.#now() - review.checkedAt >= 180000) throw Error("Fresh recovery review required");
+    const current = await this.reviewConsumed(review.id, review.consumingTxId);
+    for (const key of ["owner", "nonce", "originalTxId", "draftHash"]) if (current[key] !== review[key]) throw Error("Recovery review changed");
+    if (current.finality.blockId !== review.finality?.blockId) throw Error("Recovery finality changed");
+    return this.#tx(() => {
+      this.#fresh(current); const r = this.#row(review.id);
+      if (!terminal(r.state)) { r.state = "consumed_elsewhere"; r.finality = current.finality; this.#save(r); }
+      return this.status(review.id);
+    });
+  }
+  close() { this.#db.close(); this.#guard.close(); }
 }
 module.exports = { WalletNonceCoordinator, nonce };

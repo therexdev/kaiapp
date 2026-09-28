@@ -45,7 +45,8 @@ test("Earn review preview is desktop-only, disables repeat clicks and explains e
     assert.equal(await button.isDisabled(), false);
   }
   assert.equal(await page.locator("#btn-koin-purchase").isDisabled(), true);
-  assert.equal(await page.locator("#btn-koin-claim").isDisabled(), true);
+  assert.equal(await page.locator("#btn-koin-claim").count(), 0);
+  assert.equal(await page.locator("#koin-test-payments").isVisible(), false);
   await page.addInitScript(() => {
     window.sessionCalls = [];
     const base = { enabled: true, mode: "funded-rehearsal", paymentsEnabled: false };

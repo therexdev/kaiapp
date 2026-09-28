@@ -64,7 +64,8 @@ function fixture(t, options = {}) {
   };
   const runner = (j = journal, extras = {}) => new FundingRecoveryRunner({ mode: "isolated-rehearsal", journal: j, sign,
     submit: async d => { state.submissions.push(d.transaction); }, ...extras });
-  t.after(() => { for (const h of handles) { try { h.close(); } catch {} } fs.rmSync(dir, { recursive: true, force: true }); });
+  t.after(() => { for (const h of handles) { try { h.close(); } catch {} } fs.rmSync(dir, { recursive: true, force: true });
+    for (const suffix of ["", "-wal", "-shm"]) fs.rmSync(dir + ".recovery-anchor.sqlite" + suffix, { force: true }); });
   return { dir, d, config, client, provider, state, request, id, journal, open, runner, sign, include, signer };
 }
 module.exports = { fixture, blockId };

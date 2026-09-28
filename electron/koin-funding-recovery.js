@@ -6,27 +6,32 @@ const { FundingObserver, intent } = require("../core/lib/koin-network/funding-ob
 const { hash, digest, integer } = require("../core/lib/koin-network/job-protocol");
 const { uint, DAY } = require("../core/lib/koin-network/policy");
 const { WalletNonceCoordinator, nonce } = require("../core/lib/koinos/wallet-nonce");
-const terminal = s => ["funded", "reverted"].includes(s);
+const { JournalSet } = require("../core/lib/koin-network/journal-set");
+const { assertPaymentMode } = require("../core/lib/koin-network/payment-mode");
+const terminal = s => ["funded", "reverted", "conflicted"].includes(s);
 
-// No wallet keys, IPC, timer or broadcast transport. Only the isolated driver
-// may supply a fixture signer. Production approvals remain disconnected.
+// No wallet keys, IPC, timer or broadcast transport. Callers must explicitly
+// configure an isolated rehearsal or Foundation Test deployment.
 class FundingRecovery {
-  #db; #client; #observer; #clock; #identity; #policy; #nonces;
+  #db; #client; #observer; #clock; #identity; #policy; #nonces; #guard;
   constructor(directory, { mode, client, clock = Date.now, maxRcPerDay, maxAttempts = 3, minRetryMs = 1000 }) {
-    if (mode !== "isolated-rehearsal" || !(client instanceof KoinChain) || client.d.network !== "isolated")
-      throw Error("Explicit isolated funding client required");
+    assertPaymentMode(mode, client);
     if (typeof maxRcPerDay !== "string" || !uint(maxRcPerDay)) throw Error("Positive daily funding RC budget required");
     this.#policy = { maxRcPerDay, maxAttempts: integer(maxAttempts, 1, 20), minRetryMs: integer(minRetryMs, 1000, 3600000) };
     this.#client = client; this.#clock = clock; this.#observer = new FundingObserver(client, { clock });
     this.#identity = JSON.stringify({ schema: 1, mode, deployment: client.d, policy: this.#policy });
     fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
-    const file = path.join(directory, "funding-recovery.sqlite"); this.#db = new DatabaseSync(file); fs.chmodSync(file, 0o600);
+    this.#guard = new JournalSet(directory);
     try {
+      const file = path.join(directory, "funding-recovery.sqlite"); this.#db = new DatabaseSync(file); fs.chmodSync(file, 0o600);
       this.#db.exec(`PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
         CREATE TABLE IF NOT EXISTS identity(id INTEGER PRIMARY KEY CHECK(id=1), data TEXT NOT NULL, clock INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS deposits(id TEXT PRIMARY KEY, owner TEXT NOT NULL, state TEXT NOT NULL, tx_id TEXT NOT NULL UNIQUE, hash TEXT NOT NULL, data TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS mana(day TEXT NOT NULL, owner TEXT NOT NULL, id TEXT NOT NULL, amount TEXT NOT NULL, PRIMARY KEY(day,id));`);
-      this.#tx(() => {
+      this.#guard.attach(this.#db);
+      const existing = this.#db.prepare("SELECT data FROM identity WHERE id=1").get();
+      if (existing && existing.data !== this.#identity) throw Error("Funding deployment or policy changed");
+      if (!existing) this.#tx(() => {
         const prior = this.#db.prepare("SELECT data FROM identity WHERE id=1").get();
         if (prior && prior.data !== this.#identity) throw Error("Funding deployment or policy changed");
         if (!prior) {
@@ -38,8 +43,9 @@ class FundingRecovery {
       if (this.#db.prepare("SELECT 1 FROM deposits LIMIT 1").get() && !fs.existsSync(path.join(directory, "wallet-nonces.sqlite")))
         throw Error("Shared wallet nonce journal missing; restore both journals before recovery");
       this.#nonces = new WalletNonceCoordinator(directory, { mode, client, clock });
-    } catch (e) { this.#db.close(); throw e; }
+    } catch (e) { this.#db?.close(); this.#guard.close(); throw e; }
   }
+  assertMode(mode) { assertPaymentMode(mode, this.#client); if (JSON.parse(this.#identity).mode !== mode) throw Error("Funding mode changed"); }
   get nonceCoordinator() { return this.#nonces; }
   #time() {
     const row = this.#db.prepare("SELECT data,clock FROM identity WHERE id=1").get(), now = integer(this.#clock());
@@ -48,11 +54,10 @@ class FundingRecovery {
     return now;
   }
   #tx(fn, check = true) {
-    this.#db.exec("BEGIN IMMEDIATE");
-    try {
+    return this.#guard.write(this.#db, () => {
       if (check) this.#db.prepare("UPDATE identity SET clock=? WHERE id=1").run(this.#time());
-      const r = fn(); this.#db.exec("COMMIT"); return r;
-    } catch (e) { this.#db.exec("ROLLBACK"); throw e; }
+      return fn();
+    });
   }
   #save(r) {
     r.updatedAt = this.#time(); const data = JSON.stringify(r);
@@ -63,7 +68,7 @@ class FundingRecovery {
     if (!saved || saved.hash !== hash(saved.data)) throw Error("Missing or damaged funding journal");
     const r = JSON.parse(saved.data);
     if (r.id !== id || r.intent.actor !== saved.owner || r.draft.id !== saved.tx_id || r.state !== saved.state ||
-        !["signing", "staged", "unknown", "needs_review", "funded", "reverted"].includes(r.state) ||
+        !["signing", "staged", "unknown", "needs_review", "funded", "reverted", "conflicted"].includes(r.state) ||
         JSON.stringify(intent(r.intent)) !== JSON.stringify(r.intent) || r.draftHash !== hash(JSON.stringify(r.draft))) throw Error("Damaged funding binding");
     nonce(r.draft.header.nonce); integer(r.createdAt); integer(r.updatedAt, r.createdAt);
     const reviewedAt = r.reviewedAt ?? r.createdAt;
@@ -72,7 +77,7 @@ class FundingRecovery {
     integer(r.holdVersion ?? 0);
     integer(r.attempts, 0, this.#policy.maxAttempts);
     if (r.transaction && (r.transaction.id !== r.draft.id || r.transactionHash !== hash(JSON.stringify(r.transaction)))) throw Error("Damaged funding envelope");
-    if (!r.transaction && r.state !== "signing") throw Error("Missing signed funding envelope");
+    if (!r.transaction && !["signing", "conflicted"].includes(r.state)) throw Error("Missing signed funding envelope");
     if (r.lastAttemptAt !== null) integer(r.lastAttemptAt, r.createdAt, r.updatedAt);
     if ((r.attempts === 0) !== (r.lastAttemptAt === null) || !Array.isArray(r.days) || new Set(r.days).size !== r.days.length ||
         r.days.length > r.attempts || (r.attempts === 0) !== (r.days.length === 0)) throw Error("Damaged funding attempts");
@@ -89,6 +94,7 @@ class FundingRecovery {
       amount: r.intent.args.amount, actor: r.intent.actor, held: r.held === true, finality: structuredClone(r.finality), paymentsEnabled: false };
   }
   assertClient(client) { if (client !== this.#client) throw Error("Funding review must use the journal's client"); }
+  list() { return this.#db.prepare("SELECT id FROM deposits ORDER BY rowid DESC LIMIT 200").all().map(r => this.status(r.id)); }
   saved(id) {
     digest(id); this.#time();
     if (!this.#db.prepare("SELECT 1 FROM deposits WHERE id=?").get(id)) return null;
@@ -126,7 +132,7 @@ class FundingRecovery {
     if (state.paused) throw Error("Funding is paused");
     const draft = await this.#client.prepare(request.kind, request.method, request.args, { actor: request.actor, rcLimit: request.maxRc });
     await this.#client.verifyTransaction(draft, request); nonce(draft.header.nonce);
-    if (this.#db.prepare("SELECT 1 FROM deposits WHERE owner=? AND id<>? AND state NOT IN ('funded','reverted')").get(request.actor, id))
+    if (this.#db.prepare("SELECT 1 FROM deposits WHERE owner=? AND id<>? AND state NOT IN ('funded','reverted','conflicted')").get(request.actor, id))
       throw Error("Another deposit owns this wallet nonce; recover it first");
     if (review) this.#review(review, draft, hash(JSON.stringify(state)), active);
     const reservation = await this.#nonces.reserve(id, "funding", draft, () => !review || (active() && this.#time() < review.expires));
@@ -135,7 +141,7 @@ class FundingRecovery {
         if (JSON.stringify(this.#row(id).intent) !== JSON.stringify(request)) throw Error("Cannot replace funding intent");
         return { action: "recover_existing", ...this.status(id) };
       }
-      if (this.#db.prepare("SELECT 1 FROM deposits WHERE owner=? AND state NOT IN ('funded','reverted')").get(request.actor))
+      if (this.#db.prepare("SELECT 1 FROM deposits WHERE owner=? AND state NOT IN ('funded','reverted','conflicted')").get(request.actor))
         throw Error("Another deposit owns this wallet nonce; recover it first");
       for (const prior of this.#db.prepare("SELECT id FROM deposits WHERE owner=?").all(request.actor))
         if (nonce(draft.header.nonce) <= nonce(this.#row(prior.id).draft.header.nonce)) throw Error("Funding nonce did not advance");
@@ -192,6 +198,11 @@ class FundingRecovery {
     if (typeof allowSubmit !== "boolean") throw Error("Explicit funding submission mode required");
     let initial = this.#row(id);
     if (terminal(initial.state)) { await this.#nonces.reconcile(id); return { action: "done", ...this.status(id) }; }
+    const nonceState = this.#nonces.status(id);
+    if (nonceState.state === "consumed_elsewhere") return this.#tx(() => {
+      const r = this.#row(id); r.state = "conflicted"; r.reason = "nonce_consumed_by_other_transaction"; r.finality = nonceState.finality;
+      this.#save(r); return { action: "done", ...this.status(id) };
+    });
     // A crash between the two envelope writes can recover the first durable
     // copy. It must never invoke the signer again.
     if (!initial.transaction && this.#nonces.envelope(id)) { await this.stage(id, this.#nonces.envelope(id)); initial = this.#row(id); }
@@ -236,14 +247,15 @@ class FundingRecovery {
     if (result.action === "done") await this.#nonces.reconcile(id);
     return result;
   }
-  close() { this.#db.close(); this.#nonces.close(); }
+  close() { this.#db.close(); this.#nonces.close(); this.#guard.close(); }
 }
 
 class FundingRecoveryRunner {
   #journal; #sign; #submit; #timeout;
   constructor({ mode, journal, sign, submit, timeoutMs = 5000 }) {
-    if (mode !== "isolated-rehearsal" || !(journal instanceof FundingRecovery) || typeof sign !== "function" || typeof submit !== "function")
-      throw Error("Explicit isolated funding callbacks required");
+    if (!(journal instanceof FundingRecovery) || typeof sign !== "function" || typeof submit !== "function")
+      throw Error("Explicit funding callbacks required");
+    journal.assertMode(mode);
     this.#journal = journal; this.#sign = sign; this.#submit = submit; this.#timeout = integer(timeoutMs, 50, 30000);
   }
   async #invoke(callback, value) {

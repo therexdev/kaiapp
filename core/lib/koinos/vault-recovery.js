@@ -22,7 +22,7 @@ class VaultRecovery {
     if (r.payer !== this.payer || r.maxRc !== this.maxRc) throw Error("Vault recovery policy changed");
     return { id, nonceReservation: id, operations: r.operations, txId: r.txId,
       summary: { action: "walletApproval", producer: r.owner, network: "isolated" }, expiresAt: null,
-      status: r.state === "finalized" ? "confirmed" : r.state === "reverted" ? "reverted" : "unknown",
+      status: r.state === "finalized" ? "confirmed" : r.state === "reverted" ? "reverted" : r.state === "consumed_elsewhere" ? "conflicted" : "unknown",
       note: "Approval retained. Recover the original transaction from wallet history; expiry and disconnection do not release it." };
   }
   async begin(draft, active) {

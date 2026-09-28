@@ -21,6 +21,9 @@ contextBridge.exposeInMainWorld("kaiKoinSessionBridge", {
   retry: () => ipcRenderer.invoke("koin:session-retry"),
   revoke: () => ipcRenderer.invoke("koin:session-revoke"),
 });
+contextBridge.exposeInMainWorld("kaiKoinTestBridge", {
+  run: (action, input) => ipcRenderer.invoke("koin:test-payments", action, input),
+});
 contextBridge.exposeInMainWorld("kaiLanguageBridge", {
   get: () => ipcRenderer.invoke("shell:language"),
   save: language => ipcRenderer.invoke("shell:set-language", language),

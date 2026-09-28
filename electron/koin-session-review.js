@@ -4,7 +4,7 @@ const { trustedMainDocument } = require("./window-security");
 const { koin } = require("./koin-review");
 const { FundedSessionClient } = require("./koin-session-client");
 
-function createSessionReview({ client, dialog, track = () => () => {}, tr = x => x }) {
+function createSessionReview({ client, dialog, track = () => () => {}, tr = x => x, testDeployment = false }) {
   let pending = false;
   const result = state => ({ enabled: true, mode: "funded-rehearsal", paymentsEnabled: false, state });
   return async function run(window, action) {
@@ -23,7 +23,7 @@ function createSessionReview({ client, dialog, track = () => () => {}, tr = x =>
       if (action === "retry") { changing = true; return await client.retry(signal); }
       if (action === "revoke") {
         const state = await client.status(signal); guard();
-        const { response } = await dialog.showMessageBox(window, { type: "question", title: tr("KOIN session rehearsal"),
+        const { response } = await dialog.showMessageBox(window, { type: "question", title: tr(testDeployment ? "Test KOIN spending approval" : "KOIN session rehearsal"),
           message: tr("Stop new requests for this session?"),
           detail: `${tr("Dispatched work stays reserved. This does not refund on-chain credits.")}\n\n${state.session}`,
           buttons: [tr("Cancel"), tr("Revoke session approval")], defaultId: 0, cancelId: 0, noLink: true });
@@ -33,9 +33,9 @@ function createSessionReview({ client, dialog, track = () => () => {}, tr = x =>
       if (action !== "review") throw Error("Unknown session action");
       const review = await client.prepare(signal); guard();
       const t = review.terms, line = (name, value) => `${tr(name)}: ${value}`;
-      const { response } = await dialog.showMessageBox(window, { type: "question", title: tr("KOIN session rehearsal"),
-        message: tr("Approve one bounded rehearsal session"),
-        detail: [tr("This signs a session approval for accounting tests. No KOIN will be spent."), "",
+      const { response } = await dialog.showMessageBox(window, { type: "question", title: tr(testDeployment ? "Test KOIN spending approval" : "KOIN session rehearsal"),
+        message: tr(testDeployment ? "Approve this bounded Test spending session" : "Approve one bounded rehearsal session"),
+        detail: [tr(testDeployment ? "Requests within this approval spend the test KOIN reserved in your Foundation testnet session." : "This signs a session approval for accounting tests. No KOIN will be spent."), "",
           line("Model", t.model), line("Tariff version", t.version), line("Maximum output tokens", t.maxOutput),
           line("Input price per 1M tokens", koin(review.tariff.inputAtomsPerMillion)),
           line("Output price per 1M tokens", koin(review.tariff.outputAtomsPerMillion)),
@@ -46,7 +46,7 @@ function createSessionReview({ client, dialog, track = () => () => {}, tr = x =>
           line("Contract bytecode", t.target.creditsHash), line("Tariff policy", t.target.policyHash),
           "", tr("Requests within these limits reuse this approval. Revoking it stops new requests."),
           tr("Live payments require a separate authorization and are not enabled by this signature.")].join("\n"),
-        buttons: [tr("Cancel"), tr("Approve session rehearsal")], defaultId: 0, cancelId: 0, noLink: true });
+        buttons: [tr("Cancel"), tr(testDeployment ? "Approve Test spending" : "Approve session rehearsal")], defaultId: 0, cancelId: 0, noLink: true });
       guard(); if (response !== 1) return result("cancelled");
       changing = true; return await client.approve(review, signal);
     } catch (e) {

@@ -42,12 +42,13 @@ class Worker {
     return crypto.createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 16);
   }
 
-  constructor({ schedulerUrl, wallet, runtime, hardware, models, producer, onEvent, koinShadowJobs = process.env.KAI_KOIN_SHADOW_JOBS === "1", koinFundedRehearsalJobs = process.env.KAI_KOIN_FUNDED_REHEARSAL_JOBS === "1" }) {
+  constructor({ schedulerUrl, wallet, runtime, hardware, models, producer, onEvent, fundedOnly = false, koinShadowJobs = process.env.KAI_KOIN_SHADOW_JOBS === "1", koinFundedRehearsalJobs = process.env.KAI_KOIN_FUNDED_REHEARSAL_JOBS === "1" }) {
     this.schedulerUrl = String(schedulerUrl || "").replace(/\/$/, "");
     this.wallet = wallet; // WalletService (unlocked)
     this.runtime = runtime; // RuntimeManager
     this.hardware = hardware;
     this.models = models || null; // ModelManager — advertises what this machine can serve
+    this.fundedOnly = fundedOnly === true;
     this.koinFundedRehearsalJobs = koinFundedRehearsalJobs === true;
     this.koinShadowJobs = koinShadowJobs === true; // explicit experiment opt-in
     /*
@@ -623,6 +624,7 @@ class Worker {
 
   /** §31: only approved profiles execute — anything else is refused. */
   async _execute(job, onDelta) {
+    if (this.fundedOnly && job.type !== "koin-funded-rehearsal-chat") throw Error("This Test worker accepts only funded Test requests");
     if (["koin-shadow-chat", "koin-funded-rehearsal-chat"].includes(job.type)) {
       if (job.type === "koin-funded-rehearsal-chat" ? !this.koinFundedRehearsalJobs : !this.koinShadowJobs) throw Error("Shadow jobs require explicit opt-in");
       this._shadowAbort = new AbortController();

@@ -171,7 +171,7 @@ class ProducerVault {
     if (this.recovery && p?.nonceReservation) {
       this.requireNetwork();
       const r = await this.recovery.check(p.nonceReservation, p.txId);
-      if (["finalized", "reverted"].includes(r.state)) { p.status = r.state === "finalized" ? "confirmed" : "reverted"; p.txId = r.txId; p.note = "Original wallet transaction verified irreversible."; }
+      if (["finalized", "reverted", "consumed_elsewhere"].includes(r.state)) { p.status = r.state === "finalized" ? "confirmed" : r.state === "reverted" ? "reverted" : "conflicted"; p.txId = r.txId; p.note = r.state === "consumed_elsewhere" ? "Another irreversible transaction consumed this nonce. The original request did not complete." : "Original wallet transaction verified irreversible."; }
       return;
     }
     try {

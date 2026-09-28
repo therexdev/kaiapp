@@ -395,7 +395,7 @@
           <p class="lede">Contribute AI capacity, track network rewards and manage your KOIN wallet.</p>
           <div class="koin-overview">
             <h2>KOIN rewards are in preparation</h2>
-            <p class="hint">This Test build measures availability without paying KOIN rewards. Purchases and claims will open after contract verification. Your existing mainnet wallet remains available below.</p>
+            <p class="hint">This Test build measures availability without paying KOIN rewards. Purchases and automatic payouts will open after contract verification. Your existing mainnet wallet remains available below.</p>
             <div class="hw-summary" id="koin-stats" aria-live="polite"></div>
             <p class="hint">Launch policy: up to 5% of the free reward pool per day; 70% for verified availability and 30% for paid work. Unused rewards remain in the pool.</p>
           </div>
@@ -417,6 +417,56 @@
               <button id="btn-koin-session-revoke" class="small" type="button">Revoke session approval</button>
             </div>
             <p id="koin-session-status" class="hint" role="status" aria-live="polite"></p>
+          </div>
+
+          <div id="koin-test-payments" class="koin-overview" hidden>
+            <h2>Payment testing · Foundation testnet</h2>
+            <p class="hint">Use test KOIN to purchase refundable credits and review bounded spending. This panel uses the imported Test deployment. Rewards arrive automatically after daily review; no claim or provider signature is needed.</p>
+            <div class="form-row">
+              <button data-koin-test="import" class="small">Import Test manifest</button>
+              <button data-koin-test="access" class="small">Import private Test access</button>
+              <button data-koin-test="status" class="small">Refresh</button>
+              <button data-koin-test="backup" class="small">Back up journals</button>
+              <button data-koin-test="restore" class="small">Restore journals</button>
+              <button data-koin-test="stop" class="small">Stop payment action</button>
+            </div>
+            <div class="form-row"><button data-koin-test="worker-start" class="small">Start Test worker</button><button data-koin-test="worker-stop" class="small">Stop Test worker</button></div>
+            <p id="koin-test-balances" class="hint"></p>
+            <div class="form-row">
+              <label>Test KOIN amount <input id="koin-test-amount" type="text" inputmode="decimal" placeholder="0.1" maxlength="22" /></label>
+              <button data-koin-test="purchase" class="primary small">Buy Test credits</button>
+              <button data-koin-test="refund" class="small">Refund available credits</button>
+              <button data-koin-test="fund-rewards" class="small">Fund Test rewards</button>
+            </div>
+            <div class="form-row">
+              <button data-koin-test="reserve" class="small">Reserve spending session</button>
+              <button data-koin-test="session-review" class="small">Review Test spending</button>
+              <button data-koin-test="session-status" class="small">Spending status</button>
+              <button data-koin-test="session-retry" class="small">Recover saved approval</button>
+              <button data-koin-test="session-revoke" class="small">Stop new requests</button>
+            </div>
+            <label>Test request <textarea id="koin-test-prompt" rows="3" maxlength="12000" placeholder="Send a request using the reviewed Test session"></textarea></label>
+            <div class="form-row"><button data-koin-test="chat" class="primary small">Send Test request</button><button data-koin-test="chat-retry" class="small">Retry pending request</button></div>
+            <pre id="koin-test-answer" class="snippet" aria-live="polite"></pre>
+            <p class="hint">Revocation stops new work. Reserved credits can be released after the settlement window, then refunded to your wallet.</p>
+            <div class="form-row">
+              <label>Session ID <input id="koin-test-session-id" type="text" maxlength="64" /></label>
+              <button data-koin-test="revoke" class="small">Revoke on chain</button>
+              <button data-koin-test="release" class="small">Release expired reservation</button>
+            </div>
+            <label>Saved transaction <select id="koin-test-transaction"></select></label>
+            <div class="form-row">
+              <button data-koin-test="check" class="small">Check confirmation</button>
+              <button data-koin-test="resume" class="small">Review saved transaction</button>
+            </div>
+            <details>
+              <summary>Recover a missing response</summary>
+              <p class="hint">Use the original transaction ID from chain history. Repair is only available when another irreversible transaction consumed the same wallet nonce.</p>
+              <input id="koin-test-recovery-tx" type="text" maxlength="70" placeholder="Transaction ID from chain history" />
+              <button data-koin-test="recover" class="small">Recover original transaction</button>
+              <button data-koin-test="repair" class="small">Review nonce conflict</button>
+            </details>
+            <p id="koin-test-payment-status" class="hint" role="status" aria-live="polite"></p>
           </div>
 
           <div id="earn-setup" hidden>
@@ -478,7 +528,7 @@
             <p class="hint">Credits will be prepaid with KOIN. Unused funds stay reserved; only consumed usage is split: 60% to rewards, 25% to mining and 15% to operations.</p>
             <div class="form-row">
               <button id="btn-koin-purchase" class="primary small" disabled>Purchases not active</button>
-              <button id="btn-koin-claim" class="small" disabled>Claims not active</button>
+              <span class="hint">Rewards will be sent automatically. No claim is needed.</span>
             </div>
             <details id="earn-legacy">
               <summary>Legacy test KAI</summary>

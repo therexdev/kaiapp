@@ -132,6 +132,8 @@ async function start() {
   const tr = text => nativeI18n.t(text, [], languagePrefs.status().language);
   require("./koin-review").registerKoinReviewIPC({ ipcMain, dialog, getMainWindow: () => win, origin, tr });
   require("./koin-session-review").registerSessionReviewIPC({ ipcMain, dialog, core, getMainWindow: () => win, origin, dataDir, tr });
+  const testPayments = require("./koin-test-ipc").registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow: () => win, origin, dataDir, isTest: release.isTest });
+  app.on("before-quit", () => testPayments.dispose());
   ipcMain.handle("dialog:pick-gguf", async (event) => {
     requireMain(event);
     const r = await dialog.showOpenDialog(win, {
