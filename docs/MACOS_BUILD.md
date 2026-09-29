@@ -26,7 +26,7 @@ npm test
 CSC_IDENTITY_AUTO_DISCOVERY=false npm run dist:mac
 ```
 
-Setting `CSC_IDENTITY_AUTO_DISCOVERY=false` is important for reproducible developer builds: it prevents electron-builder from silently selecting a certificate from the local keychain. Outputs are written to `dist/` and include:
+Setting `CSC_IDENTITY_AUTO_DISCOVERY=false` is important for reproducible developer builds: it prevents electron-builder from silently selecting a certificate from the local keychain. The `afterPack` hook (`scripts/mac-adhoc-sign.js`) then **ad-hoc signs** the bundle so it is internally valid, and fails the build if it is not — see [Ad-hoc signing for unsigned builds](#ad-hoc-signing-for-unsigned-builds) below. Outputs are written to `dist/` and include:
 
 - `koinos-ai-<version>-arm64.dmg` and `.zip`;
 - `koinos-ai-<version>-x64.dmg` and `.zip`;
@@ -40,6 +40,54 @@ file "dist/mac/Koinos AI.app/Contents/MacOS/Koinos AI"
 ```
 
 The first must report `arm64`; the second must report `x86_64`.
+
+## Ad-hoc signing for unsigned builds
+
+electron-builder starts from the prebuilt `Electron.app` that npm ships, which is
+already ad-hoc signed with `Identifier=Electron`. It then injects `app.asar`, our
+resources, and a rewritten `Info.plist` into that bundle. When a Developer ID is
+configured, electron-builder re-signs afterwards and the seal is rebuilt. When
+signing is disabled — the Alpha default (`CSC_IDENTITY_AUTO_DISCOVERY=false`) or
+simply no certificate — electron-builder leaves the bundle carrying the original
+Electron seal, which no longer matches the mutated contents. That is what shipped
+in **v0.54.8**: `codesign --verify --deep --strict` failed with *"code has no
+resources but signature indicates they must be present"*, and `codesign -dvv`
+reported `Identifier=Electron`, `Signature=adhoc`, `Sealed Resources=none`,
+`Info.plist=not bound`.
+
+The `afterPack` hook `scripts/mac-adhoc-sign.js` fixes this by ad-hoc re-signing
+the whole bundle (`codesign --force --deep --sign -`) whenever a real identity is
+not supplied, then verifying the result and failing the build if the seal is
+still broken. The hook runs **before** electron-builder's own signing step, so a
+configured Developer ID simply overwrites the ad-hoc signature — signed-build
+behavior is unchanged.
+
+An ad-hoc signature is **not** Developer ID and **not** notarized: `Signature`
+stays `adhoc` and `TeamIdentifier` stays unset. What changes is only internal
+validity — the bundle now has the correct identifier (`io.koinosai.desktop`),
+sealed resources, and a bound `Info.plist`, so `codesign --verify --deep
+--strict` passes. Gatekeeper still requires the one-time right-click → **Open**
+on first launch, and in-place auto-update is still unavailable. This is not a
+substitute for signing/notarization; it makes the unsigned artifact honest and
+internally consistent rather than corrupt.
+
+The ad-hoc re-sign deliberately does **not** apply hardened runtime
+(`--options runtime`) or the `entitlements` from `package.json`, even though
+signed builds do. Hardened runtime is enforced independently, but without
+notarization — which an ad-hoc bundle can never have — it adds no Gatekeeper
+trust. It would also switch on library validation, which requires
+nested code to share the signer's Team ID; an ad-hoc bundle has no team, so the
+runtime flag risks the Electron framework and helper processes failing to load.
+The ad-hoc `CodeDirectory` therefore shows `flags=0x2(adhoc)` with no runtime bit
+and no entitlements, and JIT keeps working. The `allow-jit` /
+`allow-unsigned-executable-memory` entitlements only take effect under hardened
+runtime, so they belong to the signed path (where electron-builder applies them),
+not here.
+
+`scripts/verify-mac-signature.js` re-checks every packaged `.app` after the build
+(in CI and locally) and rejects any bundle whose signature is invalid or still
+carries the prebuilt `Electron` identity. It runs for both signed and unsigned
+builds, so the v0.54.8 artifact can never be published again.
 
 ## Runtime behavior
 
@@ -55,7 +103,7 @@ Voice transcription remains gracefully unavailable on macOS because upstream whi
 
 ## CI artifacts
 
-The `build-macos` CI job runs on `macos-latest`, executes the test suite, packages `arm64` and `x64` in one invocation, validates both Mach-O architectures, checks updater metadata, and stores DMGs, ZIPs, blockmaps, the update manifest, and SHA-256 checksums as a CI artifact.
+The `build-macos` CI job runs on `macos-latest`, executes the test suite, packages `arm64` and `x64` in one invocation, validates both Mach-O architectures, checks updater metadata, runs `scripts/verify-mac-signature.js` to confirm every bundle carries a valid (ad-hoc or Developer ID) signature, and stores DMGs, ZIPs, blockmaps, the update manifest, and SHA-256 checksums as a CI artifact. The signature check runs for signed and unsigned builds alike, so a bundle with a broken seal fails the job before anything is published.
 
 CI always invokes electron-builder with `--publish never`, so electron-builder never uploads anything itself. Publication is a separate, explicit step.
 
@@ -121,7 +169,8 @@ Do not store certificates, passwords, private keys, or API keys in the repositor
 - Both application executables report the expected Mach-O architecture.
 - DMG, ZIP, blockmap, `latest-mac.yml`, and checksum file exist.
 - The update manifest contains both `arm64` and `x64` packages.
-- `codesign`, Gatekeeper assessment, and stapler validation pass for both architecture-specific application bundles (signed builds only — these steps are skipped, not failed, when there is no Developer ID).
+- `codesign --verify --deep --strict` passes for both architecture-specific application bundles on every build (ad-hoc or Developer ID), enforced by `scripts/verify-mac-signature.js`.
+- Gatekeeper assessment (`spctl`) and stapler validation pass for both bundles (signed builds only — these steps are skipped, not failed, when there is no Developer ID).
 - Install, first launch, local chat, quit/relaunch, update, and uninstall are exercised on a clean Apple Silicon Mac.
 - The same smoke sequence is exercised on a physical Intel Mac before Intel support is advertised.
 - No voice support is claimed until a pinned, verified macOS whisper CLI is implemented and tested.
@@ -130,7 +179,10 @@ Do not store certificates, passwords, private keys, or API keys in the repositor
 
 - Cross-packaging proves that the Intel Electron bundle is structurally correct; it does not replace physical Intel validation.
 - An unsigned DMG triggers Gatekeeper warnings and cannot auto-update. It is
-  what Alpha testers get today, on purpose, and the release notes say so.
+  what Alpha testers get today, on purpose, and the release notes say so. The
+  bundle is ad-hoc signed so it is internally valid (`codesign --verify` passes),
+  but ad-hoc signing is not notarization — it does not remove the Gatekeeper
+  prompt or enable in-place updates.
 - Checksums for every platform live in the single `SHA256SUMS` file the
   `provenance` job publishes, alongside the SBOM and the build attestation;
   the macOS job does not write a competing checksum file of its own.

@@ -210,6 +210,11 @@ jobs:
           file "$x64_app/Contents/MacOS/Koinos AI" | grep -q 'x86_64'
           grep -q 'arm64' dist/latest-mac.yml
           grep -q 'x64' dist/latest-mac.yml
+      - name: Verify every bundle carries a valid code signature
+        # Runs for signed AND unsigned builds. An unsigned build must still be
+        # ad-hoc signed and internally consistent; this is the gate that stops
+        # the v0.54.8 broken-seal artifact from ever being published again.
+        run: node scripts/verify-mac-signature.js
       - name: Validate signing, Gatekeeper, and notarization
         if: env.MAC_RELEASE_READY == 'true'
         shell: bash
