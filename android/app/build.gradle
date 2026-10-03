@@ -1,0 +1,90 @@
+plugins { id 'com.android.application' }
+
+// The same sherpa runtime as desktop. Verify the upstream release before use.
+def pocketAar = layout.buildDirectory.file('pocket/sherpa-onnx-1.13.7.aar')
+def preparePocket = tasks.register('preparePocketRuntime') {
+    outputs.file(pocketAar)
+    doLast {
+        def target = pocketAar.get().asFile
+        def expected = 'c4ef49e309f24fcee5c106b8a279481aaecaabb078cd37b2cd6e9a62cc8a73c8'
+        def digest = { f ->
+            def sha = java.security.MessageDigest.getInstance('SHA-256')
+            f.withInputStream { stream -> byte[] b = new byte[65536]; int n; while ((n = stream.read(b)) != -1) sha.update(b, 0, n) }
+            sha.digest().encodeHex().toString()
+        }
+        if (target.exists() && digest(target) == expected) return
+        target.parentFile.mkdirs()
+        def stage = new File(target.path + '.part')
+        try {
+            def connection = new URL('https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.7/sherpa-onnx-1.13.7.aar').openConnection()
+            connection.connectTimeout = 30000; connection.readTimeout = 120000
+            connection.inputStream.withCloseable { input -> stage.withOutputStream { it << input } }
+            if (digest(stage) != expected) throw new GradleException('Pocket runtime integrity check failed')
+            java.nio.file.Files.move(stage.toPath(), target.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        } finally { stage.delete() }
+    }
+}
+
+def signingPath = System.getenv('KAI_SIGNING_PROPERTIES')
+def ownerSigning = new Properties()
+if (signingPath) file(signingPath).withInputStream { ownerSigning.load(it) }
+
+android {
+    namespace 'io.koinosai.mobile'
+    compileSdk 35
+    buildToolsVersion '35.0.0'
+    ndkVersion '27.2.12479018'
+    defaultConfig {
+        applicationId 'io.koinosai.mobile'
+        minSdk 28
+        targetSdk 35
+        versionCode 12
+        versionName '0.5.0-azelma-preview'
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+        ndk { abiFilters providers.gradleProperty('kaiAbi').getOrElse('arm64-v8a') }
+        externalNativeBuild {
+            cmake { arguments '-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON'; cppFlags '-std=c++17' }
+        }
+    }
+    signingConfigs {
+        if (signingPath) {
+            owner {
+                storeFile file(ownerSigning.getProperty('storeFile'))
+                storePassword ownerSigning.getProperty('storePassword')
+                keyAlias ownerSigning.getProperty('keyAlias')
+                keyPassword ownerSigning.getProperty('keyPassword')
+            }
+        }
+    }
+    buildTypes {
+        debug { debuggable true }
+        release { minifyEnabled false; if (signingPath) signingConfig signingConfigs.owner }
+    }
+    externalNativeBuild { cmake { path 'src/main/cpp/CMakeLists.txt'; version '3.22.1' } }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+    lint { abortOnError true }
+    testOptions { unitTests.includeAndroidResources = true }
+    packaging { jniLibs.excludes += ['**/libsherpa-onnx-c-api.so', '**/libsherpa-onnx-cxx-api.so'] }
+}
+
+dependencies {
+    implementation files(pocketAar).builtBy(preparePocket)
+    implementation 'org.jetbrains.kotlin:kotlin-stdlib:2.0.21'
+    implementation 'com.alphacephei:vosk-android:0.3.75@aar'
+    implementation 'net.java.dev.jna:jna:5.19.1@aar'
+    implementation 'org.jsoup:jsoup:1.23.2'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.robolectric:robolectric:4.14.1'
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+    androidTestImplementation 'androidx.test:runner:1.6.2'
+}
+
+tasks.withType(Test).configureEach {
+    // Robolectric resolves its Android test runtime in the test JVM.
+    // Honor a builder's existing network proxy and trust store there as well.
+    ['http.proxyHost', 'http.proxyPort', 'https.proxyHost', 'https.proxyPort',
+     'javax.net.ssl.trustStore'].each { key ->
+        if (System.getProperty(key) != null) systemProperty key, System.getProperty(key)
+    }
+    systemProperty 'robolectric.dependency.repo.url', 'https://repo.maven.apache.org/maven2'
+}
