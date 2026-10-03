@@ -25,7 +25,11 @@ public class PocketDeviceTest {
         AtomicReference<String> failure=new AtomicReference<>();AtomicInteger samples=new AtomicInteger();CountDownLatch synthesized=new CountDownLatch(1);
         instrumentation.runOnMainSync(()->app.pocketClient.request("Hi, I'm KAI.",false,"cute",9,new PocketClient.Callback(){
             public void ready(ParcelFileDescriptor audio,int frames,int rate,long elapsed){
-                try(InputStream input=new ParcelFileDescriptor.AutoCloseInputStream(audio)){byte[] pcm=input.readAllBytes();assertEquals(frames*2,pcm.length);assertEquals(24000,rate);samples.set(frames);}
+                try(InputStream input=new ParcelFileDescriptor.AutoCloseInputStream(audio)){
+                    ByteArrayOutputStream received=new ByteArrayOutputStream();byte[] buffer=new byte[8192];int count;
+                    while((count=input.read(buffer))!=-1)received.write(buffer,0,count);
+                    assertEquals(frames*2,received.size());assertEquals(24000,rate);samples.set(frames);
+                }
                 catch(Throwable e){failure.set(e.toString());}finally{synthesized.countDown();}
             }
             public void error(String message){failure.set(message);synthesized.countDown();}
