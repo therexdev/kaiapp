@@ -47,4 +47,24 @@ public class VisualPreviewTest {
         tab("Models");capture("models");tab("Network");capture("network");tab("Settings");capture("settings");app.setNetworkEnabled(false);tab("Network");capture("offline-modes");
     }
     @Test @Config(qualifiers="w960dp-h540dp-land-mdpi") public void handheldLandscape() throws Exception {capture("handheld-welcome");tab("KAI");capture("handheld-companion");tab("Accounts");capture("handheld-account");}
+    @Test public void guidedVoiceSetup() throws Exception {
+        app.account.token="preview-fixture";app.account.validUntil=System.currentTimeMillis()+60000;
+        app.account.account=new JSONObject().put("id","voice-fixture");app.accountChanged();
+        VoiceSetupTest.FakeSpeech speech=new VoiceSetupTest.FakeSpeech();
+        VoiceSetup setup=new VoiceSetup(activity,app,true,null,speech);setup.show();speech.complete(VoiceSetup.State.MISSING_VOICE);
+        captureDialog(setup,"voice-setup-download");
+        File dir=app.voicePack.directory();new File(dir,"am").mkdirs();new File(dir,".verified").createNewFile();new File(dir,"am/final.mdl").createNewFile();setup.refresh();
+        captureDialog(setup,"voice-setup-english");
+        speech.complete(VoiceSetup.State.READY);app.prefs.edit().putBoolean("voice.micAsked",true).apply();setup.refresh();captureDialog(setup,"voice-setup-permission");
+        Shadows.shadowOf(app).grantPermissions(android.Manifest.permission.RECORD_AUDIO);setup.refresh();captureDialog(setup,"voice-setup-ready");setup.close();
+    }
+    void captureDialog(VoiceSetup setup,String name)throws Exception {
+        Shadows.shadowOf(Looper.getMainLooper()).idle();
+        View view=setup.dialog.getWindow().getDecorView();int w=379,h=815;
+        view.measure(View.MeasureSpec.makeMeasureSpec(w,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(h,View.MeasureSpec.AT_MOST));
+        h=view.getMeasuredHeight();view.layout(0,0,w,h);
+        Bitmap bitmap=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888);view.draw(new Canvas(bitmap));
+        File folder=new File("build/reports/screenshots");folder.mkdirs();
+        try(OutputStream out=new FileOutputStream(new File(folder,name+".png"))){assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG,100,out));}bitmap.recycle();
+    }
 }

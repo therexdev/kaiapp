@@ -18,12 +18,13 @@ final class VoicePack {
     File directory(){return new File(app.getNoBackupFilesDir(),NAME);}
     File archive(){return new File(app.getExternalFilesDir(null),NAME+".zip");}
     boolean ready(){return new File(directory(),".verified").isFile()&&new File(directory(),"am/final.mdl").isFile();}
-    void download(){
+    void download(){download(!app.prefs.getBoolean("wifi",true));}
+    void download(boolean allowMobileData){
         if(!app.requireAccount())return;if(!app.networkAllowed()){app.fail("Go online to download the voice pack. Recognition works offline after setup.");return;}
         if(ready()||downloadId!=-1||installing)return;
         if(app.getNoBackupFilesDir().getUsableSpace()<160*1024*1024L){app.fail("Free 160 MB to set up offline voice input.");return;}
-        try{archive().delete();DownloadManager.Request r=new DownloadManager.Request(Uri.parse(URL)).setTitle("KAI offline voice input · English").setDestinationUri(Uri.fromFile(archive())).setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED).setAllowedOverRoaming(false).setAllowedOverMetered(!app.prefs.getBoolean("wifi",true));
-            if(app.prefs.getBoolean("wifi",true))r.setAllowedNetworkTypes(DownloadManager.Request.NETWORK_WIFI);
+        try{archive().delete();DownloadManager.Request r=new DownloadManager.Request(Uri.parse(URL)).setTitle("KAI offline voice input · English").setDestinationUri(Uri.fromFile(archive())).setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED).setAllowedOverRoaming(false).setAllowedOverMetered(allowMobileData);
+            if(!allowMobileData)r.setAllowedNetworkTypes(DownloadManager.Request.NETWORK_WIFI);
             downloaded=0;downloadId=app.downloads.enqueue(r);app.prefs.edit().putLong("voice.download",downloadId).apply();status="Downloading voice input · 0% of 41 MB";app.changed();
         }catch(Exception e){app.fail("Voice download could not start. Check storage and connection.");}
     }

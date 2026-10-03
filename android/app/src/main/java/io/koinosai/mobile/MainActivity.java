@@ -34,7 +34,8 @@ public final class MainActivity extends Activity {
     private KaiApp.ChatMessage thinkingAnswer;
     private final Set<KaiApp.ChatMessage> expandedSources=Collections.newSetFromMap(new IdentityHashMap<>());
     private int chatActionEpoch;
-    private VoiceController voice;private boolean foreground,pendingVoiceChat,resumeVoice;
+    private VoiceController voice;private boolean foreground,pendingVoiceChat,restoreVoiceSetup;
+    private VoiceSetup voiceSetup;
     private String voiceScope="";private KaiApp.Conversation voiceConversation;private int voiceMessageStart;
     private final Runnable voiceRender=()->{if(foreground)render();};
     private ScrollView chatScroll;
@@ -55,21 +56,21 @@ public final class MainActivity extends Activity {
     @Override public void onCreate(Bundle state) {
         super.onCreate(state); app=(KaiApp)getApplication();
         if(Build.VERSION.SDK_INT>=30)getWindow().setDecorFitsSystemWindows(false);
-        if(state!=null)tab=state.getString("tab","KAI");
+        if(state!=null){tab=state.getString("tab","KAI");restoreVoiceSetup=state.getBoolean("voiceSetup",false);pendingVoiceChat=state.getBoolean("setupConversation",true);}
         initVoice();buildShell();
         if(state!=null&&composer!=null)composer.setText(state.getString("draft",""));
     }
     @Override protected void onStart() { super.onStart();foreground=true;initVoice(); app.listener=this::render; app.account.setForeground(true);render(); }
-    @Override protected void onPause(){foreground=false;if(companionView!=null)companionView.active(false);if(app.agent.running)app.agent.stop();app.connections.cancel();dismissVoiceMenu();chatActionEpoch++;endVoice(true);super.onPause();}
-    @Override protected void onResume(){super.onResume();foreground=true;if(companionView!=null)companionView.active(true);if(resumeVoice){resumeVoice=false;if(isVoiceScreen())startVoice(pendingVoiceChat);}}
-    @Override protected void onDestroy(){if(voice!=null){voice.close();voice=null;}app.main.removeCallbacks(voiceRender);super.onDestroy();}
+    @Override protected void onPause(){foreground=false;if(voiceSetup!=null)voiceSetup.pause();if(companionView!=null)companionView.active(false);if(app.agent.running)app.agent.stop();app.connections.cancel();dismissVoiceMenu();chatActionEpoch++;endVoice(true);super.onPause();}
+    @Override protected void onResume(){super.onResume();foreground=true;if(companionView!=null)companionView.active(true);if(voiceSetup!=null&&!voiceSetup.disposed)voiceSetup.resume();else if(restoreVoiceSetup){restoreVoiceSetup=false;openVoiceSetup(pendingVoiceChat,null);}}
+    @Override protected void onDestroy(){if(voiceSetup!=null)voiceSetup.close();if(voice!=null){voice.close();voice=null;}app.main.removeCallbacks(voiceRender);super.onDestroy();}
     @Override protected void onStop() {
         app.listener=null;app.account.setForeground(false);if(voice!=null){voice.close();voice=null;}app.main.removeCallbacks(voiceRender);
         if(!isChangingConfigurations() && app.generating) app.stop();
         super.onStop();
     }
     @Override protected void onSaveInstanceState(Bundle state) {
-        state.putString("tab",tab); if(composer!=null)state.putString("draft",composer.getText().toString()); super.onSaveInstanceState(state);
+        state.putString("tab",tab);state.putBoolean("voiceSetup",voiceSetup!=null&&!voiceSetup.disposed);state.putBoolean("setupConversation",pendingVoiceChat); if(composer!=null)state.putString("draft",composer.getText().toString()); super.onSaveInstanceState(state);
     }
     @Override public void onConfigurationChanged(Configuration config) {super.onConfigurationChanged(config);if(composer!=null)drafts.put(renderedChatId,composer.getText().toString());tabs.clear();buildShell();}
     private int dp(float n) {return Math.round(n*getResources().getDisplayMetrics().density);}
@@ -148,7 +149,7 @@ public final class MainActivity extends Activity {
         if(navigation!=null)navigation.setVisibility(keyboardVisible&&tab.equals("Chat")?View.GONE:View.VISIBLE);
         if(composer!=null){int available=root.getHeight()-root.getPaddingTop()-root.getPaddingBottom();int lines=available>0&&available<dp(300)?1:available>0&&available<dp(450)?2:4;if(composer.getMaxLines()!=lines){composer.setMaxLines(lines);composer.setPadding(dp(12),dp(lines==1?14:8),dp(4),dp(lines==1?14:8));}}
     }
-    private void go(String name){if(!tab.equals(name)){chatActionEpoch++;endVoice(true);if(app.agent.running)app.agent.stop();}hideKeyboard();tab=name;pageKey="";render();}
+    private void go(String name){if(!tab.equals(name)){if(voiceSetup!=null)voiceSetup.close();chatActionEpoch++;endVoice(true);if(app.agent.running)app.agent.stop();}hideKeyboard();tab=name;pageKey="";render();}
     private String key() {
         String auth=app.account.signedIn()+app.account.owner()+app.route+app.networkAllowed()+app.prefs.getBoolean("webSearch",false)+app.autoWeb()+app.prefs.getBoolean("webTopicConsent",false);
         if(tab.equals("KAI"))return tab+auth+agentVoiceMode+(app.agent.review==null?"":app.agent.review.id);
@@ -227,7 +228,7 @@ public final class MainActivity extends Activity {
         if(app.busy||(voice!=null&&voice.active()))getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         boolean pending=app.voicePack.installing||app.voicePack.downloadId!=-1;
         if(voicePackWasPending&&!pending&&app.voicePack.ready()&&foreground)Toast.makeText(this,"Voice input is ready",Toast.LENGTH_SHORT).show();
-        voicePackWasPending=pending;updateAvailableSpace();
+        voicePackWasPending=pending;updateAvailableSpace();if(voiceSetup!=null)voiceSetup.refresh();
     }
     private void buildChat(String draft) {
         renderedChatId=app.current.id;
@@ -532,7 +533,7 @@ public final class MainActivity extends Activity {
     private void initVoice(){if(voice!=null)return;voice=new VoiceController(new AndroidVoice.Input(app),new AndroidVoice.Speaker(app),new VoiceController.Host(){
         public boolean allowed(){return foreground&&isVoiceScreen()&&app.account.signedIn();}
         public void changed(){app.main.removeCallbacks(voiceRender);app.main.post(voiceRender);}
-        public void error(String text){app.fail(text);}
+        public void error(String text){voiceRecovery(text);}
         public void transcript(String text,boolean automatic){
             if(!allowed())return;
             if(automatic){if(!voiceScope.equals(voiceScope())){endVoice(true);return;}if(voiceUsesAgent()){voice.beginReply();app.agent.start(text);voiceAgentRun=app.agent.runId;if(!app.agent.running)voice.stop();}else sendPrompt(text);}
@@ -556,18 +557,36 @@ public final class MainActivity extends Activity {
         if(!app.busy&&app.current.messages.size()==previous&&composer!=null)composer.setText(prompt);
     }
     private void startVoice(boolean conversation){
-        if(!app.account.signedIn()){go("Accounts");return;}if(app.busy){app.fail("Stop the current reply before using the microphone.");return;}
-        if(!app.voicePack.ready()){offerVoicePack();return;}
-        if(conversation&&voiceUsesAgent()&&app.connections.selected().isEmpty()){go("Apps");app.fail("Connect an app and select its actions before talking to your agent.");return;}
+        if(!app.account.signedIn()){confirm("Sign in to talk to KAI","Sign in with your KAI account first. Then tap Talk to KAI; we will guide you through voice setup.","Sign in",()->go("Accounts"));return;}
+        if(app.busy){app.fail("Stop the current reply before using the microphone.");return;}
+        pendingVoiceChat=conversation;String scope=voiceScope();
+        openVoiceSetup(conversation,()->{if(foreground&&isVoiceScreen()&&app.account.signedIn()&&scope.equals(voiceScope()))startVoiceReady(conversation);});
+    }
+    private void openVoiceSetup(boolean replies,Runnable ready){
+        if(!app.account.signedIn()){confirm("Sign in to set up voice","Sign in with your KAI account, then tap Talk to KAI. Setup will guide you through the downloads and microphone permission.","Sign in",()->go("Accounts"));return;}
+        if(voiceSetup!=null&&!voiceSetup.disposed){voiceSetup.refresh();return;}
+        pendingVoiceChat=replies;endVoice(false);app.clearError();voiceSetup=new VoiceSetup(this,app,replies,ready);voiceSetup.show();
+    }
+    private void voiceRecovery(String message){
+        app.fail(message);if(!foreground)return;
+        AlertDialog.Builder recovery=new AlertDialog.Builder(this).setTitle("Let's fix voice").setMessage(message+"\n\nYour conversation is saved. Setup will check what is missing and show the next button to press.").setNegativeButton("Type instead",null);
+        recovery.setPositiveButton("Fix voice setup",(d,w)->openVoiceSetup(true,null));
+        if(message.toLowerCase(java.util.Locale.ROOT).contains("microphone"))recovery.setNeutralButton("Microphone settings",(d,w)->{openVoiceSetup(true,null);if(voiceSetup!=null&&!voiceSetup.disposed)voiceSetup.openMicrophoneSettings();});
+        recovery.show();
+    }
+    private void startVoiceReady(boolean conversation){
+        if(!foreground||!isVoiceScreen()||!app.account.signedIn()||app.busy)return;
+        if(!app.voicePack.ready()||checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)!=android.content.pm.PackageManager.PERMISSION_GRANTED){startVoice(conversation);return;}
+        if(conversation&&voiceUsesAgent()&&app.connections.selected().isEmpty()){confirm("Connect an app for your agent","Voice is ready. Connect an app, then select the actions your agent may use. You can also switch to Conversation to chat with KAI.","Connect an app",()->go("Apps"));return;}
         if(conversation&&voiceUsesAgent()&&!app.networkAllowed()){ensureOnline(()->startVoice(true));return;}
         if(conversation&&!voiceUsesAgent()&&app.prefs.getBoolean("webSearch",false)&&app.autoWeb()&&!app.prefs.getBoolean("webTopicConsent",false)){smartSearchConsent(()->startVoice(true));return;}
         if(conversation&&!app.usesRemoteModel()&&app.active==null){chooseLocalModel("start voice",()->startVoice(true));return;}
         if(conversation&&app.usesRemoteModel()&&!app.networkAllowed()){ensureOnline(()->startVoice(true));return;}
         if(conversation&&!voiceUsesAgent()&&!app.usesRemoteModel()&&app.prefs.getBoolean("webSearch",false)&&!app.networkAllowed()){withWebConnection(()->startVoice(true));return;}
-        JSONObject grant=app.account.grant(app.grantId);if(conversation&&app.usesRemoteModel()&&grant==null){accountSection="access";go("Accounts");app.fail("Choose a spending grant for voice chat over the network.");return;}
+        JSONObject grant=app.account.grant(app.grantId);if(conversation&&app.usesRemoteModel()&&grant==null){confirm("Set up network access","Voice is ready. Choose a spending grant so KAI can answer using "+app.routeLabel()+". You can also select Local in Network to use a downloaded model.","Choose access",()->{accountSection="access";go("Accounts");});return;}
         pendingVoiceChat=conversation;
-        if(checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)!=android.content.pm.PackageManager.PERMISSION_GRANTED){requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO},MICROPHONE);return;}
-        Runnable begin=()->{initVoice();voiceScope=voiceScope();voiceConversation=null;voice.start(conversation);};
+        String startingScope=voiceScope();
+        Runnable begin=()->{if(!foreground||!isVoiceScreen()||!app.account.signedIn()||app.busy||!startingScope.equals(voiceScope()))return;initVoice();voiceScope=voiceScope();voiceConversation=null;voice.start(conversation);};
         if(!conversation){begin.run();return;}
         String message="KAI will listen, automatically send each spoken question to "+app.routeLabel()+", speak its reply and listen for your follow-up. The microphone pauses while KAI speaks. Leaving this screen or the app stops the session. Tap Stop at any time.";
         if(voiceUsesAgent())message+="\n\nAgent mode may run up to 8 steps per spoken task using your selected app actions. Connected data will be sent to the selected model. Changes pause for your review. No background tasks.";
@@ -575,12 +594,10 @@ public final class MainActivity extends Activity {
         if(!voiceUsesAgent()&&app.prefs.getBoolean("webSearch",false))message+="\n\nWeb search is enabled: short search queries may include the recent conversation topic. Auto searches only selected question types; Always searches every question.";
         confirm("Start voice chat?",message,"Start listening",begin);
     }
-    @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results){super.onRequestPermissionsResult(request,permissions,results);if(request==MICROPHONE){if(results.length>0&&results[0]==android.content.pm.PackageManager.PERMISSION_GRANTED&&isVoiceScreen()){if(foreground)startVoice(pendingVoiceChat);else resumeVoice=true;}else app.fail("Microphone permission is needed for voice input. You can still type.");}}
+    @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results){super.onRequestPermissionsResult(request,permissions,results);if(request==MICROPHONE&&voiceSetup!=null&&!voiceSetup.disposed)voiceSetup.permissionResult(results.length>0&&results[0]==android.content.pm.PackageManager.PERMISSION_GRANTED);}
     private void offerVoicePack(){
         if(!app.account.signedIn()){go("Accounts");return;}
-        if(app.voicePack.installing||app.voicePack.downloadId!=-1){new AlertDialog.Builder(this).setTitle("Setting up voice input").setMessage(app.voicePack.status+"\n\nProgress is shown inside the message bubble. When setup finishes, tap the voice icon to choose Dictate message or Voice chat.").setPositiveButton("OK",null).setNeutralButton("Settings",(d,w)->go("Settings")).show();return;}
-        if(!app.networkAllowed()){ensureOnline(this::offerVoicePack);return;}
-        confirm("Set up offline voice input?","Download the 41 MB English speech pack from Alpha Cephei. Speech recognition then stays on this device. About 110 MB of storage is used during setup. Android supplies the voice for spoken replies.","Download",()->app.voicePack.download());
+        openVoiceSetup(true,null);
     }
     private boolean needsWebConsent(String prompt){return app.autoWeb()&&app.prefs.getBoolean("webSearch",false)&&!app.prefs.getBoolean("webTopicConsent",false)&&SearchPlanner.plan(prompt,app.current.messages,true,false,true).search;}
     private void prepareWeb(String prompt,Runnable next){
@@ -608,10 +625,11 @@ public final class MainActivity extends Activity {
         add(c,text(app.voicePack.ready()?"English voice input · ready offline":app.voicePack.status.isEmpty()?"Set up English voice input with a 41 MB download.":app.voicePack.status,14,MUTED,false));space(c,10);
         if(!app.voicePack.ready()&&!app.voicePack.installing)add(c,button(app.voicePack.downloadId==-1?"Download voice pack":"Cancel voice download",false,()->{if(app.voicePack.downloadId==-1)offerVoicePack();else app.voicePack.cancel();}));
         Switch read=new Switch(this);read.setText("Read replies aloud");read.setTextColor(NAVY);read.setTextSize(15);read.setMinHeight(dp(48));read.setChecked(app.prefs.getBoolean("readReplies",false));read.setOnCheckedChangeListener((b,value)->{if(!value)endVoice(false);app.prefs.edit().putBoolean("readReplies",value).apply();});add(c,read);
-        add(c,text("Voice chat always speaks its replies. Audio stays on this device. Install an English offline Android voice if no voice is available. This uses your Android voice, with a KAI pitch option.",13,MUTED,false));space(c,10);
+        add(c,text("Voice chat always speaks its replies. Audio stays on this device. Voice setup checks listening, spoken replies and microphone access, with install buttons for anything missing.",13,MUTED,false));space(c,10);
+        add(c,button("Set up & test voice",true,()->openVoiceSetup(true,null)));space(c,10);
         spinner(c,new String[]{"KAI · bright","Natural","Lower"},new int[]{115,100,85},Math.round(app.prefs.getFloat("voicePitch",1.15f)*100),v->app.prefs.edit().putFloat("voicePitch",v/100f).apply());space(c,10);
         add(c,text("Speaking pace",13,MUTED,false));spinner(c,new String[]{"Relaxed","Balanced","Quick"},new int[]{80,96,115},Math.round(app.prefs.getFloat("voiceRate",.96f)*100),v->app.prefs.edit().putFloat("voiceRate",v/100f).apply());space(c,10);
-        add(c,button("Android voice settings",false,()->{try{startActivity(new Intent("com.android.settings.TTS_SETTINGS"));}catch(ActivityNotFoundException e){startActivity(new Intent(android.provider.Settings.ACTION_SETTINGS));}}));
+        add(c,button("Android voice settings",false,()->{openVoiceSetup(true,null);if(voiceSetup!=null&&!voiceSetup.disposed)voiceSetup.openVoiceSettings();}));
     }
     private void ensureOnline(Runnable action){
         if(app.networkAllowed()){action.run();return;}

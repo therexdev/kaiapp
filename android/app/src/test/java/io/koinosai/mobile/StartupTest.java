@@ -96,15 +96,16 @@ public class StartupTest {
     }
     private void installedModel()throws Exception{KaiApp.Model model=app.models.get(0);model.installed=true;app.file(model).getParentFile().mkdirs();app.file(model).createNewFile();}
     private void installedVoice()throws Exception{java.io.File directory=app.voicePack.directory();new java.io.File(directory,"am").mkdirs();new java.io.File(directory,".verified").createNewFile();new java.io.File(directory,"am/final.mdl").createNewFile();}
+    private void readyAndroidVoice(){Shadows.shadowOf(app).grantPermissions(android.Manifest.permission.RECORD_AUDIO);VoiceSetup setup=org.robolectric.util.ReflectionHelpers.getField(activity,"voiceSetup");setup.speech.close();setup.result=new VoiceSetup.Result(VoiceSetup.State.READY,"test.engine");setup.refresh();}
     @Test public void dictatedQuestionCanLoadLocalModelWithoutLosingDraftOrGoingOnline()throws Exception{
         signIn();installedModel();EditText composer=org.robolectric.util.ReflectionHelpers.getField(activity,"composer");composer.setText("Which starter should I choose?");
         assertTrue(control("Send message").isEnabled());control("Send message").performClick();android.app.AlertDialog dialog=org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();
         assertTrue(dialog.isShowing());assertNotNull(find(dialog.getWindow().getDecorView(),"Load & send"));assertFalse(app.networkAllowed());assertEquals("local",app.route);
         dialog.getButton(android.content.DialogInterface.BUTTON_NEGATIVE).performClick();assertEquals("Which starter should I choose?",composer.getText().toString());assertTrue(app.current.messages.isEmpty());
-        installedVoice();chooseVoiceChat();dialog=org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();assertNotNull(find(dialog.getWindow().getDecorView(),"Load & start voice"));assertFalse(app.networkAllowed());
+        installedVoice();chooseVoiceChat();readyAndroidVoice();dialog=org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();assertNotNull(find(dialog.getWindow().getDecorView(),"Load & start voice"));assertFalse(app.networkAllowed());
     }
     @Test public void localVoiceWithWebEnabledOffersOfflineContinuation()throws Exception{
-        signIn();installedVoice();app.active=app.models.get(0);app.prefs.edit().putBoolean("webSearch",true).putBoolean("webTopicConsent",true).apply();app.changed();chooseVoiceChat();
+        signIn();installedVoice();app.active=app.models.get(0);app.prefs.edit().putBoolean("webSearch",true).putBoolean("webTopicConsent",true).apply();app.changed();chooseVoiceChat();readyAndroidVoice();
         android.app.AlertDialog dialog=org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();assertEquals("Continue offline",dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE).getText().toString());
         dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE).performClick();Shadows.shadowOf(Looper.getMainLooper()).idle();assertFalse(app.prefs.getBoolean("webSearch",true));assertFalse(app.networkAllowed());assertEquals("local",app.route);
     }
