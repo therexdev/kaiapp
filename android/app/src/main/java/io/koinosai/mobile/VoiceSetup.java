@@ -17,8 +17,9 @@ final class VoiceSetup {
     static final String GOOGLE_TTS = "com.google.android.tts";
     enum State { CHECKING, READY, MISSING_VOICE, MISSING_ENGINE, ERROR }
     static final class Result {
-        final State state; final String engine;
-        Result(State state, String engine) { this.state=state; this.engine=engine==null?"":engine; }
+        final State state; final String engine,detail;
+        Result(State state, String engine) { this(state,engine,""); }
+        Result(State state, String engine,String detail) { this.state=state; this.engine=engine==null?"":engine;this.detail=detail; }
     }
     interface Speech {
         void check(Consumer<Result> callback);
@@ -29,56 +30,108 @@ final class VoiceSetup {
         final KaiApp app;
         TextToSpeech probe;
         AndroidVoice.Speaker sample;
-        int epoch;
-        Runnable timeout;
+        int epoch,attempt;
+        Runnable timeout,voiceTimeout;
+        java.io.File audioFile;
+        String utterance="",lastFailure="";
+        final java.util.Set<String> rejected=new java.util.HashSet<>();
         AndroidSpeech(KaiApp app) { this.app=app; }
-        String engine() {
-            if (probe!=null) try { String name=probe.getDefaultEngine();if(name!=null&&!name.isEmpty())return name; } catch (Exception ignored) {}
-            String preferred=Settings.Secure.getString(app.getContentResolver(), "tts_default_synth");
-            for (android.content.pm.ResolveInfo info : app.getPackageManager().queryIntentServices(
-                    new Intent(TextToSpeech.Engine.INTENT_ACTION_TTS_SERVICE), 0)) {
-                if (preferred!=null && preferred.equals(info.serviceInfo.packageName)) return preferred;
-            }
-            for (android.content.pm.ResolveInfo info : app.getPackageManager().queryIntentServices(
-                    new Intent(TextToSpeech.Engine.INTENT_ACTION_TTS_SERVICE), 0)) return info.serviceInfo.packageName;
-            return "";
-        }
+        String engine() {return OfflineSpeech.engineName(app,probe);}
         @Override public void check(Consumer<Result> callback) {
-            close(); int ticket=epoch;
+            close(); int ticket=epoch;attempt=0;lastFailure="";rejected.clear();
             timeout=()->{
-                if (ticket!=epoch) return;
-                String name=engine(); close();
-                callback.accept(new Result(name.isEmpty()?State.MISSING_ENGINE:State.ERROR,name));
+                if(ticket!=epoch)return;
+                String name=engine(),detail=diagnostic("Speech engine check timed out.");close();
+                callback.accept(new Result(name.isEmpty()?State.MISSING_ENGINE:State.ERROR,name,detail));
             };
-            app.main.postDelayed(timeout,10000);
+            app.main.postDelayed(timeout,15000);
             try {
-                probe=new TextToSpeech(app,status->app.main.post(()->{
-                    if (ticket!=epoch) return;
-                    app.main.removeCallbacks(timeout);
-                    String name=engine();
-                    State state;
-                    try {
-                        android.speech.tts.Voice voice=status==TextToSpeech.SUCCESS?AndroidVoice.Speaker.offlineVoice(probe.getVoices()):null;
-                        state=status!=TextToSpeech.SUCCESS?(name.isEmpty()?State.MISSING_ENGINE:State.ERROR):
-                            voice!=null&&probe.setVoice(voice)==TextToSpeech.SUCCESS?State.READY:State.MISSING_VOICE;
-                    } catch (Exception e) { state=State.ERROR; }
-                    callback.accept(new Result(state,name));
+                probe=OfflineSpeech.create(app,status->app.main.post(()->{
+                    if(ticket!=epoch)return;
+                    if(status!=TextToSpeech.SUCCESS){finish(ticket,callback,new Result(engine().isEmpty()?State.MISSING_ENGINE:State.ERROR,engine(),"The speech engine failed to initialize."));return;}
+                    tryVoice(ticket,callback);
                 }));
-            } catch (Exception e) {
-                app.main.removeCallbacks(timeout);
-                callback.accept(new Result(State.MISSING_ENGINE,engine()));
+            } catch(Exception e) {
+                finish(ticket,callback,new Result(State.ERROR,engine(),"The speech engine could not be opened."));
             }
         }
+        void tryVoice(int ticket,Consumer<Result> callback) {
+            if(ticket!=epoch||probe==null)return;
+            final android.speech.tts.Voice voice;
+            try {voice=OfflineSpeech.select(OfflineSpeech.access(probe),OfflineSpeech.preferredVoice(app,engine()),rejected);}
+            catch(Exception e){finish(ticket,callback,new Result(State.ERROR,engine(),diagnostic("Voice selection failed.")));return;}
+            if(voice==null||attempt>=12){
+                finish(ticket,callback,new Result(rejected.isEmpty()?State.MISSING_VOICE:State.ERROR,engine(),diagnostic(lastFailure.isEmpty()?"No usable offline English voice was found.":lastFailure)));return;
+            }
+            attempt++;String id="kai-setup-"+ticket+"-"+attempt;utterance=id;
+            try {
+                audioFile=java.io.File.createTempFile("kai-voice-check-",".wav",app.getCacheDir());
+                java.io.File file=audioFile;
+                probe.setOnUtteranceProgressListener(new android.speech.tts.UtteranceProgressListener(){
+                    public void onStart(String ignored){}
+                    public void onDone(String completed){app.main.post(()->{
+                        if(ticket!=epoch||!id.equals(utterance)||!id.equals(completed))return;
+                        if(validWave(file)){
+                            app.prefs.edit().putString("voice.selected."+engine(),voice.getName()).apply();
+                            finish(ticket,callback,new Result(State.READY,engine(),diagnostic("Verified speech output: "+voice.getName())));
+                        }else failedVoice(ticket,id,voice,callback,"The engine returned no usable speech audio.");
+                    });}
+                    public void onError(String failed){onError(failed,TextToSpeech.ERROR);}
+                    public void onError(String failed,int code){app.main.post(()->{
+                        if(id.equals(failed))failedVoice(ticket,id,voice,callback,"Speech synthesis returned error "+code+".");
+                    });}
+                });
+                voiceTimeout=()->failedVoice(ticket,id,voice,callback,"A voice did not finish its speech check.");
+                app.main.postDelayed(voiceTimeout,3500);
+                android.os.Bundle params=new android.os.Bundle();
+                params.putString(TextToSpeech.Engine.KEY_FEATURE_EMBEDDED_SYNTHESIS,"true");
+                if(probe.synthesizeToFile("KAI is ready.",params,file,id)!=TextToSpeech.SUCCESS)
+                    failedVoice(ticket,id,voice,callback,"The engine rejected the speech check.");
+            }catch(Exception e){failedVoice(ticket,id,voice,callback,"The speech check could not run.");}
+        }
+        void failedVoice(int ticket,String id,android.speech.tts.Voice voice,Consumer<Result> callback,String reason){
+            if(ticket!=epoch||!id.equals(utterance))return;
+            lastFailure=reason;rejected.add(voice.getName());utterance="";
+            if(voiceTimeout!=null)app.main.removeCallbacks(voiceTimeout);
+            probe.stop();removeAudio();
+            app.main.post(()->tryVoice(ticket,callback));
+        }
+        static boolean validWave(java.io.File file){
+            if(file==null||file.length()<=44)return false;
+            try(java.io.RandomAccessFile in=new java.io.RandomAccessFile(file,"r")){
+                if(in.readInt()!=0x52494646)return false;in.readInt();if(in.readInt()!=0x57415645)return false;
+                boolean format=false,data=false;
+                for(int i=0;i<64&&in.getFilePointer()+8<=in.length();i++){
+                    int kind=in.readInt();long size=Integer.toUnsignedLong(Integer.reverseBytes(in.readInt())),start=in.getFilePointer();
+                    if(size>in.length()-start)return false;
+                    if(kind==0x666d7420&&size>=16){int encoding=Short.toUnsignedInt(Short.reverseBytes(in.readShort()));int channels=Short.toUnsignedInt(Short.reverseBytes(in.readShort()));int rate=Integer.reverseBytes(in.readInt());format=(encoding==1||encoding==3)&&channels>0&&channels<=8&&rate>0;}
+                    if(kind==0x64617461&&size>0)data=true;
+                    if(format&&data)return true;
+                    in.seek(start+size+(size&1));
+                }
+                return false;
+            }catch(Exception e){return false;}
+        }
+        String diagnostic(String reason){
+            return reason+(probe==null?"":"\n"+OfflineSpeech.describe(OfflineSpeech.access(probe)));
+        }
+        void finish(int ticket,Consumer<Result> callback,Result result){
+            if(ticket!=epoch)return;
+            close();callback.accept(result);
+        }
+        void removeAudio(){if(audioFile!=null){audioFile.delete();audioFile=null;}}
         @Override public void preview(Runnable done, Consumer<String> error) {
             if(sample!=null)sample.close();
             sample=new AndroidVoice.Speaker(app);
             sample.say("Hi, I'm KAI. My voice is ready. Let's talk.",done,error);
         }
         @Override public void close() {
-            epoch++;
+            epoch++;utterance="";
             if(timeout!=null)app.main.removeCallbacks(timeout);
-            if(probe!=null){probe.shutdown();probe=null;}
+            if(voiceTimeout!=null)app.main.removeCallbacks(voiceTimeout);
+            if(probe!=null){probe.stop();probe.shutdown();probe=null;}
             if(sample!=null){sample.close();sample=null;}
+            removeAudio();
         }
     }
 
@@ -119,6 +172,11 @@ final class VoiceSetup {
     void resume() {
         if(disposed)return;
         foreground=true;external=false;
+        String installing=app.prefs.getString("voice.installEngine","");
+        if(!installing.isEmpty()){
+            if(OfflineSpeech.engines(app).containsKey(installing))app.prefs.edit().putString("voice.engine",installing).apply();
+            app.prefs.edit().remove("voice.installEngine").apply();
+        }
         // Permission results update only microphone readiness; they cannot validate a voice installer.
         checkSpeech();
     }
@@ -137,7 +195,7 @@ final class VoiceSetup {
         if(downloadStatus!=null)downloadStatus.setText(app.voicePack.status.isEmpty()?"Preparing voice input…":app.voicePack.status);
         if(packProgress!=null){packProgress.setIndeterminate(app.voicePack.installing);packProgress.setProgress((int)Math.min(100,app.voicePack.downloaded*100/VoicePack.BYTES));}
         String packState=downloading?(app.voicePack.status.contains("paused")?"paused":"downloading"):app.voicePack.status;
-        String key=app.voicePack.ready()+"|"+packState+"|"+app.voicePack.downloadId+"|"+app.voicePack.installing+"|"+app.networkAllowed()+"|"+result.state+"|"+microphone()+"|"+app.prefs.getBoolean("voice.micAsked",false)+"|"+note+"|"+previewing;
+        String key=app.voicePack.ready()+"|"+packState+"|"+app.voicePack.downloadId+"|"+app.voicePack.installing+"|"+app.networkAllowed()+"|"+result.state+"|"+result.engine+"|"+result.detail+"|"+microphone()+"|"+app.prefs.getBoolean("voice.micAsked",false)+"|"+note+"|"+previewing;
         if(key.equals(rendered))return;rendered=key;
         content.removeAllViews();downloadStatus=null;packProgress=null;primaryShown=false;
         dialog.getButton(DialogInterface.BUTTON_NEGATIVE).setText(allReady()?"Close":"Not now");
@@ -147,10 +205,11 @@ final class VoiceSetup {
         if(replies){
             label((result.state==State.READY?"✓":"2")+"  Talk back",17,true);
             label(result.state==State.READY?"An English speaking voice is ready offline.":
-                result.state==State.CHECKING?"Checking your Android speaking voice…":
+                result.state==State.CHECKING?"Testing your Android speaking voice…":
                 result.state==State.MISSING_ENGINE?"Install an Android speech engine so KAI can answer aloud.":
-                result.state==State.ERROR?"Android's speech engine did not respond. Retry the check or open voice settings.":
-                "An English speaking voice needs to be downloaded in Android.",14,false);
+                result.state==State.ERROR?"This engine could not generate speech for KAI. Try another installed engine below.":
+                "KAI could not activate an offline English voice in this engine. It may already be installed.",14,false);
+            if(!result.engine.isEmpty())label("Engine: "+OfflineSpeech.engines(app).getOrDefault(result.engine,result.engine),13,false);
         }
         label((microphone()?"✓":replies?"3":"2")+"  Microphone",17,true);
         label(microphone()?"Permission is ready. Listening begins only after you start.":"Allow microphone access when Android asks. KAI listens only during a visible voice session.",14,false);
@@ -177,16 +236,21 @@ final class VoiceSetup {
         }else if(replies&&result.state!=State.READY){
             if(result.state!=State.CHECKING){
                 if(result.state==State.MISSING_ENGINE){
-                    label("Tap Install, install Speech Recognition & Synthesis from Google, then return to KAI. If asked, choose it as your preferred engine in Android voice settings.",14,false);
+                    label("Install Speech Recognition & Synthesis from Google, then return. KAI will use it without changing your phone's preferred engine.",14,false);
                     button("Install speech engine",this::openEngineStore);
                 }else if(result.state==State.MISSING_VOICE){
-                    label("Tap Install English voice. In Android, choose English and tap its download button. Return to KAI when it finishes; we'll check automatically.",14,false);
-                    button("Install English voice",this::installVoice);
-                }else{
-                    button("Install or update speech engine",this::openEngineStore);
+                    label("If Android says Latest version, you do not need to download that voice again. Try another engine below. Use Install English voice only if English is missing.",14,false);
+                }
+                if(result.state!=State.MISSING_ENGINE){
+                    if(OfflineSpeech.engines(app).containsKey(GOOGLE_TTS)&&!GOOGLE_TTS.equals(result.engine))
+                        button("Use Google speech instead",()->useEngine(GOOGLE_TTS));
+                    else if(!GOOGLE_TTS.equals(result.engine))button("Install Google speech instead",this::openEngineStore);
+                    button("Choose speech engine",this::chooseEngine);
+                    if(result.state==State.MISSING_VOICE)button("Install English voice",this::installVoice);
                 }
                 button("Android voice settings",this::openVoiceSettings);
                 button("Check again",this::checkSpeech);
+                button("Voice details",this::showDetails);
             }
         }else if(!microphone()){
             boolean asked=app.prefs.getBoolean("voice.micAsked",false);
@@ -199,7 +263,7 @@ final class VoiceSetup {
             });
         }else{
             label("You're all set. Return to KAI and tap Talk to KAI.",15,true);
-            if(replies)button(previewing?"Stop voice test":"Test KAI's voice",this::preview);
+            if(replies){button(previewing?"Stop voice test":"Test KAI's voice",this::preview);button("Choose speech engine",this::chooseEngine);}
         }
         // A voice can be tested before the microphone has been granted.
         if(replies&&result.state==State.READY&&!microphone())button(previewing?"Stop voice test":"Test KAI's voice",this::preview);
@@ -238,12 +302,40 @@ final class VoiceSetup {
         }
     }
     void openEngineStore() {
-        note="Install Speech Recognition & Synthesis from Google, then return to KAI.";
+        note="Install Speech Recognition & Synthesis from Google, then return. KAI will use it without changing your phone's preferred engine.";
+        app.prefs.edit().putString("voice.installEngine",GOOGLE_TTS).apply();
         if(!launch(new Intent(Intent.ACTION_VIEW,Uri.parse("market://details?id="+GOOGLE_TTS)))&&
            !launch(new Intent(Intent.ACTION_VIEW,Uri.parse("https://play.google.com/store/apps/details?id="+GOOGLE_TTS)))){
             note="No app store or browser could open. Install a text-to-speech engine from your device's app store, then choose it in Android voice settings. You can still type in KAI.";
+            app.prefs.edit().remove("voice.installEngine").apply();
         }
         refresh();
+    }
+    void useEngine(String engine){
+        if(disposed||!foreground)return;
+        app.prefs.edit().putString("voice.engine",engine).apply();note="Checking this engine for KAI. Your phone's preferred engine is unchanged.";checkSpeech();
+    }
+    void chooseEngine(){
+        java.util.Map<String,String> installed=OfflineSpeech.engines(app);
+        if(installed.isEmpty()){openEngineStore();return;}
+        epoch++;speech.close();
+        java.util.List<String> keys=new java.util.ArrayList<>(),labels=new java.util.ArrayList<>();
+        keys.add("");labels.add("Use phone's preferred engine");
+        for(java.util.Map.Entry<String,String> engine:installed.entrySet()){keys.add(engine.getKey());labels.add(engine.getValue());}
+        int chosen=keys.indexOf(OfflineSpeech.requestedEngine(app));
+        new AlertDialog.Builder(activity).setTitle("Speaking voice for KAI")
+            .setSingleChoiceItems(labels.toArray(new String[0]),Math.max(0,chosen),(d,index)->{d.dismiss();useEngine(keys.get(index));})
+            .setNegativeButton("Cancel",(d,w)->checkSpeech()).setOnCancelListener(d->checkSpeech()).show();
+    }
+    void showDetails(){
+        String details="KAI voice check\nDevice: "+android.os.Build.MANUFACTURER+" "+android.os.Build.MODEL+
+            "\nAndroid API: "+android.os.Build.VERSION.SDK_INT+"\nEngine: "+result.engine+"\nStatus: "+result.state+"\n"+result.detail;
+        new AlertDialog.Builder(activity).setTitle("Voice details").setMessage(details)
+            .setPositiveButton("Copy details",(d,w)->{
+                android.content.ClipboardManager clipboard=(android.content.ClipboardManager)activity.getSystemService(Context.CLIPBOARD_SERVICE);
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("KAI voice check",details));
+                Toast.makeText(activity,"Voice details copied",Toast.LENGTH_SHORT).show();
+            }).setNegativeButton("Close",null).show();
     }
     TextView label(String value,int size,boolean bold) {
         TextView view=new TextView(activity);view.setText(value);view.setTextSize(size);view.setTextColor(bold?0xff14284e:0xff61728d);

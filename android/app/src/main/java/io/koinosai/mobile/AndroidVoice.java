@@ -52,14 +52,17 @@ final class AndroidVoice {
         @Override public void close(){if(closed)return;closed=true;stop();worker.execute(()->{if(model!=null){model.close();model=null;}});worker.shutdown();}
     }
     static final class Speaker implements VoiceController.Speaker {
-        final KaiApp app;final AudioManager audio;TextToSpeech tts;boolean ready,closed;int generation;Runnable pending,done;Consumer<String> failure;String utterance="";AudioFocusRequest focus;
+        final KaiApp app;final AudioManager audio;TextToSpeech tts;boolean ready,closed;int generation;Runnable pending,done;Consumer<String> failure;String utterance="",engineRequest="";AudioFocusRequest focus;
         Speaker(KaiApp app){this.app=app;audio=(AudioManager)app.getSystemService(Context.AUDIO_SERVICE);}
         @Override public void say(String text,Runnable complete,Consumer<String> error){
-            if(closed)return;int token=++generation;done=complete;failure=error;
+            if(closed)return;
+            String requested=OfflineSpeech.requestedEngine(app);
+            if(!engineRequest.equals(requested)){if(tts!=null)tts.shutdown();tts=null;ready=false;engineRequest=requested;}
+            int token=++generation;done=complete;failure=error;
             Runnable speak=()->{
                 if(token!=generation||closed)return;
-                try{android.speech.tts.Voice voice=offlineVoice(tts.getVoices());
-                    if(voice==null||tts.setVoice(voice)!=TextToSpeech.SUCCESS){report("Install an English offline voice in Android voice settings to hear KAI.");return;}
+                try{android.speech.tts.Voice voice=OfflineSpeech.select(OfflineSpeech.access(tts),OfflineSpeech.preferredVoice(app,OfflineSpeech.engineName(app,tts)),new HashSet<>());
+                    if(voice==null){report("Android could not activate an offline English voice. Open Fix voice setup to test the installed voices or choose another engine.");return;}
                     tts.setSpeechRate(Math.max(.7f,Math.min(1.3f,app.prefs.getFloat("voiceRate",.96f))));tts.setPitch(app.prefs.getFloat("voicePitch",1.15f));
                     AudioAttributes attrs=new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build();tts.setAudioAttributes(attrs);
                     focus=new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK).setAudioAttributes(attrs).setOnAudioFocusChangeListener(change->{if(change<0)app.main.post(()->{if(token==generation&&!closed)report("Voice paused because another app needs audio.");});},app.main).build();
@@ -69,7 +72,7 @@ final class AndroidVoice {
                 }catch(Exception e){report("Android voice is unavailable. Check Android voice settings.");}
             };
             if(ready){speak.run();return;}pending=speak;
-            if(tts==null)tts=new TextToSpeech(app,status->app.main.post(()->{
+            if(tts==null)tts=OfflineSpeech.create(app,status->app.main.post(()->{
                 if(closed)return;if(status!=TextToSpeech.SUCCESS){if(tts!=null)tts.shutdown();tts=null;report("Set up an offline text-to-speech engine in Android voice settings.");return;}
                 ready=true;tts.setOnUtteranceProgressListener(new UtteranceProgressListener(){
                     public void onStart(String id){}
@@ -80,7 +83,7 @@ final class AndroidVoice {
         }
         static android.speech.tts.Voice offlineVoice(Set<android.speech.tts.Voice> voices){
             if(voices==null)return null;
-            return voices.stream().filter(v->v.getLocale().getLanguage().equals("en")&&!v.isNetworkConnectionRequired()&&(v.getFeatures()==null||!v.getFeatures().contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED)))
+            return voices.stream().filter(OfflineSpeech::offline)
                 .sorted(Comparator.comparingInt(android.speech.tts.Voice::getQuality).reversed().thenComparing(android.speech.tts.Voice::getName)).findFirst().orElse(null);
         }
         void report(String message){Consumer<String> callback=failure;stop();if(callback!=null)callback.accept(message);}

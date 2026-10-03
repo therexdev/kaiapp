@@ -1,5 +1,7 @@
 # Android companion preview
 
+Android 0.4.2 fixes voice-selection compatibility cases that could reject installed English voices. It tests generated speech, tries alternate offline voices, and adds a KAI-only engine selector plus a direct Google speech install/use option when an engine cannot speak. The desktop installer is unchanged.
+
 Voice setup now checks listening, spoken replies and microphone access before a conversation. Missing requirements get direct install/settings buttons, progress and retry controls. Returning from Android triggers a fresh check. Settings includes a short voice test; microphone permission denial has a direct App settings route. Android preview version 0.4.1 updates the existing app in place when signed with the retained owner key.
 
 The separate Android build now opens to animated KAI with foreground voice conversations and an Agent mode. Apps reuses KAI-managed Connections, with selected actions, exact write reviews, Stop, reusable task prompts, activity history and recovery notices after interruption. Local models, network/My node chat and encrypted account sign-in remain available under the redesigned navigation. This change does not publish or alter the desktop Test installer. See `android/README.md` and `android/VALIDATION.md` for setup, tested scope and signing status.

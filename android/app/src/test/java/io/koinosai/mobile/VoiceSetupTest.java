@@ -121,8 +121,79 @@ public class VoiceSetupTest {
     }
     @Test public void stalledAndroidSpeechCheckTimesOutAndCloseInvalidatesIt() {
         VoiceSetup.AndroidSpeech probe=new VoiceSetup.AndroidSpeech(app);java.util.List<VoiceSetup.Result> replies=new java.util.ArrayList<>();
-        probe.check(replies::add);Shadows.shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(11));
+        probe.check(replies::add);Shadows.shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(16));
         assertEquals(1,replies.size());assertNotEquals(VoiceSetup.State.READY,replies.get(0).state);
-        replies.clear();probe.check(replies::add);probe.close();Shadows.shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(11));assertTrue(replies.isEmpty());
+        replies.clear();probe.check(replies::add);probe.close();Shadows.shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(16));assertTrue(replies.isEmpty());
+    }
+    @Test public void voiceCheckRequiresGeneratedAudioNotOnlyMetadata() throws Exception {
+        File audio=File.createTempFile("voice-check-test",".wav",app.getCacheDir());
+        assertFalse(VoiceSetup.AndroidSpeech.validWave(audio));
+        byte[] bytes=new byte[100];java.nio.file.Files.write(audio.toPath(),bytes);assertFalse(VoiceSetup.AndroidSpeech.validWave(audio));
+        System.arraycopy("RIFF".getBytes(java.nio.charset.StandardCharsets.US_ASCII),0,bytes,0,4);
+        System.arraycopy("WAVE".getBytes(java.nio.charset.StandardCharsets.US_ASCII),0,bytes,8,4);
+        java.nio.file.Files.write(audio.toPath(),bytes);assertFalse(VoiceSetup.AndroidSpeech.validWave(audio));
+        wave(audio);assertTrue(VoiceSetup.AndroidSpeech.validWave(audio));
+        try(java.io.RandomAccessFile truncated=new java.io.RandomAccessFile(audio,"rw")){truncated.setLength(44);}
+        assertFalse(VoiceSetup.AndroidSpeech.validWave(audio));audio.delete();
+    }
+    @Test public void engineChoiceOnlyChangesKaisPreference() throws Exception {
+        pack();mic();android.provider.Settings.Secure.putString(app.getContentResolver(),"tts_default_synth","com.samsung.SMT");
+        show(true,true);speech.complete(VoiceSetup.State.MISSING_VOICE);
+        setup.useEngine(VoiceSetup.GOOGLE_TTS);
+        assertEquals(VoiceSetup.GOOGLE_TTS,OfflineSpeech.requestedEngine(app));
+        assertEquals("com.samsung.SMT",android.provider.Settings.Secure.getString(app.getContentResolver(),"tts_default_synth"));
+        assertEquals(2,speech.checks);assertEquals(0,continued);speech.complete(VoiceSetup.State.READY);assertEquals(1,continued);
+    }
+    @Test public void installedVoiceFailureOffersAlternativesWithoutReinstallLoop() throws Exception {
+        pack();mic();show(true,true);speech.complete(VoiceSetup.State.MISSING_VOICE);
+        assertNotNull(find("Choose speech engine"));assertNotNull(find("Install Google speech instead"));assertNotNull(find("Voice details"));
+        assertEquals(0,continued);
+    }
+    void wave(File file)throws Exception{
+        java.nio.ByteBuffer wav=java.nio.ByteBuffer.allocate(100).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        wav.put("RIFF".getBytes(java.nio.charset.StandardCharsets.US_ASCII)).putInt(92).put("WAVEfmt ".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+        wav.putInt(16).putShort((short)1).putShort((short)1).putInt(16000).putInt(32000).putShort((short)2).putShort((short)16);
+        wav.put("data".getBytes(java.nio.charset.StandardCharsets.US_ASCII)).putInt(56);
+        while(wav.hasRemaining())wav.putShort((short)100);
+        java.nio.file.Files.write(file.toPath(),wav.array());
+    }
+    VoiceSetup.AndroidSpeech startProbe(java.util.List<VoiceSetup.Result> results)throws Exception{
+        System.setProperty("robolectric.enableShadowTtsSynthesisToFileCallbackSuppression","true");
+        app.prefs.edit().putString("voice.engine","test.engine").apply();
+        VoiceSetup.AndroidSpeech probe=new VoiceSetup.AndroidSpeech(app);probe.check(results::add);
+        Shadows.shadowOf(probe.probe).getOnInitListener().onInit(TextToSpeech.SUCCESS);
+        Shadows.shadowOf(Looper.getMainLooper()).idle();return probe;
+    }
+    @Test public void realSetupAdapterRequiresSynthesisCompletionAndRemembersVerifiedVoice()throws Exception{
+        android.speech.tts.Voice english=new android.speech.tts.Voice("oem-english",new java.util.Locale("eng","USA"),300,300,false,java.util.Collections.emptySet());
+        org.robolectric.shadows.ShadowTextToSpeech.addVoice(english);
+        java.util.List<VoiceSetup.Result> results=new java.util.ArrayList<>();VoiceSetup.AndroidSpeech probe=startProbe(results);
+        try{
+            assertTrue(results.isEmpty());File audio=probe.audioFile;assertNotNull(audio);wave(audio);
+            Shadows.shadowOf(probe.probe).getUtteranceProgressListener().onDone(probe.utterance);Shadows.shadowOf(Looper.getMainLooper()).idle();
+            assertEquals(1,results.size());assertEquals(VoiceSetup.State.READY,results.get(0).state);assertFalse(audio.exists());
+            assertEquals("oem-english",OfflineSpeech.preferredVoice(app,"test.engine"));
+        }finally{probe.close();System.clearProperty("robolectric.enableShadowTtsSynthesisToFileCallbackSuppression");}
+    }
+    @Test public void synthesisErrorTriesNextVoiceAndIgnoresOldUtterance()throws Exception{
+        org.robolectric.shadows.ShadowTextToSpeech.addVoice(new android.speech.tts.Voice("first",java.util.Locale.US,500,300,false,java.util.Collections.emptySet()));
+        org.robolectric.shadows.ShadowTextToSpeech.addVoice(new android.speech.tts.Voice("second",new java.util.Locale("eng","USA"),300,300,false,java.util.Collections.emptySet()));
+        java.util.List<VoiceSetup.Result> results=new java.util.ArrayList<>();VoiceSetup.AndroidSpeech probe=startProbe(results);
+        try{
+            String oldId=probe.utterance;File oldFile=probe.audioFile;android.speech.tts.UtteranceProgressListener first=Shadows.shadowOf(probe.probe).getUtteranceProgressListener();
+            first.onError(oldId,TextToSpeech.ERROR);Shadows.shadowOf(Looper.getMainLooper()).idle();assertFalse(oldFile.exists());assertEquals(2,probe.attempt);assertTrue(results.isEmpty());
+            first.onDone(oldId);Shadows.shadowOf(Looper.getMainLooper()).idle();assertTrue(results.isEmpty());
+            wave(probe.audioFile);Shadows.shadowOf(probe.probe).getUtteranceProgressListener().onDone(probe.utterance);Shadows.shadowOf(Looper.getMainLooper()).idle();
+            assertEquals(1,results.size());assertEquals(VoiceSetup.State.READY,results.get(0).state);assertEquals("second",OfflineSpeech.preferredVoice(app,"test.engine"));
+        }finally{probe.close();System.clearProperty("robolectric.enableShadowTtsSynthesisToFileCallbackSuppression");}
+    }
+    @Test public void closingProbeDeletesAudioAndRejectsLateCompletion()throws Exception{
+        org.robolectric.shadows.ShadowTextToSpeech.addVoice(new android.speech.tts.Voice("english",java.util.Locale.US,300,300,false,java.util.Collections.emptySet()));
+        java.util.List<VoiceSetup.Result> results=new java.util.ArrayList<>();VoiceSetup.AndroidSpeech probe=startProbe(results);
+        try{
+            File audio=probe.audioFile;String id=probe.utterance;android.speech.tts.UtteranceProgressListener listener=Shadows.shadowOf(probe.probe).getUtteranceProgressListener();
+            probe.close();listener.onDone(id);Shadows.shadowOf(Looper.getMainLooper()).idle();
+            assertTrue(results.isEmpty());assertFalse(audio.exists());
+        }finally{probe.close();System.clearProperty("robolectric.enableShadowTtsSynthesisToFileCallbackSuppression");}
     }
 }
