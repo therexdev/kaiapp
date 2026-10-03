@@ -9,12 +9,12 @@ final class VoiceController {
         void listen(Runnable ready,Consumer<String> partial,Consumer<String> result,Runnable timeout,Consumer<String> error);
         void finish();void stop();void close();
     }
-    interface Speaker {void say(String text,Runnable done,Consumer<String> error);void stop();void close();}
+    interface Speaker {void say(String text,Runnable done,Consumer<String> error);void stop();void close();default void onAudible(Consumer<Boolean> listener){}}
     interface Host {boolean allowed();void transcript(String text,boolean automatic);void changed();void error(String text);}
     final Input input;final Speaker speaker;final Host host;
-    boolean session,listening,preparing,waiting,speaking;String status="";int epoch,consumed;boolean replyFinished;
+    boolean session,listening,preparing,waiting,speaking,audible;String status="";int epoch,consumed;boolean replyFinished;
     private final Deque<String> queue=new ArrayDeque<>();
-    VoiceController(Input input,Speaker speaker,Host host){this.input=input;this.speaker=speaker;this.host=host;}
+    VoiceController(Input input,Speaker speaker,Host host){this.input=input;this.speaker=speaker;this.host=host;speaker.onAudible(value->{audible=value&&speaking;if(speaking)status=audible?"KAI is speaking · microphone paused":"Preparing KAI's voice · microphone paused";host.changed();});}
     boolean active(){return session||listening||preparing||waiting||speaking;}
     void start(boolean automatic){stop();session=automatic;listen();}
     private void listen(){
@@ -43,7 +43,7 @@ final class VoiceController {
         if(queue.isEmpty()){
             if(replyFinished){waiting=false;if(session)listen();else{status="";host.changed();}}return;
         }
-        String next=queue.removeFirst();speaking=true;waiting=true;status="KAI is speaking · microphone paused";host.changed();int token=epoch;
+        String next=queue.removeFirst();speaking=true;waiting=true;status="Preparing KAI's voice · microphone paused";host.changed();int token=epoch;
         speaker.say(next,()->{if(!valid(token))return;speaking=false;pump();host.changed();},message->{if(valid(token))fail(message);});
     }
     void fail(String message){stop();host.error(message);}

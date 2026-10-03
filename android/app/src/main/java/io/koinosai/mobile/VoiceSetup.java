@@ -138,12 +138,12 @@ final class VoiceSetup {
     final Activity activity; final KaiApp app; final boolean replies; final Runnable continuation;
     final Speech speech; final String owner;
     AlertDialog dialog; LinearLayout content;
-    TextView downloadStatus;ProgressBar packProgress;boolean primaryShown;
+    TextView downloadStatus,pocketStatus;ProgressBar packProgress,pocketProgress;boolean primaryShown;
     Result result=new Result(State.CHECKING,"");
     boolean foreground=true, disposed, mobileData, previewing, waitingPermission, external;
     int epoch; String note="", rendered="";
     VoiceSetup(Activity activity,KaiApp app,boolean replies,Runnable continuation) {
-        this(activity,app,replies,continuation,new AndroidSpeech(app));
+        this(activity,app,replies,continuation,new KaiSpeechSetup(app));
     }
     VoiceSetup(Activity activity,KaiApp app,boolean replies,Runnable continuation,Speech speech) {
         this.activity=activity;this.app=app;this.replies=replies;this.continuation=continuation;this.speech=speech;
@@ -160,10 +160,10 @@ final class VoiceSetup {
     }
     int dp(int size) { return Math.round(size*activity.getResources().getDisplayMetrics().density); }
     boolean microphone() { return activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED; }
-    boolean allReady() { return app.voicePack.ready()&&microphone()&&(!replies||result.state==State.READY); }
+    boolean allReady() { return app.voicePack.ready()&&microphone()&&(!replies||result.state==State.READY&&(!PocketPack.ENGINE.equals(result.engine)||app.pocketPack.ready())); }
     void checkSpeech() {
         if(disposed||!foreground)return;
-        int ticket=++epoch;result=new Result(replies?State.CHECKING:State.READY,result.engine);rendered="";
+        int ticket=++epoch;result=new Result(replies?State.CHECKING:State.READY,PocketPack.selected(app)?PocketPack.ENGINE:OfflineSpeech.requestedEngine(app));rendered="";
         if(!replies){refresh();return;}
         speech.check(value->{if(!disposed&&foreground&&ticket==epoch){result=value;refresh();}});
         refresh();
@@ -174,7 +174,7 @@ final class VoiceSetup {
         foreground=true;external=false;
         String installing=app.prefs.getString("voice.installEngine","");
         if(!installing.isEmpty()){
-            if(OfflineSpeech.engines(app).containsKey(installing))app.prefs.edit().putString("voice.engine",installing).apply();
+            if(OfflineSpeech.engines(app).containsKey(installing))app.prefs.edit().putString("voice.provider","android").putString("voice.engine",installing).apply();
             app.prefs.edit().remove("voice.installEngine").apply();
         }
         // Permission results update only microphone readiness; they cannot validate a voice installer.
@@ -188,28 +188,33 @@ final class VoiceSetup {
     void refresh() {
         if(disposed||!foreground||dialog==null)return;
         if(!owner.equals(app.account.owner())){close();return;}
+        boolean pocket=PocketPack.ENGINE.equals(result.engine);
+        if(replies&&pocket&&result.state==State.READY&&!app.pocketPack.ready())result=new Result(State.MISSING_VOICE,PocketPack.ENGINE);
+        if(replies&&pocket&&result.state==State.MISSING_VOICE&&app.pocketPack.ready()&&!app.pocketPack.active){checkSpeech();return;}
         if(allReady()&&continuation!=null&&!previewing&&!waitingPermission){
             close();continuation.run();return;
         }
         boolean downloading=app.voicePack.downloadId!=-1||app.voicePack.installing;
         if(downloadStatus!=null)downloadStatus.setText(app.voicePack.status.isEmpty()?"Preparing voice input…":app.voicePack.status);
         if(packProgress!=null){packProgress.setIndeterminate(app.voicePack.installing);packProgress.setProgress((int)Math.min(100,app.voicePack.downloaded*100/VoicePack.BYTES));}
+        if(pocketStatus!=null)pocketStatus.setText(app.pocketPack.status);
+        if(pocketProgress!=null){pocketProgress.setIndeterminate(app.pocketPack.verifying);pocketProgress.setProgress((int)Math.min(100,app.pocketPack.downloaded*100/PocketPack.BYTES));}
         String packState=downloading?(app.voicePack.status.contains("paused")?"paused":"downloading"):app.voicePack.status;
-        String key=app.voicePack.ready()+"|"+packState+"|"+app.voicePack.downloadId+"|"+app.voicePack.installing+"|"+app.networkAllowed()+"|"+result.state+"|"+result.engine+"|"+result.detail+"|"+microphone()+"|"+app.prefs.getBoolean("voice.micAsked",false)+"|"+note+"|"+previewing;
+        String key=app.voicePack.ready()+"|"+packState+"|"+app.voicePack.downloadId+"|"+app.voicePack.installing+"|"+app.networkAllowed()+"|"+result.state+"|"+result.engine+"|"+result.detail+"|"+microphone()+"|"+app.prefs.getBoolean("voice.micAsked",false)+"|"+note+"|"+previewing+"|"+app.pocketPack.active+"|"+app.pocketPack.verifying+"|"+(app.pocketPack.active?app.pocketPack.status.contains("paused"):app.pocketPack.status);
         if(key.equals(rendered))return;rendered=key;
-        content.removeAllViews();downloadStatus=null;packProgress=null;primaryShown=false;
+        content.removeAllViews();downloadStatus=null;packProgress=null;pocketStatus=null;pocketProgress=null;primaryShown=false;
         dialog.getButton(DialogInterface.BUTTON_NEGATIVE).setText(allReady()?"Close":"Not now");
         label("A quick setup, then you can talk. KAI checks each step for you.",15,false);
         label((app.voicePack.ready()?"✓":"1")+"  Hear you",17,true);
         label(app.voicePack.ready()?"English voice input is ready and works offline.":"KAI needs a 41 MB English listening pack. It turns your speech into text on this device.",14,false);
         if(replies){
             label((result.state==State.READY?"✓":"2")+"  Talk back",17,true);
-            label(result.state==State.READY?"An English speaking voice is ready offline.":
+            label(pocket?(result.state==State.READY?"KAI's desktop Azelma voice is ready offline.":result.state==State.CHECKING?"Warming up Azelma and generating a short test. The first check can take a moment…":result.state==State.ERROR?"Azelma could not finish its speech test. Tap Check again to retry.":"Get KAI's desktop voice with one 199 MB download. No Android voice settings needed."):result.state==State.READY?"An English speaking voice is ready offline.":
                 result.state==State.CHECKING?"Testing your Android speaking voice…":
                 result.state==State.MISSING_ENGINE?"Install an Android speech engine so KAI can answer aloud.":
                 result.state==State.ERROR?"This engine could not generate speech for KAI. Try another installed engine below.":
                 "KAI could not activate an offline English voice in this engine. It may already be installed.",14,false);
-            if(!result.engine.isEmpty())label("Engine: "+OfflineSpeech.engines(app).getOrDefault(result.engine,result.engine),13,false);
+            if(!pocket&&!result.engine.isEmpty())label("Engine: "+OfflineSpeech.engines(app).getOrDefault(result.engine,result.engine),13,false);
         }
         label((microphone()?"✓":replies?"3":"2")+"  Microphone",17,true);
         label(microphone()?"Permission is ready. Listening begins only after you start.":"Allow microphone access when Android asks. KAI listens only during a visible voice session.",14,false);
@@ -234,7 +239,21 @@ final class VoiceSetup {
                 button(app.networkAllowed()?"Download voice input · 41 MB":"Go online & download · 41 MB",this::download);
             }
         }else if(replies&&result.state!=State.READY){
-            if(result.state!=State.CHECKING){
+            if(pocket){
+                if(app.pocketPack.active){
+                    pocketStatus=label(app.pocketPack.status,14,true);pocketProgress=new ProgressBar(activity,null,android.R.attr.progressBarStyleHorizontal);pocketProgress.setMax(100);pocketProgress.setIndeterminate(app.pocketPack.verifying);pocketProgress.setProgress((int)Math.min(100,app.pocketPack.downloaded*100/PocketPack.BYTES));content.addView(pocketProgress);
+                    button("Cancel voice download",()->{app.pocketPack.cancel();refresh();});
+                    if(app.pocketPack.status.contains("paused"))button("Download using mobile data",()->{app.pocketPack.cancel();mobileData=true;downloadPocket();});
+                }else if(!app.pocketPack.ready()){
+                    if(!app.pocketPack.status.isEmpty())label(app.pocketPack.status,14,true);
+                    label("Allow 450 MB of free space during setup. Afterward, KAI speaks offline using the same Azelma voice and character effects as desktop.",13,false);
+                    CheckBox metered=new CheckBox(activity);metered.setText("Allow mobile data for this 199 MB download");metered.setChecked(mobileData);metered.setOnCheckedChangeListener((v,on)->mobileData=on);content.addView(metered);
+                    button(app.networkAllowed()?"Download KAI's voice · 199 MB":"Go online & get KAI's voice",this::downloadPocket);
+                    button("Choose speaking voice",this::chooseEngine);
+                }else if(result.state==State.ERROR){
+                    label(result.detail,13,false);button("Check again",()->{app.pocketChecked=false;checkSpeech();});button("Choose speaking voice",this::chooseEngine);button("Voice details",this::showDetails);
+                }
+            }else if(result.state!=State.CHECKING){
                 if(result.state==State.MISSING_ENGINE){
                     label("Install Speech Recognition & Synthesis from Google, then return. KAI will use it without changing your phone's preferred engine.",14,false);
                     button("Install speech engine",this::openEngineStore);
@@ -263,7 +282,7 @@ final class VoiceSetup {
             });
         }else{
             label("You're all set. Return to KAI and tap Talk to KAI.",15,true);
-            if(replies){button(previewing?"Stop voice test":"Test KAI's voice",this::preview);button("Choose speech engine",this::chooseEngine);}
+            if(replies){button(previewing?"Stop voice test":"Test KAI's voice",this::preview);button(pocket?"Choose speaking voice":"Choose speech engine",this::chooseEngine);}
         }
         // A voice can be tested before the microphone has been granted.
         if(replies&&result.state==State.READY&&!microphone())button(previewing?"Stop voice test":"Test KAI's voice",this::preview);
@@ -274,6 +293,7 @@ final class VoiceSetup {
         if(app.voicePack.downloadId==-1&&!app.voicePack.ready()&&!app.error.isEmpty()){note=app.error;app.clearError();}
         refresh();
     }
+    void downloadPocket(){note="";if(!app.networkAllowed())app.setNetworkEnabled(true);app.pocketPack.download(mobileData);refresh();}
     void preview() {
         if(previewing){previewing=false;speech.close();checkSpeech();return;}
         previewing=true;note="Playing a short voice test. Turn up media volume if needed.";refresh();int ticket=epoch;
@@ -313,16 +333,18 @@ final class VoiceSetup {
     }
     void useEngine(String engine){
         if(disposed||!foreground)return;
-        app.prefs.edit().putString("voice.engine",engine).apply();note="Checking this engine for KAI. Your phone's preferred engine is unchanged.";checkSpeech();
+        if(PocketPack.ENGINE.equals(engine))app.prefs.edit().putString("voice.provider","pocket").apply();
+        else app.prefs.edit().putString("voice.provider","android").putString("voice.engine",engine).apply();
+        note=PocketPack.ENGINE.equals(engine)?"KAI will use his desktop Azelma voice.":"Checking this engine for KAI. Your phone's preferred engine is unchanged.";checkSpeech();
     }
     void chooseEngine(){
         java.util.Map<String,String> installed=OfflineSpeech.engines(app);
-        if(installed.isEmpty()){openEngineStore();return;}
         epoch++;speech.close();
         java.util.List<String> keys=new java.util.ArrayList<>(),labels=new java.util.ArrayList<>();
+        keys.add(PocketPack.ENGINE);labels.add("KAI's desktop voice · Azelma");
         keys.add("");labels.add("Use phone's preferred engine");
         for(java.util.Map.Entry<String,String> engine:installed.entrySet()){keys.add(engine.getKey());labels.add(engine.getValue());}
-        int chosen=keys.indexOf(OfflineSpeech.requestedEngine(app));
+        int chosen=keys.indexOf(PocketPack.selected(app)?PocketPack.ENGINE:OfflineSpeech.requestedEngine(app));
         new AlertDialog.Builder(activity).setTitle("Speaking voice for KAI")
             .setSingleChoiceItems(labels.toArray(new String[0]),Math.max(0,chosen),(d,index)->{d.dismiss();useEngine(keys.get(index));})
             .setNegativeButton("Cancel",(d,w)->checkSpeech()).setOnCancelListener(d->checkSpeech()).show();

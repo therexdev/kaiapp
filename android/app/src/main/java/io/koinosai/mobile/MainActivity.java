@@ -65,7 +65,7 @@ public final class MainActivity extends Activity {
     @Override protected void onResume(){super.onResume();foreground=true;if(companionView!=null)companionView.active(true);if(voiceSetup!=null&&!voiceSetup.disposed)voiceSetup.resume();else if(restoreVoiceSetup){restoreVoiceSetup=false;openVoiceSetup(pendingVoiceChat,null);}}
     @Override protected void onDestroy(){if(voiceSetup!=null)voiceSetup.close();if(voice!=null){voice.close();voice=null;}app.main.removeCallbacks(voiceRender);super.onDestroy();}
     @Override protected void onStop() {
-        app.listener=null;app.account.setForeground(false);if(voice!=null){voice.close();voice=null;}app.main.removeCallbacks(voiceRender);
+        app.listener=null;app.account.setForeground(false);if(voice!=null){voice.close();voice=null;}app.pocketClient.close();app.main.removeCallbacks(voiceRender);
         if(!isChangingConfigurations() && app.generating) app.stop();
         super.onStop();
     }
@@ -160,7 +160,7 @@ public final class MainActivity extends Activity {
         if(tab.equals("Chat")&&!app.account.signedIn())return "gate"+auth+app.account.restoring;
 
         if(tab.equals("Chat"))return tab+auth+app.current.id+app.current.messages.size()+app.error+app.busy+app.generating+app.searching+(app.active==null?"":app.active.id);
-        if(tab.equals("Settings"))return tab+app.networkAllowed()+app.voicePack.status+app.voicePack.ready();
+        if(tab.equals("Settings"))return tab+app.networkAllowed()+app.voicePack.status+app.voicePack.ready()+PocketPack.selected(app)+app.pocketPack.status+app.pocketPack.ready();
         StringBuilder k=new StringBuilder(tab+auth).append(app.busy).append(app.importing).append(app.transferStatus).append(app.active==null?"":app.active.id);
         for(KaiApp.Model m:app.models)k.append(m.id).append(m.installed).append(m.downloadId).append(m.downloadStatus).append(m.issue).append(app.verifying.contains(m.id));
         return k.toString();
@@ -299,7 +299,7 @@ public final class MainActivity extends Activity {
     }
     private void updateCompanion(){
         if(companionView==null)return;
-        String state=app.agent.review!=null?"review":voice!=null&&voice.speaking?"speaking":voice!=null&&voice.listening?"listening":app.busy?"thinking":"idle";companionView.state(state);companionView.active(foreground);
+        String state=app.agent.review!=null?"review":voice!=null&&voice.audible?"speaking":voice!=null&&voice.listening?"listening":app.busy||voice!=null&&voice.speaking?"thinking":"idle";companionView.state(state);companionView.active(foreground);
         if(companionStatus!=null)companionStatus.setText(app.agent.review!=null?"An action needs your review":voice!=null&&voice.active()?voice.status:app.agent.running?app.agent.status:app.busy?app.status:"Ready when you are");
         if(talkButton!=null)talkButton.setText(app.busy||voice!=null&&voice.active()?"Stop":"Talk to "+(agentVoiceMode?"your agent":"KAI"));
         if(companionReply!=null){String transcript="Tap Talk to KAI to start. Your microphone is used only during a visible voice session.";
@@ -530,7 +530,7 @@ public final class MainActivity extends Activity {
     private boolean isVoiceScreen(){return tab.equals("Chat")||tab.equals("KAI")||tab.equals("Agent");}
     private boolean voiceUsesAgent(){return tab.equals("Agent")||tab.equals("KAI")&&agentVoiceMode;}
     private String voiceScope(){return app.account.owner()+"|"+app.current.id+"|"+app.route+"|"+app.grantId+"|"+app.networkModel+"|"+app.prefs.getBoolean("webSearch",false)+"|"+app.autoWeb()+"|"+app.prefs.getBoolean("webTopicConsent",false)+"|"+voiceUsesAgent();}
-    private void initVoice(){if(voice!=null)return;voice=new VoiceController(new AndroidVoice.Input(app),new AndroidVoice.Speaker(app),new VoiceController.Host(){
+    private void initVoice(){if(voice!=null)return;voice=new VoiceController(new AndroidVoice.Input(app),new KaiSpeaker(app),new VoiceController.Host(){
         public boolean allowed(){return foreground&&isVoiceScreen()&&app.account.signedIn();}
         public void changed(){app.main.removeCallbacks(voiceRender);app.main.post(voiceRender);}
         public void error(String text){voiceRecovery(text);}
@@ -627,9 +627,19 @@ public final class MainActivity extends Activity {
         Switch read=new Switch(this);read.setText("Read replies aloud");read.setTextColor(NAVY);read.setTextSize(15);read.setMinHeight(dp(48));read.setChecked(app.prefs.getBoolean("readReplies",false));read.setOnCheckedChangeListener((b,value)->{if(!value)endVoice(false);app.prefs.edit().putBoolean("readReplies",value).apply();});add(c,read);
         add(c,text("Voice chat always speaks its replies. Audio stays on this device. Voice setup checks listening, spoken replies and microphone access, with install buttons for anything missing.",13,MUTED,false));space(c,10);
         add(c,button("Set up & test voice",true,()->openVoiceSetup(true,null)));space(c,10);
-        spinner(c,new String[]{"KAI · bright","Natural","Lower"},new int[]{115,100,85},Math.round(app.prefs.getFloat("voicePitch",1.15f)*100),v->app.prefs.edit().putFloat("voicePitch",v/100f).apply());space(c,10);
-        add(c,text("Speaking pace",13,MUTED,false));spinner(c,new String[]{"Relaxed","Balanced","Quick"},new int[]{80,96,115},Math.round(app.prefs.getFloat("voiceRate",.96f)*100),v->app.prefs.edit().putFloat("voiceRate",v/100f).apply());space(c,10);
-        add(c,button("Android voice settings",false,()->{openVoiceSetup(true,null);if(voiceSetup!=null&&!voiceSetup.disposed)voiceSetup.openVoiceSettings();}));
+        add(c,text(PocketPack.selected(app)?"Azelma · KAI's desktop voice":"Android speaking voice",16,NAVY,true));
+        add(c,text(PocketPack.selected(app)?app.pocketPack.ready()?"Installed · speaks offline":"One-time 199 MB download, guided inside KAI":"Uses your selected offline Android speech engine",13,MUTED,false));space(c,10);
+        add(c,button("Choose speaking voice",false,()->{openVoiceSetup(true,null);if(voiceSetup!=null&&!voiceSetup.disposed)voiceSetup.chooseEngine();}));space(c,10);
+        if(PocketPack.selected(app)){
+            add(c,text("KAI's character",13,MUTED,false));String tone=PocketSpeaker.tone(app);
+            spinner(c,new String[]{"Cute KAI · desktop default","Natural Azelma","Classic KAI · deeper / robotic"},new int[]{0,1,2},tone.equals("cute")?0:tone.equals("natural")?1:2,v->{endVoice(false);app.prefs.edit().putString("pocket.tone",v==0?"cute":v==1?"natural":"kai").apply();});space(c,10);
+            add(c,text("Cute KAI pitch",13,MUTED,false));spinner(c,new String[]{"Gentle","Desktop default","Extra squeaky"},new int[]{5,9,12},PocketSpeaker.pitch(app),v->{endVoice(false);app.prefs.edit().putInt("pocket.pitch",v).apply();});
+            space(c,8);add(c,text("KAI prepares a complete sentence before playing it. The first reply can take longer while the voice warms up.",13,MUTED,false));
+        }else{
+            spinner(c,new String[]{"KAI · bright","Natural","Lower"},new int[]{115,100,85},Math.round(app.prefs.getFloat("voicePitch",1.15f)*100),v->app.prefs.edit().putFloat("voicePitch",v/100f).apply());space(c,10);
+            add(c,text("Speaking pace",13,MUTED,false));spinner(c,new String[]{"Relaxed","Balanced","Quick"},new int[]{80,96,115},Math.round(app.prefs.getFloat("voiceRate",.96f)*100),v->app.prefs.edit().putFloat("voiceRate",v/100f).apply());space(c,10);
+            add(c,button("Android voice settings",false,()->{openVoiceSetup(true,null);if(voiceSetup!=null&&!voiceSetup.disposed)voiceSetup.openVoiceSettings();}));
+        }
     }
     private void ensureOnline(Runnable action){
         if(app.networkAllowed()){action.run();return;}

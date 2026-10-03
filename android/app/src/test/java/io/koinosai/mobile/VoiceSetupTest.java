@@ -149,6 +149,29 @@ public class VoiceSetupTest {
         assertNotNull(find("Choose speech engine"));assertNotNull(find("Install Google speech instead"));assertNotNull(find("Voice details"));
         assertEquals(0,continued);
     }
+    @Test public void azelmaSetupOffersInAppDownloadWithoutAndroidSettings()throws Exception{
+        pack();mic();show(true,true);speech.result.accept(new VoiceSetup.Result(VoiceSetup.State.MISSING_VOICE,PocketPack.ENGINE));
+        assertNotNull(find("Go online & get KAI's voice"));assertNull(find("Install English voice"));assertNull(find("Android voice settings"));assertFalse(app.pocketPack.active);
+        click("Go online & get KAI's voice");assertTrue(app.networkAllowed());assertTrue(app.pocketPack.active);assertTrue(app.pocketPack.downloadId!=-1);assertEquals(0,continued);
+        click("Cancel voice download");assertFalse(app.pocketPack.active);assertEquals(-1,app.pocketPack.downloadId);assertEquals(0,continued);
+    }
+    @Test public void missingAzelmaNeverBecomesReadyFromAnInstallerReturn()throws Exception{
+        pack();mic();show(true,true);speech.result.accept(new VoiceSetup.Result(VoiceSetup.State.MISSING_VOICE,PocketPack.ENGINE));setup.pause();setup.resume();
+        speech.result.accept(new VoiceSetup.Result(VoiceSetup.State.READY,PocketPack.ENGINE));assertEquals(0,continued);assertTrue(setup.dialog.isShowing());assertNotNull(find("Go online & get KAI's voice"));
+    }
+    @Test public void selectingAzelmaPreservesAndroidPreference()throws Exception{
+        pack();mic();app.prefs.edit().putString("voice.provider","android").putString("voice.engine","com.samsung.SMT").apply();
+        show(true,false);setup.useEngine(PocketPack.ENGINE);assertTrue(PocketPack.selected(app));assertEquals("com.samsung.SMT",OfflineSpeech.requestedEngine(app));
+        setup.useEngine("com.samsung.SMT");assertFalse(PocketPack.selected(app));
+    }
+    @Test public void localOnlyCancelsAzelmaDownloadAndKeepsVoiceChoice()throws Exception{
+        app.setNetworkEnabled(true);app.pocketPack.download(false);assertTrue(app.pocketPack.active);app.setNetworkEnabled(false);
+        assertFalse(app.pocketPack.active);assertEquals(-1,app.pocketPack.downloadId);assertTrue(PocketPack.selected(app));
+    }
+    @Test public void realAzelmaSetupDoesNotOpenSystemEngineWhenPackIsMissing(){
+        KaiSpeechSetup adapter=new KaiSpeechSetup(app);java.util.List<VoiceSetup.Result> values=new java.util.ArrayList<>();adapter.check(values::add);
+        assertEquals(1,values.size());assertEquals(VoiceSetup.State.MISSING_VOICE,values.get(0).state);assertEquals(PocketPack.ENGINE,values.get(0).engine);assertNull(adapter.android.probe);assertEquals(0,app.pocketClient.active);adapter.close();
+    }
     void wave(File file)throws Exception{
         java.nio.ByteBuffer wav=java.nio.ByteBuffer.allocate(100).order(java.nio.ByteOrder.LITTLE_ENDIAN);
         wav.put("RIFF".getBytes(java.nio.charset.StandardCharsets.US_ASCII)).putInt(92).put("WAVEfmt ".getBytes(java.nio.charset.StandardCharsets.US_ASCII));

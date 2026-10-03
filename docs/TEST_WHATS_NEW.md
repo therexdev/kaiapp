@@ -1,5 +1,7 @@
 # Android companion preview
 
+Android 0.5.0 adds KAI’s desktop Azelma/Pocket voice, with the same Cute, Natural and deeper Classic character processing. The 199 MB voice pack downloads inside KAI with progress, verification and retry; Samsung voice settings are no longer required for the default voice. Android voices remain optional. Playback prepares complete sentences, visibly warms up the first time, and stops when the app leaves the foreground. This is a separate Android preview; the desktop installer is unchanged.
+
 Android 0.4.2 fixes voice-selection compatibility cases that could reject installed English voices. It tests generated speech, tries alternate offline voices, and adds a KAI-only engine selector plus a direct Google speech install/use option when an engine cannot speak. The desktop installer is unchanged.
 
 Voice setup now checks listening, spoken replies and microphone access before a conversation. Missing requirements get direct install/settings buttons, progress and retry controls. Returning from Android triggers a fresh check. Settings includes a short voice test; microphone permission denial has a direct App settings route. Android preview version 0.4.1 updates the existing app in place when signed with the retained owner key.

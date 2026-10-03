@@ -67,4 +67,13 @@ public class VisualPreviewTest {
         File folder=new File("build/reports/screenshots");folder.mkdirs();
         try(OutputStream out=new FileOutputStream(new File(folder,name+".png"))){assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG,100,out));}bitmap.recycle();
     }
+    @Test public void azelmaVoiceSetupScreens()throws Exception{
+        app.account.token="preview-fixture";app.account.validUntil=System.currentTimeMillis()+60000;app.account.account=new JSONObject().put("id","azelma-fixture");app.accountChanged();
+        File dir=app.voicePack.directory();new File(dir,"am").mkdirs();new File(dir,".verified").createNewFile();new File(dir,"am/final.mdl").createNewFile();
+        Shadows.shadowOf(app).grantPermissions(android.Manifest.permission.RECORD_AUDIO);
+        VoiceSetupTest.FakeSpeech speech=new VoiceSetupTest.FakeSpeech();VoiceSetup setup=new VoiceSetup(activity,app,true,null,speech);setup.show();
+        speech.result.accept(new VoiceSetup.Result(VoiceSetup.State.MISSING_VOICE,PocketPack.ENGINE));captureDialog(setup,"azelma-setup-download");
+        app.pocketPack.active=true;app.pocketPack.downloaded=PocketPack.BYTES/2;app.pocketPack.status="Downloading KAI's voice · 50% of 199 MB";setup.refresh();captureDialog(setup,"azelma-setup-progress");
+        app.pocketPack.active=false;app.pocketPack.status="";setup.close();tab("Settings");capture("azelma-settings");
+    }
 }

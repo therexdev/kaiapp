@@ -52,6 +52,8 @@ final class AndroidVoice {
         @Override public void close(){if(closed)return;closed=true;stop();worker.execute(()->{if(model!=null){model.close();model=null;}});worker.shutdown();}
     }
     static final class Speaker implements VoiceController.Speaker {
+        Consumer<Boolean> audible=value->{};
+        @Override public void onAudible(Consumer<Boolean> listener){audible=listener;}
         final KaiApp app;final AudioManager audio;TextToSpeech tts;boolean ready,closed;int generation;Runnable pending,done;Consumer<String> failure;String utterance="",engineRequest="";AudioFocusRequest focus;
         Speaker(KaiApp app){this.app=app;audio=(AudioManager)app.getSystemService(Context.AUDIO_SERVICE);}
         @Override public void say(String text,Runnable complete,Consumer<String> error){
@@ -75,8 +77,8 @@ final class AndroidVoice {
             if(tts==null)tts=OfflineSpeech.create(app,status->app.main.post(()->{
                 if(closed)return;if(status!=TextToSpeech.SUCCESS){if(tts!=null)tts.shutdown();tts=null;report("Set up an offline text-to-speech engine in Android voice settings.");return;}
                 ready=true;tts.setOnUtteranceProgressListener(new UtteranceProgressListener(){
-                    public void onStart(String id){}
-                    public void onDone(String id){app.main.post(()->{if(id.equals(utterance)&&!closed){abandon();Runnable callback=done;done=null;if(callback!=null)callback.run();}});}
+                    public void onStart(String id){app.main.post(()->{if(id.equals(utterance)&&!closed)audible.accept(true);});}
+                    public void onDone(String id){app.main.post(()->{if(id.equals(utterance)&&!closed){audible.accept(false);abandon();Runnable callback=done;done=null;if(callback!=null)callback.run();}});}
                     public void onError(String id){app.main.post(()->{if(id.equals(utterance)&&!closed)report("Speech playback stopped. Check Android voice settings.");});}
                 });Runnable run=pending;pending=null;if(run!=null)run.run();
             }));
@@ -88,7 +90,7 @@ final class AndroidVoice {
         }
         void report(String message){Consumer<String> callback=failure;stop();if(callback!=null)callback.accept(message);}
         void abandon(){if(focus!=null){audio.abandonAudioFocusRequest(focus);focus=null;}}
-        @Override public void stop(){generation++;utterance="";done=null;failure=null;pending=null;if(tts!=null)tts.stop();abandon();}
+        @Override public void stop(){generation++;utterance="";done=null;failure=null;pending=null;if(tts!=null)tts.stop();abandon();audible.accept(false);}
         @Override public void close(){closed=true;stop();if(tts!=null){tts.shutdown();tts=null;}}
     }
 }

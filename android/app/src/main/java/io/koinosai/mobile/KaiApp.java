@@ -30,7 +30,7 @@ public final class KaiApp extends Application {
     ConnectionsHub connections;
     AgentRunner agent;
     NetworkApi chatApi=new NetworkApi();
-    WebSearch webApi=new WebSearch();VoicePack voicePack;
+    WebSearch webApi=new WebSearch();VoicePack voicePack;PocketPack pocketPack;PocketClient pocketClient;boolean pocketChecked;
     AtomicBoolean searchStopped=new AtomicBoolean();boolean searching;String retryPrompt="",searchQuestion="",searchQuery="",searchProvider="";
     final ExecutorService network=Executors.newSingleThreadExecutor();
     final AtomicBoolean networkStopped=new AtomicBoolean();
@@ -50,7 +50,7 @@ public final class KaiApp extends Application {
         networkEnabled=enabled;prefs.edit().putBoolean("networkEnabled",enabled).apply();
         if(!enabled){
             if(agent!=null)agent.stop();if(connections!=null)connections.cancel();
-            account.cancelRequests();networkStopped.set(true);chatApi.cancel();searchStopped.set(true);webApi.cancel();if(voicePack!=null)voicePack.cancel();
+            account.cancelRequests();networkStopped.set(true);chatApi.cancel();searchStopped.set(true);webApi.cancel();if(voicePack!=null)voicePack.cancel();if(pocketPack!=null)pocketPack.cancel();
             for(Model m:models)if(m.downloadId!=-1&&!verifying.contains(m.id))cancelDownload(m);
         }
         error="";status=enabled?"Online · "+routeLabel()+" selected":"Offline mode · local models available";changed();
@@ -91,7 +91,7 @@ public final class KaiApp extends Application {
     long generationStarted;
     private long checkpoint;
     private final Runnable downloadPoll = new Runnable() {
-        @Override public void run() { pollDownloads();if(voicePack!=null)voicePack.poll(); main.postDelayed(this, 1200); }
+        @Override public void run() { pollDownloads();if(voicePack!=null)voicePack.poll();if(pocketPack!=null)pocketPack.poll(); main.postDelayed(this, 1200); }
     };
 
     static final class Model {
@@ -134,7 +134,9 @@ public final class KaiApp extends Application {
     }
 
     @Override public void onCreate() {
-        super.onCreate(); prefs=getSharedPreferences("kai",MODE_PRIVATE); downloads=getSystemService(DownloadManager.class);
+        super.onCreate();
+        if((getPackageName()+":kai_voice").equals(Application.getProcessName()))return;
+        prefs=getSharedPreferences("kai",MODE_PRIVATE); downloads=getSystemService(DownloadManager.class);
         restoreRoutingPreferences();
         try (InputStream input=getAssets().open("models.json")) {
             JSONArray a=new JSONArray(new String(ModelFile.readLimited(input,256*1024),StandardCharsets.UTF_8));
@@ -149,7 +151,7 @@ public final class KaiApp extends Application {
                 m.installed=prefs.getBoolean("installed."+m.id,false) && file(m).isFile();
             }
         } catch(Exception e) { error="Could not read the model catalog: "+safe(e); }
-        voicePack=new VoicePack(this);if(!networkAllowed())voicePack.cancel();
+        voicePack=new VoicePack(this);pocketPack=new PocketPack(this);pocketClient=new PocketClient(this,main);if(!networkAllowed()){voicePack.cancel();pocketPack.cancel();}
         account=new AccountState(this);connections=new ConnectionsHub(this);agent=new AgentRunner(this);loadChats(); current=new Conversation();account.restore();
         if(NativeEngine.unavailable!=null) error=NativeEngine.unavailable;
         pollDownloads();
