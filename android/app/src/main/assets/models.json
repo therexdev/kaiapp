@@ -1,0 +1,30 @@
+[
+  {
+    "id": "koinos-fast",
+    "name": "Koinos Fast",
+    "description": "Recommended for Pocket 5. A compact everyday assistant.",
+    "model": "Qwen2.5-1.5B-Instruct",
+    "filename": "Qwen2.5-1.5B-Instruct-Q4_K_M.gguf",
+    "url": "https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf",
+    "sha256": "1adf0b11065d8ad2e8123ea110d1ec956dab4ab038eab665614adba04b6c3370",
+    "sizeBytes": 986048768,
+    "minRamGb": 3,
+    "license": "apache-2.0",
+    "creator": "Qwen team, Alibaba Cloud (quantized by bartowski)",
+    "licenseUrl": "https://www.apache.org/licenses/LICENSE-2.0"
+  },
+  {
+    "id": "koinos-balanced",
+    "name": "Koinos Balanced",
+    "description": "More capable conversations. Uses more memory and battery.",
+    "model": "Llama-3.2-3B-Instruct",
+    "filename": "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+    "url": "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+    "sha256": "6c1a2b41161032677be168d354123594c0e6e67d2b9227c84f296ad037c728ff",
+    "sizeBytes": 2019377696,
+    "minRamGb": 8,
+    "license": "llama3.2",
+    "creator": "Meta (quantized by bartowski)",
+    "licenseUrl": "https://www.llama.com/llama3_2/license/"
+  }
+]

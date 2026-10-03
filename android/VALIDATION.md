@@ -1,0 +1,95 @@
+# Android 0.4.0 Companion Preview — 2026-10-03
+
+- Based on Test commit `723e3b73d70670a5cc98a3bb55539d3d91231eec`, importing the existing Android 0.3.3 app from `e6e0750` before extending it. Desktop runtime code is unchanged.
+- 94 Android tests pass, including 17 new agent/service tests for approved writes, declined/stale approvals, sign-out/offline cancellation, scoped account/project access, uncertain writes without retries, duplicate-action rejection, action/schema allowlists, the eight-step bound and interrupted-task recovery.
+- `:app:testDebugUnitTest :app:lintDebug :app:assembleRelease` passes. Lint has no errors; existing translation/ABI/resource warnings remain. Native animation avoids per-frame shader/path allocation.
+- Native context-budget executable passes, and the model catalog matches the desktop identities.
+- Actual Android layouts rendered with Robolectric native graphics: companion portrait/landscape, conversation/agent states, connected-app fixture, action-review fixture, model/account/settings pages and keyboard/composer layouts. All account/action data in screenshots is synthetic.
+- Release package: `io.koinosai.mobile`, versionCode 9, versionName `0.4.0-companion-preview`, Android 9+, ARM64, non-debuggable. The release is unsigned pending explicit approval to retrieve the retained owner signing key. Do not treat it as installable or as a verified in-place update yet.
+- Read-only live check: `https://koinosai.com/connections/status` returned available=true, protocol=1. The mobile client was checked against the current first-party Connections source. No live account linking, Gmail/Facebook mutations, paid model inference or physical-device microphone/playback test was performed.
+- Agent results use the chosen Local / Network / My node model. Connected data may reach remote inference only after the task/session disclosure. Local model quality and context capacity still affect agent reliability; malformed action output fails visibly without executing a guessed action.
+- Routines are user-started prompts, not background jobs. Actions already submitted may finish after Stop; no automatic retries are issued. Checkpoint recovery prevents blind resubmission after a killed process.
+- This does not port desktop-only Brain state, personal keys, Pocket/Azelma synthesis, computer control or wallet signing. Managed connection identities are shared through the existing account service; mobile operation grants are deliberately separate.
+
+# Android 0.3.3 follow-up context and selective search — 2026-09-22
+
+- Passed `:app:testDebugUnitTest :app:lintDebug :app:assembleRelease`: **77 tests**, zero failures or lint errors. Ten new tests cover contextual and unrelated-topic queries, selective/forced/disabled search, explicit no-search requests, late questions in long prompts, topic-sharing consent, exclusion of assistant text from search, compact evidence, retained model history, Auto/Always dispatch and the single stop control.
+- Reproduced the reported Pokémon follow-up as a deterministic query/context regression: the lookup is `pokemon first game chronologically`; model messages retain the Pokémon question and answer, include current evidence, and exclude the old search payload. This validates input preparation, not a guaranteed answer from a small model.
+- Passed the native C++ context-budget executable: recent exchange retained, long replies excerpted, oldest turns removed first, insufficient space rejected instead of discarding the preceding question, and UTF-8 excerpt boundaries. The same routine runs with the real tokenizer in the Android engine. CI runs this standalone test in addition to Android tests.
+- Removed thinking/writing/playback status and the duplicate voice stop icon from the composer. Reviewed the actual Android thinking render: one stop action remains beside the globe, and thinking stays in the answer card. Prior portrait, landscape, keyboard, rotation and voice lifecycle checks still pass.
+- Auto is a local English heuristic, with Always and Off overrides. Search failures and Offline remain explicit; no paid planner call or new remote endpoint was added. Prior-topic keywords require smart-search consent. Account credentials and full transcripts are not included in provider queries. Source details preserve the compact snippets supplied for the answer.
+- Verified the non-debuggable ARM64 package `io.koinosai.mobile`, version code **8** / **0.3.3-preview**, retained owner certificate, APK 16 KB ZIP alignment and all native ELF load-segment alignments. Delivered APK: **17,499,020 bytes**, SHA-256 `8c8380710c0d101b8ab66b9e7add13551d4d9cec08496cfe971250dc9ff9144a`.
+- Tests use controlled provider/model payloads and Robolectric native graphics. No live account or paid inference was used. The revised native library compiled for ARM64; on-device inference quality, latency and microphone/keyboard behavior still require the user's phone or Pocket 5. Small-model accuracy and search relevance are not guaranteed.
+
+# Android 0.3.2 compact chat composer — 2026-09-22
+
+- Passed `:app:testDebugUnitTest :app:lintDebug :app:assembleRelease`: **67 tests**, no failures or lint errors. New coverage checks the inline voice picker, finish/stop controls, composer bounds above navigation and keyboard, a short landscape window with download/error notices, older fitted windows, and draft retention across rotation.
+- Reviewed actual Android View renders for 411 × 891 portrait and 800 × 360 landscape, plus simulated keyboard insets. Every composer icon keeps a 48 dp target. Chats is in the top bar, routine ready/status rows are removed, and conversation metadata scrolls with messages. Chat errors scroll with the conversation to protect input space.
+- API 35 tests apply system-bar and IME insets to the edge-to-edge root; the API 28 fixture measures the older resized-window path. Navigation hides while the chat keyboard is visible and returns after it closes. Short windows cap visible draft lines; the text is retained. Android keyboards are requested not to enter full-screen extraction mode.
+- Existing voice, search, account, route, model, cancellation and source-disclosure regressions pass. Download progress stays inside the bubble; a short completion notice replaces the persistent voice-ready row. Original mascot assets, launcher artwork and native inference code are unchanged.
+- Verified the non-debuggable ARM64 package `io.koinosai.mobile`, version code **7** / **0.3.2-preview**, retained owner certificate and 16 KB APK ZIP alignment. Delivered APK: **17,466,252 bytes**, SHA-256 `ff7ac4b0ef6b61dde34b3550a9fe23d7227d88a5bee8b1efe3baf15574526219`. It updates the existing owner-signed KAI installation without a data migration.
+- These are Robolectric native renders and simulated keyboard/window states, not physical-device tests. Installation, real keyboard behavior and microphone/TTS use on the Pocket 5 or phone still need on-device confirmation. No live account or paid generation was used.
+
+# Android 0.3.1 search activity and local voice setup — 2026-09-22
+
+- Passed `:app:testDebugUnitTest :app:lintDebug :app:assembleRelease`: **62 tests**, no failures or lint errors. The six new regressions cover real provider progress ordering, source disclosure during/after generation, sending a dictated draft with an unloaded model, local voice with Web selected while offline, voice-download visibility, and exactly-once model-load continuation cancelled by backgrounding/navigation/scope changes.
+- Reproduced the screenshot state: Local selected, no loaded AI model, recognized text in the composer, and a disabled Send button. Send now remains actionable and opens Load & send for installed models. Voice chat uses the same local setup flow. No model route changes or online requests are required to load an already-installed model. Cancelling keeps the draft.
+- Web search presents the pending question and actual provider during retrieval, then a thinking/writing indicator with the source domains supplied to the model. It does not claim to visit full pages. Sources are collapsed until tapped after generation; the expanded view includes the exact snippets, links, query, provider and retrieval time. Stopped/failed searches restore the question.
+- Reviewed actual Android View renders for search, thinking, collapsed/expanded sources, visible voice download progress, and a dictated draft with Send available. Existing portrait and handheld-landscape renders also pass. All fixture data is synthetic; no live account or paid generation was used.
+- Verified non-debuggable ARM64 package `io.koinosai.mobile`, version code **6** / **0.3.1-preview**, retained owner certificate and 16 KB APK ZIP alignment. Native libraries, voice model and search providers are unchanged from 0.3.0. Delivered APK: **17,464,072 bytes**, SHA-256 `7207e502b2a3aca9f7c71031a4301b2dd85d7c1888e07596b58485ce5a82e4a3`.
+- The user's screenshots confirm on-device transcription and local web-assisted generation in 0.3.0. This revision has not been installed on a physical Pocket 5 here; end-to-end microphone/TTS quality and native model-load-to-send behavior still need device testing. Source, lifecycle and UI regressions use controlled test fixtures.
+
+# Android 0.3.0 voice and web preview — 2026-09-22
+
+- Passed `:app:testDebugUnitTest :app:lintDebug :app:assembleRelease`: **56 tests**, no failures or lint errors. Coverage includes 19 account/route/search contract tests, seven startup/lifecycle tests, six model-file tests, four network-stream tests, eight voice-controller tests, five search tests, four speech-pack tests, one Android offline-voice selection test and two actual-layout rendering tests.
+- Voice tests verify dictation versus automatic submission, microphone pause during speech, streamed sentence ordering, follow-up only after playback, foreground/tab loss, Stop and stale callbacks, timeout, missing offline TTS voice, and offline dictation with Web selected. The real Android microphone and TTS device services still require physical-device validation.
+- Downloaded the official 41,205,931-byte Vosk English pack and installed it through the same Java integrity/extraction code. SHA-256 matched `30f26242c4eb449f948e42cb302dd7a686cb29a3423a8367f99ff41780942498`; required model/config files and the verification marker were produced. Negative tests cover incorrect size, a same-size incorrect hash, and ZIP path traversal.
+- Ran the actual Java HTTPS search transport against public providers. DuckDuckGo returned an automated-client challenge; Bing returned a four-source Retroid search result. Other live Bing queries returned unrelated results, which motivated a conservative query-term relevance filter and explicit failure handling. The stored unrelated response is rejected by the updated parser. This is a keyless preview search integration: provider availability, relevance, freshness and full-page accuracy are not guaranteed. No CAPTCHA bypass, user login, account credentials or paid requests were used.
+- Web tests verify fixed bounded requests, fallback, Stop without a later generation, Offline blocking, query-only disclosure, unsafe-link filtering, non-fetching XML parsing, unrelated-result rejection, persisted source metadata and model context that treats snippets as untrusted evidence. Search does not execute model-proposed actions or fetch arbitrary result pages.
+- Reviewed native Android portrait layouts for chat controls, source cards and voice settings, plus existing handheld landscape layouts. Source/account screenshot data is explicitly synthetic. These are Robolectric native graphics renders, not installed-device screenshots.
+- Verified non-debuggable ARM64 package `io.koinosai.mobile`, version code **5**, version **0.3.0-preview**, 16 KB APK ZIP alignment and ELF segment alignment for llama.cpp, Vosk and JNA. Signing certificate remains `c956b88ac520cab5b5ea93fd29c18ee032522e512e6a5a1378fe66a40f0c394b`, permitting an in-place update over owner-signed 0.2.x without clearing app data.
+- Delivered APK: **17,447,688 bytes**, SHA-256 `7c10285dae370b65bb836a0c1bc22729ed6646763c9aae3f4895e20c56f7e3eb`.
+- Remaining device checks: microphone permission and headset recognition on the Pocket 5, offline English Android voice availability, speaker echo/latency, interruption/background cleanup on real audio hardware, in-place installation, and end-to-end local/network/own-node voice replies. No physical-device voice quality, real account login or paid generation test is claimed. Desktop source, website services, original mascot/launcher and the native inference engine are unchanged.
+
+# Android 0.2.2 independent model selection — 2026-09-22
+
+- Model route (Local / Network / My node) and network permission now persist independently. Switching routes does not cancel account requests, sign-in, model downloads, or unload the local model. Offline mode is a separate Settings control; upgrading preserves the prior privacy choice.
+- Passed the complete 33-test Android suite: 16 account/route tests, five startup/UI tests, six file-integrity tests, four network-stream tests and two native-layout rendering tests. New coverage exercises online Local account refresh/downloads without changing route, local prompt isolation while online, session/download/model/grant retention across all routes, device-link continuity, preference/session restoration, legacy privacy migration, signed-out gates, and explicit Offline cancellation without stopping local generation. UI tests check switches without a disconnect dialog and Offline confirmation/cancel behavior.
+- Passed `:app:testDebugUnitTest :app:lintDebug :app:assembleRelease`. Lint has no errors. Reviewed native Android portrait and handheld renders, including model choices, the separate Offline setting, and signed-in account details with Local selected.
+- Verified the non-debuggable ARM64 release, package `io.koinosai.mobile`, version code 4 / `0.2.2-preview`, 16 KB ZIP alignment, and unchanged retained owner signing certificate. Installs over owner-signed 0.2.0 / 0.2.1 without clearing app data.
+- Delivered APK SHA-256: `4126c86468f27f7c154fd6e22216198fbeee32066ef4fe8556a9175f2dc0f6e7`.
+- Account tests use a fake transport, session vault and Android download service; no real login, paid generation or physical-device update is claimed. The native inference engine, original mascot exports, launcher and website services are unchanged.
+
+# Android 0.2.1 mascot correction — 2026-09-22
+
+- Replaced the in-app vector redraw with direct static exports of the original desktop SVG, stylesheet, and texture. The source artwork matches the latest Test branch inspected (`6d51341`); hashes and renderer versions are in `mascot-source.json`.
+- Reviewed actual Android portrait (411 × 891) and handheld landscape (960 × 540) renders, including the welcome mascot, header/avatar, account fixture, and launcher. The launcher source files are unchanged from 0.2.0. Screenshots use Robolectric native graphics, not a physical device.
+- Passed `:app:assembleRelease`, the two existing `VisualPreviewTest` rendering tests, and `:app:lintDebug` (no errors). Cleared stale local Gradle output/metadata to resolve duplicate generated R classes before the successful build. No new functional tests were added or claimed for this artwork-only revision.
+- Verified non-debuggable ARM64 package `io.koinosai.mobile`, version code 3 / `0.2.1-preview`, 16 KB ZIP alignment, and the same retained owner signing certificate as 0.2.0. This permits an in-place update; no data migration or account/network/inference behavior changed.
+- Delivered APK SHA-256: `623abf5f420571350c611a094d9d66a6373de3f7e15066527bbdcc3da4ab8eaf`.
+
+The prior functional validation and physical-device limitations below still apply.
+
+# Android 0.2 validation — 2026-09-22
+
+## Passed
+
+- Non-debuggable, ARM64 release APK build with the retained owner signing key; local Gradle unit-test and Android lint gates.
+- 23 Android tests: six file-integrity/import tests, eight account/route contract tests, four network-stream tests, three startup/navigation tests, and two actual-layout rendering tests.
+- Device-link request/response contract, saved session, expired/rejected session gates, retry after expired link code, sign-out, account separation, Local-only request blocking, empty conversation on route changes including the 30-chat limit, explicit grant and own-node request shape, partial-response preservation, bounded/Unicode/multiline SSE handling.
+- Native Android layout render review at 411 × 891 portrait and 960 × 540 handheld landscape, including the adaptive launcher icon, sign-in, model library, account overview/mining fixtures, mode selection, and settings. Account screenshots contain synthetic data only.
+- Catalog check: both Android packages match the desktop model identity, byte size and SHA-256.
+- APK signature and 16 KB ZIP/native-library alignment checks. Manifest inspected for the application ID, version, ARM64 ABI and disabled debugging.
+- Live, unauthenticated read-only checks: `/auth/session` and `/account/api/nodes` returned 401; `/scheduler/network/models` returned a live model/price catalog. No user credentials were used and no paid request was submitted.
+- Website API contracts inspected in `therexdev/kai` commit `13a7ba436a67a6442f0311f065898b744538f71f`; Android changes are based on the existing Android branch and the latest Test base `125182907e9aa9b4d4275df3634d7921f9a59fe4`.
+- No desktop application source, dependencies, wallet, mining, or server code changed. No service deployment is required.
+
+Lint has no errors; remaining warnings concern optional ChromeOS ABI coverage, storage-space APIs, English strings, and unused small vector resources. These are not runtime or signing failures.
+
+## Scope and remaining device checks
+
+The user confirmed the original 0.1 local-model APK works on their device. The native inference implementation and pinned llama.cpp revision are unchanged in 0.2. The earlier native smoke tests passed, but were not rerun as part of this UI/account revision.
+
+Robolectric rendering is actual Android View rendering, not an installed emulator or physical device. A real website account sign-in, Android Keystore round trip, account-node refresh and remote/own-node inference must still be exercised on the Pocket 5. No end-to-end account login or paid generation is claimed. Check return from browser sign-in, cached-session airplane mode, model downloads, Stop, portrait/landscape and controller focus on the device.
+
+The delivered package installs as **KAI** beside the original **KAI Mobile Preview** because that initial preview's temporary signing key is unavailable. The new owner signing material is retained separately so subsequent delivered APKs can update this installation. CI debug APKs are signed differently and are only for development.

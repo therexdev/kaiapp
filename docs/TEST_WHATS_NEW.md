@@ -1,3 +1,7 @@
+# Android companion preview
+
+The separate Android build now opens to animated KAI with foreground voice conversations and an Agent mode. Apps reuses KAI-managed Connections, with selected actions, exact write reviews, Stop, reusable task prompts, activity history and recovery notices after interruption. Local models, network/My node chat and encrypted account sign-in remain available under the redesigned navigation. This change does not publish or alter the desktop Test installer. See `android/README.md` and `android/VALIDATION.md` for setup, tested scope and signing status.
+
 ## Foundation testnet payment controls
 
 - Adds a Test-only panel for native purchase, reward funding, bounded session reservation, session revocation, release and refund reviews. Import a verified public deployment manifest and a separate OS-encrypted Test invitation first. Mainnet manifests are rejected.
