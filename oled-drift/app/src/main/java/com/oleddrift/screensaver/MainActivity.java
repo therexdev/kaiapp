@@ -2,6 +2,7 @@ package com.oleddrift.screensaver;
 
 import android.app.Activity;
 import android.content.Context;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.media.AudioManager;
@@ -13,7 +14,9 @@ import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
+import android.widget.LinearLayout;
 import android.widget.SeekBar;
+import android.widget.TextView;
 
 public class MainActivity extends Activity {
     private DriftView driftView;
@@ -59,26 +62,47 @@ public class MainActivity extends Activity {
     }
 
     private void createVolumeControl() {
-        FrameLayout panel = new FrameLayout(this);
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.HORIZONTAL);
+        panel.setGravity(Gravity.CENTER_VERTICAL);
 
         GradientDrawable background = new GradientDrawable();
-        background.setColor(Color.argb(220, 24, 24, 24));
-        background.setCornerRadius(dp(18));
+        background.setColor(Color.argb(230, 22, 22, 22));
+        background.setCornerRadius(dp(22));
         panel.setBackground(background);
-        panel.setPadding(dp(14), dp(8), dp(14), dp(8));
+        panel.setPadding(dp(8), dp(8), dp(8), dp(8));
         panel.setVisibility(View.GONE);
         panel.setAlpha(0f);
+
+        TextView minusButton = createVolumeButton("−");
+        TextView plusButton = createVolumeButton("+");
 
         volumeSlider = new SeekBar(this);
         volumeSlider.setMax(audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC));
         volumeSlider.setProgress(audioManager.getStreamVolume(AudioManager.STREAM_MUSIC));
+        volumeSlider.setPadding(dp(12), 0, dp(12), 0);
+        volumeSlider.setMinimumHeight(dp(60));
+        volumeSlider.setThumbTintList(ColorStateList.valueOf(Color.WHITE));
+        volumeSlider.setProgressTintList(ColorStateList.valueOf(Color.rgb(112, 211, 255)));
+        volumeSlider.setProgressBackgroundTintList(ColorStateList.valueOf(Color.rgb(72, 72, 72)));
+        volumeSlider.setScaleY(1.35f);
 
-        FrameLayout.LayoutParams sliderParams = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.CENTER
+        LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(dp(58), dp(58));
+        panel.addView(minusButton, buttonParams);
+
+        LinearLayout.LayoutParams sliderParams = new LinearLayout.LayoutParams(
+                0,
+                dp(64),
+                1f
         );
+        sliderParams.leftMargin = dp(4);
+        sliderParams.rightMargin = dp(4);
         panel.addView(volumeSlider, sliderParams);
+
+        panel.addView(plusButton, new LinearLayout.LayoutParams(dp(58), dp(58)));
+
+        minusButton.setOnClickListener(v -> changeVolumeBy(-1));
+        plusButton.setOnClickListener(v -> changeVolumeBy(1));
 
         volumeSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
@@ -102,8 +126,36 @@ public class MainActivity extends Activity {
 
         volumePanel = panel;
 
-        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(dp(280), dp(58));
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(dp(360), dp(76));
         root.addView(panel, params);
+    }
+
+    private TextView createVolumeButton(String label) {
+        TextView button = new TextView(this);
+        button.setText(label);
+        button.setTextColor(Color.WHITE);
+        button.setTextSize(32);
+        button.setGravity(Gravity.CENTER);
+        button.setClickable(true);
+        button.setFocusable(true);
+
+        GradientDrawable buttonBackground = new GradientDrawable();
+        buttonBackground.setColor(Color.rgb(50, 50, 50));
+        buttonBackground.setCornerRadius(dp(18));
+        button.setBackground(buttonBackground);
+
+        return button;
+    }
+
+    private void changeVolumeBy(int delta) {
+        int max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+        int current = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
+        int next = Math.max(0, Math.min(max, current + delta));
+
+        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, next, 0);
+        volumeSlider.setMax(max);
+        volumeSlider.setProgress(next);
+        scheduleVolumeHide();
     }
 
     private void showVolumeControl(float tapX, float tapY) {
@@ -114,22 +166,23 @@ public class MainActivity extends Activity {
         volumeSlider.setMax(audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC));
         volumeSlider.setProgress(audioManager.getStreamVolume(AudioManager.STREAM_MUSIC));
 
-        int panelWidth = dp(280);
-        int panelHeight = dp(58);
         int margin = dp(12);
-        int gap = dp(26);
-
-        int availableWidth = Math.max(root.getWidth(), panelWidth + margin * 2);
-        int availableHeight = Math.max(root.getHeight(), panelHeight + margin * 2);
+        int panelHeight = dp(76);
+        int desiredPanelWidth = dp(360);
+        int rootWidth = Math.max(root.getWidth(), dp(300));
+        int rootHeight = Math.max(root.getHeight(), panelHeight + margin * 2);
+        int panelWidth = Math.min(desiredPanelWidth, rootWidth - margin * 2);
+        panelWidth = Math.max(dp(290), panelWidth);
+        int gap = dp(28);
 
         int left = Math.round(tapX - panelWidth / 2f);
-        left = Math.max(margin, Math.min(left, availableWidth - panelWidth - margin));
+        left = Math.max(margin, Math.min(left, rootWidth - panelWidth - margin));
 
         int top = Math.round(tapY + gap);
-        if (top + panelHeight + margin > availableHeight) {
+        if (top + panelHeight + margin > rootHeight) {
             top = Math.round(tapY - panelHeight - gap);
         }
-        top = Math.max(margin, Math.min(top, availableHeight - panelHeight - margin));
+        top = Math.max(margin, Math.min(top, rootHeight - panelHeight - margin));
 
         FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) volumePanel.getLayoutParams();
         params.width = panelWidth;
@@ -150,7 +203,7 @@ public class MainActivity extends Activity {
 
     private void scheduleVolumeHide() {
         uiHandler.removeCallbacks(hideVolumeRunnable);
-        uiHandler.postDelayed(hideVolumeRunnable, 3500);
+        uiHandler.postDelayed(hideVolumeRunnable, 4000);
     }
 
     private void hideVolumeControl() {
