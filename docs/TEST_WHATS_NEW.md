@@ -1,5 +1,7 @@
 ## Mainnet KOIN pilot in Test
 
+- Updates flagged installer and runtime dependencies before packaging this Test build.
+
 - Import a verified **mainnet-pilot** manifest and your separate private invitation to use real mainnet KOIN in Test. The payment panel and native dialogs identify real funds, show exact amounts and spending limits, and default to Cancel.
 - Mainnet sessions and provider results are bound to the imported contracts. The optional worker needs explicit mainnet participation; rehearsal approvals and ordinary earning workers cannot authorize mainnet jobs.
 - Lost-response recovery retains the original transaction and spending reservation. Retrying cannot reset the approved budget or create a second charge. Automatic rewards retain their review period and finality checks.

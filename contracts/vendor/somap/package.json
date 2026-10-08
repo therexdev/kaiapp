@@ -1,0 +1,9 @@
+{
+  "name": "somap",
+  "version": "0.5.14-kai.1",
+  "private": true,
+  "description": "Vendored somap for the Koinos test VM; unused npm dependency removed",
+  "main": "somap.js",
+  "license": "MIT",
+  "author": "Ulf Schneider"
+}

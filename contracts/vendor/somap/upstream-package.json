@@ -1,0 +1,33 @@
+{
+  "name": "somap",
+  "version": "0.5.14",
+  "description": "A sorted map, implemented as a binary search tree",
+  "keywords": [
+    "sorted",
+    "map"
+  ],
+  "main": "somap.js",
+  "scripts": {
+    "test": "jest",
+    "coveralls": "jest --coverage && cat ./coverage/lcov.info | ./node_modules/coveralls/bin/coveralls.js"
+  },
+  "jest": {
+    "verbose": true,
+    "testURL": "http://localhost/",
+    "collectCoverage": true
+  },
+  "author": "Ulf Schneider",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ulfschneider/somap.git"
+  },
+  "homepage": "https://ulf.codes/tools/somap",
+  "license": "MIT",
+  "devDependencies": {
+    "coveralls": "^3.0.2",
+    "jest": "^27.4.5"
+  },
+  "dependencies": {
+    "npm": "^8.3.0"
+  }
+}
