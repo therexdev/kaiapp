@@ -42,13 +42,16 @@ class Worker {
     return crypto.createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 16);
   }
 
-  constructor({ schedulerUrl, wallet, runtime, hardware, models, producer, onEvent, fundedOnly = false, koinShadowJobs = process.env.KAI_KOIN_SHADOW_JOBS === "1", koinFundedRehearsalJobs = process.env.KAI_KOIN_FUNDED_REHEARSAL_JOBS === "1" }) {
+  constructor({ schedulerUrl, wallet, runtime, hardware, models, producer, onEvent, fundedOnly = false, koinMainnetPilotJobs = false, koinMainnetTarget = null, koinShadowJobs = process.env.KAI_KOIN_SHADOW_JOBS === "1", koinFundedRehearsalJobs = process.env.KAI_KOIN_FUNDED_REHEARSAL_JOBS === "1" }) {
     this.schedulerUrl = String(schedulerUrl || "").replace(/\/$/, "");
     this.wallet = wallet; // WalletService (unlocked)
     this.runtime = runtime; // RuntimeManager
     this.hardware = hardware;
     this.models = models || null; // ModelManager — advertises what this machine can serve
     this.fundedOnly = fundedOnly === true;
+    this.koinMainnetPilotJobs = koinMainnetPilotJobs === true;
+    this.koinMainnetTarget = this.koinMainnetPilotJobs ? require("./koin-network/session-delegation").target(koinMainnetTarget) : null;
+    if (this.koinMainnetPilotJobs && !require("./koin-network/payment-network").protocol(this.koinMainnetTarget).paymentsEnabled) throw Error("Pinned mainnet worker target required");
     this.koinFundedRehearsalJobs = koinFundedRehearsalJobs === true;
     this.koinShadowJobs = koinShadowJobs === true; // explicit experiment opt-in
     /*
@@ -322,6 +325,7 @@ class Worker {
             ...(this.hardware?.capabilities ?? {}),
             koinShadowJobs: this.koinShadowJobs ? 1 : 0,
             koinFundedRehearsalJobs: this.koinFundedRehearsalJobs ? 1 : 0,
+            koinMainnetPilotJobs: this.koinMainnetPilotJobs ? 1 : 0,
             ...(ramGb ? { ramGb: Math.round(ramGb) } : {}),
             ...(this.preferredModel ? { preferredModel: this.preferredModel } : {}),
           },
@@ -558,7 +562,8 @@ class Worker {
       }, 25000);
       try {
         const t0 = Date.now();
-        const funded = job.type === "koin-funded-rehearsal-chat";
+        const funded = ["koin-funded-rehearsal-chat", "koin-mainnet-pilot-chat"].includes(job.type);
+        const wire = funded && require("./koin-network/payment-network").protocol(job.target);
         const shadow = funded || job.type === "koin-shadow-chat";
         // Post generation deltas as they're produced — the consumer's
         // words appear live instead of arriving as one block. Batched
@@ -592,7 +597,7 @@ class Worker {
           : crypto.createHash("sha256").update(`${job.id}|${output}`).digest();
         if (shadow && !this.running) throw Error("Shadow worker stopped");
         const signature = await this.wallet.signHash(hash);
-        const resultRoute = funded ? "/koin/funded/rehearsal/result" : shadow ? "/koin/shadow/jobs/result" : "/worker/result";
+        const resultRoute = funded ? wire.prefix + "result" : shadow ? "/koin/shadow/jobs/result" : "/worker/result";
         const res = await fetch(`${this.schedulerUrl}${resultRoute}?token=${this.token}`, {
           method: "POST",
           headers: { "content-type": "application/json", connection: "close" },
@@ -601,10 +606,10 @@ class Worker {
         });
         const jr = await res.json();
         if (shadow) {
-          if (!res.ok || jr.mode !== (funded ? "funded-rehearsal" : "shadow") || jr.paymentsEnabled !== false || jr.accepted !== true) throw Error(jr.error || "Shadow result was not accepted");
-          const counter = funded ? "fundedRehearsalJobsDone" : "shadowJobsDone";
+          if (!res.ok || jr.mode !== (funded ? wire.mode : "shadow") || jr.paymentsEnabled !== (funded ? wire.paymentsEnabled : false) || jr.accepted !== true) throw Error(jr.error || "Shadow result was not accepted");
+          const counter = funded ? (wire.paymentsEnabled ? "mainnetPilotJobsDone" : "fundedRehearsalJobsDone") : "shadowJobsDone";
           this.stats[counter] = (this.stats[counter] || 0) + 1;
-          this.onEvent({ type: funded ? "worker:funded-rehearsal-job-done" : "worker:shadow-job-done", jobId: job.id });
+          this.onEvent({ type: funded ? (wire.paymentsEnabled ? "worker:mainnet-pilot-job-done" : "worker:funded-rehearsal-job-done") : "worker:shadow-job-done", jobId: job.id });
           continue;
         }
         this.stats.jobsDone += 1;
@@ -624,9 +629,11 @@ class Worker {
 
   /** §31: only approved profiles execute — anything else is refused. */
   async _execute(job, onDelta) {
-    if (this.fundedOnly && job.type !== "koin-funded-rehearsal-chat") throw Error("This Test worker accepts only funded Test requests");
-    if (["koin-shadow-chat", "koin-funded-rehearsal-chat"].includes(job.type)) {
-      if (job.type === "koin-funded-rehearsal-chat" ? !this.koinFundedRehearsalJobs : !this.koinShadowJobs) throw Error("Shadow jobs require explicit opt-in");
+    if (this.fundedOnly && !["koin-funded-rehearsal-chat", "koin-mainnet-pilot-chat"].includes(job.type)) throw Error("This Test worker accepts only funded Test requests");
+    if (["koin-shadow-chat", "koin-funded-rehearsal-chat", "koin-mainnet-pilot-chat"].includes(job.type)) {
+      if (job.type === "koin-mainnet-pilot-chat") {
+        if (!this.koinMainnetPilotJobs || JSON.stringify(require("./koin-network/session-delegation").target(job.target)) !== JSON.stringify(this.koinMainnetTarget)) throw Error("Mainnet job differs from the explicitly configured worker target");
+      } else if (job.type === "koin-funded-rehearsal-chat" ? !this.koinFundedRehearsalJobs : !this.koinShadowJobs) throw Error("Shadow jobs require explicit opt-in");
       this._shadowAbort = new AbortController();
       return require("./koin-network/shadow-worker").executeShadow({ job, catalog: this.models?.catalog,
         runtime: this.runtime, signal: this._shadowAbort.signal });

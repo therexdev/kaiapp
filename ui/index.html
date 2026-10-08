@@ -420,8 +420,8 @@
           </div>
 
           <div id="koin-test-payments" class="koin-overview" hidden>
-            <h2>Payment testing · Foundation testnet</h2>
-            <p class="hint">Use test KOIN to purchase refundable credits and review bounded spending. This panel uses the imported Test deployment. Rewards arrive automatically after daily review; no claim or provider signature is needed.</p>
+            <h2 id="koin-test-title">Payment testing · choose a deployment</h2>
+            <p id="koin-test-network-notice" class="hint">Import a reviewed deployment manifest. The network and real or test KOIN status will be shown before you approve any payment.</p>
             <div class="form-row">
               <button data-koin-test="import" class="small">Import Test manifest</button>
               <button data-koin-test="access" class="small">Import private Test access</button>
@@ -434,7 +434,7 @@
             <div class="form-row"><button data-koin-test="worker-start" class="small">Start Test worker</button><button data-koin-test="worker-stop" class="small">Stop Test worker</button></div>
             <p id="koin-test-balances" class="hint"></p>
             <div class="form-row">
-              <label>Test KOIN amount <input id="koin-test-amount" type="text" inputmode="decimal" placeholder="0.1" maxlength="22" /></label>
+              <label><span id="koin-test-amount-label">KOIN amount</span> <input id="koin-test-amount" type="text" inputmode="decimal" placeholder="0.1" maxlength="22" /></label>
               <button data-koin-test="purchase" class="primary small">Buy Test credits</button>
               <button data-koin-test="refund" class="small">Refund available credits</button>
               <button data-koin-test="fund-rewards" class="small">Fund Test rewards</button>

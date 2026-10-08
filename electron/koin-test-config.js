@@ -6,7 +6,7 @@ const { scheduler } = require("../core/lib/koin-network/grant-chat");
 const { utils } = require("koilib");
 function configuration(value) {
   if (!value || Object.keys(value).sort().join() !== "deployment,limits,maxOutput,maxRcPerDay,maxRcPerTransaction,mode,model,owner,policyHash,schedulerUrl,schema,version" ||
-      value.schema !== 1 || value.mode !== "test-deployment") throw Error("Exact public Test deployment manifest required");
+      value.schema !== 1 || !["test-deployment", "mainnet-pilot"].includes(value.mode)) throw Error("Exact public Test deployment manifest required");
   const c = structuredClone(value), client = new KoinChain(c.deployment);
   assertPaymentMode(c.mode, client); c.deployment = structuredClone(client.d);
   c.schedulerUrl = scheduler(c.schedulerUrl);

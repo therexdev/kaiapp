@@ -15,7 +15,7 @@ class TestPayments {
   #config; #client; #journal; #wallet; #dialog; #funding; #task; #clock; #authorizeHost;
   constructor({ config, client, journal, wallet, dialog, clock = Date.now, authorizeHost = null }) {
     assertPaymentMode(config.mode, client); journal.assertMode(config.mode); journal.assertClient(client);
-    if (config.mode === "test-deployment" && typeof authorizeHost !== "function") throw Error("Test signing requires a persistent host lease");
+    if (config.mode !== "isolated-rehearsal" && typeof authorizeHost !== "function") throw Error("Test signing requires a persistent host lease");
     this.#authorizeHost = authorizeHost;
     this.#config = structuredClone(config); this.#client = client; this.#journal = journal; this.#wallet = wallet; this.#dialog = dialog; this.#clock = clock;
     this.#funding = createFundingApproval({ mode: config.mode, client, journal, dialog, clock,
@@ -36,7 +36,7 @@ class TestPayments {
   async status() {
     const owner = this.#owner(), config = await this.#client.verify();
     const balances = await this.#client.read("credits", "balances", { account: encodedAddress(owner) });
-    return { enabled: true, mode: this.#config.mode, mainnetPaymentsEnabled: false, owner, paused: !!config.paused,
+    return { enabled: true, mode: this.#config.mode, mainnetPaymentsEnabled: this.#config.mode === "mainnet-pilot", owner, paused: !!config.paused,
       balances: { available: balances.balance?.available || "0", reserved: balances.balance?.reserved || "0" },
       deposits: this.#journal.list(), transactions: this.#journal.nonceCoordinator.list(),
       automaticPayouts: true, payoutNotice: "Rewards are sent automatically after the daily review and irreversible confirmation." };
@@ -141,17 +141,18 @@ class TestPayments {
         draft = nonces.draft(id); request = await this.#scope(draft);
       }
       guard(); const config = await this.#client.verify(); guard();
-      const args = request.args, s = args.session;
-      const detail = ["Foundation testnet tokens only.", `Action: ${request.method}`, `Wallet: ${request.actor}`,
-        ...(args.amount ? [`Amount: ${koin(args.amount)} test KOIN`] : []),
-        ...(s ? [`Session budget: ${koin(s.remaining)} test KOIN`, `Per request: ${koin(s.per_job)} test KOIN`, `Maximum requests: ${s.max_jobs}`, `Expires: ${new Date(Number(s.expires)).toISOString()}`, `Model: ${this.#config.model}`] : []),
+      const args = request.args, s = args.session, mainnet = this.#config.mode === "mainnet-pilot";
+      const display = n => koin(n) + (mainnet ? " (mainnet)" : " (testnet)");
+      const detail = [mainnet ? "MAINNET: real KOIN. This approval can spend real funds." : "Foundation testnet tokens only.", `Action: ${request.method}`, `Wallet: ${request.actor}`,
+        ...(args.amount ? [`Amount: ${display(args.amount)}`] : []),
+        ...(s ? [`Session budget: ${display(s.remaining)}`, `Per request: ${display(s.per_job)}`, `Maximum requests: ${s.max_jobs}`, `Expires: ${new Date(Number(s.expires)).toISOString()}`, `Model: ${this.#config.model}`] : []),
         ...(args.id ? [`Session: ${Buffer.from(args.id, "base64url").toString("hex")}`] : []),
         "Revocation stops new work; reserved credits remain locked through the settlement window.",
         `Chain: ${this.#client.d.chainId}`, `Contract: ${this.#client.d.credits}`, `Code: ${this.#client.d.creditsHash}`,
         `Maximum resource credits: ${request.maxRc}`, `Transaction: ${draft.id}`, `Nonce: ${draft.header.nonce}`,
         fresh ? "Approve one exact signature and submission." : "Resend the saved transaction without signing again.", "Stop cannot undo a transaction already sent."].join("\n");
-      const answer = await this.#dialog.showMessageBox(window, { type: "question", title: "Review Test payment", message: `Approve testnet ${request.method}?`, detail,
-        buttons: ["Cancel", fresh ? "Approve Test transaction" : "Resend saved transaction"], defaultId: 0, cancelId: 0, noLink: true });
+      const answer = await this.#dialog.showMessageBox(window, { type: "question", title: mainnet ? "Review real KOIN payment" : "Review Test payment", message: `Approve ${mainnet ? "mainnet" : "testnet"} ${request.method}?`, detail,
+        buttons: ["Cancel", fresh ? (mainnet ? "Approve mainnet transaction" : "Approve Test transaction") : "Resend saved transaction"], defaultId: 0, cancelId: 0, noLink: true });
       guard(); if (answer.response !== 1) return { state: "cancelled" };
       if (JSON.stringify(config) !== JSON.stringify(await this.#client.verify()) || await this.#client.provider.getNextNonce(request.actor) !== draft.header.nonce) throw Error("Chain policy or wallet nonce changed; refresh the review");
       guard();

@@ -40,7 +40,7 @@ class TestAccess {
       headers: { "content-type": "application/json", authorization: "Bearer " + a.sessionToken }, body: JSON.stringify({ installation: a.installation }) });
     const parts = []; let size = 0; for await (const part of response.body) { size += part.length; if (size > 4096) throw Error("Invalid Test host response"); parts.push(part); }
     const value = JSON.parse(Buffer.concat(parts).toString("utf8"));
-    if (!response.ok || value.mode !== "test-deployment" || value.chainId !== this.config.deployment.chainId || value.owner !== a.owner || value.installation !== a.installation || value.granted !== true)
+    if (!response.ok || value.mode !== this.config.mode || value.chainId !== this.config.deployment.chainId || value.owner !== a.owner || value.installation !== a.installation || value.granted !== true)
       throw Error("Test wallet host lease unavailable. A wallet can sign from only one Test installation");
     return value;
   }

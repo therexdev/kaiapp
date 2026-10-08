@@ -82,6 +82,17 @@ test("Earn review preview is desktop-only, disables repeat clicks and explains e
   });
   await page.reload(); await navClick(page, '.nav-item[data-view="earn"]');
   assert.equal(await page.locator("#koin-test-payments").isVisible(), true);
+  await page.evaluate(() => {
+    const previous = window.kaiKoinTestBridge.run;
+    window.kaiKoinTestBridge.run = (action, input) => action === "status" ? Promise.resolve({ enabled: true, mode: "mainnet-pilot", configured: true,
+      balances: { available: "100000000", reserved: "0" }, transactions: [] }) : previous(action, input);
+  });
+  await page.locator('[data-koin-test="status"]').click();
+  await page.waitForFunction(() => document.getElementById("koin-test-title").textContent.includes("MAINNET"));
+  assert.match(await page.locator("#koin-test-network-notice").textContent(), /REAL KOIN/);
+  assert.equal(await page.locator('[data-koin-test="purchase"]').textContent(), "Buy credits with real KOIN");
+  assert.match(await page.locator("#koin-test-balances").textContent(), /1.00000000 mainnet KOIN/);
+
   await page.fill("#koin-test-amount", "0.12345678");
   const purchase = page.locator('[data-koin-test="purchase"]'); await purchase.click();
   assert.equal(await purchase.isDisabled(), true);

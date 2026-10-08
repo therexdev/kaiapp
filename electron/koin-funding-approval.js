@@ -9,12 +9,12 @@ const { FundingRecovery, FundingRecoveryRunner } = require("./koin-funding-recov
 const { koin } = require("./koin-review");
 
 function createFundingApproval({ mode, client, journal, dialog, sign, submit, clock = Date.now, timeoutMs = 5000, tr = x => x }) {
-  assertPaymentMode(mode, client);
+  assertPaymentMode(mode, client); const mainnet = mode === "mainnet-pilot";
   if (!(journal instanceof FundingRecovery) || typeof dialog?.showMessageBox !== "function" ||
       typeof sign !== "function" || typeof submit !== "function") throw Error("Explicit isolated funding approval dependencies required");
   journal.assertMode(mode); journal.assertClient(client); integer(timeoutMs, 50, 30000);
   let pending = null;
-  const result = (status, id) => ({ status, mode, paymentsEnabled: false, ...(id ? { deposit: journal.status(id) } : {}) });
+  const result = (status, id) => ({ status, mode, paymentsEnabled: mainnet, ...(id ? { deposit: journal.status(id) } : {}) });
   const cancel = () => {
     if (!pending) return;
     pending.stopped = true; pending.abort.abort();
@@ -58,9 +58,9 @@ function createFundingApproval({ mode, client, journal, dialog, sign, submit, cl
       if (!valid()) return result("cancelled");
       const line = (name, value) => `${tr(name)}: ${value}`;
       const { response } = await waiting(dialog.showMessageBox(window, {
-        type: "question", title: tr(mode === "test-deployment" ? "Test KOIN funding" : "Isolated KOIN funding rehearsal"),
-        message: tr(resume ? "Review the saved deposit for resubmission" : (mode === "test-deployment" ? "Approve this testnet deposit" : "Approve this fixture-wallet deposit")),
-        detail: [tr(mode === "test-deployment" ? "Foundation testnet tokens only. This transfers test KOIN to the displayed custody contract." : "Isolated fixture chain only. This approval cannot enable live payments."), "",
+        type: "question", title: tr(mainnet ? "Mainnet KOIN funding — real funds" : mode === "test-deployment" ? "Test KOIN funding" : "Isolated KOIN funding rehearsal"),
+        message: tr(resume ? "Review the saved deposit for resubmission" : (mainnet ? "Approve this real KOIN deposit" : mode === "test-deployment" ? "Approve this testnet deposit" : "Approve this fixture-wallet deposit")),
+        detail: [tr(mainnet ? "MAINNET: This transfers real KOIN to the displayed custody contract. A Test installer does not make these funds test tokens." : mode === "test-deployment" ? "Foundation testnet tokens only. This transfers test KOIN to the displayed custody contract." : "Isolated fixture chain only. This approval cannot enable live payments."), "",
           tr(request.kind === "credits" ? "This deposit backs refundable usage credits." : "This funds provider rewards, not a refundable customer balance."),
           line("Amount", koin(request.args.amount)), line("Wallet and Mana payer", request.actor),
           line("Custody contract", client.d[request.kind]), line("Custody code", client.d[request.kind + "Hash"]),
@@ -70,7 +70,7 @@ function createFundingApproval({ mode, client, journal, dialog, sign, submit, cl
           tr("The exact approval and deposit are atomic. Success consumes the whole allowance; failure rolls both back."),
           tr(resume ? "Resume sends only the original saved signature and transaction. It does not sign again or reset retry or daily Mana limits." : "Approval permits one signature for this exact deposit and an attempt to submit it."),
           tr("Stop prevents further sends. A transaction already sent may still be included and confirmed.")].join("\n"),
-        buttons: [tr("Cancel"), tr(resume ? "Resume saved deposit" : (mode === "test-deployment" ? "Approve testnet deposit" : "Approve fixture deposit"))], defaultId: 0, cancelId: 0, noLink: true,
+        buttons: [tr("Cancel"), tr(resume ? "Resume saved deposit" : (mainnet ? "Send real KOIN" : mode === "test-deployment" ? "Approve testnet deposit" : "Approve fixture deposit"))], defaultId: 0, cancelId: 0, noLink: true,
       }));
       if (response !== 1 || !valid()) return result("cancelled");
       if (JSON.stringify(intent(await getRequest())) !== JSON.stringify(request) || !valid()) return result("cancelled");

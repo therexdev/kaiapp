@@ -1,11 +1,12 @@
 "use strict";
+const { protocol } = require("./payment-network");
 const P = require("./job-protocol"), D = require("./session-delegation"), F = require("./funded-protocol");
 const { scheduler } = require("./grant-chat");
 function verify(result, { terms, messages, model, maxOutput, requestId }) {
   const t = D.terms(terms), id = P.digest(requestId), input = P.messages(messages);
   const k = result.koin, r = k?.receipt, output = result.choices?.[0]?.message?.content;
-  if (result.id !== id || result.model !== "koinos-network" || result.costUsd !== 0 || k?.mode !== "funded-rehearsal" ||
-      k.paymentsEnabled !== false || !["verified", "prepared", "submitted", "settled"].includes(k.state) ||
+  if (result.id !== id || result.model !== "koinos-network" || result.costUsd !== 0 || k?.mode !== protocol(t.target).mode ||
+      k.paymentsEnabled !== protocol(t.target).paymentsEnabled || !["verified", "prepared", "submitted", "settled"].includes(k.state) ||
       k.delegationId !== D.id(t) || JSON.stringify(D.target(k.target)) !== JSON.stringify(t.target) ||
       typeof output !== "string" || !output.length || !r ||
       Object.keys(r).sort().join() !== "attempt,completedAt,dispatchedAt,id,mode,outputHash,provider,quoteHash,session,signature,usage" ||
@@ -14,7 +15,7 @@ function verify(result, { terms, messages, model, maxOutput, requestId }) {
   if (JSON.stringify(q.tariff) !== JSON.stringify(tariff) || q.domain !== t.target.domain || q.policyHash !== t.target.policyHash ||
       q.requestHash !== P.hash(JSON.stringify(input)) || (model !== "auto" && model !== t.model) ||
       q.maxOutput !== (maxOutput ?? t.maxOutput) || q.maxOutput > t.maxOutput || BigInt(q.maxCharge) > BigInt(t.perJob) ||
-      result.servedModel !== t.model || r.mode !== "funded-rehearsal" || r.id !== id || r.session !== t.session ||
+      result.servedModel !== t.model || r.mode !== protocol(t.target).mode || r.id !== id || r.session !== t.session ||
       r.quoteHash !== q.hash || r.outputHash !== P.hash(output) || r.provider === t.owner ||
       k.receiptHash !== P.hash(JSON.stringify(r))) throw Error("Funded receipt differs from approved request");
   P.integer(r.dispatchedAt, Math.max(t.issuedAt, q.at), Math.min(t.expires, q.expires) - 1);
@@ -38,9 +39,9 @@ function verify(result, { terms, messages, model, maxOutput, requestId }) {
   return { id, object: "chat.completion", model: "koinos-network", servedModel: t.model,
     choices: [{ index: 0, message: { role: "assistant", content: output }, finish_reason: "stop" }],
     usage: { prompt_tokens: u.inputTokens, completion_tokens: u.outputTokens, total_tokens: u.inputTokens + u.outputTokens }, costUsd: 0,
-    koin: { mode: "funded-rehearsal", paymentsEnabled: false, state: k.state, delegationId: k.delegationId,
+    koin: { mode: protocol(t.target).mode, paymentsEnabled: protocol(t.target).paymentsEnabled, state: k.state, delegationId: k.delegationId,
       quote: q, receipt: r, receiptHash: k.receiptHash, settlement },
-    warning: "KOIN rehearsal: this answer used the network. The charge is reserved for accounting tests; no KOIN was spent." };
+    warning: protocol(t.target).paymentsEnabled ? "Mainnet KOIN: this request uses real funds under your approved session. Check settlement status for irreversible confirmation." : "KOIN rehearsal: this answer used the network. The charge is reserved for accounting tests; no KOIN was spent." };
 }
 async function consume({ schedulerUrl, authorization, terms, observationId, messages, model, maxOutput, requestId, signal, fetchImpl = fetch }) {
   const t = D.terms(terms), input = P.messages(messages), id = P.digest(requestId);
@@ -49,7 +50,7 @@ async function consume({ schedulerUrl, authorization, terms, observationId, mess
   if (maxOutput !== undefined) P.integer(maxOutput, 1, t.maxOutput);
   const response = await fetchImpl(scheduler(schedulerUrl) + "/consume/chat/completions", {
     method: "POST", redirect: "error", signal, headers: { "content-type": "application/json", connection: "close" },
-    body: JSON.stringify({ billing: "koin-funded-rehearsal", sessionToken: authorization.sessionToken, grantId: t.grantId,
+    body: JSON.stringify({ billing: protocol(t.target).billing, sessionToken: authorization.sessionToken, grantId: t.grantId,
       delegationId: D.id(t), observationId: P.digest(observationId), requestId: id, messages: input, model,
       ...(maxOutput === undefined ? {} : { max_tokens: maxOutput }), stream: false }),
   });

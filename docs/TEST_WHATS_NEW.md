@@ -1,3 +1,12 @@
+## Mainnet KOIN pilot in Test
+
+- Import a verified **mainnet-pilot** manifest and your separate private invitation to use real mainnet KOIN in Test. The payment panel and native dialogs identify real funds, show exact amounts and spending limits, and default to Cancel.
+- Mainnet sessions and provider results are bound to the imported contracts. The optional worker needs explicit mainnet participation; rehearsal approvals and ordinary earning workers cannot authorize mainnet jobs.
+- Lost-response recovery retains the original transaction and spending reservation. Retrying cannot reset the approved budget or create a second charge. Automatic rewards retain their review period and finality checks.
+- Installation alone does not deploy contracts, fund wallets or activate a mainnet service. The dedicated backend, funded role wallets and a qualified separate provider must be ready first. Legacy KAI earnings continue during this Test pilot; their cutoff and 10:1 snapshot belong to the later Alpha transition.
+
+Earlier changes follow chronologically below.
+
 ## Foundation testnet payment controls
 
 - Adds a Test-only panel for native purchase, reward funding, bounded session reservation, session revocation, release and refund reviews. Import a verified public deployment manifest and a separate OS-encrypted Test invitation first. Mainnet manifests are rejected.

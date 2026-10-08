@@ -36,11 +36,11 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
   const getSession = async () => {
     const config = await open().session(); await access.claimHost(); if (!config) throw Error("Reserve a Test session and wait for irreversible confirmation first");
     if (sessionId !== config.session) {
-      sessionClient = new FundedSessionClient({ config, file: path.join(root, "session-" + config.session + ".json"),
+      sessionClient = new FundedSessionClient({ config, mainnetPilot: readConfig(configFile).mode === "mainnet-pilot", file: path.join(root, "session-" + config.session + ".json"),
         authorize: (pin, signal) => access.authorize(pin, signal),
         sign: hash => core.account.wallet.signHash(hash) });
       sessionId = config.session;
-      sessionRun = createSessionReview({ client: sessionClient, dialog, testDeployment: true,
+      sessionRun = createSessionReview({ client: sessionClient, dialog, testDeployment: true, mainnetPilot: readConfig(configFile).mode === "mainnet-pilot",
         track: controller => { sessionAbort = controller; const release = core.gateway.network.trackShadowRequest(controller); return () => { release(); sessionAbort = null; }; } });
     }
     return sessionRun;
@@ -50,7 +50,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     if (!trustedMainDocument(event, window, origin)) throw Error("Desktop window access denied");
     if (!isTest) return { enabled: false, mode: "test-deployment" };
     if (typeof action !== "string" || JSON.stringify(input ?? null).length > 16384) throw Error("Invalid Test payment action");
-    if (action === "stop") { stopVersion++; payments?.stop(); chatAbort?.abort(); sessionAbort?.abort(); return { state: "stopped", enabled: true, mode: "test-deployment" }; }
+    if (action === "stop") { stopVersion++; payments?.stop(); chatAbort?.abort(); sessionAbort?.abort(); return { state: "stopped", enabled: true, mode: fs.existsSync(configFile) ? readConfig(configFile).mode : "test-deployment" }; }
     if (busy || disposed) throw Error("Finish the open Test payment action first");
     busy = true; const activeVersion = stopVersion;
     const active = () => activeVersion === stopVersion && !disposed && !window.isDestroyed() && window.isVisible() && !window.isMinimized();
@@ -63,12 +63,12 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
         if (picked.canceled) return { state: "cancelled" };
         const config = readConfig(picked.filePaths[0]), client = new KoinChain(config.deployment); await client.verify();
         if (core.account.wallet.address !== config.owner) throw Error("Manifest belongs to a different wallet");
-        const review = await dialog.showMessageBox(window, { type: "question", title: "Configure payment testing", message: "Use this Foundation testnet deployment?",
-          detail: `Test wallet: ${config.owner}\nBackend: ${config.schedulerUrl}\nCredits: ${config.deployment.credits}\nRewards: ${config.deployment.rewards}\nModel: ${config.model}\n\nYour existing live profile remains in use. Payment tests use separate testnet contracts and journals. No transaction is signed by importing this file.`,
-          buttons: ["Cancel", "Use Test deployment"], defaultId: 0, cancelId: 0, noLink: true });
+        const review = await dialog.showMessageBox(window, { type: "question", title: "Configure payment testing", message: config.mode === "mainnet-pilot" ? "Use this MAINNET deployment with real KOIN?" : "Use this Foundation testnet deployment?",
+          detail: `Test wallet: ${config.owner}\nBackend: ${config.schedulerUrl}\nCredits: ${config.deployment.credits}\nRewards: ${config.deployment.rewards}\nModel: ${config.model}\nChain: ${config.deployment.chainId}\n\n${config.mode === "mainnet-pilot" ? "MAINNET: payments and rewards use real KOIN. Each deposit and spending approval requires a native review." : "Foundation testnet: payments and rewards use test KOIN."} Your existing profile remains in use. No transaction is signed by importing this file.`,
+          buttons: ["Cancel", config.mode === "mainnet-pilot" ? "Use mainnet pilot" : "Use Test deployment"], defaultId: 0, cancelId: 0, noLink: true });
         if (review.response !== 1 || !active()) return { state: "cancelled" };
         fs.mkdirSync(root, { recursive: true, mode: 0o700 }); save(configFile, config);
-        return { enabled: true, configured: true, mode: "test-deployment" };
+        return { enabled: true, configured: true, mode: config.mode, mainnetPaymentsEnabled: config.mode === "mainnet-pilot" };
       }
       if (action === "restore") {
         if (input !== undefined) throw Error("Choose the backup with the native folder picker");
@@ -92,13 +92,15 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
         if (worker?.running) return { state: "test_worker_running" };
         const config = readConfig(configFile); access.authorize(config.schedulerUrl);
         const answer = await dialog.showMessageBox(window, { type: "question", title: "Run Test inference worker", message: "Serve requests for this Test backend?",
-          detail: `Backend: ${config.schedulerUrl}\nModel: ${config.model}\nWallet: ${config.owner}\n\nUses your installed models and hardware. Only funded Test jobs are accepted. Rewards are automatic; no payout signature is requested.`,
+          detail: `Backend: ${config.schedulerUrl}\nModel: ${config.model}\nWallet: ${config.owner}\n\nUses your installed models and hardware. ${config.mode === "mainnet-pilot" ? "MAINNET: funded jobs and rewards use real KOIN." : "Foundation testnet: jobs and rewards use test KOIN."} Rewards are automatic; no payout signature is requested.`,
           buttons: ["Cancel", "Start Test worker"], defaultId: 0, cancelId: 0, noLink: true });
         if (answer.response !== 1 || !active()) return { state: "cancelled" };
         access.authorize(config.schedulerUrl);
         const { Worker } = require("../core/lib/worker");
         worker = new Worker({ schedulerUrl: config.schedulerUrl, wallet: core.account.wallet, runtime: core.runtime, hardware: core.hardware,
-          models: core.models, koinFundedRehearsalJobs: true, koinShadowJobs: false, fundedOnly: true });
+          models: core.models, koinFundedRehearsalJobs: config.mode === "test-deployment", koinShadowJobs: false, fundedOnly: true,
+          koinMainnetPilotJobs: config.mode === "mainnet-pilot", koinMainnetTarget: { chainId: config.deployment.chainId, credits: config.deployment.credits, creditsHash: config.deployment.creditsHash,
+            policyHash: config.policyHash, domain: require("../core/lib/koin-network/payment-mode").testDomain(config.deployment, config.schedulerUrl) } });
         workerAbort = new AbortController(); workerTrack = core.gateway.network.trackShadowRequest(workerAbort);
         workerAbort.signal.addEventListener("abort", () => worker.stop().catch(() => {}), { once: true });
         try { await worker.start(); workerAbort.signal.throwIfAborted(); return { state: "test_worker_running" }; }
@@ -158,7 +160,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
         const response = await fetch(config.schedulerUrl + "/koin/test/status", { redirect: "error", signal: AbortSignal.timeout(10000), headers: { authorization: "Bearer " + auth.sessionToken } });
         const chunks = []; let size = 0; for await (const part of response.body) { size += part.length; if (size > 65536) throw Error("Test payout response too large"); chunks.push(part); }
         const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-        if (!response.ok || value.mode !== "test-deployment" || value.mainnetPaymentsEnabled !== false || !Array.isArray(value.payouts)) throw Error("Test payout status unavailable");
+        if (!response.ok || value.mode !== config.mode || value.mainnetPaymentsEnabled !== (config.mode === "mainnet-pilot") || !Array.isArray(value.payouts)) throw Error("Test payout status unavailable");
         return { enabled: true, ...value, state: "payout_status" };
       }
       if (action === "status") return { worker: worker?.status() || null, configured: true, ...await controller.status(), session: await controller.session() };

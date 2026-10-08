@@ -1,4 +1,5 @@
 "use strict";
+const { protocol } = require("../core/lib/koin-network/payment-network");
 // Private main-process client. This is not exposed through Core, tools or IPC
 // arguments. It signs one bounded rehearsal certificate, never a transaction.
 const fs = require("fs"), path = require("path");
@@ -14,8 +15,9 @@ function configuration(value) {
 }
 class FundedSessionClient {
   #config; #file; #authorize; #sign; #fetch; #clock; #record; #observation = null; #configHash;
-  constructor({ config, file, authorize, sign, fetchImpl = fetch, clock = Date.now }) {
+  constructor({ config, file, authorize, sign, fetchImpl = fetch, clock = Date.now, mainnetPilot = false }) {
     this.#config = configuration(config); this.#file = file; this.#authorize = authorize; this.#sign = sign; this.#fetch = fetchImpl; this.#clock = clock;
+    if (protocol(this.#config.target).paymentsEnabled && mainnetPilot !== true) throw Error("Mainnet sessions require explicit private Test configuration");
     this.#configHash = P.hash(JSON.stringify(Object.fromEntries(Object.entries(this.#config).sort(([a], [b]) => a.localeCompare(b)))));
     try {
       this.#record = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -44,7 +46,7 @@ class FundedSessionClient {
     return auth;
   }
   async #call(action, body, auth, signal) {
-    const response = await this.#fetch(this.#config.schedulerUrl + "/koin/funded/rehearsal/" + action, {
+    const response = await this.#fetch(this.#config.schedulerUrl + protocol(this.#config.target).prefix + action, {
       method: "POST", redirect: "error", signal, headers: { "content-type": "application/json", connection: "close" },
       body: JSON.stringify({ ...body, sessionToken: auth.sessionToken }),
     });
@@ -52,7 +54,7 @@ class FundedSessionClient {
     for await (const chunk of response.body) { size += chunk.length; if (size > 65536) throw Error("Session response too large"); chunks.push(chunk); }
     const result = JSON.parse(Buffer.concat(chunks).toString("utf8"));
     if (!response.ok || result.ok !== true) throw Error(typeof result.error === "string" ? result.error.split(auth.sessionToken).join("[redacted]").slice(0, 220) : "Session request failed");
-    if (result.mode !== "funded-rehearsal" || result.paymentsEnabled !== false) throw Error("Invalid session rehearsal response");
+    if (result.mode !== protocol(this.#config.target).mode || result.paymentsEnabled !== protocol(this.#config.target).paymentsEnabled) throw Error("Invalid session rehearsal response");
     return result;
   }
   #matching(t, auth) {
@@ -102,7 +104,7 @@ class FundedSessionClient {
     for (const k of ["held", "spent", "available"]) if (typeof result[k] !== "string" || !/^(0|[1-9]\d{0,19})$/.test(result[k])) throw Error("Invalid session accounting");
     if (BigInt(result.held) + BigInt(result.spent) + BigInt(result.available) !== BigInt(r.terms.amount)) throw Error("Session accounting mismatch");
     P.integer(result.remainingJobs, 0, r.terms.maxJobs);
-    return { enabled: true, mode: "funded-rehearsal", paymentsEnabled: false,
+    return { enabled: true, mode: protocol(this.#config.target).mode, paymentsEnabled: protocol(this.#config.target).paymentsEnabled,
       ...Object.fromEntries(["id", "session", "owner", "state", "amount", "perJob", "held", "spent", "available", "remainingJobs", "maxJobs", "expires", "model", "version", "maxOutput"].map(k => [k, result[k]])) };
   }
   async retry(signal) {
@@ -133,7 +135,7 @@ class FundedSessionClient {
     const status = this.#status(result, r); this.#save({ ...r, phase: status.state }); return status;
   }
   async status(signal) {
-    if (!this.#record) return { enabled: true, mode: "funded-rehearsal", paymentsEnabled: false, state: "unapproved" };
+    if (!this.#record) return { enabled: true, mode: protocol(this.#config.target).mode, paymentsEnabled: protocol(this.#config.target).paymentsEnabled, state: "unapproved" };
     const auth = await this.#auth(signal, true), r = this.#owner(auth);
     const result = await this.#call("status", { id: r.id }, auth, signal);
     return this.#status(result, r);

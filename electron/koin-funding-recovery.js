@@ -46,6 +46,7 @@ class FundingRecovery {
     } catch (e) { this.#db?.close(); this.#guard.close(); throw e; }
   }
   assertMode(mode) { assertPaymentMode(mode, this.#client); if (JSON.parse(this.#identity).mode !== mode) throw Error("Funding mode changed"); }
+  get paymentsEnabled() { return JSON.parse(this.#identity).mode === "mainnet-pilot"; }
   get nonceCoordinator() { return this.#nonces; }
   #time() {
     const row = this.#db.prepare("SELECT data,clock FROM identity WHERE id=1").get(), now = integer(this.#clock());
@@ -91,7 +92,7 @@ class FundingRecovery {
   status(id) {
     const r = this.#row(id);
     return { id, state: r.state, reason: r.reason, txId: r.draft.id, attempts: r.attempts, kind: r.intent.kind,
-      amount: r.intent.args.amount, actor: r.intent.actor, held: r.held === true, finality: structuredClone(r.finality), paymentsEnabled: false };
+      amount: r.intent.args.amount, actor: r.intent.actor, held: r.held === true, finality: structuredClone(r.finality), paymentsEnabled: this.paymentsEnabled };
   }
   assertClient(client) { if (client !== this.#client) throw Error("Funding review must use the journal's client"); }
   list() { return this.#db.prepare("SELECT id FROM deposits ORDER BY rowid DESC LIMIT 200").all().map(r => this.status(r.id)); }
@@ -151,7 +152,7 @@ class FundingRecovery {
         policyHash: hash(JSON.stringify(state)), transaction: null, transactionHash: null, createdAt: now, expires: now + 180000,
         held: false, attempts: 0, lastAttemptAt: null, days: [], finality: null });
       if (reservation.action !== "sign_original") return { action: "recover_existing", ...this.status(id) };
-      return { action: "prepare_funding", id, transaction: structuredClone(draft), intent: request, paymentsEnabled: false };
+      return { action: "prepare_funding", id, transaction: structuredClone(draft), intent: request, paymentsEnabled: this.paymentsEnabled };
     });
   }
   async resumeReviewed(id, review, active) {
@@ -215,16 +216,16 @@ class FundingRecovery {
     const result = this.#tx(() => {
       const r = this.#row(id);
       if (terminal(r.state)) return { action: "done", ...this.status(id) };
-      if (evidence.state !== "verified") return { action: "wait", reason: "funding_" + evidence.state, paymentsEnabled: false };
+      if (evidence.state !== "verified") return { action: "wait", reason: "funding_" + evidence.state, paymentsEnabled: this.paymentsEnabled };
       if (this.#time() - evidence.checkedAt > 5000 || this.#time() < evidence.checkedAt) throw Error("Stale funding evidence");
       if (confirmed && uint(evidence.height) >= uint(finality.height)) {
-        if (finality.state === "finalized" && evidence.allowance !== "0") return { action: "review", reason: "residual_allowance", paymentsEnabled: false };
+        if (finality.state === "finalized" && evidence.allowance !== "0") return { action: "review", reason: "residual_allowance", paymentsEnabled: this.paymentsEnabled };
         r.finality = finality; r.state = finality.state === "finalized" ? "funded" : "reverted"; r.reason = null; this.#save(r);
         return { action: "done", ...this.status(id) };
       }
       if (r.held) return { action: "review", ...this.status(id), reason: "funding_user_stopped" };
       if (r.state === "needs_review") return { action: "review", ...this.status(id) };
-      if (finality.state !== "unknown") return { action: "wait", reason: "funding_" + finality.state, paymentsEnabled: false };
+      if (finality.state !== "unknown") return { action: "wait", reason: "funding_" + finality.state, paymentsEnabled: this.paymentsEnabled };
       if (!allowSubmit) return { action: "review", ...this.status(id), reason: "funding_resume_review_required" };
       let reason = null;
       if (hash(JSON.stringify(evidence.config)) !== r.policyHash) reason = "funding_policy_changed";
@@ -232,17 +233,17 @@ class FundingRecovery {
       else if (r.attempts === 0 && this.#time() >= r.expires) reason = "funding_review_expired";
       else if (r.attempts >= this.#policy.maxAttempts) reason = "funding_attempt_limit";
       if (reason) { r.state = "needs_review"; r.reason = reason; this.#save(r); return { action: "review", ...this.status(id) }; }
-      if (evidence.config.paused || evidence.allowance !== "0") return { action: "wait", reason: "funding_paused_or_allowance", paymentsEnabled: false };
+      if (evidence.config.paused || evidence.allowance !== "0") return { action: "wait", reason: "funding_paused_or_allowance", paymentsEnabled: this.paymentsEnabled };
       const now = this.#time();
-      if (r.lastAttemptAt !== null && now - r.lastAttemptAt < this.#policy.minRetryMs) return { action: "wait", reason: "funding_retry_delay", paymentsEnabled: false };
+      if (r.lastAttemptAt !== null && now - r.lastAttemptAt < this.#policy.minRetryMs) return { action: "wait", reason: "funding_retry_delay", paymentsEnabled: this.paymentsEnabled };
       const day = String(Math.floor(now / DAY));
       if (!r.days.includes(day)) {
         const used = this.#db.prepare("SELECT amount FROM mana WHERE day=? AND owner=?").all(day, r.intent.actor).reduce((sum, m) => sum + uint(m.amount), 0n);
-        if (used + uint(r.intent.maxRc) > uint(this.#policy.maxRcPerDay)) return { action: "wait", reason: "funding_daily_rc_budget", paymentsEnabled: false };
+        if (used + uint(r.intent.maxRc) > uint(this.#policy.maxRcPerDay)) return { action: "wait", reason: "funding_daily_rc_budget", paymentsEnabled: this.paymentsEnabled };
         this.#db.prepare("INSERT INTO mana VALUES(?,?,?,?)").run(day, r.intent.actor, id, r.intent.maxRc); r.days.push(day);
       }
       r.attempts++; r.lastAttemptAt = now; r.state = "unknown"; this.#save(r);
-      return { action: "submit_exact_transaction", id, transaction: structuredClone(r.transaction), intent: structuredClone(r.intent), paymentsEnabled: false };
+      return { action: "submit_exact_transaction", id, transaction: structuredClone(r.transaction), intent: structuredClone(r.intent), paymentsEnabled: this.paymentsEnabled };
     });
     if (result.action === "done") await this.#nonces.reconcile(id);
     return result;

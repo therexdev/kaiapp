@@ -55,13 +55,20 @@
   const bridge = window.kaiKoinTestBridge, section = document.getElementById("koin-test-payments");
   if (!bridge || !section) return;
   const status = document.getElementById("koin-test-payment-status"), select = document.getElementById("koin-test-transaction");
-  const buttons = [...section.querySelectorAll("[data-koin-test]")]; let busy = false;
+  const buttons = [...section.querySelectorAll("[data-koin-test]")]; let busy = false, mainnet = false;
   const amount = value => { const n = BigInt(value || "0"); return `${n / 100000000n}.${(n % 100000000n).toString().padStart(8, "0")}`; };
   function show(result) {
-    if (result?.mode === "test-deployment") section.hidden = result.enabled === false;
+    if (["test-deployment", "mainnet-pilot"].includes(result?.mode)) {
+      section.hidden = result.enabled === false; mainnet = result.mode === "mainnet-pilot";
+      document.getElementById("koin-test-title").textContent = mainnet ? "Payment testing · MAINNET · real KOIN" : "Payment testing · Foundation testnet";
+      document.getElementById("koin-test-network-notice").textContent = mainnet ? "This Test app uses REAL KOIN. Deposits, approved requests and rewards move real funds. Review each native approval and its limits." : "Foundation testnet: deposits, requests and automatic rewards use test KOIN.";
+      document.getElementById("koin-test-amount-label").textContent = mainnet ? "Real KOIN amount" : "Test KOIN amount";
+      for (const [action, label] of [["purchase", mainnet ? "Buy credits with real KOIN" : "Buy Test credits"], ["fund-rewards", mainnet ? "Fund mainnet rewards" : "Fund Test rewards"], ["session-review", mainnet ? "Review real KOIN spending" : "Review Test spending"]]) section.querySelector(`[data-koin-test="${action}"]`).textContent = label;
+    }
+    const unit = mainnet ? "mainnet KOIN" : "test KOIN";
     if (result?.configured === false) { status.textContent = "Import the public manifest from your Test backend to begin."; return; }
     if (result?.balances) {
-      document.getElementById("koin-test-balances").textContent = `Available: ${amount(result.balances.available)} test KOIN · Reserved: ${amount(result.balances.reserved)} test KOIN${result.paused ? " · New spending paused" : ""}`;
+      document.getElementById("koin-test-balances").textContent = `Available: ${amount(result.balances.available)} ${unit} · Reserved: ${amount(result.balances.reserved)} ${unit}${result.paused ? " · New spending paused" : ""}`;
       const selected = select.value; select.replaceChildren();
       for (const tx of result.transactions || []) {
         const option = document.createElement("option"); option.value = tx.id; option.textContent = `${tx.purpose}: ${tx.state} · ${tx.txId || tx.id}`; select.appendChild(option);
@@ -71,16 +78,16 @@
     }
     const state = result?.state || result?.status || (result?.configured ? "Ready" : "Action complete");
     status.textContent = result?.error || String(state).replaceAll("_", " ");
-    if (result?.payouts) status.textContent = result.payouts.length ? result.payouts.map(p => `Day ${p.epoch}: ${p.state} · ${amount((BigInt(p.availability || "0") + BigInt(p.work || "0")).toString())} test KOIN`).join("; ") : "No daily payouts yet. Rewards are automatic after the review period.";
+    if (result?.payouts) status.textContent = result.payouts.length ? result.payouts.map(p => `Day ${p.epoch}: ${p.state} · ${amount((BigInt(p.availability || "0") + BigInt(p.work || "0")).toString())} ${unit}`).join("; ") : "No daily payouts yet. Rewards are automatic after the review period.";
     if (result?.answer) {
       document.getElementById("koin-test-answer").textContent = result.answer;
       const charge = result.koin?.receipt?.usage?.amount;
-      status.textContent = `Answer verified · Input tokens: ${result.usage?.prompt_tokens || 0} · Output tokens: ${result.usage?.completion_tokens || 0}${charge ? " · Charge: " + amount(charge) + " test KOIN (awaiting settlement)" : ""}`;
+      status.textContent = `Answer verified · Input tokens: ${result.usage?.prompt_tokens || 0} · Output tokens: ${result.usage?.completion_tokens || 0}${charge ? " · Charge: " + amount(charge) + " " + unit + " (awaiting settlement)" : ""}`;
     }
     if (result?.deposit) status.textContent += ` · Deposit: ${result.deposit.state}`;
-    if (result?.state === "active") status.textContent = `Test spending approved. Spent: ${amount(result.spent)} · Held: ${amount(result.held)} · Remaining requests: ${result.remainingJobs}`;
+    if (result?.state === "active") status.textContent = `${mainnet ? "Real KOIN" : "Test"} spending approved. Spent: ${amount(result.spent)} · Held: ${amount(result.held)} · Remaining requests: ${result.remainingJobs}`;
     if (result?.state === "request_cancelled") status.textContent = "Request was cancelled before dispatch. You can send a new request.";
-    if (result?.state === "request_settled") status.textContent = `Request settled once · Charge: ${amount(result.amount)} test KOIN. You can send a new request.`;
+    if (result?.state === "request_settled") status.textContent = `Request settled once · Charge: ${amount(result.amount)} ${unit}. You can send a new request.`;
     if (result?.state === "request_unknown") status.textContent = "Request remains uncertain. Retry its original prompt; no new request has been started.";
   }
   async function run(action) {

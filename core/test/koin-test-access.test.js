@@ -18,13 +18,13 @@ test("Test access is encrypted, pinned and separate from live account credential
   online = false; assert.throws(() => service.authorize(config.schedulerUrl), /privacy/); online = true;
   wallet.address = "different"; assert.throws(() => service.authorize(config.schedulerUrl), /changed/);
 });
-test("Test host authorization verifies the exact backend, chain, wallet and encrypted installation", async t => {
+for (const mode of ["test-deployment", "mainnet-pilot"]) test(mode + " host authorization verifies the exact backend, chain, wallet and encrypted installation", async t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "kai-test-lease-")); t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const config = { owner: "owner", schedulerUrl: "https://test.example/scheduler", deployment: { chainId: "pinned-test-chain" } };
+  const config = { mode, owner: "owner", schedulerUrl: "https://test.example/scheduler", deployment: { chainId: "pinned-test-chain" } };
   let mismatch = false, captured;
   const service = new TestAccess({ file: path.join(root, "access"), config, wallet: { address: "owner" }, settings: { get: () => "online" },
     safeStorage: { isEncryptionAvailable: () => true, encryptString: s => Buffer.from(s), decryptString: b => b.toString() },
-    fetchImpl: async (url, options) => { captured = { url, options }; const body = { mode: "test-deployment", chainId: config.deployment.chainId,
+    fetchImpl: async (url, options) => { captured = { url, options }; const body = { mode: config.mode, chainId: config.deployment.chainId,
       owner: "owner", installation: mismatch ? "0".repeat(64) : JSON.parse(options.body).installation, granted: true };
       return { ok: true, body: [Buffer.from(JSON.stringify(body))] }; } });
   service.install({ schema: 1, mode: "test-access", owner: "owner", schedulerUrl: config.schedulerUrl, accountId: "test", grantId: "test", token: "test_" + "a".repeat(43), expiresAt: Date.now() + 60000 });

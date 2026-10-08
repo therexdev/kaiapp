@@ -4,9 +4,9 @@ const { trustedMainDocument } = require("./window-security");
 const { koin } = require("./koin-review");
 const { FundedSessionClient } = require("./koin-session-client");
 
-function createSessionReview({ client, dialog, track = () => () => {}, tr = x => x, testDeployment = false }) {
+function createSessionReview({ client, dialog, track = () => () => {}, tr = x => x, testDeployment = false, mainnetPilot = false }) {
   let pending = false;
-  const result = state => ({ enabled: true, mode: "funded-rehearsal", paymentsEnabled: false, state });
+  const result = state => ({ enabled: true, mode: mainnetPilot ? "mainnet-pilot" : "funded-rehearsal", paymentsEnabled: mainnetPilot, state });
   return async function run(window, action) {
     const visible = () => window && !window.isDestroyed() && window.isVisible() && !window.isMinimized();
     if (pending || !visible()) return result("cancelled");
@@ -23,7 +23,7 @@ function createSessionReview({ client, dialog, track = () => () => {}, tr = x =>
       if (action === "retry") { changing = true; return await client.retry(signal); }
       if (action === "revoke") {
         const state = await client.status(signal); guard();
-        const { response } = await dialog.showMessageBox(window, { type: "question", title: tr(testDeployment ? "Test KOIN spending approval" : "KOIN session rehearsal"),
+        const { response } = await dialog.showMessageBox(window, { type: "question", title: tr(mainnetPilot ? "Mainnet KOIN spending approval" : testDeployment ? "Test KOIN spending approval" : "KOIN session rehearsal"),
           message: tr("Stop new requests for this session?"),
           detail: `${tr("Dispatched work stays reserved. This does not refund on-chain credits.")}\n\n${state.session}`,
           buttons: [tr("Cancel"), tr("Revoke session approval")], defaultId: 0, cancelId: 0, noLink: true });
@@ -32,10 +32,11 @@ function createSessionReview({ client, dialog, track = () => () => {}, tr = x =>
       }
       if (action !== "review") throw Error("Unknown session action");
       const review = await client.prepare(signal); guard();
+      if ((review.terms.mode === "mainnet-pilot") !== mainnetPilot) throw Error("Session network differs from native review mode");
       const t = review.terms, line = (name, value) => `${tr(name)}: ${value}`;
-      const { response } = await dialog.showMessageBox(window, { type: "question", title: tr(testDeployment ? "Test KOIN spending approval" : "KOIN session rehearsal"),
-        message: tr(testDeployment ? "Approve this bounded Test spending session" : "Approve one bounded rehearsal session"),
-        detail: [tr(testDeployment ? "Requests within this approval spend the test KOIN reserved in your Foundation testnet session." : "This signs a session approval for accounting tests. No KOIN will be spent."), "",
+      const { response } = await dialog.showMessageBox(window, { type: "question", title: tr(mainnetPilot ? "Mainnet KOIN spending approval" : testDeployment ? "Test KOIN spending approval" : "KOIN session rehearsal"),
+        message: tr(mainnetPilot ? "Approve bounded spending of real KOIN" : testDeployment ? "Approve this bounded Test spending session" : "Approve one bounded rehearsal session"),
+        detail: [tr(mainnetPilot ? "MAINNET: Requests within these limits spend real KOIN reserved in your session without asking again for each request." : testDeployment ? "Requests within this approval spend the test KOIN reserved in your Foundation testnet session." : "This signs a session approval for accounting tests. No KOIN will be spent."), "",
           line("Model", t.model), line("Tariff version", t.version), line("Maximum output tokens", t.maxOutput),
           line("Input price per 1M tokens", koin(review.tariff.inputAtomsPerMillion)),
           line("Output price per 1M tokens", koin(review.tariff.outputAtomsPerMillion)),
@@ -45,8 +46,8 @@ function createSessionReview({ client, dialog, track = () => () => {}, tr = x =>
           line("Session", t.session), line("Chain", t.target.chainId), line("Credits contract", t.target.credits),
           line("Contract bytecode", t.target.creditsHash), line("Tariff policy", t.target.policyHash),
           "", tr("Requests within these limits reuse this approval. Revoking it stops new requests."),
-          tr("Live payments require a separate authorization and are not enabled by this signature.")].join("\n"),
-        buttons: [tr("Cancel"), tr(testDeployment ? "Approve Test spending" : "Approve session rehearsal")], defaultId: 0, cancelId: 0, noLink: true });
+          tr(mainnetPilot ? "Only the displayed mainnet deployment and exact limits are authorized. This approval does not authorize wallet transfers." : "Live payments require a separate authorization and are not enabled by this signature.")].join("\n"),
+        buttons: [tr("Cancel"), tr(mainnetPilot ? "Approve real KOIN spending" : testDeployment ? "Approve Test spending" : "Approve session rehearsal")], defaultId: 0, cancelId: 0, noLink: true });
       guard(); if (response !== 1) return result("cancelled");
       changing = true; return await client.approve(review, signal);
     } catch (e) {

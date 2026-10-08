@@ -11,6 +11,7 @@ function fixture(t, options = {}) {
     chainId: utils.encodeBase64url(Buffer.from("1220" + "6".repeat(64), "hex")) };
   for (const k of ["token", "credits", "rewards", "admin", "verifier", "mining", "operations"]) d[k] = Signer.fromSeed("funding-recovery-" + k).getAddress();
   for (const k of ["token", "credits", "rewards"]) d[k + "Hash"] = "0x1220" + "1".repeat(64);
+  if (options.mainnet === true) Object.assign(d, { network: "mainnet", chainId: require("../../lib/koin-network/payment-network").MAINNET_CHAIN, token: require("../../lib/koin-network/payment-network").MAINNET_TOKEN, rpc: ["https://mainnet.invalid"] });
   const config = { chain_id: d.chainId, token: encodedAddress(d.token), credits: encodedAddress(d.credits), treasury: encodedAddress(d.rewards),
     admin: encodedAddress(d.admin), verifier: encodedAddress(d.verifier), mining: encodedAddress(d.mining), operations: encodedAddress(d.operations), version: "1" };
   const state = { now: 1000000, height: 10, lib: 10, nonce: "KAE=", paused: false, record: null, block: null, fork: false, liquid: "0", liabilities: "0", available: "0", allowance: "0", signed: 0, submissions: [] };
@@ -46,7 +47,7 @@ function fixture(t, options = {}) {
   const client = new KoinChain(d, provider), request = { kind: "credits", method: "purchase", actor: signer.getAddress(),
     args: { account: encodedAddress(signer.getAddress()), amount: "500000000" }, maxRc: "10000000" };
   const handles = [], open = extra => {
-    const j = new FundingRecovery(dir, { mode: "isolated-rehearsal", client, clock: () => state.now, maxRcPerDay: "20000000", ...options, ...extra }); handles.push(j); return j;
+    const j = new FundingRecovery(dir, { mode: options.mainnet ? "mainnet-pilot" : "isolated-rehearsal", client, clock: () => state.now, maxRcPerDay: "20000000", ...options, ...extra }); handles.push(j); return j;
   };
   const id = hash("deposit-one"), journal = open();
   const sign = async d => { state.signed++; const tx = structuredClone(d.transaction); await signer.signTransaction(tx); return tx; };
@@ -62,7 +63,7 @@ function fixture(t, options = {}) {
     state.block.receipt = { id: state.block.block_id, height: String(state.height), transaction_receipts: [receipt] };
     if (irreversible) state.lib = state.height;
   };
-  const runner = (j = journal, extras = {}) => new FundingRecoveryRunner({ mode: "isolated-rehearsal", journal: j, sign,
+  const runner = (j = journal, extras = {}) => new FundingRecoveryRunner({ mode: options.mainnet ? "mainnet-pilot" : "isolated-rehearsal", journal: j, sign,
     submit: async d => { state.submissions.push(d.transaction); }, ...extras });
   t.after(() => { for (const h of handles) { try { h.close(); } catch {} } fs.rmSync(dir, { recursive: true, force: true });
     for (const suffix of ["", "-wal", "-shm"]) fs.rmSync(dir + ".recovery-anchor.sqlite" + suffix, { force: true }); });
