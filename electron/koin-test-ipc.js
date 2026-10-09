@@ -163,7 +163,11 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
         if (!response.ok || value.mode !== config.mode || value.mainnetPaymentsEnabled !== (config.mode === "mainnet-pilot") || !Array.isArray(value.payouts)) throw Error("Test payout status unavailable");
         return { enabled: true, ...value, state: "payout_status" };
       }
-      if (action === "status") return { worker: worker?.status() || null, configured: true, ...await controller.status(), session: await controller.session() };
+      if (action === "status") {
+        let accessReady = false;
+        try { access.authorize(readConfig(configFile).schedulerUrl); accessReady = true; } catch { /* Missing invitation, locked storage or offline mode. */ }
+        return { worker: worker?.status() || null, configured: true, accessReady, ...await controller.status(), session: await controller.session() };
+      }
       if (["session-review", "session-status", "session-retry", "session-revoke"].includes(action)) return (await getSession())(window, action.slice(8));
       if (!["purchase", "fund-rewards", "reserve", "refund", "revoke", "release", "check", "resume", "recover", "repair"].includes(action)) throw Error("Unknown Test payment action");
       return await controller.run(window, action, input);

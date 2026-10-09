@@ -1,0 +1,57 @@
+/* Payment account: everyday actions first, operational tools on demand. */
+#koin-test-payments { margin: 8px 0 24px; padding: 26px; background: var(--bg-raised); border: 1px solid var(--border); border-radius: 18px; }
+.koin-payments .kp-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
+.koin-payments h2 { font-size: 26px; letter-spacing: -.035em; margin: 3px 0 6px; }
+.koin-payments h3 { font-size: 16px; margin: 0 0 8px; }
+.kp-eyebrow { font-size: 12px; color: var(--text-dim); }
+.kp-heading-actions, .kp-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.kp-heading-actions { justify-content: flex-end; }
+.kp-badge { padding: 5px 10px; border: 1px solid var(--border); border-radius: 20px; font-size: 12px; white-space: nowrap; color: var(--text-dim); }
+.kp-badge[data-network="mainnet"] { background: #ecf7f2; color: #176b51; border-color: #cbe5d9; }
+.kp-badge[data-network="testnet"] { background: #fff7e7; color: #895700; border-color: #f0dfba; }
+.koin-payments .kp-notice { font-size: 12px; color: var(--text-dim); margin: 18px 0 0; padding-left: 12px; border-left: 2px solid var(--border); }
+.kp-status-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0; min-height: 24px; }
+#koin-test-payment-status { font-size: 13px; overflow-wrap: anywhere; }
+#koin-test-payment-status[data-error="true"] { color: var(--danger); }
+.kp-status-row button { flex-shrink: 0; }
+.kp-tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--border); margin: 22px 0; }
+.kp-tabs [role="tab"] { font: inherit; font-weight: 600; color: var(--text-dim); background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 8px 0 12px; cursor: pointer; box-shadow: none; }
+.kp-tabs [aria-selected="true"] { color: var(--violet); border-bottom-color: var(--violet); }
+.kp-balances { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin: 0 0 24px; }
+.kp-balances > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 4px 0; }
+.kp-balances > div + div { border-left: 1px solid var(--border); padding-left: 24px; }
+.kp-balances span, .kp-balances .koin-currency { color: var(--text-dim); font-size: 12px; }
+.kp-balances strong { font-size: clamp(20px, 2.4vw, 31px); font-weight: 650; letter-spacing: -.04em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.kp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.kp-card { min-width: 0; padding: 20px; border: 1px solid var(--border); border-radius: 12px; }
+.koin-payments .kp-card .hint { margin: 0 0 16px; line-height: 1.6; }
+.koin-payments label { display: block; margin: 12px 0 7px; font-size: 12px; font-weight: 600; color: var(--text-dim); }
+.kp-amount { display: flex; gap: 10px; align-items: stretch; margin-bottom: 10px; }
+.koin-payments input, .koin-payments textarea, .koin-payments select { min-width: 0; width: 100%; border: 1px solid var(--border); border-radius: 9px; padding: 11px 12px; background: var(--bg-input); color: var(--text); font: inherit; }
+.kp-amount input { flex: 1; width: 0; font-variant-numeric: tabular-nums; }
+.kp-amount button { flex-shrink: 0; }
+.koin-payments .kp-text-button { background: none; border: 0; box-shadow: none; padding: 4px 0; color: var(--sky); font: inherit; font-size: 12px; cursor: pointer; }
+.koin-payments .kp-text-button:disabled { opacity: .45; cursor: default; }
+.kp-secondary { margin-top: 12px; gap: 16px; }
+.kp-chat { margin-top: 16px; }
+.koin-payments textarea { resize: vertical; min-height: 100px; display: block; }
+.kp-chat-actions { justify-content: space-between; margin-top: 12px; }
+.kp-chat-actions .hint { margin: 0 !important; flex: 1; overflow-wrap: anywhere; }
+.kp-answer { border-top: 1px solid var(--border); margin-top: 20px; padding-top: 16px; }
+.kp-answer > span { font-size: 12px; color: var(--text-dim); }
+#koin-test-answer { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 8px; font-size: 14px; line-height: 1.7; }
+.kp-details { border-top: 1px solid var(--border); margin-top: 18px; }
+.kp-details > summary { padding: 15px 0 0; font-weight: 600; font-size: 13px; cursor: pointer; }
+.kp-details > summary span { font-weight: 400; color: var(--text-dim); margin-left: 10px; font-size: 12px; }
+.kp-details-body { padding: 16px 0 0; }
+.kp-details-body > section + section { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
+.kp-details-body .kp-actions { margin-top: 12px; }
+.kp-details-body > p, .kp-wallet { margin: 10px 0; overflow-wrap: anywhere; }
+.kp-provider-state { margin: 14px 0; font-size: 14px; font-weight: 600; }
+.kp-reward-status { margin: 16px 0; font-size: 13px; white-space: pre-line; }
+#koin-developer-tools { margin-top: 24px; font-size: 13px; }
+#koin-developer-tools summary { cursor: pointer; }
+#koin-developer-content > div { margin-top: 14px; }
+.koin-payments button:focus-visible, .koin-payments summary:focus-visible { outline: 2px solid var(--violet); outline-offset: 4px; }
+@media (max-width: 900px) { .kp-grid { grid-template-columns: 1fr; } .koin-payments .kp-heading { flex-wrap: wrap; } .kp-heading-actions { justify-content: flex-start; } }
+@media (max-width: 540px) { #koin-test-payments { padding: 16px; } .kp-card { padding: 16px; } .kp-balances { grid-template-columns: 1fr; gap: 14px; } .kp-balances > div + div { border-left: 0; border-top: 1px solid var(--border); padding: 14px 0 0; } .kp-balances strong { font-size: 24px; } .kp-status-row { align-items: flex-start; flex-direction: column; } .kp-amount { flex-wrap: wrap; } .kp-amount input { min-width: 110px; } }

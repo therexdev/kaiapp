@@ -1,3 +1,10 @@
+## A clearer KOIN account
+
+- Separates **Use AI** and **Earn KOIN**, with available/reserved credits, spending limits, a full-width message box and automatic reward status.
+- Keeps connection setup separate and moves backups, reward-pool funding, recovery and developer previews into expandable sections. Unknown balances remain unavailable instead of appearing as zero.
+- Shows **Not connected** until a deployment is verified. Mainnet clearly identifies real KOIN; testnet remains labelled as test KOIN. The old default testnet label no longer appears before setup.
+- Native payment approvals, exact transaction recovery and the shared wallet/node profile remain in place. This layout does not activate payments or change the deployed contracts.
+
 ## Mainnet KOIN pilot in Test
 
 - Updates flagged installer and runtime dependencies before packaging this Test build.

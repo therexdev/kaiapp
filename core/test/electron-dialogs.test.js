@@ -121,7 +121,8 @@ test("every card view scrolls itself, so the page never scrolls the sidebar", ()
 
 test("no markup names a class the stylesheet never defines", () => {
   const html = fs.readFileSync(path.join(UI_DIR, "index.html"), "utf8");
-  const css = ["styles.css", "language.css"].map(file => fs.readFileSync(path.join(UI_DIR, file), "utf8")).join("\n");
+  const stylesheets = [...html.matchAll(/<link rel="stylesheet" href="([^"]+\.css)"/g)].map(m => m[1]);
+  const css = stylesheets.map(file => fs.readFileSync(path.join(UI_DIR, file), "utf8")).join("\n");
   const used = new Set();
   for (const m of html.matchAll(/class="([^"]+)"/g)) {
     for (const c of m[1].split(/\s+/)) if (c) used.add(c);
