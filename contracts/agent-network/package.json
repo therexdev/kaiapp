@@ -6,10 +6,11 @@
   "scripts": {
     "generate": "node scripts/generate.js",
     "build": "node scripts/generate.js && asc assembly/index.ts --target release --use abort=",
-    "test": "node scripts/generate.js && asp --nologo"
+    "test": "node ../verify-coverage-toolchain.js && node scripts/generate.js && asp --nologo"
   },
   "devDependencies": {
     "@koinos/sdk-as": "1.0.0",
+    "micromatch": "npm:picomatch@4.0.7",
     "protobufjs": "7.6.6",
     "yaml": "2.9.0",
     "somap": "file:../vendor/somap"
