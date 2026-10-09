@@ -34,7 +34,7 @@ This page never requests a private key, uploads the JSON to KAI's website, or re
 
 If Kondor is missing, locked, denied, or its popup is closed, the page reports the error or times out. Close any pending Kondor prompt before retrying. If the draft expires, prepare a fresh one. For Harbinger or a fully offline signing machine, use the CLI helper below. The signer supports one ordinary account signature; multisig and contract-wallet authorization remain unsupported.
 
-The signer uses a pinned Kondor JS SDK and the website's locked Koilib 9.3.0 bundle, with no CDN scripts, analytics or persistent transaction storage. `scripts/export-producer-signer.js` copies the exact UI and shared validator to the website checkout and records their hashes. Automated tests cover the browser SDK message flow with disposable test keys; installed-extension approvals and real-network confirmation still need tester validation.
+The signer uses a pinned Kondor JS SDK and the website's locked Koilib 9.4.0 bundle, with no CDN scripts, analytics or persistent transaction storage. `scripts/export-producer-signer.js` copies the exact UI and shared validator to the website checkout and records their hashes. Automated tests cover the browser SDK message flow with disposable test keys; installed-extension approvals and real-network confirmation still need tester validation.
 
 ## Offline signing helper
 

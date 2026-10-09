@@ -12,7 +12,7 @@ function exportSigner(destination) {
     files[name] = crypto.createHash("sha256").update(bytes).digest("hex");
   }
   const koilibVersion = require("koilib/package.json").version;
-  if (koilibVersion !== "9.3.0") throw new Error("Review the Koilib browser bundle before changing the signer deployment version.");
+  if (koilibVersion !== "9.4.0") throw new Error("Review the Koilib browser bundle before changing the signer deployment version.");
   fs.writeFileSync(path.join(destination, "manifest.json"), JSON.stringify({ format: "kai-producer-signer-v1", koilibVersion, kondorCommit: "e319c5f190ec6d4c3c644270ded85a1256cd8e7c", files }, null, 2) + "\n");
 }
 if (require.main === module) {

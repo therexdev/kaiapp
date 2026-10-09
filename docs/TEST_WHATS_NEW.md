@@ -1,3 +1,8 @@
+## KOIN SDK compatibility
+
+- Updates Koilib to 9.4 so native KOIN contract calls work with the patched Protobuf dependency.
+- Adds checks for real SDK contract construction and exact balance/transfer encoding. Contract bytecode and payment approval rules are unchanged.
+
 ## A clearer KOIN account
 
 - Separates **Use AI** and **Earn KOIN**, with available/reserved credits, spending limits, a full-width message box and automatic reward status.
