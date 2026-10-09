@@ -55,3 +55,42 @@ suite is claimed while the model/browser prerequisites are missing. The next
 bounded step is the local-only inference adapter and its no-egress/cancellation
 contract tests; see `../PLUGIN_CORE_ARCHITECTURE.md` for the staged plan and
 actual wallet/service inventory.
+
+# Independent review and dormant adapter follow-up
+
+Continued on the same local feature branch. An independent review agent examined
+`211e49c`, reproduced accessor-based authority changes, cancellation hangs, error
+leakage and expiry resurrection, then reviewed the fixes and local adapter twice.
+All reported issues are fixed; see `LOCAL_INFERENCE.md` for details and limits.
+
+Final verification:
+
+- `node --test core/test/plugin-permissions.test.js core/test/plugin-local-inference.test.js`:
+  **28 passed, 0 failed/skipped/cancelled**. Parent log:
+  `/tmp/kaiapp-plugin-adapter-focused.log`.
+- Independent reviewer additionally ran
+  `node --unhandled-rejections=strict --test core/test/plugin-permissions.test.js core/test/plugin-local-inference.test.js`:
+  **28 passed, 0 failed/skipped/cancelled**, no remaining blockers for this dormant
+  milestone. The suite also contains a standalone strict-mode subprocess test
+  for synchronous revocation followed by adapter throw.
+- `ELECTRON_OVERRIDE_DIST_PATH=/tmp/kaiapp-no-electron npm test`:
+  **1,196 tests; 1,126 passed, 7 failed, 63 skipped**, approximately 53 seconds.
+  Log: `/tmp/kaiapp-plugin-adapter-full.log`.
+- Re-ran the same three-file baseline command listed above in the detached,
+  unchanged baseline worktree. The same seven prerequisite failures remain
+  (Chromium and pinned Smart-Turn model). Log:
+  `/tmp/kaiapp-plugin-adapter-baseline.log`.
+- `git diff --check` and `git diff --cached --check`: passed.
+
+New adapter tests use actual dedicated local fixture subprocesses, verify exit
+on revoke/expiry/timeout, test unconfirmed termination and listener cleanup, reject
+resource/route/provider injection, over-limit and concurrent requests, malformed
+or oversized output, and redirects. Instrumented HTTP/HTTPS/fetch hooks show zero
+paid/network fallback attempts. The adapter does not load or use a real model.
+
+No existing UI, payment, KOIN pilot, runtime manager, serving gateway, deployment
+or release files changed. No production imports of the new modules. No push,
+merge, release or financial transaction performed. Windows native engine/model
+ownership and process-tree/GPU termination remain unverified. Next is the dormant
+trusted consent/identity and dedicated-engine supervisor boundary, before any
+Compare Models UI integration or untrusted plugin loading.

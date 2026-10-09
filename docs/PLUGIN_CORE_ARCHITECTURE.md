@@ -1,4 +1,4 @@
-# Minimal Windows core and optional plugins — milestone 1
+# Minimal Windows core and optional plugins — dormant foundation
 
 ## Status and decision
 
@@ -9,8 +9,8 @@ Read root AGENTS.md; this checkout has no `.agents/skills` or nested AGENTS.md.
 User scope overrides the repository's general release authorization: local work
 only, no push, release, merge, deployment change or financial operation.
 
-This milestone adds a dependency-free, in-memory permission policy module and
-an example manifest. Nothing imports it from the running application. No loader,
+This work adds a dependency-free, in-memory permission policy module, an example
+manifest and a dormant dedicated local-engine adapter (see `plugins/LOCAL_INFERENCE.md`). Nothing imports it from the running application. No loader,
 profile switch, storage migration, wallet operation, IPC route or UI change is
 introduced. Existing payment UI, KOIN pilot and full application stay intact.
 
@@ -80,12 +80,14 @@ is supplied. Future plugin wallet services must bind an independent account and
 signer, possibly sharing reviewed implementation code, never core key material.
 
 The injected trusted adapter receives an exact model resource, literal prompt,
-output-token ceiling and abort signal, and must return text. It must enforce
-local-only selection, token generation limits and cancellation at runtime without
-tool execution or network fallback. No production adapter exists yet. Revocation,
+output-token ceiling and abort signal, and must return text. The dormant trusted
+local adapter targets one dedicated resident llama.cpp child, with no routing or
+provisioning dependency. It is not connected to the production app. Revocation,
 uninstall and manifest updates signal abort and suppress late results; expiry
-also signals abort and suppresses results. The policy cannot forcibly stop an
-adapter that ignores abort. Limits are not OS CPU/RAM quotas or billing controls.
+also signals abort and suppresses results. The policy promptly rejects even if an
+adapter ignores abort, while the new local adapter destroys the HTTP request and
+terminates its dedicated child. It retires permanently if termination cannot be
+confirmed. Limits are not OS CPU/RAM quotas or billing controls.
 
 `docs/plugins/compare-models.manifest.json` is an illustrative two-model request;
 the tests use fake inference only. It is not a packaged plugin or a claim that
@@ -101,8 +103,9 @@ secrets or call existing local APIs. No untrusted native plugin is safe to insta
 on this evidence. Manifest hashes are not code signatures or artifact integrity
 checks. There is no loader, authenticated IPC transport, consent UI, persistent
 approval ledger, OS isolation, concurrent runtime quota or enforced egress boundary.
-Use only parsed JSON DTOs across a future transport; arbitrary JS accessors and
-objects are not a serialization boundary. Never expose the host authority object.
+Use only parsed JSON DTOs across a future transport. Validation now rejects
+accessors, symbols, unexpected prototypes and sparse/custom arrays, but hostile
+same-process Proxies are still outside this boundary. Never expose the host authority object.
 
 A production release needs authenticated code/installation identity, immutable
 artifact binding, closed and resource-scoped broker APIs, OS-enforced filesystem,
@@ -114,11 +117,12 @@ are not retrofitted with this policy and retain their current trust model.
 
 1. **This milestone:** inventory plus dormant policy and fake Compare tests.
    Rollback removes the new files/commit; there is no profile migration.
-2. **Next bounded step:** implement a trusted local-only inference adapter behind
-   the dormant interface, using explicit runtime/model handles, cancellation and
-   per-call limits. Test local model absence, load contention, expiry and Stop,
-   with network/provider functions configured to throw if invoked. Add a trusted
-   owner-consent mock and transport identity contract. Keep Compare/full UI unchanged.
+2. **Dormant adapter implemented:** a dedicated already-running local engine,
+   strict loopback request path, per-call limits, timeout and process termination.
+   Subprocess tests verify cancellation and forbidden fallback. **Next bounded
+   step:** trusted owner-consent/installation identity contract and a dedicated
+   engine supervisor that proves child/port/model ownership and Windows shutdown.
+   Do not connect shared RuntimeManager or enable Compare/full UI yet.
 3. **Composition seam:** refactor `createCore` into explicit factories/lifecycles,
    preserving the full profile default. Model minimal/full profiles in tests;
    absent optional factories must not construct stores, timers, tools or workers.
