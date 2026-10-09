@@ -72,6 +72,15 @@ function createInstallationHost({ publishers, store, localInference }) {
         artifactSha256: hash(input.artifact), installationId: crypto.randomUUID() });
       const rows = [...entries.values()].filter(e => e.row.manifest.id !== row.manifest.id).map(e => e.row);
       if (rows.length >= 100) fail();
+      // Optional protected store stages verified bytes before inventory commit.
+      // Failure can leave only an unreferenced snapshot, never a partial install.
+      try {
+        if (store.stageArtifact) {
+          const staged = store.stageArtifact(input.artifact);
+          if (staged && typeof staged.then === "function") { Promise.resolve(staged).catch(() => {}); fail(); }
+          if (staged !== row.artifactSha256) fail();
+        }
+      } catch { close(); fail(); }
       // Every explicit install gets a fresh identity, even identical reinstall.
       persist([...rows, row]); policy.uninstall(row.manifest.id);
       return activate(row);
@@ -86,7 +95,18 @@ function createInstallationHost({ publishers, store, localInference }) {
     inspect(handle) { return current(handle).row; },
     connect(handle) {
       const entry = current(handle), client = policy.connect(entry.row.manifest.id);
-      return Object.freeze({ async infer(input) { current(handle); return client.infer(input); } });
+      return Object.freeze({ async infer(input) {
+        current(handle);
+        try {
+          if (store.verifyArtifact) {
+            const checked = store.verifyArtifact(entry.row.artifactSha256);
+            if (checked && typeof checked.then === "function") { Promise.resolve(checked).catch(() => {}); fail(); }
+            if (checked !== true) fail();
+          }
+        }
+        catch { close(); fail(); }
+        return client.infer(input);
+      } });
     },
     prepareConsent(handle, input) {
       const entry = current(handle);

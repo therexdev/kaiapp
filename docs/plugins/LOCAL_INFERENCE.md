@@ -95,8 +95,9 @@ asynchronous child kill errors, cleans up listeners and stays disabled.
 ## Next integration boundary
 
 The dormant owner-consent/installation contract and Linux engine supervisor now
-exist; see `IDENTITY_SUPERVISION.md`. Next implement the authenticated transport,
-protected single-writer store and immutable artifact/lifecycle harness. Demonstrate model absence/busy denial
+exist; see `IDENTITY_SUPERVISION.md`. The dormant transport/store/snapshot boundary
+is also complete; `INTEGRATION_READINESS.md` identifies the first-party demo and
+Windows evidence required next. Demonstrate model absence/busy denial
 without download or fallback, Windows process-tree termination, and a genuine
 Stop path. Keep shared serving/earning unaffected. Only then connect a reviewed
 Compare Models harness behind explicit owner grants. Untrusted plugin loading

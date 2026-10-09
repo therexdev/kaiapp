@@ -168,3 +168,53 @@ fixture children, and hung/false verifier fail-closed behavior. Windows ownershi
 verification explicitly denies admission, rather than simulating a security
 boundary. No existing app, KOIN/payment, runtime or deployment file changed;
 fixture changes are test-only. No push, release, merge or financial operation.
+
+# Final dormant transport/storage boundary and readiness review
+
+Continued locally from `532f826`. Added host-created capability MessagePort
+transport, Linux protected HMAC inventory/single-writer persistence and inert,
+read-only content-addressed artifact staging/copy verification. Added only dormant
+store hooks to the existing new installation host. No loader, marketplace, TCP
+plugin service, model/runtime download or default behavior change.
+
+An independent reviewer reproduced rejected asynchronous artifact-store hooks
+causing unhandled rejection; both hooks now drain rejected unsupported async
+results and close the host. The reviewer independently verified the final tests,
+root replacement/symlink/hardlink protections, cross-process lock, update/transport
+invalidation and the integration-readiness report. The report's persistence wording
+was corrected: after atomic rename, a failure may leave new complete inventory;
+the host closes and restarted grants remain denied. No blocking issue remains
+within the stated dormant trusted-first-party/Linux scope.
+
+Final commands and outcomes:
+
+- Parent and reviewer:
+  `node --unhandled-rejections=strict --test core/test/plugin-*.test.js`
+  — **63 passed, 0 failed/skipped/cancelled**.
+  Parent log: `/tmp/kaiapp-plugin-complete-focused.log`.
+- `ELECTRON_OVERRIDE_DIST_PATH=/tmp/kaiapp-no-electron npm test`
+  — **1,231 tests, 1,163 passed, 5 failed, 63 skipped**, 57.1 seconds.
+  Log: `/tmp/kaiapp-plugin-complete-full.log`.
+- In unchanged baseline worktree `3ceb60b`, same prepared dependency/model cache:
+  `ELECTRON_OVERRIDE_DIST_PATH=/tmp/kaiapp-no-electron node --test --test-concurrency=2 core/test/live-senses-assets.test.js core/test/node-data-folder.browser.test.js core/test/smart-turn.test.js`
+  — **15 tests, 9 passed, 5 failed, 1 skipped**.
+  Log: `/tmp/kaiapp-plugin-complete-baseline.log`.
+- `git diff --check` and `git diff --cached --check`: passed.
+- Compared changed paths against every tracked file in baseline `3ceb60b`:
+  **zero original baseline files changed**. Explicit diff of `electron/`, `ui/`,
+  Core startup/wallet/account/gateway/KOIN paths, scheduler fixture, package files,
+  scripts, build and release workflows also returned no differences.
+  Evidence: `/tmp/kaiapp-plugin-existing-files-check.log`.
+
+The five failures remain `node-data-folder.browser.test.js` lines 144, 166, 192,
+235 and 286: unavailable Chromium at `/opt/pw-browsers/chromium`. Its official
+Playwright download was previously blocked by HTTP 403; no alternate executable
+or bypass attempted. Pinned Smart-Turn hash and real-model tests now pass.
+
+Final scope and recommendation: see `INTEGRATION_READINESS.md`. Stop generic
+foundation expansion. Demonstrate a bundled first-party Compare controller with
+exact owner consent first; reuse existing Electron IPC/dialog/storage and runtime
+launch patterns. Real Windows local-model admission, protected storage adaptation,
+process-tree termination and GPU cleanup remain unverified and fail closed. No
+same-user native sandbox, transferable-port nondelegation or cross-restart
+rollback guarantee is claimed. No pushes, merges, releases, wallets or transactions.

@@ -121,10 +121,11 @@ are not retrofitted with this policy and retain their current trust model.
    strict loopback request path, per-call limits, timeout and process termination.
    Subprocess tests verify cancellation and forbidden fallback. **Next bounded
    step:** the signed installation/one-use consent contract and Linux supervisor
-   now exist (`plugins/IDENTITY_SUPERVISION.md`). Next build dormant authenticated
-   transport, protected single-writer storage and immutable artifact/lifecycle
-   integration; real Windows termination remains unverified. Do not connect the
-   shared RuntimeManager or enable Compare/full UI yet.
+   now exist (`plugins/IDENTITY_SUPERVISION.md`), with a host-created transport,
+   protected Linux store and inert artifact snapshots. Stop foundation expansion;
+   see `plugins/INTEGRATION_READINESS.md` for the first-party Compare demo and
+   exact Windows blockers. Do not connect the shared RuntimeManager or enable
+   Compare/full UI yet.
 3. **Composition seam:** refactor `createCore` into explicit factories/lifecycles,
    preserving the full profile default. Model minimal/full profiles in tests;
    absent optional factories must not construct stores, timers, tools or workers.

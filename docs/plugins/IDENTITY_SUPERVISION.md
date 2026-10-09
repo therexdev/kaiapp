@@ -114,9 +114,9 @@ and do not survive host crashes. Startup needs child reconciliation and singleto
 coordination before launching replacements. Direct child exit does not prove
 Windows process-tree or GPU cleanup. Same-user native code remains trusted.
 
-The next bounded gate is a **dormant authenticated host transport + supervisor
-lifecycle harness** with protected single-writer registry storage and approved
-immutable artifact loading. It must bind a transport endpoint to an opaque
+The dormant host-created transport, protected Linux registry and inert artifact
+snapshot lifecycle now exist; see `INTEGRATION_READINESS.md`. No further general
+infrastructure is planned. The next gate is a first-party Compare integration. It must bind a transport endpoint to an opaque
 installation handle, expose only inference, render exact owner consent in trusted
 UI, and account for child startup/admission failure/crash recovery and idle close.
 Validate one real pinned llama.cpp model/process/port contract, including Windows
