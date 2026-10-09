@@ -120,9 +120,11 @@ are not retrofitted with this policy and retain their current trust model.
 2. **Dormant adapter implemented:** a dedicated already-running local engine,
    strict loopback request path, per-call limits, timeout and process termination.
    Subprocess tests verify cancellation and forbidden fallback. **Next bounded
-   step:** trusted owner-consent/installation identity contract and a dedicated
-   engine supervisor that proves child/port/model ownership and Windows shutdown.
-   Do not connect shared RuntimeManager or enable Compare/full UI yet.
+   step:** the signed installation/one-use consent contract and Linux supervisor
+   now exist (`plugins/IDENTITY_SUPERVISION.md`). Next build dormant authenticated
+   transport, protected single-writer storage and immutable artifact/lifecycle
+   integration; real Windows termination remains unverified. Do not connect the
+   shared RuntimeManager or enable Compare/full UI yet.
 3. **Composition seam:** refactor `createCore` into explicit factories/lifecycles,
    preserving the full profile default. Model minimal/full profiles in tests;
    absent optional factories must not construct stores, timers, tools or workers.

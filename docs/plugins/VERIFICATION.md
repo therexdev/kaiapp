@@ -94,3 +94,77 @@ merge, release or financial transaction performed. Windows native engine/model
 ownership and process-tree/GPU termination remain unverified. Next is the dormant
 trusted consent/identity and dedicated-engine supervisor boundary, before any
 Compare Models UI integration or untrusted plugin loading.
+
+# Installation identity and engine-supervisor milestone
+
+Continued on `feature/plugin-permission-foundation` from `544a8c6`, without
+changing the application or its default composition. Added a pinned-publisher
+signed inventory, host-only one-use consent and opaque session identity, and a
+Linux dedicated-child ownership verifier/supervisor. See
+`IDENTITY_SUPERVISION.md` for exact contracts, adoption/cleanup ownership and
+remaining production integration gates.
+
+Independent review reproduced and resolved unbounded verifier waits and a
+non-true verification result being accepted. Also implemented the reviewer's
+optional rejected asynchronous-store contract handling. The final reviewer
+checked the code and documentation and found no blocking issue within this
+strictly dormant, trusted-host scope.
+
+## Official project prerequisite setup
+
+Read `.github/workflows/test-release.yml` (Chromium install and executable-path
+setup), `.github/workflows/ci.yml`, `package.json`'s `live-senses:prepare` script,
+`scripts/prepare-live-senses.js`, `core/runtimes/smart-turn.json`, README and
+`docs/KAI_LIVE_SENSES_ARCHITECTURE.md`. Used the already-installed lockfile
+Playwright dependency, not a newly fetched CLI package:
+
+```sh
+PLAYWRIGHT_BROWSERS_PATH=/workspace/kaiapp-test-browsers node node_modules/playwright-core/cli.js install chromium
+npm run live-senses:prepare
+NODE_USE_ENV_PROXY=1 npm run live-senses:prepare
+```
+
+Chromium: official Playwright download of Chrome for Testing 151.0.7922.34
+(revision 1234) failed with **HTTP 403 `Domain forbidden`** from the configured
+environment's network path to `cdn.playwright.dev`. Did not bypass that restriction,
+try alternative executables/mirrors, change deployment settings or accept terms.
+Log: `/tmp/kaiapp-prereq-chromium.log`.
+
+Smart-Turn: direct Node fetch failed. Retrying the **same pinned project script**
+with Node's configured-environment proxy enabled succeeded. The script verified
+8,679,182 bytes and SHA-256
+`2bb026316b14a660486a75b1733cd3fbab8c2fd0314dc9af7be49f8cca967e4f` from the pinned
+Pipecat commit `8e48188b875b4116e088c3734d8af40ba457ed7c`, BSD-2-Clause. No URL,
+checksum, license or model choice changed. Logs:
+`/tmp/kaiapp-prereq-smart-turn.log`, `/tmp/kaiapp-prereq-smart-turn-proxy.log`.
+Model cache is ignored/uncommitted; baseline uses the same dependency tree.
+
+## Exact final verification
+
+- Parent and independent reviewer each ran:
+  `node --unhandled-rejections=strict --test core/test/plugin-*.test.js`
+  — **48 passed, 0 failed/skipped/cancelled**.
+  Parent log: `/tmp/kaiapp-plugin-identity-all-focused.log`.
+- `ELECTRON_OVERRIDE_DIST_PATH=/tmp/kaiapp-no-electron npm test`
+  — **1,216 tests, 1,148 passed, 5 failed, 63 skipped**, 57.6 seconds.
+  Log: `/tmp/kaiapp-plugin-identity-full.log`.
+- In unchanged baseline worktree at `3ceb60b`:
+  `ELECTRON_OVERRIDE_DIST_PATH=/tmp/kaiapp-no-electron node --test --test-concurrency=2 core/test/live-senses-assets.test.js core/test/node-data-folder.browser.test.js core/test/smart-turn.test.js`
+  — **15 tests, 9 passed, 5 failed, 1 skipped**.
+  Log: `/tmp/kaiapp-plugin-prereq-baseline.log`.
+- `git diff --check` and `git diff --cached --check`: passed.
+
+All five remaining failures are the same unavailable Chromium executable at
+`/opt/pw-browsers/chromium`, in `node-data-folder.browser.test.js` lines
+144, 166, 192, 235 and 286. Smart-Turn hash and real model execution tests now pass.
+No claim of a fully green suite or Windows/GPU cleanup verification is made.
+
+New regression evidence includes signed publisher/version/artifact replacement,
+forged/reused consent, corrupted inventory, actual file-backed inventory restart,
+revoked and formerly live grants after restart, opaque reinstall identity,
+reservation concurrency/quarantine, wrong PID/listener/executable/model proof,
+wildcard listener and closed model FD denial, expiry/uninstall terminating real
+fixture children, and hung/false verifier fail-closed behavior. Windows ownership
+verification explicitly denies admission, rather than simulating a security
+boundary. No existing app, KOIN/payment, runtime or deployment file changed;
+fixture changes are test-only. No push, release, merge or financial operation.

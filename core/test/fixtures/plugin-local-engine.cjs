@@ -2,6 +2,10 @@
 // Dedicated process fixture: a literal local completion server, not an AI model.
 const http = require("node:http");
 const { randomBytes } = require("node:crypto");
+const modelFd = process.argv[2] ? require("node:fs").openSync(process.argv[2], "r") : null;
+process.on("message", message => {
+  if (message === "close-model" && modelFd !== null) { require("node:fs").closeSync(modelFd); process.send({ type: "model-closed" }); }
+});
 const apiKey = randomBytes(32).toString("base64url");
 const server = http.createServer((req, res) => {
   let raw = "";
@@ -20,4 +24,4 @@ const server = http.createServer((req, res) => {
       tokens_predicted: body.prompt === "over-limit" ? body.n_predict + 1 : 2 }));
   });
 });
-server.listen(0, "127.0.0.1", () => process.send({ type: "ready", port: server.address().port, apiKey }));
+server.listen(0, process.argv[3] || "127.0.0.1", () => process.send({ type: "ready", port: server.address().port, apiKey }));
