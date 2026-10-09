@@ -126,3 +126,77 @@ test("real expiry aborts an in-flight adapter, without accepting its late output
       prompt: "hello", maxOutputTokens: 10 }));
   } finally { clearTimeout(keepAlive); }
 });
+test("accessors cannot expand grants or revoke between validation and dispatch", async () => {
+  let dispatches = 0, reads = 0;
+  const f = fixture(async () => { dispatches++; return "ok"; });
+  const limits = { calls: 2, inputChars: 20, get outputTokens() { reads++; return reads === 1 ? 10 : 1000000; } };
+  assert.throws(() => f.host.approve({ ...f.approval, limits }));
+  const id = f.host.approve(f.approval), request = f.request(id);
+  Object.defineProperty(request, "prompt", { enumerable: true, get() { reads++; f.host.revoke(id); return "hi"; } });
+  await assert.rejects(f.client.infer(request), /Plugin permission denied/);
+  assert.equal(reads, 0); assert.equal(dispatches, 0);
+});
+test("prototype, path, symbol, sparse and custom-array inputs fail before dispatch", async () => {
+  const f = fixture(), id = f.host.approve(f.approval);
+  for (const request of [Object.assign(Object.create({ caller: "other" }), f.request(id)),
+    { ...f.request(id), [Symbol("hidden")]: true }, { ...f.request(id), resource: "../wallet" }]) {
+    await assert.rejects(f.client.infer(request));
+  }
+  for (const permissions of [Array(1), Object.assign(copy(example.permissions), { map: () => [] }),
+    [Object.assign(Object.create({ admin: true }), example.permissions[0])]]) {
+    assert.throws(() => validateManifest({ ...example, permissions }));
+  }
+  for (const resource of ["../wallet", "C:\\wallet", "file:../key", "model:%2fwallet"]) {
+    assert.throws(() => validateManifest({ ...example, permissions: [{ ...example.permissions[0], resource }] }));
+  }
+  const polluted = JSON.parse('{"schemaVersion":1,"id":"x","version":"1.0.0","permissions":[],"__proto__":{"admin":true}}');
+  assert.throws(() => validateManifest(polluted)); assert.equal({}.admin, undefined);
+});
+test("revocation and expiry settle even if an adapter ignores abort forever", async () => {
+  const f = fixture(() => new Promise(() => {})), id = f.host.approve(f.approval);
+  const pending = f.client.infer(f.request(id)); f.host.revoke(id);
+  await assert.rejects(pending, { message: "Plugin permission denied" });
+  const host = createPermissionHost({ localInference: () => new Promise(() => {}) });
+  const manifestDigest = host.install(example);
+  const expiring = host.approve({ ...f.approval, manifestDigest, expiresAt: Date.now() + 25 });
+  const keepAlive = setTimeout(() => {}, 1000);
+  try { await assert.rejects(host.connect(example.id).infer(f.request(expiring))); }
+  finally { clearTimeout(keepAlive); }
+});
+test("adapter exceptions are redacted and observed expiry cannot resurrect after clock rollback", async () => {
+  const f = fixture(async () => { throw Error("SECRET API TOKEN /private/profile"); }), id = f.host.approve(f.approval);
+  await assert.rejects(f.client.infer(f.request(id)), { message: "Plugin permission denied" });
+  let time = 1000;
+  const host = createPermissionHost({ localInference: async () => "ok", now: () => time });
+  const manifestDigest = host.install(example);
+  const grant = host.approve({ ...f.approval, manifestDigest });
+  time = 2000; await assert.rejects(host.connect(example.id).infer(f.request(grant)));
+  time = 1000; await assert.rejects(host.connect(example.id).infer(f.request(grant)));
+});
+test("expiry first observed after completion is terminal across clock rollback", async () => {
+  let time = 1000, finish;
+  const host = createPermissionHost({ localInference: () => new Promise(resolve => { finish = resolve; }), now: () => time });
+  const manifestDigest = host.install(example), approval = fixture().approval;
+  const grantId = host.approve({ ...approval, manifestDigest });
+  const client = host.connect(example.id), request = { grantId, resource: example.permissions[0].resource, prompt: "hi", maxOutputTokens: 10 };
+  const pending = client.infer(request);
+  time = 2000; finish("late"); await assert.rejects(pending);
+  time = 1000; await assert.rejects(client.infer(request));
+});
+test("synchronous adapter revocation plus throw produces no unhandled rejection", () => {
+  const { spawnSync } = require("node:child_process");
+  const script = `
+    const { createPermissionHost } = require(${JSON.stringify(require.resolve("../lib/plugins/permissions"))});
+    const manifest = ${JSON.stringify(example)};
+    let grantId;
+    const host = createPermissionHost({ localInference: () => { host.revoke(grantId); throw Error("private"); } });
+    const manifestDigest = host.install(manifest);
+    grantId = host.approve({ caller: manifest.id, manifestDigest, scope: manifest.permissions[0],
+      expiresAt: Date.now() + 1000, limits: { calls: 1, inputChars: 20, outputTokens: 10 } });
+    host.connect(manifest.id).infer({ grantId, resource: manifest.permissions[0].resource, prompt: "hi", maxOutputTokens: 10 })
+      .catch(error => { if (error.message !== "Plugin permission denied") process.exitCode = 1; });
+    setTimeout(() => {}, 20);
+  `;
+  const result = spawnSync(process.execPath, ["--unhandled-rejections=strict", "-e", script], { encoding: "utf8", timeout: 3000 });
+  assert.equal(result.status, 0, result.stderr);
+});
