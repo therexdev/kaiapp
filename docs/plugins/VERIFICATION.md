@@ -218,3 +218,48 @@ launch patterns. Real Windows local-model admission, protected storage adaptatio
 process-tree termination and GPU cleanup remain unverified and fail closed. No
 same-user native sandbox, transferable-port nondelegation or cross-restart
 rollback guarantee is claimed. No pushes, merges, releases, wallets or transactions.
+
+# Opt-in first-party Compare consent fixture
+
+Continued from `7ff6ed3`, without changes to `core/lib/plugins`. Added a separate
+Electron development entrypoint/controller/preload, two small renderer files using
+existing CSS, launcher, focused controller/IPC and optional browser tests. The only
+existing baseline app file changed is `package.json`, adding `demo:compare`.
+No normal entrypoint, payment/KOIN UI, wallet/account, runtime, deployment settings,
+lockfile or foundation behavior changed. See `COMPARE_FIXTURE_DEMO.md` to run it.
+
+Exact verification:
+
+- `node --unhandled-rejections=strict --test core/test/plugin-*.test.js core/test/compare-fixture*.test.js`
+  — **71 tests, 70 passed, 0 failed, 1 skipped** (Chromium unavailable).
+  Log `/tmp/kai-compare-all-focused.log`.
+- `ELECTRON_OVERRIDE_DIST_PATH=/tmp/kaiapp-no-electron npm test`
+  — **1,239 tests, 1,170 passed, 5 failed, 64 skipped**.
+  Log `/tmp/kai-compare-full.log`. The same five pre-existing Node-folder browser
+  failures report missing `/opt/pw-browsers/chromium`; no new failure.
+- After extending IPC lifecycle assertions to hide/crash/destroy and tightening
+  the browser test's approved-state wait:
+  `node --unhandled-rejections=strict --test core/test/compare-fixture*.test.js`
+  — **8 tests, 7 passed, 0 failed, 1 skipped**.
+  Log `/tmp/kai-compare-demo-final.log`.
+- `npm run demo:compare` — expected exit **1**, explicit missing Electron binary
+  diagnostic. No automatic executable download attempted.
+  Log `/tmp/kai-compare-launch.log`.
+- `git diff --check` passed. Baseline tracked-path comparison against `3ceb60b`
+  reports only `package.json`; foundation diff against preceding milestone is empty.
+
+Tests cover install-without-authority, separate model consent, deny, late approval,
+expiry before/during work, repeated approve/run, input/resource injection, per-model
+revoke, stop, selection, disable/uninstall/reinstall and navigation/hide/crash/destroy
+invalidation. The fixture callback executes through actual grant/transport code
+with network APIs blocked in a test. Browser UI test is provided but skipped here;
+Electron native dialog/renderer behavior and Windows execution remain unverified.
+No screenshots were captured. No real model, wallet or payment operation occurred;
+no push, merge or release. This is trusted first-party fixture consent, not an
+untrusted-code sandbox or a production Windows engine boundary.
+
+Baseline reproduced in unchanged `3ceb60b` worktree with the same prepared cache:
+`ELECTRON_OVERRIDE_DIST_PATH=/tmp/kaiapp-no-electron node --test --test-concurrency=2 core/test/live-senses-assets.test.js core/test/node-data-folder.browser.test.js core/test/smart-turn.test.js`
+— **15 tests, 9 passed, 5 failed, 1 skipped**.
+Log `/tmp/kai-compare-baseline.log`; the five failures are the same unavailable
+Chromium executable. No browser binary substitution or download bypass attempted.

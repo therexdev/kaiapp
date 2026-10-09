@@ -141,3 +141,16 @@ is a small explicit-consent Compare demonstration and the missing packaged Windo
 runtime/storage evidence, using the existing app machinery above. Do not enable
 untrusted loading, marketplace installation, automatic profile migration or network
 spending to make that demonstration work.
+
+## Follow-up: opt-in first-party fixture UI
+
+The bounded demo is now implemented in a separate development Electron entrypoint:
+`npm run demo:compare`. See `COMPARE_FIXTURE_DEMO.md` for its run/verification
+checklist. It reuses the existing installation host, transport, CSS and Electron
+sender/navigation checks, with native per-model owner dialogs and explicit fixture
+results. It does not expand the foundation or enable real Windows inference or
+persistent Windows storage. Native/visual verification remains blocked in this
+cloud environment by absent Electron/Chromium binaries. The earlier recommendation
+above is retained as the foundation milestone record; the next bounded step is
+Windows verification and dedicated real-engine admission, not more generic plugin
+infrastructure. Only the development package script changes an existing app file.
