@@ -14,7 +14,15 @@ function setup(t, answer = 1) {
     owner: f.signer.getAddress(), schedulerUrl: "https://mainnet-test.example/scheduler", policyHash: P.hash("mainnet-tariff"), version: 1,
     model: "koinos-fast", maxOutput: 128, maxRcPerTransaction: "10000000", maxRcPerDay: "20000000",
     limits: { amount: "500000000", perJob: "1000000", maxJobs: 10, durationMs: 3600000 } });
-  f.provider.call = async (_, { transaction }) => { f.state.submissions.push(structuredClone(transaction)); throw Error("lost acknowledgment"); };
+  f.provider.getAccountRc = async () => "1000000000";
+  f.state.simulations = [];
+  f.provider.call = async (_, { transaction, broadcast }) => {
+    if (broadcast === false) {
+      f.state.simulations.push(structuredClone(transaction));
+      return { receipt: { id: transaction.id, payer: config.owner, rc_used: "1000" } };
+    }
+    f.state.submissions.push(structuredClone(transaction)); throw Error("lost acknowledgment");
+  };
   const wallet = { address: config.owner, signer: f.signer }, dialog = { showMessageBox: async (_w, r) => { reviews.push(r); return { response: answer }; } };
   const controller = new TestPayments({ config, client: f.client, journal: f.journal, wallet, dialog, authorizeHost: async () => ({ granted: true }), clock: () => f.state.now });
   return { ...f, config, controller, wallet, dialog, reviews };
@@ -35,11 +43,20 @@ test("real mainnet deposits disclose exact amounts, cancel by default and recove
   const f = setup(t), w = window();
   const first = await f.controller.run(w, "purchase", "1");
   assert.equal(first.paymentsEnabled, true); assert.equal(f.state.submissions.length, 1);
+  assert.deepEqual(f.state.simulations, f.state.submissions);
   assert.match(f.reviews[0].detail, /MAINNET.*real KOIN/); assert.match(f.reviews[0].detail, /1\.00000000 KOIN/);
   assert.equal(f.reviews[0].defaultId, 0); assert.equal(f.reviews[0].cancelId, 0); assert.equal(f.reviews[0].buttons[1], "Send real KOIN");
   const id = first.deposit.id, tx = structuredClone(f.state.submissions[0]);
   f.state.now += 1001; await f.controller.run(w, "resume", id);
   assert.deepEqual(f.state.submissions[1], tx); assert.equal(f.reviews[1].buttons[1], "Resume saved deposit");
+});
+test("a mainnet deposit rejected by Mana simulation remains saved without broadcast", async t => {
+  const f = setup(t);
+  f.provider.call = async (_, { broadcast }) => { assert.equal(broadcast, false); throw Error("insufficient rc"); };
+  const result = await f.controller.run(window(), "purchase", "1");
+  assert.equal(result.reason, "funding_insufficient_rc");
+  assert.equal(f.state.submissions.length, 0); assert.equal(result.deposit.state, "unknown");
+  assert.ok(f.journal.nonceCoordinator.envelope(result.deposit.id));
 });
 test("cancelled mainnet funding never signs; refunds also identify real KOIN", async t => {
   const f = setup(t, 0); await f.controller.run(window(), "purchase", "1");

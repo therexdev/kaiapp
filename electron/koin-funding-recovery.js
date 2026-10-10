@@ -200,7 +200,9 @@ class FundingRecovery {
     let initial = this.#row(id);
     if (terminal(initial.state)) { await this.#nonces.reconcile(id); return { action: "done", ...this.status(id) }; }
     const nonceState = this.#nonces.status(id);
-    if (nonceState.state === "consumed_elsewhere") return this.#tx(() => {
+    const correction = this.#nonces.correction(id);
+    const correctedWinner = nonceState.state === "consumed_elsewhere" && correction?.transaction && ["finalized", "reverted"].includes(correction.state);
+    if (nonceState.state === "consumed_elsewhere" && !correctedWinner) return this.#tx(() => {
       const r = this.#row(id); r.state = "conflicted"; r.reason = "nonce_consumed_by_other_transaction"; r.finality = nonceState.finality;
       this.#save(r); return { action: "done", ...this.status(id) };
     });
@@ -208,8 +210,13 @@ class FundingRecovery {
     // copy. It must never invoke the signer again.
     if (!initial.transaction && this.#nonces.envelope(id)) { await this.stage(id, this.#nonces.envelope(id)); initial = this.#row(id); }
     if (!initial.transaction) return { action: "review", ...this.status(id), reason: "recover_signing_envelope" };
-    await this.#validate(initial.transaction, initial);
-    const finality = await this.#observer.finality(initial.transaction, initial.intent);
+    // The original envelope stays immutable. A reviewed correction can count as
+    // this deposit only after its exact same-nonce transaction wins irreversibly,
+    // and the funding observer independently verifies its transfer and balance.
+    const observed = correctedWinner ? { ...initial, draft: correction.draft, transaction: correction.transaction,
+      intent: { ...initial.intent, maxRc: correction.draft.header.rc_limit } } : initial;
+    await this.#validate(observed.transaction, observed);
+    const finality = await this.#observer.finality(observed.transaction, observed.intent);
     const confirmed = ["finalized", "reverted"].includes(finality.state);
     const evidence = await this.#observer.inspect(initial.intent, confirmed ? finality.height : "0");
     const nextNonce = confirmed ? null : await this.#client.provider.getNextNonce(initial.intent.actor);
@@ -223,6 +230,7 @@ class FundingRecovery {
         r.finality = finality; r.state = finality.state === "finalized" ? "funded" : "reverted"; r.reason = null; this.#save(r);
         return { action: "done", ...this.status(id) };
       }
+      if (correction) return { action: "review", ...this.status(id), reason: "funding_mana_correction_pending" };
       if (r.held) return { action: "review", ...this.status(id), reason: "funding_user_stopped" };
       if (r.state === "needs_review") return { action: "review", ...this.status(id) };
       if (finality.state !== "unknown") return { action: "wait", reason: "funding_" + finality.state, paymentsEnabled: this.paymentsEnabled };

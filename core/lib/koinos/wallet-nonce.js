@@ -80,9 +80,16 @@ class WalletNonceCoordinator {
         (r.transaction && (r.transactionHash !== hash(JSON.stringify(r.transaction)) || !this.#matches(r, r.transaction))) ||
         (!r.transaction && !["signing", "consumed_elsewhere"].includes(r.state))) throw Error("Damaged wallet nonce binding");
     nonce(r.draft.header.nonce); objectId(r.draft.id); integer(r.createdAt); integer(r.updatedAt, r.createdAt);
+    if (r.correction !== undefined) this.#validateCorrection(r);
     return r;
   }
-  status(id) { const r = this.#row(id); return { id, owner: r.owner, payer: r.draft.header.payer, purpose: r.purpose, state: r.state, txId: r.transaction?.id || (r.remote ? null : r.draft.id), nonce: r.draft.header.nonce, finality: structuredClone(r.finality) }; }
+  status(id) {
+    const r = this.#row(id), c = r.correction;
+    return { id, owner: r.owner, payer: r.draft.header.payer, purpose: r.purpose, state: r.state,
+      txId: r.transaction?.id || (r.remote ? null : r.draft.id), nonce: r.draft.header.nonce, finality: structuredClone(r.finality),
+      ...(c ? { correction: { state: c.state, txId: c.draft.id, rcLimit: c.draft.header.rc_limit,
+        nonce: c.draft.header.nonce, attempts: c.submissions.length, finality: structuredClone(c.finality) } } : {}) };
+  }
   pending(owner, purpose) {
     if (!utils.isChecksumAddress(owner) || !purposes.includes(purpose)) throw Error("Invalid pending wallet request");
     return this.#db.prepare("SELECT id FROM reservations WHERE owner=? AND state IN ('signing','signed')").all(owner)
@@ -103,6 +110,107 @@ class WalletNonceCoordinator {
   }
   envelope(id) { return structuredClone(this.#row(id).transaction); }
   draft(id) { return structuredClone(this.#row(id).draft); }
+  correction(id) { return structuredClone(this.#row(id).correction ?? null); }
+  #correctionMatches(r, draft) {
+    if (r.purpose !== "funding" || r.remote || !r.transaction || r.draft.header.payee !== undefined ||
+        !draft || draft.header?.payee !== undefined || !uint(draft.header?.rc_limit) ||
+        uint(draft.header.rc_limit) <= uint(r.draft.header.rc_limit) || draft.id === r.draft.id) return false;
+    const originalTerms = structuredClone(draft);
+    originalTerms.header.rc_limit = r.draft.header.rc_limit; originalTerms.id = r.draft.id;
+    return isDeepStrictEqual(originalTerms, r.draft);
+  }
+  #validateCorrection(r) {
+    const c = r.correction;
+    if (!c || !["signing", "signed", "finalized", "reverted", "superseded"].includes(c.state) ||
+        !this.#correctionMatches(r, c.draft) || c.draftHash !== hash(JSON.stringify(c.draft)) ||
+        !Array.isArray(c.submissions) || c.submissions.length > 3 ||
+        (!c.transaction && !["signing", "superseded"].includes(c.state)) ||
+        (c.transaction && (c.transactionHash !== hash(JSON.stringify(c.transaction)) ||
+          !isDeepStrictEqual(unsigned(c.transaction), c.draft)))) throw Error("Damaged wallet Mana correction");
+    integer(c.createdAt, r.createdAt); integer(c.updatedAt, c.createdAt, r.updatedAt);
+    for (const a of c.submissions) {
+      integer(a.at, c.createdAt, c.updatedAt);
+      if (a.day !== String(Math.floor(a.at / 86400000))) throw Error("Damaged correction submission history");
+    }
+    if (c.submissions.length && (!c.submissionPolicy || c.submissions.length > c.submissionPolicy.maxAttempts)) throw Error("Missing correction submission policy");
+    if (c.submissionPolicy) {
+      integer(c.submissionPolicy.maxAttempts, 1, 3); integer(c.submissionPolicy.minRetryMs, 1000, 3600000);
+      if (uint(c.submissionPolicy.maxRcPerDay) < uint(c.draft.header.rc_limit)) throw Error("Damaged correction resource policy");
+    }
+    if (c.submissionPolicy && r.submissionPolicy && !isDeepStrictEqual(c.submissionPolicy, r.submissionPolicy)) throw Error("Correction wallet policy changed");
+    if ((r.state === "signed" && !["signing", "signed"].includes(c.state)) ||
+        (["finalized", "reverted"].includes(r.state) && c.state !== "superseded") ||
+        (r.state === "consumed_elsewhere" && !["finalized", "reverted", "superseded"].includes(c.state))) throw Error("Damaged correction finality binding");
+  }
+  // One exact alternative for the same owner nonce. The original remains intact
+  // and owns the wallet until either envelope is irreversibly included.
+  async reserveCorrection(id, transaction, active = () => true) {
+    const draft = structuredClone(transaction); await this.#verify(draft);
+    if (draft.signatures?.length) throw Error("Reserve the Mana correction before signing");
+    const initial = this.#row(id);
+    if (!this.#correctionMatches(initial, unsigned(draft))) throw Error("Mana correction must preserve the exact funding transaction and nonce");
+    if (await this.#client.provider.getChainId() !== this.#client.d.chainId ||
+        await this.#client.provider.getNextNonce(initial.owner) !== draft.header.nonce) throw Error("Wallet chain or nonce changed");
+    return this.#tx(() => {
+      if (!active()) throw Error("Wallet Mana correction stopped");
+      const r = this.#row(id);
+      if (r.correction) {
+        if (!isDeepStrictEqual(r.correction.draft, unsigned(draft))) throw Error("Cannot replace the saved Mana correction");
+        return { action: "recover_existing", ...this.status(id) };
+      }
+      if (r.state !== "signed" || !this.#correctionMatches(r, unsigned(draft))) throw Error("Unresolved signed funding transaction required");
+      if (r.submissionPolicy && uint(draft.header.rc_limit) > uint(r.submissionPolicy.maxRcPerDay)) throw Error("Mana correction exceeds the existing daily budget");
+      const now = this.#now();
+      r.correction = { draft: unsigned(draft), draftHash: hash(JSON.stringify(unsigned(draft))), transaction: null,
+        transactionHash: null, state: "signing", createdAt: now, updatedAt: now, submissions: [], finality: null };
+      this.#save(r); return { action: "sign_original", ...this.status(id) };
+    });
+  }
+  async stageCorrection(id, transaction) {
+    const tx = structuredClone(transaction); await this.#verify(tx); this.#signatures(tx, true);
+    return this.#tx(() => {
+      const r = this.#row(id), c = r.correction;
+      if (!c || !isDeepStrictEqual(unsigned(tx), c.draft)) throw Error("Original Mana correction envelope required");
+      if (c.transaction) {
+        if (c.transactionHash !== hash(JSON.stringify(tx))) throw Error("Cannot replace the saved Mana correction signature");
+        return this.status(id);
+      }
+      // Preserve a late signature even if the original has won in the meantime.
+      if (!["signing", "superseded"].includes(c.state)) throw Error("Missing Mana correction signing fence");
+      c.transaction = tx; c.transactionHash = hash(JSON.stringify(tx));
+      if (c.state === "signing") c.state = "signed";
+      c.updatedAt = this.#now(); this.#save(r); return this.status(id);
+    });
+  }
+  #dailyUsed(owner, day) {
+    let spent = 0n;
+    for (const row of this.#db.prepare("SELECT id FROM reservations WHERE owner=?").all(owner)) {
+      const other = this.#row(row.id), original = (other.submissions || []).some(a => a.day === day) ? uint(other.draft.header.rc_limit) : 0n;
+      const corrected = other.correction?.submissions.some(a => a.day === day) ? uint(other.correction.draft.header.rc_limit) : 0n;
+      // These envelopes use one identical owner nonce; only one can execute.
+      spent += original > corrected ? original : corrected;
+    }
+    return spent;
+  }
+  authorizeCorrectionSubmission(id, { maxRcPerDay, maxAttempts = 3, minRetryMs = 1000 }) {
+    const budget = uint(maxRcPerDay); integer(maxAttempts, 1, 3); integer(minRetryMs, 1000, 3600000);
+    if (!budget) throw Error("Positive wallet resource budget required");
+    return this.#tx(() => {
+      const r = this.#row(id), c = r.correction, now = this.#now(), day = String(Math.floor(now / 86400000));
+      if (r.state !== "signed" || c?.state !== "signed" || !c.transaction) throw Error("Unresolved signed Mana correction required");
+      const policy = { maxRcPerDay, maxAttempts, minRetryMs };
+      if ((r.submissionPolicy && !isDeepStrictEqual(r.submissionPolicy, policy)) ||
+          (c.submissionPolicy && !isDeepStrictEqual(c.submissionPolicy, policy))) throw Error("Wallet submission policy changed");
+      const attempts = c.submissions;
+      if (attempts.length >= maxAttempts || (attempts.length && now < attempts.at(-1).at + minRetryMs)) throw Error("Wallet correction retry limit reached");
+      const rc = uint(c.draft.header.rc_limit), originalToday = (r.submissions || []).some(a => a.day === day) ? uint(r.draft.header.rc_limit) : 0n;
+      const current = attempts.some(a => a.day === day) ? rc : originalToday;
+      if (this.#dailyUsed(r.owner, day) + rc - current > budget) throw Error("Daily wallet resource budget exhausted");
+      c.submissionPolicy = policy; c.submissions = [...attempts, { at: now, day }]; c.updatedAt = now;
+      if (!r.submissionPolicy) r.submissionPolicy = policy;
+      this.#save(r); return structuredClone(c.transaction);
+    });
+  }
   // Called immediately before transport. Persist attempts even if the caller
   // crashes before sending; an uncertain acknowledgment never resets a budget.
   authorizeSubmission(id, { maxRcPerDay, maxAttempts = 3, minRetryMs = 1000 }) {
@@ -111,15 +219,12 @@ class WalletNonceCoordinator {
     return this.#tx(() => {
       const r = this.#row(id), now = this.#now(), day = String(Math.floor(now / 86400000));
       if (r.state !== "signed") throw Error("Unresolved signed envelope required");
+      if (r.correction) throw Error("Use the saved Mana correction; the original cannot be resubmitted");
       const policy = { maxRcPerDay, maxAttempts, minRetryMs };
       if (r.submissionPolicy && JSON.stringify(r.submissionPolicy) !== JSON.stringify(policy)) throw Error("Wallet submission policy changed");
       const attempts = r.submissions || [];
       if (attempts.length >= maxAttempts || (attempts.length && now < attempts.at(-1).at + minRetryMs)) throw Error("Wallet retry limit reached");
-      let spent = 0n;
-      for (const row of this.#db.prepare("SELECT id FROM reservations WHERE owner=?").all(r.owner)) {
-        const other = this.#row(row.id);
-        if ((other.submissions || []).some(a => a.day === day)) spent += uint(other.draft.header.rc_limit);
-      }
+      const spent = this.#dailyUsed(r.owner, day);
       if (!attempts.some(a => a.day === day) && spent + uint(r.draft.header.rc_limit) > budget) throw Error("Daily wallet resource budget exhausted");
       r.submissionPolicy = policy; r.submissions = [...attempts, { at: now, day }]; this.#save(r);
       return structuredClone(r.transaction);
@@ -221,11 +326,20 @@ class WalletNonceCoordinator {
   // elapsed time, acknowledgments, user Stop and a later tip nonce cannot.
   async reconcile(id) {
     const r = this.#row(id); if (terminal(r.state) || !r.transaction) return this.status(id);
-    const proof = await this.#inspectFinality(r.transaction);
+    const original = await this.#inspectFinality(r.transaction);
+    const corrected = !original && r.correction?.transaction ? await this.#inspectFinality(r.correction.transaction) : null;
+    const proof = original || corrected;
     if (!proof) return this.status(id);
     return this.#tx(() => {
       this.#fresh(proof); const current = this.#row(id);
-      if (!terminal(current.state)) { current.state = proof.state; current.finality = proof.finality; this.#save(current); }
+      if (!terminal(current.state)) {
+        current.state = corrected ? "consumed_elsewhere" : proof.state; current.finality = proof.finality;
+        if (current.correction) {
+          current.correction.state = corrected ? proof.state : "superseded";
+          current.correction.finality = proof.finality; current.correction.updatedAt = this.#now();
+        }
+        this.#save(current);
+      }
       return this.status(id);
     });
   }
@@ -270,12 +384,15 @@ class WalletNonceCoordinator {
   async recoverOriginal(id, txId) {
     objectId(txId); const r = this.#row(id);
     if (r.remote) return this.observeRemote(id, txId);
-    if (txId !== r.draft.id) throw Error("Original transaction ID required");
+    const correction = txId === r.correction?.draft.id;
+    if (!correction && txId !== r.draft.id) throw Error("Original transaction ID or saved Mana correction ID required");
     const records = response(await this.#client.provider.getTransactionsById([txId])).transactions ?? [];
     if (!Array.isArray(records)) throw Error("Invalid wallet transaction lookup");
     const found = records.filter(x => x.transaction?.id === txId);
     if (found.length !== 1) throw Error("Original transaction is not uniquely available");
-    await this.stage(id, found[0].transaction); return this.reconcile(id);
+    if (correction) await this.stageCorrection(id, found[0].transaction);
+    else await this.stage(id, found[0].transaction);
+    return this.reconcile(id);
   }
   async reviewConsumed(id, txId) {
     const r = this.#row(id); objectId(txId);
@@ -289,16 +406,26 @@ class WalletNonceCoordinator {
     const proof = await this.#inspectFinality(tx); if (!proof) throw Error("Repair requires irreversible nonce consumption");
     this.#fresh(proof);
     return { id, owner: r.owner, nonce: r.draft.header.nonce, originalTxId: r.transaction?.id || (r.remote ? null : r.draft.id),
-      consumingTxId: txId, draftHash: r.draftHash, checkedAt: proof.checkedAt, finality: proof.finality };
+      consumingTxId: txId, consumingState: proof.state, draftHash: r.draftHash, checkedAt: proof.checkedAt, finality: proof.finality };
   }
   async repairConsumed(review) {
     if (!review || this.#now() < review.checkedAt || this.#now() - review.checkedAt >= 180000) throw Error("Fresh recovery review required");
     const current = await this.reviewConsumed(review.id, review.consumingTxId);
     for (const key of ["owner", "nonce", "originalTxId", "draftHash"]) if (current[key] !== review[key]) throw Error("Recovery review changed");
     if (current.finality.blockId !== review.finality?.blockId) throw Error("Recovery finality changed");
+    const repairRow = this.#row(review.id);
+    if (repairRow.correction?.draft.id === current.consumingTxId && !repairRow.correction.transaction)
+      throw Error("Recover the saved Mana correction envelope before recording its finality");
     return this.#tx(() => {
       this.#fresh(current); const r = this.#row(review.id);
-      if (!terminal(r.state)) { r.state = "consumed_elsewhere"; r.finality = current.finality; this.#save(r); }
+      if (!terminal(r.state)) {
+        r.state = "consumed_elsewhere"; r.finality = current.finality;
+        if (r.correction) {
+          r.correction.state = current.consumingTxId === r.correction.draft.id ? current.consumingState : "superseded";
+          r.correction.finality = current.finality; r.correction.updatedAt = this.#now();
+        }
+        this.#save(r);
+      }
       return this.status(review.id);
     });
   }

@@ -270,13 +270,15 @@ class KoinChain {
       throw Error("Transaction commitment mismatch");
     return true;
   }
-  async submit(tx, intent) {
+  async submit(tx, intent, { signal } = {}) {
+    signal?.throwIfAborted();
     tx = structuredClone(tx); intent = structuredClone(intent);
     const state = await this.verify();
     if (funding(intent.kind, intent.method) && state.paused) throw Error("Funding is paused");
     await this.verifyTransaction(tx, intent);
     if (!(await Signer.recoverAddresses(tx)).includes(intent.actor))
       throw Error("Account signature required");
+    signal?.throwIfAborted();
     const r = await this.provider.call("chain.submit_transaction", {
       transaction: tx,
       broadcast: true,

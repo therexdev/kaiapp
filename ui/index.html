@@ -474,7 +474,8 @@
             <details id="koin-activity" class="kp-details">
               <summary>Payment activity <span id="koin-activity-count">No activity loaded</span></summary>
               <div class="kp-details-body"><p class="hint">Check confirmation before continuing after a payment. A pending transaction is not a completed payment.</p><label for="koin-test-transaction">Transaction</label><select id="koin-test-transaction"><option value="">No transactions loaded</option></select>
-                <div class="kp-actions"><button data-koin-test="check" class="small">Check confirmation</button><button data-koin-test="resume" class="small">Review saved transaction</button></div>
+                <div class="kp-actions"><button data-koin-test="check" class="small">Check confirmation</button><button data-koin-test="resume" class="small">Review saved transaction</button><button data-koin-test="correct-mana" class="small" hidden>Review Mana correction</button></div>
+                <p id="koin-mana-correction" class="hint" hidden></p>
               </div>
             </details>
             <details id="koin-advanced" class="kp-details">

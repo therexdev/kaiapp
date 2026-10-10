@@ -169,7 +169,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
         return { worker: worker?.status() || null, configured: true, accessReady, ...await controller.status(), session: await controller.session() };
       }
       if (["session-review", "session-status", "session-retry", "session-revoke"].includes(action)) return (await getSession())(window, action.slice(8));
-      if (!["purchase", "fund-rewards", "reserve", "refund", "revoke", "release", "check", "resume", "recover", "repair"].includes(action)) throw Error("Unknown Test payment action");
+      if (!["purchase", "fund-rewards", "reserve", "refund", "revoke", "release", "check", "resume", "recover", "repair", "correct-mana"].includes(action)) throw Error("Unknown Test payment action");
       return await controller.run(window, action, input);
     } finally { busy = false; }
   });

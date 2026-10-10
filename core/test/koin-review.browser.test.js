@@ -84,6 +84,7 @@ test("Earn review preview is desktop-only, disables repeat clicks and explains e
   assert.equal(await page.locator("#koin-test-payments").isVisible(), true);
   assert.equal(await page.locator("#koin-network-badge").textContent(), "Not connected");
   assert.equal(await page.locator('[data-koin-test="purchase"]').isDisabled(), true);
+  assert.equal(await page.locator('[data-koin-test="correct-mana"]').isVisible(), false);
   assert.equal(await page.locator("#koin-available").textContent(), "—");
   assert.equal(await page.locator("#koin-review-preview").isVisible(), false);
   assert.equal(await page.locator("#koin-answer-wrap").isVisible(), false);
@@ -103,6 +104,7 @@ test("Earn review preview is desktop-only, disables repeat clicks and explains e
   assert.equal(await page.locator("#koin-connection").getAttribute("open"), null);
   assert.equal(await page.locator('[data-koin-test="fund-rewards"]').isVisible(), false);
   assert.equal(await page.locator('[data-koin-test="worker-start"]').isVisible(), false);
+  assert.equal(await page.locator('[data-koin-test="correct-mana"]').isDisabled(), true);
   const qa = process.env.KAI_MASCOT_QA_DIR;
   if (qa) { fs.mkdirSync(qa, { recursive: true }); await page.setViewportSize({ width: 1280, height: 1800 }); await page.locator("#koin-test-payments").screenshot({ path: path.join(qa, "koin-payments-mainnet.png") }); }
 
@@ -141,6 +143,52 @@ test("Earn review preview is desktop-only, disables repeat clicks and explains e
   }
   assert.equal(await page.evaluate(() => window.testPaymentCalls.filter(c => c.action === "resume").length), 0);
 
+  // Mana correction acts on the selected saved deposit, never the amount entry.
+  const correctionButton = page.locator('[data-koin-test="correct-mana"]');
+  assert.equal(await correctionButton.isDisabled(), false);
+  await correctionButton.click();
+  assert.equal(await correctionButton.isDisabled(), true);
+  await page.evaluate(() => document.querySelector('[data-koin-test="correct-mana"]').click());
+  assert.deepEqual(await page.evaluate(() => window.testPaymentCalls.filter(c => c.action === "correct-mana")), [{ action: "correct-mana", input: "b".repeat(64) }]);
+  await page.evaluate(() => {
+    const correction = { state: "signed", txId: "0x1220" + "d".repeat(64), rcLimit: "900000000", nonce: "KAE=", attempts: 1 };
+    window.paymentSnapshot.transactions[0].correction = correction;
+    window.finishTestPayment({ state: "correction_await_finality", correction, funding: { state: "unknown", attempts: 1 }, simulation: { rcUsed: "123456789" } });
+  });
+  await page.waitForFunction(() => document.getElementById("koin-test-payment-status").textContent.includes("Mana correction submission attempted"));
+  assert.match(await page.locator("#koin-mana-correction").textContent(), /9\.00000000 Mana \(not a KOIN fee\)/);
+  assert.match(await page.locator("#koin-mana-correction").textContent(), new RegExp("0x1220" + "d".repeat(64)));
+  assert.doesNotMatch(await page.locator("#koin-test-payment-status").textContent(), /Transaction signed\./);
+  assert.match(await page.locator("#koin-test-payment-status").textContent(), /Simulation: 1\.23456789 Mana/);
+
+  await page.locator('[data-koin-test="check"]').click();
+  await page.evaluate(() => window.finishTestPayment({ state: "signed", correction: window.paymentSnapshot.transactions[0].correction, funding: { state: "unknown", attempts: 1 } }));
+  await page.waitForFunction(() => !document.querySelector('[data-koin-test="check"]').disabled);
+  assert.match(await page.locator("#koin-test-payment-status").textContent(), /Mana correction submission attempted/);
+  assert.doesNotMatch(await page.locator("#koin-test-payment-status").textContent(), /Transaction signed\./);
+
+  await page.locator('[data-koin-test="resume"]').click();
+  assert.deepEqual(await page.evaluate(() => window.testPaymentCalls.filter(c => c.action === "resume")), [{ action: "resume", input: "b".repeat(64) }]);
+  await page.evaluate(() => window.finishTestPayment({ state: "correction_simulation_failed", correction: window.paymentSnapshot.transactions[0].correction, reason: "funding_insufficient_rc" }));
+  await page.waitForFunction(() => document.getElementById("koin-test-payment-status").textContent.includes("This attempt was not submitted"));
+  assert.match(await page.locator("#koin-test-payment-status").textContent(), /approved Mana limit or the available Mana/);
+  assert.doesNotMatch(await page.locator("#koin-test-payment-status").textContent(), /Choose Review Mana correction/);
+
+  // Winning correction consumes the original nonce but is a confirmed deposit.
+  await page.locator('[data-koin-test="check"]').click();
+  await page.evaluate(() => {
+    const tx = window.paymentSnapshot.transactions[0];
+    tx.state = "consumed_elsewhere"; tx.correction.state = "finalized";
+    window.paymentSnapshot.deposits = [{ id: tx.id, state: "funded" }];
+    window.finishTestPayment({ state: tx.state, correction: tx.correction, funding: { state: "funded" }, deposit: { state: "unknown" } });
+  });
+  await page.waitForFunction(() => document.getElementById("koin-test-payment-status").textContent.includes("Deposit confirmed"));
+  assert.doesNotMatch(await page.locator("#koin-test-payment-status").textContent(), /consumed|unknown|conflict/i);
+  assert.match(await page.locator("#koin-test-transaction option").textContent(), /deposit confirmed/);
+  assert.match(await page.locator("#koin-test-transaction option").textContent(), new RegExp("0x1220" + "d".repeat(64)));
+  assert.match(await page.locator("#koin-mana-correction").textContent(), /deposit confirmed/);
+  assert.equal(await correctionButton.isDisabled(), true);
+
   await page.locator("#koin-earn-tab").click();
   assert.equal(await page.locator("#koin-use-panel").isVisible(), false);
   await page.locator('[data-koin-test="worker-start"]').click();
@@ -161,6 +209,7 @@ test("Earn review preview is desktop-only, disables repeat clicks and explains e
   await page.waitForFunction(() => document.getElementById("koin-network-badge").textContent.includes("Testnet"));
   assert.equal(await page.locator("#koin-available").textContent(), "—");
   assert.equal(await page.locator('[data-koin-test="chat"]').isDisabled(), true);
+  assert.equal(await correctionButton.isVisible(), false);
   await page.setViewportSize({ width: 480, height: 900 });
   assert.equal(await page.locator("#koin-test-payments").evaluate(node => node.scrollWidth <= node.clientWidth), true);
   if (qa) { await page.setViewportSize({ width: 480, height: 2800 }); await page.locator("#koin-test-payments").screenshot({ path: path.join(qa, "koin-payments-narrow.png") }); }

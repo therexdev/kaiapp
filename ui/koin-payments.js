@@ -6,12 +6,22 @@
   const status = el("koin-test-payment-status"), select = el("koin-test-transaction");
   const buttons = [...section.querySelectorAll("[data-koin-test]")];
   let busy = false, configured = false, mainnet = false, hasSession = false, providing = false, activated = false;
+  let transactions = [];
   const amount = value => {
     if (typeof value !== "string" || !/^(0|[1-9]\d*)$/.test(value)) return "—";
     const n = BigInt(value); return `${n / 100000000n}.${(n % 100000000n).toString().padStart(8, "0")}`;
   };
   const words = value => String(value || "").replaceAll("_", " ");
   const unit = () => mainnet ? "mainnet KOIN" : "test KOIN";
+  const funded = tx => tx?.funding?.state === "funded";
+  function activityDetails() {
+    const tx = transactions.find(item => item.id === select.value), correction = tx?.correction;
+    const detail = el("koin-mana-correction");
+    detail.hidden = !correction;
+    detail.textContent = correction
+      ? `Mana correction · ${funded(tx) ? "deposit confirmed" : words(correction.state)}${correction.rcLimit ? " · Limit: " + amount(correction.rcLimit) + " Mana (not a KOIN fee)" : ""}${correction.txId ? " · Transaction: " + correction.txId : ""}`
+      : "";
+  }
   function message(text, error = false) { status.textContent = text; status.dataset.error = String(error); }
   function activate() {
     section.hidden = false;
@@ -23,19 +33,23 @@
     }
   }
   function controls() {
+    const selected = transactions.find(item => item.id === select.value);
     for (const button of buttons) {
       const action = button.dataset.koinTest;
       button.disabled = action === "stop" ? !busy : busy ||
         (!configured && !["status", "import", "restore"].includes(action)) ||
         (configured && action === "import") ||
         (!hasSession && ["session-review", "session-status", "session-revoke", "session-retry", "chat", "chat-retry", "chat-status"].includes(action)) ||
-        (!select.value && ["check", "resume", "recover", "repair"].includes(action));
+        (!select.value && ["check", "resume", "correct-mana", "recover", "repair"].includes(action)) ||
+        (action === "correct-mana" && (!mainnet || selected?.purpose !== "funding" || funded(selected) || ["finalized", "reverted", "consumed_elsewhere"].includes(selected?.state)));
       if (action === "stop") button.hidden = !busy;
       if (action === "worker-start") button.hidden = providing;
       if (action === "worker-stop") button.hidden = !providing;
+      if (action === "correct-mana") button.hidden = !mainnet;
     }
     section.setAttribute("aria-busy", String(busy));
     el("koin-provider-state").textContent = providing ? "Providing AI capacity" : "Not providing";
+    activityDetails();
   }
   function snapshot(result) {
     if (result?.enabled === false) { section.hidden = true; return; }
@@ -73,10 +87,12 @@
       el("koin-reserved").textContent = amount(result.balances.reserved);
     }
     if (Array.isArray(result.transactions)) {
+      const deposits = new Map((result.deposits || []).map(deposit => [deposit.id, deposit]));
+      transactions = result.transactions.map(tx => ({ ...tx, funding: deposits.get(tx.id) || tx.funding }));
       const selected = select.value; select.replaceChildren();
-      for (const tx of result.transactions) {
+      for (const tx of transactions) {
         const option = document.createElement("option"); option.value = tx.id;
-        option.textContent = `${words(tx.purpose)} · ${words(tx.state)} · ${tx.txId || tx.id}`; select.appendChild(option);
+        option.textContent = `${words(tx.purpose)} · ${funded(tx) ? "deposit confirmed" : words(tx.state)} · ${funded(tx) && tx.correction?.state === "finalized" ? tx.correction.txId : tx.txId || tx.id}`; select.appendChild(option);
       }
       if ([...select.options].some(option => option.value === selected)) select.value = selected;
       if (!select.options.length) { const option = document.createElement("option"); option.value = ""; option.textContent = "No payment transactions yet"; select.appendChild(option); }
@@ -106,11 +122,13 @@
       funding_forked: "The chain changed during verification. Check confirmation again before continuing.",
       funding_user_stopped: "Deposit saved. Choose Review saved transaction to continue with the original deposit.",
       funding_resume_review_required: "Deposit saved. Choose Review saved transaction to continue with the original deposit.",
-      funding_insufficient_rc: "The node reported insufficient Mana or a resource limit. Keep this saved deposit for recovery; do not create another payment.",
+      funding_insufficient_rc: mainnet
+        ? "The node reported insufficient Mana or a resource limit. Choose Review Mana correction for this saved deposit; do not create another payment."
+        : "The node reported insufficient Mana or a resource limit. Keep this saved deposit for recovery; do not create another payment.",
       funding_submission_uncertain: "The submission response was unavailable. Check confirmation for this saved deposit before retrying.",
     };
     const funding = result?.funding;
-    const fundingMessage = funding?.state === "unknown" && funding.attempts > 0
+    const fundingMessage = !result?.correction && funding?.state === "unknown" && funding.attempts > 0
       ? "Submission was attempted; confirmation is still unknown. Check confirmation again. Do not create another deposit."
       : fundingMessages[funding?.reason || result?.reason];
     const messages = {
@@ -118,6 +136,9 @@
       signed: "Transaction signed. Check confirmation in Payment activity before continuing.", finalized: "Transaction confirmed on chain.",
       uncertain: "The result is uncertain. Check the saved transaction before trying again.",
       await_finality: "Deposit submission attempted. Check confirmation in Payment activity before continuing.",
+      correction_saved: "Mana correction saved. Choose Review saved transaction to continue with this deposit. Do not create another deposit.",
+      correction_await_finality: "Mana correction submission attempted. Check confirmation for this saved deposit. Do not create another deposit.",
+      correction_simulation_failed: "Mana correction did not pass the node’s simulation. This attempt was not submitted. Keep this saved deposit for recovery; do not create another deposit.",
       reverted: "Transaction reverted. Check payment activity for details.",
       access_imported: "Invitation added. Your account is ready for connection checks.",
       backed_up: "Payment history backed up.", restored: "Payment history restored. Pending transactions still need confirmation.",
@@ -127,10 +148,16 @@
       revoked: "New requests are stopped. Previously dispatched work stays reserved.",
     };
     if (result?.error) message(String(result.error).slice(0, 280), true);
+    else if (funding?.state === "funded") message("Deposit confirmed. Account balances have been refreshed.");
+    else if (result?.correction?.state === "finalized") message("Mana correction confirmed on chain. Check confirmation to verify your credits.");
+    else if (state === "correction_simulation_failed") message((funding?.reason || result?.reason) === "funding_insufficient_rc"
+      ? "The correction still cannot run within its approved Mana limit or the available Mana. This attempt was not submitted. Keep this saved deposit for recovery; do not create another deposit."
+      : messages.correction_simulation_failed);
     else if (fundingMessage && !["finalized", "reverted", "consumed_elsewhere"].includes(state)) message(fundingMessage);
+    else if (result?.correction && ["signed", "await_finality"].includes(state)) message(result.correction.attempts > 0 ? messages.correction_await_finality : messages.correction_saved);
     else if (state) message(messages[state] || words(state));
     if (state === "test_worker_running" || state === "test_worker_stopped") providing = state === "test_worker_running";
-    if (["signed", "uncertain", "reverted", "consumed_elsewhere"].includes(state)) el("koin-activity").open = true;
+    if (["signed", "uncertain", "reverted", "consumed_elsewhere", "correction_saved", "correction_await_finality", "correction_simulation_failed"].includes(state)) el("koin-activity").open = true;
     if (state === "request_unknown") el("koin-advanced").open = true;
     if (Array.isArray(result?.payouts)) {
       el("koin-payout-summary").textContent = result.payouts.length ? result.payouts.map(p => {
@@ -150,9 +177,10 @@
       el("koin-spending-summary").textContent = text; message(text);
     }
     if (state === "request_settled") message(`Request settled once · ${amount(result.amount)} ${unit()}. You can send a new request.`);
-    if (result?.deposit) status.appendChild(document.createTextNode(" · Deposit: " + words(result.deposit.state)));
+    if (state === "correction_await_finality" && amount(result?.simulation?.rcUsed) !== "—") status.appendChild(document.createTextNode(" · Simulation: " + amount(result.simulation.rcUsed) + " Mana"));
+    if (result?.deposit && funding?.state !== "funded") status.appendChild(document.createTextNode(" · Deposit: " + words(result.deposit.state)));
   }
-  const refreshAfter = new Set(["import", "access", "purchase", "fund-rewards", "reserve", "refund", "revoke", "release", "check", "resume", "recover", "repair", "restore", "worker-start", "worker-stop"]);
+  const refreshAfter = new Set(["import", "access", "purchase", "fund-rewards", "reserve", "refund", "revoke", "release", "check", "resume", "correct-mana", "recover", "repair", "restore", "worker-start", "worker-stop"]);
   async function run(action) {
     if (busy && action !== "stop") return;
     if (action !== "stop") { busy = true; message(action === "status" ? "Refreshing your account…" : "Follow the approval in the desktop window, if requested."); controls(); }
@@ -162,7 +190,7 @@
       if (["purchase", "refund"].includes(action)) input = el("koin-test-amount").value.trim();
       if (action === "fund-rewards") input = el("koin-reward-amount").value.trim();
       if (["revoke", "release"].includes(action)) input = el("koin-test-session-id").value.trim();
-      if (["check", "resume"].includes(action)) input = select.value;
+      if (["check", "resume", "correct-mana"].includes(action)) input = select.value;
       if (["recover", "repair"].includes(action)) input = { id: select.value, txId: el("koin-test-recovery-tx").value.trim() };
       const result = await bridge.run(action, input);
       let refreshFailed = false;

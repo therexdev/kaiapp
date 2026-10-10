@@ -1,5 +1,6 @@
 ## KOIN deposit confirmation recovery
 
+- Adds **Review Mana correction** for a saved mainnet deposit whose Mana limit is too low. A native approval keeps the KOIN amount and nonce unchanged, saves the corrected signature, and requires a successful simulation before submission. The corrected transaction remains visible in Payment activity until its credits are confirmed.
 - Reads funding checks concurrently and retries an interrupted snapshot when a new block arrives. A snapshot spanning different blocks is still rejected.
 - Handles time spent waiting for RPC responses correctly, while preserving clock, contract, backing and irreversible-confirmation checks.
 - Shows when a saved deposit needs more confirmation checks or **Review saved transaction**. Recovery keeps the original signed transaction and does not require another credit purchase.
