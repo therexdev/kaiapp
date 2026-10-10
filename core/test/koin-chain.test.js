@@ -3,6 +3,7 @@ const { test } = require("node:test"),
   assert = require("node:assert/strict");
 const { Signer, Transaction, utils } = require("koilib");
 const { KoinChain, encodedAddress } = require("../lib/koin-network/chain");
+const { PinnedRpcProvider } = require("../lib/koin-network/rpc-provider");
 const address = (n) => Signer.fromSeed("koin-chain-fixture-" + n).getAddress();
 function fixture() {
   const d = {
@@ -152,4 +153,25 @@ test("KOIN transaction review binds exact account, amount, contract, payer, fees
     client.operation("credits", "purchase", { ...args, extra: "1" }),
     /Unknown/,
   );
+});
+
+test("Stop during the transport chain check prevents a late broadcast", async () => {
+  const { client, d } = fixture(), signer = Signer.fromSeed("koin-chain-fixture-8");
+  const actor = signer.getAddress(), args = { account: encodedAddress(actor), amount: "100" };
+  const tx = await client.prepare("credits", "purchase", args, { actor, rcLimit: "100" });
+  await signer.signTransaction(tx);
+  const controller = new AbortController(), methods = [];
+  let release, started;
+  const probeStarted = new Promise(resolve => { started = resolve; });
+  client.provider = new PinnedRpcProvider(d.rpc, d.chainId, { fetchImpl: async (_url, options) => {
+    const body = JSON.parse(options.body); methods.push(body.method); started();
+    await new Promise(resolve => { release = resolve; });
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result: { chain_id: d.chainId } }));
+  } });
+  client.verify = async () => ({ paused: false });
+  const submission = client.submit(tx, { kind: "credits", method: "purchase", args, actor, maxRc: "100" }, { signal: controller.signal });
+  await probeStarted; controller.abort(); release();
+  await assert.rejects(submission);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(methods, ["chain.get_chain_id"]);
 });

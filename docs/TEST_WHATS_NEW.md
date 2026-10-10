@@ -1,5 +1,6 @@
 ## KOIN deposit confirmation recovery
 
+- Handles HTML error pages and temporary RPC failures with bounded fallback across the deployment's pinned endpoints for account reads, confirmation and non-broadcast simulations. Each endpoint must match the pinned chain. Account snapshots restart after a switch; transaction broadcasts are never automatically retried.
 - Adds **Review Mana correction** for a saved mainnet deposit whose Mana limit is too low. A native approval keeps the KOIN amount and nonce unchanged, saves the corrected signature, and requires a successful simulation before submission. The corrected transaction remains visible in Payment activity until its credits are confirmed.
 - Reads funding checks concurrently and retries an interrupted snapshot when a new block arrives. A snapshot spanning different blocks is still rejected.
 - Handles time spent waiting for RPC responses correctly, while preserving clock, contract, backing and irreversible-confirmation checks.

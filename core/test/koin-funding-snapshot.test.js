@@ -57,6 +57,39 @@ test("elapsed RPC time is not backwards time and evidence is stamped after verif
   assert.equal(f.state.signed, 1); assert.equal(f.state.submissions.length, 1);
 });
 
+test("an RPC switch discards mixed account reads even when surrounding heads match", async t => {
+  const f = fixture(t), read = f.provider.readContract;
+  f.provider.readGeneration = 0;
+  let switched = false, allowanceReads = 0;
+  f.provider.readContract = async op => {
+    const result = await read(op);
+    if (op.contract_id === f.d.token && op.entry_point === utils.tokenAbi.methods.allowance.entry_point) {
+      allowanceReads++;
+      if (!switched) { switched = true; f.provider.readGeneration++; f.state.allowance = "7"; }
+    }
+    return result;
+  };
+  const observer = new FundingObserver(f.client, { clock: () => f.state.now });
+  const evidence = await observer.inspect(f.request);
+  assert.equal(evidence.state, "verified");
+  assert.equal(evidence.allowance, "7");
+  assert.equal(allowanceReads, 3); // discarded capture, replacement and verification
+  assert.equal(f.state.signed, 0); assert.equal(f.state.submissions.length, 0);
+});
+
+test("continuous RPC switches remain a bounded read-only wait", async t => {
+  const f = fixture(t), draft = await f.journal.begin(f.id, f.request);
+  await f.journal.stage(f.id, await f.sign(draft));
+  const original = f.journal.nonceCoordinator.envelope(f.id), getHead = f.provider.getHeadInfo;
+  f.provider.readGeneration = 0;
+  let heads = 0;
+  f.provider.getHeadInfo = async () => { heads++; f.provider.readGeneration++; return getHead(); };
+  assert.equal((await f.runner().tick(f.id)).reason, "funding_moving");
+  assert.equal(heads, 6); assert.equal(f.journal.status(f.id).attempts, 0);
+  assert.equal(f.state.signed, 1); assert.equal(f.state.submissions.length, 0);
+  assert.deepEqual(f.journal.nonceCoordinator.envelope(f.id), original);
+});
+
 test("a real backwards clock or changed contract still blocks funding during a retry", async t => {
   for (const reason of ["clock", "contract"]) {
     const f = fixture(t), read = f.provider.readContract;

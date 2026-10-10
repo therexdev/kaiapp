@@ -1,6 +1,7 @@
 "use strict";
-const { Provider, Serializer, Transaction, utils, Signer } = require("koilib"),
+const { Serializer, Transaction, utils, Signer } = require("koilib"),
   crypto = require("crypto");
+const { PinnedRpcProvider } = require("./rpc-provider");
 const P = require("./policy");
 const ABIS = {
   credits: require("./credits-abi.json"),
@@ -101,7 +102,7 @@ class KoinChain {
     if (this.d.network === "isolated" && !provider)
       throw Error("Isolated mode requires an explicitly injected provider");
     Object.freeze(this.d.rpc); Object.freeze(this.d);
-    this.provider = provider || new Provider(this.d.rpc);
+    this.provider = provider || new PinnedRpcProvider(this.d.rpc, this.d.chainId);
     this.serializer = new Serializer(ABIS.credits.types);
   }
   async operation(kind, method, args = {}) {
@@ -282,7 +283,7 @@ class KoinChain {
     const r = await this.provider.call("chain.submit_transaction", {
       transaction: tx,
       broadcast: true,
-    });
+    }, { signal });
     if (r.receipt?.reverted) throw Error("Transaction reverted");
     return { txId: tx.id, state: "submitted" };
   }

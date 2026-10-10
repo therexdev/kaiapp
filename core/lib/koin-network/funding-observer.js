@@ -46,8 +46,9 @@ class FundingObserver {
   async #capture(r) {
     const c = this.#client, startedAt = integer(this.#clock());
     // RPC reads are not block-pinned. Discard the whole capture if a block
-    // arrives, then retry a bounded number of times without signing or sending.
+    // arrives or the RPC endpoint changes, then retry without signing/sending.
     for (let attempt = 0; attempt < 3; attempt++) {
+      const generation = c.provider.readGeneration;
       const before = this.#head(await c.provider.getHeadInfo());
       const [config, balances, tokenBalance, tokenAllowance] = await Promise.all([
         c.verify(),
@@ -60,7 +61,8 @@ class FundingObserver {
       const after = this.#head(head), observedAt = integer(this.#clock());
       if (chainId !== c.d.chainId) throw Error("Funding chain mismatch");
       if (observedAt < startedAt) throw Error("Funding clock moved backwards");
-      if (before.id !== after.id || before.height !== after.height || before.time !== after.time) continue;
+      if (generation !== c.provider.readGeneration || before.id !== after.id ||
+          before.height !== after.height || before.time !== after.time) continue;
       const liquid = num(tokenBalance.value), allowance = num(tokenAllowance.value);
       const liabilities = num(balances.liabilities), available = num(balances.balance?.available), reserved = num(balances.balance?.reserved);
       if (liquid !== num(balances.liquid) || liquid < liabilities ||
