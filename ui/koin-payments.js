@@ -99,10 +99,25 @@
   }
   function outcome(result) {
     const state = result?.state || result?.status;
+    const fundingMessages = {
+      funding_moving: "New blocks arrived during the account checks. Your saved deposit is unchanged. Wait a moment, then check confirmation again.",
+      funding_reversible: "Waiting for the account checks to become irreversible. Check confirmation again shortly; then review the saved transaction if requested.",
+      funding_changed: "The account changed during verification. Check confirmation again before continuing.",
+      funding_forked: "The chain changed during verification. Check confirmation again before continuing.",
+      funding_user_stopped: "Deposit saved. Choose Review saved transaction to continue with the original deposit.",
+      funding_resume_review_required: "Deposit saved. Choose Review saved transaction to continue with the original deposit.",
+      funding_insufficient_rc: "The node reported insufficient Mana or a resource limit. Keep this saved deposit for recovery; do not create another payment.",
+      funding_submission_uncertain: "The submission response was unavailable. Check confirmation for this saved deposit before retrying.",
+    };
+    const funding = result?.funding;
+    const fundingMessage = funding?.state === "unknown" && funding.attempts > 0
+      ? "Submission was attempted; confirmation is still unknown. Check confirmation again. Do not create another deposit."
+      : fundingMessages[funding?.reason || result?.reason];
     const messages = {
       cancelled: "Action cancelled. No new approval was granted.", stopped: "Action stopped. Check payment activity if submission had already started.",
       signed: "Transaction signed. Check confirmation in Payment activity before continuing.", finalized: "Transaction confirmed on chain.",
       uncertain: "The result is uncertain. Check the saved transaction before trying again.",
+      await_finality: "Deposit submission attempted. Check confirmation in Payment activity before continuing.",
       reverted: "Transaction reverted. Check payment activity for details.",
       access_imported: "Invitation added. Your account is ready for connection checks.",
       backed_up: "Payment history backed up.", restored: "Payment history restored. Pending transactions still need confirmation.",
@@ -112,6 +127,7 @@
       revoked: "New requests are stopped. Previously dispatched work stays reserved.",
     };
     if (result?.error) message(String(result.error).slice(0, 280), true);
+    else if (fundingMessage && !["finalized", "reverted", "consumed_elsewhere"].includes(state)) message(fundingMessage);
     else if (state) message(messages[state] || words(state));
     if (state === "test_worker_running" || state === "test_worker_stopped") providing = state === "test_worker_running";
     if (["signed", "uncertain", "reverted", "consumed_elsewhere"].includes(state)) el("koin-activity").open = true;

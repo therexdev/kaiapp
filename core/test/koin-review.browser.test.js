@@ -128,6 +128,19 @@ test("Earn review preview is desktop-only, disables repeat clicks and explains e
   await page.waitForFunction(() => !document.querySelector('[data-koin-test="fund-rewards"]').disabled);
   await page.locator("#koin-advanced > summary").click();
 
+  await page.evaluate(() => { window.paymentSnapshot.transactions = [{ id: "b".repeat(64), purpose: "funding", state: "signed", txId: "0x1220" + "c".repeat(64) }]; });
+  await page.locator('[data-koin-test="status"]').click();
+  for (const [funding, expected] of [
+    [{ reason: "funding_moving", state: "staged", attempts: 0 }, "New blocks arrived"],
+    [{ reason: "funding_resume_review_required", state: "staged", attempts: 0 }, "Review saved transaction"],
+    [{ reason: "funding_user_stopped", state: "unknown", attempts: 1 }, "Submission was attempted"],
+  ]) {
+    await page.locator('[data-koin-test="check"]').click();
+    await page.evaluate(funding => window.finishTestPayment({ state: "signed", funding }), funding);
+    await page.waitForFunction(expected => document.getElementById("koin-test-payment-status").textContent.includes(expected), expected);
+  }
+  assert.equal(await page.evaluate(() => window.testPaymentCalls.filter(c => c.action === "resume").length), 0);
+
   await page.locator("#koin-earn-tab").click();
   assert.equal(await page.locator("#koin-use-panel").isVisible(), false);
   await page.locator('[data-koin-test="worker-start"]').click();

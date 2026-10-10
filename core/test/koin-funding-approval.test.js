@@ -113,6 +113,20 @@ test("Stop during submission cannot erase a later irreversible deposit; checks n
   assert.equal((await reopened.check(f.id)).state, "funded"); assert.equal((await reopened.resume(window(), f.id, () => f.request)).status, "complete");
   assert.equal(f.state.signed, 1); assert.equal(f.state.submissions.length, 1);
 });
+test("submission failures explain Mana or uncertainty without exposing RPC data or releasing the deposit", async t => {
+  for (const [error, reason] of [
+    ['{"message":"insufficient rc","private":"do-not-display"}', "funding_insufficient_rc"],
+    ["lost response do-not-display", "funding_submission_uncertain"],
+  ]) {
+    const f = fixture(t), c = controller(f, { submit: async () => { throw Error(error); } });
+    const result = await c.approve(window(), f.id, () => f.request);
+    assert.equal(result.status, "await_finality"); assert.equal(result.reason, reason);
+    assert.equal(result.deposit.state, "unknown"); assert.equal(result.deposit.attempts, 1);
+    assert.equal(result.deposit.held, true); assert.equal(f.state.signed, 1);
+    assert.equal(JSON.stringify(result).includes("do-not-display"), false);
+    await assert.rejects(f.journal.begin(hash("another-deposit"), f.request), /owns this wallet nonce/);
+  }
+});
 
 test("a Stop from another journal handle invalidates an already-open resume review", async t => {
   const f = fixture(t), other = f.open(), c = controller(f);

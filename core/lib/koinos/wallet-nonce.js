@@ -260,7 +260,9 @@ class WalletNonceCoordinator {
       await verify(included[0]); const receipt = receipts[0];
       if (receipt.rpc_error || receipt.payer !== tx.header.payer || ![undefined, false, true].includes(receipt.reverted) || uint(receipt.rc_used ?? "0") > uint(tx.header.rc_limit)) throw Error("Invalid wallet receipt");
       if (await p.getChainId() !== this.#client.d.chainId) throw Error("Wallet chain changed during finality");
-      return { state: receipt.reverted ? "reverted" : "finalized", checkedAt: now,
+      const checkedAt = this.#now();
+      if (checkedAt < now) throw Error("Wallet clock moved backwards during finality");
+      return { state: receipt.reverted ? "reverted" : "finalized", checkedAt,
         finality: { txId: tx.id, blockId: b.block_id, height: h.toString(), irreversibleHeight: lib.toString() } };
     }
     return null;

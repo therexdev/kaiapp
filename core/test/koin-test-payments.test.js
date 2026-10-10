@@ -81,6 +81,20 @@ test("Test actions enforce deposit, refund and session limits before signatures"
   await assert.rejects(f.controller.run(window(), "reserve", { amount: "1" }), /manifest/);
   assert.equal(f.journal.nonceCoordinator.list().length, 0);
 });
+test("checking a saved deposit reports whether submission was attempted without sending again", async t => {
+  const f = setup(t); f.state.available = "0";
+  const draft = await f.journal.begin(f.id, f.request); await f.journal.stage(f.id, await f.sign(draft));
+  const saved = await f.controller.run(window(), "check", f.id);
+  assert.equal(saved.state, "signed"); assert.equal(saved.funding.reason, "funding_resume_review_required");
+  assert.equal(saved.funding.attempts, 0); assert.equal(f.state.submissions.length, 0);
+  await f.controller.run(window(), "resume", f.id);
+  const unknown = await f.controller.run(window(), "check", f.id);
+  assert.equal(unknown.state, "signed"); assert.equal(unknown.funding.state, "unknown");
+  assert.equal(unknown.funding.attempts, 1); assert.equal(f.state.submissions.length, 1);
+  await f.include(f.state.submissions[0], { irreversible: true });
+  assert.equal((await f.controller.run(window(), "check", f.id)).state, "finalized");
+  assert.equal(f.state.signed, 1); assert.equal(f.state.submissions.length, 1);
+});
 test("a rejected Test host lease prevents deposits and refunds before any local signing fence", async t => {
   const f = setup(t, { authorizeHost: async () => { throw Error("Another installation owns this Test wallet"); } });
   for (const action of ["purchase", "fund-rewards", "refund", "reserve"]) await assert.rejects(f.controller.run(window(), action, action === "reserve" ? undefined : "1"), /Another installation/);

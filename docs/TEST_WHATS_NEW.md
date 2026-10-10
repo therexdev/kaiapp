@@ -1,3 +1,10 @@
+## KOIN deposit confirmation recovery
+
+- Reads funding checks concurrently and retries an interrupted snapshot when a new block arrives. A snapshot spanning different blocks is still rejected.
+- Handles time spent waiting for RPC responses correctly, while preserving clock, contract, backing and irreversible-confirmation checks.
+- Shows when a saved deposit needs more confirmation checks or **Review saved transaction**. Recovery keeps the original signed transaction and does not require another credit purchase.
+- Distinguishes uncertain submission responses and reported Mana limits without treating either as a confirmed payment.
+
 ## KOIN SDK compatibility
 
 - Updates Koilib to 9.4 so native KOIN contract calls work with the patched Protobuf dependency.

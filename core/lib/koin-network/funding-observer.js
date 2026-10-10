@@ -44,21 +44,32 @@ class FundingObserver {
     return native.deserialize(r.result ?? "", entry.return);
   }
   async #capture(r) {
-    const c = this.#client, before = this.#head(await c.provider.getHeadInfo());
-    // Rewards expose aggregate custody only; only credits have account balances.
-    const config = await c.verify(), balances = await c.read(r.kind, "balances",
-      r.kind === "credits" ? { account: encodedAddress(r.actor) } : {});
-    const liquid = num((await this.#native("balanceOf", { owner: c.d[r.kind] })).value);
-    const allowance = num((await this.#native("allowance", { owner: r.actor, spender: c.d[r.kind] })).value);
-    const liabilities = num(balances.liabilities), available = num(balances.balance?.available), reserved = num(balances.balance?.reserved);
-    if (liquid !== num(balances.liquid) || liquid < liabilities ||
-        (r.kind === "credits" && available + reserved > liabilities)) throw Error("Funding custody is not backed");
-    const after = this.#head(await c.provider.getHeadInfo());
-    if (before.id !== after.id || before.height !== after.height || before.time !== after.time ||
-        await c.provider.getChainId() !== c.d.chainId) throw Error("Head changed during funding reads");
-    const state = { config, liquid: liquid.toString(), liabilities: liabilities.toString(),
-      available: available.toString(), reserved: reserved.toString(), allowance: allowance.toString() };
-    return { head: after, state, hash: hash(JSON.stringify(state)), observedAt: integer(this.#clock()) };
+    const c = this.#client, startedAt = integer(this.#clock());
+    // RPC reads are not block-pinned. Discard the whole capture if a block
+    // arrives, then retry a bounded number of times without signing or sending.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const before = this.#head(await c.provider.getHeadInfo());
+      const [config, balances, tokenBalance, tokenAllowance] = await Promise.all([
+        c.verify(),
+        // Rewards expose aggregate custody; only credits have account balances.
+        c.read(r.kind, "balances", r.kind === "credits" ? { account: encodedAddress(r.actor) } : {}),
+        this.#native("balanceOf", { owner: c.d[r.kind] }),
+        this.#native("allowance", { owner: r.actor, spender: c.d[r.kind] }),
+      ]);
+      const [head, chainId] = await Promise.all([c.provider.getHeadInfo(), c.provider.getChainId()]);
+      const after = this.#head(head), observedAt = integer(this.#clock());
+      if (chainId !== c.d.chainId) throw Error("Funding chain mismatch");
+      if (observedAt < startedAt) throw Error("Funding clock moved backwards");
+      if (before.id !== after.id || before.height !== after.height || before.time !== after.time) continue;
+      const liquid = num(tokenBalance.value), allowance = num(tokenAllowance.value);
+      const liabilities = num(balances.liabilities), available = num(balances.balance?.available), reserved = num(balances.balance?.reserved);
+      if (liquid !== num(balances.liquid) || liquid < liabilities ||
+          (r.kind === "credits" && available + reserved > liabilities)) throw Error("Funding custody is not backed");
+      const state = { config, liquid: liquid.toString(), liabilities: liabilities.toString(),
+        available: available.toString(), reserved: reserved.toString(), allowance: allowance.toString() };
+      return { head: after, state, hash: hash(JSON.stringify(state)), observedAt };
+    }
+    return null;
   }
   async inspect(value, minimumHeight = "0") {
     const r = intent(value), key = r.kind + ":" + r.actor, now = integer(this.#clock()); uint(minimumHeight);
@@ -67,9 +78,13 @@ class FundingObserver {
     if (saved && uint(saved.head.height) < uint(minimumHeight)) { this.#snapshots.delete(key); saved = null; }
     if (!saved) {
       if (this.#snapshots.size >= 32) throw Error("Funding observer queue full");
-      saved = await this.#capture(r); this.#snapshots.set(key, saved);
+      saved = await this.#capture(r);
+      if (!saved) return { state: "moving" };
+      this.#snapshots.set(key, saved);
     }
-    if (now < saved.observedAt) throw Error("Funding clock moved backwards");
+    // The capture finishes after inspect starts; elapsed RPC time is normal.
+    const capturedAt = integer(this.#clock());
+    if (capturedAt < now || capturedAt < saved.observedAt) throw Error("Funding clock moved backwards");
     const c = this.#client, head = this.#head(await c.provider.getHeadInfo());
     if (await c.provider.getChainId() !== c.d.chainId) throw Error("Funding chain mismatch");
     if (uint(saved.head.height) > uint(head.lib)) return { state: "reversible" };
@@ -79,9 +94,12 @@ class FundingObserver {
         num(b.block.header?.height).toString() !== saved.head.height || num(b.block.header?.timestamp).toString() !== saved.head.time)
       throw Error("Inconsistent funding snapshot block");
     const current = await this.#capture(r);
+    if (!current) return { state: "moving" };
     if (uint(current.head.lib) < uint(head.lib) || uint(current.head.height) < uint(head.height)) throw Error("Funding finality regressed");
     if (saved.hash !== current.hash) { this.#snapshots.set(key, current); return { state: "changed" }; }
-    return { state: "verified", ...structuredClone(saved.state), height: saved.head.height, blockId: saved.head.id, checkedAt: now };
+    const checkedAt = integer(this.#clock());
+    if (checkedAt < capturedAt || checkedAt < current.observedAt) throw Error("Funding clock moved backwards");
+    return { state: "verified", ...structuredClone(saved.state), height: saved.head.height, blockId: saved.head.id, checkedAt };
   }
   async finality(transaction, value) {
     const tx = structuredClone(transaction), r = intent(value), c = this.#client, p = c.provider;

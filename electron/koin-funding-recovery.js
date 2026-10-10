@@ -273,8 +273,15 @@ class FundingRecoveryRunner {
   async tick(id) {
     const d = await this.#journal.advance(id);
     if (d.action !== "submit_exact_transaction") return d;
-    try { await this.#invoke(this.#submit, { transaction: d.transaction, intent: d.intent }); } catch { /* Saved attempt remains uncertain. */ }
-    return { action: "await_finality", ...this.#journal.status(id) };
+    let reason = null;
+    try { await this.#invoke(this.#submit, { transaction: d.transaction, intent: d.intent }); }
+    catch (error) {
+      // Report a bounded category, never raw transport data, signatures or
+      // credentials. A rejection/timeout still cannot resolve the saved nonce.
+      reason = /insufficient rc|compute bandwidth limit|insufficient mana|rc limit/i.test(String(error?.message || ""))
+        ? "funding_insufficient_rc" : "funding_submission_uncertain";
+    }
+    return { action: "await_finality", ...this.#journal.status(id), reason };
   }
 }
 module.exports = { FundingRecovery, FundingRecoveryRunner };

@@ -113,7 +113,12 @@ class TestPayments {
         const id = typeof input === "string" ? input : input?.id; digest(id);
         if (action === "check") {
           const n = await nonces.reconcile(id);
-          if (n.purpose === "funding") await this.#funding.check(id);
+          if (n.purpose === "funding") {
+            const checked = await this.#funding.check(id);
+            const deposit = this.#journal.status(id);
+            return { ...nonces.status(id), funding: { action: checked.action, reason: checked.reason ?? null,
+              state: deposit.state, attempts: deposit.attempts } };
+          }
           return n;
         }
         if (action === "recover") {

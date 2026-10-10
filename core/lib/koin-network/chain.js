@@ -144,15 +144,22 @@ class KoinChain {
   }
   async verify() {
     const d = this.d;
-    if ((await this.provider.getChainId()) !== d.chainId)
+    // Independent public reads must not stretch a funding snapshot across many
+    // blocks. Validate every result before exposing the verified configuration.
+    const kinds = ["token", "credits", "rewards"];
+    const [chainId, canonical, metadata, credits, rewards] = await Promise.all([
+      this.provider.getChainId(),
+      this.provider.invokeGetContractAddress("koin"),
+      Promise.all(kinds.map(kind => this.provider.invokeGetContractMetadata(d[kind]))),
+      this.read("credits", "config"),
+      this.read("rewards", "config"),
+    ]);
+    if (chainId !== d.chainId)
       throw Error("Deployment chain mismatch");
-    {
-      const canonical = await this.provider.invokeGetContractAddress("koin");
-      if (canonical?.value?.address !== d.token)
-        throw Error("Asset is not canonical native KOIN");
-    }
-    for (const kind of ["token", "credits", "rewards"]) {
-      const m = await this.provider.invokeGetContractMetadata(d[kind]);
+    if (canonical?.value?.address !== d.token)
+      throw Error("Asset is not canonical native KOIN");
+    for (const [index, kind] of kinds.entries()) {
+      const m = metadata[index];
       if (m.value?.hash !== d[kind + "Hash"])
         throw Error(kind + " bytecode changed");
       if (
@@ -162,10 +169,6 @@ class KoinChain {
       )
         throw Error("Unexpected contract authority override");
     }
-    const [credits, rewards] = await Promise.all([
-      this.read("credits", "config"),
-      this.read("rewards", "config"),
-    ]);
     for (const value of [credits, rewards]) {
       const c = value.config;
       if (
