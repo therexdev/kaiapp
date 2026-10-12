@@ -58,7 +58,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
       if (action === "status" && !fs.existsSync(configFile)) return { enabled: true, configured: false, mode: "test-deployment" };
       if (action === "import") {
         if (input !== undefined) throw Error("Choose the manifest with the native file picker");
-        if (fs.existsSync(configFile)) throw Error("This Test deployment is already pinned. Changing deployments requires reviewed migration");
+        if (fs.existsSync(configFile)) throw Error("This Test deployment is already pinned. Use Refresh to reload your existing account. Changing deployments requires reviewed migration");
         const picked = await dialog.showOpenDialog(window, { title: "Choose public Test deployment manifest", filters: [{ name: "JSON", extensions: ["json"] }], properties: ["openFile"] });
         if (picked.canceled) return { state: "cancelled" };
         const config = readConfig(picked.filePaths[0]), client = new KoinChain(config.deployment); await client.verify();

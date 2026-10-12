@@ -189,6 +189,44 @@ test("Earn review preview is desktop-only, disables repeat clicks and explains e
   assert.match(await page.locator("#koin-mana-correction").textContent(), /deposit confirmed/);
   assert.equal(await correctionButton.isDisabled(), true);
 
+  // A saved release is distinct from a deposit, and confirmation never resends it.
+  await page.evaluate(() => {
+    window.paymentSnapshot.transactions.unshift({ id: "e".repeat(64), purpose: "credits", creditAction: "release", state: "signed", txId: "0x1220" + "f".repeat(64) });
+  });
+  await page.locator('[data-koin-test="status"]').click();
+  await page.selectOption("#koin-test-transaction", "e".repeat(64));
+  assert.match(await page.locator('#koin-test-transaction option').first().textContent(), /Release reserved credits · signed/);
+  assert.equal(await correctionButton.isDisabled(), true);
+  const resumesBefore = await page.evaluate(() => window.testPaymentCalls.filter(c => c.action === "resume").length);
+  for (const [reason, expected] of [
+    ["credit_submission_uncertain", "submission response was unavailable"],
+    ["credit_confirmation_unavailable", "Confirmation checks are unavailable"],
+    ["credit_await_finality", "The node reports this transaction"],
+    ["credit_saved_review_required", "Choose Review saved transaction"],
+    ["credit_nonce_changed", "do not resend it yet"],
+    ["credit_insufficient_rc", "insufficient Mana"],
+  ]) {
+    await page.locator('[data-koin-test="check"]').click();
+    await page.evaluate(reason => window.finishTestPayment({ state: "signed", purpose: "credits", creditAction: "release", reason }), reason);
+    await page.waitForFunction(expected => document.getElementById("koin-test-payment-status").textContent.includes(expected), expected);
+    assert.match(await page.locator("#koin-test-payment-status").textContent(), /^Release reserved credits:/);
+    assert.doesNotMatch(await page.locator("#koin-test-payment-status").textContent(), /Transaction signed\.|Deposit:|Choose Review Mana correction/);
+  }
+  assert.equal(await page.evaluate(() => window.testPaymentCalls.filter(c => c.action === "resume").length), resumesBefore);
+  await page.locator('[data-koin-test="resume"]').click();
+  assert.deepEqual(await page.evaluate(() => window.testPaymentCalls.filter(c => c.action === "resume").at(-1)), { action: "resume", input: "e".repeat(64) });
+  await page.evaluate(() => window.finishTestPayment({ state: "signed", purpose: "credits", creditAction: "release", reason: "credit_submission_pending" }));
+  await page.waitForFunction(() => document.getElementById("koin-test-payment-status").textContent.includes("Submission attempted"));
+  await page.locator('[data-koin-test="check"]').click();
+  await page.evaluate(() => {
+    window.paymentSnapshot.transactions[0].state = "finalized";
+    window.paymentSnapshot.balances = { available: "10000000", reserved: "0" };
+    window.finishTestPayment({ state: "finalized", purpose: "credits", creditAction: "release" });
+  });
+  await page.waitForFunction(() => document.getElementById("koin-test-payment-status").textContent === "Transaction confirmed on chain.");
+  assert.equal(await page.locator("#koin-available").textContent(), "0.10000000");
+  assert.equal(await page.locator("#koin-reserved").textContent(), "0.00000000");
+
   await page.locator("#koin-earn-tab").click();
   assert.equal(await page.locator("#koin-use-panel").isVisible(), false);
   await page.locator('[data-koin-test="worker-start"]').click();

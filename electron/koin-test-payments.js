@@ -46,12 +46,42 @@ class TestPayments {
     const signed = structuredClone(tx); await signer.signTransaction(signed); return signed;
   }
   stop() { if (this.#task) { this.#task.stopped = true; this.#task.abort.abort(); } this.#funding.cancel(); }
+  #creditStatus(status, reason) {
+    if (status.purpose !== "credits") return status;
+    const draft = this.#journal.nonceCoordinator.draft(status.id), op = draft.operations?.length === 1 && draft.operations[0].call_contract;
+    const methods = require("../core/lib/koin-network/credits-abi.json").methods;
+    const creditAction = op?.contract_id === this.#client.d.credits &&
+      ["refund", "reserve", "revoke", "release"].find(method => methods[method].entry_point === op.entry_point);
+    return { ...status, ...(creditAction ? { creditAction } : {}), ...(reason ? { reason } : {}) };
+  }
+  async #checkCredit(id, guard) {
+    const nonces = this.#journal.nonceCoordinator, p = this.#client.provider;
+    let reason;
+    try {
+      const status = await nonces.reconcile(id); guard();
+      if (status.state !== "signed") return this.#creditStatus(status);
+      // This is a recovery hint, not proof that the nonce is free. Resuming
+      // still requires native review and the original nonce/policy checks.
+      const generation = p.readGeneration, lookup = await p.getTransactionsById([status.txId]); guard();
+      if (!lookup || typeof lookup !== "object" || Array.isArray(lookup) || lookup.error || lookup.rpc_error ||
+          (lookup.transactions !== undefined && !Array.isArray(lookup.transactions))) throw Error("Unavailable transaction lookup");
+      const records = lookup.transactions || [];
+      if (records.length > 1 || records.some(record => record?.transaction?.id !== status.txId)) throw Error("Unexpected transaction lookup");
+      if (records.length) reason = "credit_await_finality";
+      else reason = await p.getNextNonce(status.owner) === status.nonce ? "credit_saved_review_required" : "credit_nonce_changed";
+      guard();
+      if (p.readGeneration !== generation) throw Error("RPC changed during confirmation reads");
+    } catch {
+      guard(); reason = "credit_confirmation_unavailable";
+    }
+    return this.#creditStatus(nonces.status(id), reason);
+  }
   async status() {
     const owner = this.#owner(), config = await this.#client.verify();
     const balances = await this.#client.read("credits", "balances", { account: encodedAddress(owner) });
     return { enabled: true, mode: this.#config.mode, mainnetPaymentsEnabled: this.#config.mode === "mainnet-pilot", owner, paused: !!config.paused,
       balances: { available: balances.balance?.available || "0", reserved: balances.balance?.reserved || "0" },
-      deposits: this.#journal.list(), transactions: this.#journal.nonceCoordinator.list(),
+      deposits: this.#journal.list(), transactions: this.#journal.nonceCoordinator.list().map(status => this.#creditStatus(status)),
       automaticPayouts: true, payoutNotice: "Rewards are sent automatically after the daily review and irreversible confirmation." };
   }
   async #scope(draft) {
@@ -206,6 +236,7 @@ class TestPayments {
       if (["check", "resume", "recover", "repair"].includes(action)) {
         const id = typeof input === "string" ? input : input?.id; digest(id);
         if (action === "check") {
+          if (nonces.status(id).purpose === "credits") return await this.#checkCredit(id, guard);
           const n = await nonces.reconcile(id);
           if (n.purpose === "funding") {
             const checked = await this.#funding.check(id);
@@ -217,7 +248,7 @@ class TestPayments {
         }
         if (action === "recover") {
           const n = await nonces.recoverOriginal(id, input.txId); guard();
-          if (n.purpose === "funding") await this.#funding.check(id); return n;
+          if (n.purpose === "funding") await this.#funding.check(id); return this.#creditStatus(n);
         }
         if (action === "repair") {
           const review = await nonces.reviewConsumed(id, input.txId); guard();
@@ -225,7 +256,7 @@ class TestPayments {
             message: "Mark this request as conflicted?", detail: `Another irreversible transaction consumed the reserved nonce. This does not mark the original payment successful.\n\nWallet: ${review.owner}\nOriginal: ${review.originalTxId}\nConsuming transaction: ${review.consumingTxId}\nIrreversible block: ${review.finality.blockId}`,
             buttons: ["Cancel", "Record conflict"], defaultId: 0, cancelId: 0, noLink: true });
           guard(); if (answer.response !== 1) return { state: "cancelled" };
-          const n = await nonces.repairConsumed(review); if (n.purpose === "funding") await this.#funding.check(id); return n;
+          const n = await nonces.repairConsumed(review); if (n.purpose === "funding") await this.#funding.check(id); return this.#creditStatus(n);
         }
         if (nonces.status(id).purpose === "funding") {
           if (nonces.correction(id)) return await this.#correctMana(window, id, guard);
@@ -238,7 +269,7 @@ class TestPayments {
         draft = await this.#client.prepare("credits", request.method, request.args, { actor: request.actor, rcLimit: request.maxRc }); id = hash(draft.id);
       } else {
         id = digest(input); const status = nonces.status(id);
-        if (terminal(status.state)) return status;
+        if (terminal(status.state)) return this.#creditStatus(status);
         if (!nonces.envelope(id)) throw Error("Recover the original signed transaction from chain history; signing again is forbidden");
         draft = nonces.draft(id); request = await this.#scope(draft);
       }
@@ -260,12 +291,18 @@ class TestPayments {
       guard();
       if (fresh) {
         const decision = await nonces.reserve(id, "credits", draft, () => { try { guard(); return true; } catch { return false; } });
-        if (decision.action !== "sign_original") return nonces.status(id);
+        if (decision.action !== "sign_original") return this.#creditStatus(nonces.status(id));
         guard(); const tx = await this.#sign(draft); await nonces.stage(id, tx); // Preserve even a late signature.
       }
       guard(); const tx = nonces.authorizeSubmission(id, { maxRcPerDay: this.#config.maxRcPerDay }); guard();
-      try { await this.#client.submit(tx, request); } catch { /* Persisted envelope remains uncertain. */ }
-      return nonces.status(id);
+      let reason = "credit_submission_pending";
+      try { await this.#client.submit(tx, request); }
+      catch (error) {
+        // Transport messages can contain signed envelopes. Expose only fixed
+        // categories and keep the original envelope reserved for recovery.
+        reason = error?.code === "koin_rpc_insufficient_rc" ? "credit_insufficient_rc" : "credit_submission_uncertain";
+      }
+      return this.#creditStatus(nonces.status(id), reason);
     } finally {
       clearTimeout(timer); task.abort.abort(); for (const event of ["hide", "minimize", "closed"]) window.removeListener(event, stop);
       window.webContents.removeListener("did-start-navigation", navigation); window.webContents.removeListener("render-process-gone", stop); this.#task = null;

@@ -7,6 +7,11 @@ const A = "https://primary.invalid", B = "https://backup.invalid";
 const json = (id, result) => ({ ok: true, status: 200,
   text: async () => JSON.stringify({ jsonrpc: "2.0", id, result }) });
 const html = () => ({ ok: true, status: 200, text: async () => "<html>private-wallet-signature</html>" });
+const rpcError = (id, error) => ({ ok: true, status: 200,
+  text: async () => JSON.stringify({ jsonrpc: "2.0", id, error }) });
+const amqpError = id => rpcError(id, { code: -32603,
+  message: "An internal server error has occurred private-wallet-signature",
+  data: "rpc failed, AMQP connection is not open" });
 function fixture(handler, options = {}) {
   const calls = [];
   const fetchImpl = async (url, request) => {
@@ -172,5 +177,61 @@ test("HTTP403 and narrow RPC timeout errors permit bounded reads but not broadca
     const write = fixture((_url, body) => body.method === "chain.get_chain_id" ? undefined : failure(body));
     await assert.rejects(write.provider.call("chain.submit_transaction", { transaction: {}, broadcast: true }), /temporarily unavailable/);
     assert.equal(write.calls.filter(c => c.body.method === "chain.submit_transaction").length, 1);
+  }
+});
+test("AMQP outage retries confirmation reads only after verifying the backup chain", async () => {
+  const params = { transaction_ids: ["saved-transaction"], include_receipt: true };
+  const result = { transactions: [{ transaction: { id: "saved-transaction" } }] };
+  const { provider, calls } = fixture((url, body) => {
+    if (body.method === "chain.get_chain_id") return;
+    return url === A ? amqpError(body.id) : json(body.id, result);
+  });
+  assert.deepEqual(await provider.call("transaction_store.get_transactions_by_id", params), result);
+  assert.deepEqual(calls.map(c => [c.url, c.body.method]), [
+    [A, "chain.get_chain_id"], [A, "transaction_store.get_transactions_by_id"],
+    [B, "chain.get_chain_id"], [B, "transaction_store.get_transactions_by_id"],
+  ]);
+  for (const call of calls.filter(c => c.body.method !== "chain.get_chain_id"))
+    assert.deepEqual(call.body.params, params);
+  assert.equal(provider.readGeneration, 1);
+
+  const wrongChain = fixture((url, body) => url === A ? amqpError(body.id) : json(body.id, { chain_id: "wrong" }));
+  await assert.rejects(wrongChain.provider.getHeadInfo(), error => error.code === "koin_rpc_chain_mismatch");
+  assert.equal(wrongChain.calls.length, 2);
+  assert(wrongChain.calls.every(c => c.body.method === "chain.get_chain_id"));
+});
+test("AMQP outage is sanitized, bounded for reads and never retries a broadcast", async () => {
+  for (const broadcast of [false, true]) {
+    const { provider, calls } = fixture((_url, body) =>
+      body.method === "chain.get_chain_id" ? undefined : amqpError(body.id));
+    const params = { transaction: { id: "saved", signatures: ["private-signature"] }, broadcast };
+    await assert.rejects(provider.call("chain.submit_transaction", params), error => {
+      assert.equal(error.code, "koin_rpc_unavailable");
+      assert.equal(error.message, "KOIN RPC is temporarily unavailable. Check confirmation again shortly.");
+      assert.doesNotMatch(JSON.stringify(error), /private|AMQP|rpc failed/);
+      return true;
+    });
+    const submissions = calls.filter(c => c.body.method === "chain.submit_transaction");
+    assert.deepEqual(submissions.map(c => c.url), broadcast ? [A] : [A, B]);
+    for (const call of submissions) assert.deepEqual(call.body.params, params);
+    assert.equal(provider.readGeneration, 0);
+  }
+});
+test("AMQP diagnostics do not turn resource limits or contract failures into retries", async () => {
+  for (const [error, code] of [
+    [{ code: -32603, message: "insufficient rc", data: "rpc failed, AMQP connection is not open" }, "koin_rpc_insufficient_rc"],
+    [{ code: -32603, message: "transaction reverted", data: '{"logs":["rpc failed, AMQP connection is not open private-key"]}' }, "koin_rpc_rejected"],
+    [{ code: -32603, message: "transaction reverted: AMQP connection is not open", data: "private-key" }, "koin_rpc_rejected"],
+    [{ code: 1, message: "contract rejected", data: "rpc failed, AMQP connection is not open" }, "koin_rpc_rejected"],
+    [{ code: -32603, message: "An internal server error has occurred", data: "private-key" }, "koin_rpc_rejected"],
+  ]) {
+    const { provider, calls } = fixture((_url, body) => body.method === "chain.get_chain_id" ? undefined : rpcError(body.id, error));
+    await assert.rejects(provider.call("chain.submit_transaction", { transaction: {}, broadcast: false }), failure => {
+      assert.equal(failure.code, code);
+      assert.doesNotMatch(failure.message, /private|AMQP|rpc failed/);
+      return true;
+    });
+    assert.equal(calls.length, 2);
+    assert(calls.every(c => c.url === A));
   }
 });

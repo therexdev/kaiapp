@@ -1,3 +1,10 @@
+## KOIN reserved-credit release recovery
+
+- Handles the RPC server's disconnected message broker as a temporary outage and checks the next pinned, chain-verified endpoint for reads. Broadcasts still require explicit review and are never automatically retried.
+- Identifies releases, reservations, refunds and revocations in Payment activity. Confirmation distinguishes a transaction reported by the node from one it cannot find with an unchanged wallet nonce, and directs the latter to **Review saved transaction**.
+- Reports uncertain submission responses and Mana rejections instead of silently returning the same signed message. Recovery keeps the original transaction, signature, nonce and spending limits.
+- An already configured account directs users to **Refresh** when they try to import its network configuration again.
+
 ## KOIN deposit confirmation recovery
 
 - Handles HTML error pages and temporary RPC failures with bounded fallback across the deployment's pinned endpoints for account reads, confirmation and non-broadcast simulations. Each endpoint must match the pinned chain. Account snapshots restart after a switch; transaction broadcasts are never automatically retried.

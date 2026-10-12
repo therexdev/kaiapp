@@ -29,7 +29,13 @@ function rejection(error) {
   if (typeof error?.data === "string") detail += error.data.slice(0, 4096);
   if (/insufficient rc|insufficient mana|compute bandwidth limit|rc limit/i.test(detail))
     return new RpcFailure("KOIN RPC rejected the transaction: insufficient rc.", false, "koin_rpc_insufficient_rc");
-  if (error?.code === -32603 && /context deadline exceeded|temporarily unavailable|service unavailable|upstream timed out/i.test(detail))
+  // Koinos JSON-RPC can return HTTP 200 while its AMQP connection to the
+  // chain service is down. Match that gateway diagnostic exactly: contract
+  // failures/logs mentioning AMQP are not evidence of a transport outage.
+  const amqpUnavailable = typeof error?.data === "string" && error.data.length <= 4096 &&
+    /^rpc failed, AMQP connection is not open$/i.test(error.data.trim());
+  if (error?.code === -32603 && (amqpUnavailable ||
+      /context deadline exceeded|temporarily unavailable|service unavailable|upstream timed out/i.test(detail)))
     return unavailable();
   return new RpcFailure("KOIN RPC rejected the request.", false, "koin_rpc_rejected");
 }
