@@ -1,3 +1,9 @@
+## KOIN recovery on slow RPC servers
+
+- Gives each pinned RPC server more time to verify the chain and finish an account check, so a slow but working backup can complete release recovery after the primary fails.
+- Keeps checks bounded and preserves the saved transaction, approval, nonce and deployment. Broadcasts are still attempted only once per approved submission.
+- Stops a pending credit submission when the payment window is hidden or stopped, including while it waits for slow verification reads. Its saved signature remains available for a later explicit review.
+
 ## Node reliability — October 13, 2026
 
 - Recovery runs in the background and resumes after reopening the app. It remembers a deliberately stopped node and leaves it stopped.

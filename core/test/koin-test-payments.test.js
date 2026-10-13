@@ -65,6 +65,38 @@ test("Stop during native review and locked or changed wallets never sign", async
   Object.defineProperty(f.wallet, "signer", { get() { throw Error("Wallet is locked"); } });
   await assert.rejects(f.controller.run(w, "refund", "1"), /locked/); assert.equal(f.journal.nonceCoordinator.list().length, 0);
 });
+test("Stop or hide during real submission verification prevents a late broadcast and preserves the signed refund", async t => {
+  for (const stop of [f => f.controller.stop(), (_f, w) => w.emit("hide")]) {
+    const f = setup(t), w = window();
+    let reachedVerification, releaseVerification, signs = 0;
+    const reached = new Promise(resolve => { reachedVerification = resolve; });
+    const gate = new Promise(resolve => { releaseVerification = resolve; });
+    const metadata = f.provider.invokeGetContractMetadata, sign = f.signer.signTransaction.bind(f.signer);
+    f.signer.signTransaction = tx => { signs++; return sign(tx); };
+    // Leave KoinChain.submit real. Delay its public verification reads only
+    // after the reviewed envelope has been signed and persisted.
+    f.provider.invokeGetContractMetadata = async address => {
+      if (f.journal.nonceCoordinator.list().some(r => r.state === "signed")) {
+        reachedVerification(); await gate;
+      }
+      return metadata(address);
+    };
+    const pending = f.controller.run(w, "refund", "1");
+    await reached;
+    const [reservation] = f.journal.nonceCoordinator.list();
+    const saved = f.journal.nonceCoordinator.envelope(reservation.id);
+    assert.equal(signs, 1); assert.equal(saved.signatures.length, 1);
+    stop(f, w); releaseVerification();
+    const stopped = await pending;
+    assert.equal(stopped.state, "signed"); assert.equal(stopped.reason, "credit_submission_uncertain");
+    assert.equal(f.state.submissions.length, 0);
+    assert.deepEqual(f.journal.nonceCoordinator.envelope(reservation.id), saved);
+    // A subsequent explicit review resends those exact bytes, without signing.
+    f.state.now += 1001;
+    await f.controller.run(w, "resume", reservation.id);
+    assert.equal(signs, 1); assert.deepEqual(f.state.submissions, [saved]);
+  }
+});
 test("a lost Test refund response cannot create another signature and resume uses identical bytes", async t => {
   const f = setup(t); let signs = 0;
   const sign = f.signer.signTransaction.bind(f.signer); f.signer.signTransaction = tx => { signs++; return sign(tx); };

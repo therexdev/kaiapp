@@ -132,16 +132,18 @@ test("timed-out late response cannot undo fallback or mutate the generation", as
   assert.equal(calls.at(-1).url, B);
   assert.equal(provider.readGeneration, 1);
 });
-test("one total deadline bounds all attempts and aborts stalled requests", async () => {
+test("one total deadline bounds all attempts and aborts stalled requests", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
   const calls = [];
   const provider = new PinnedRpcProvider([A, B, "https://third.invalid"], CHAIN, {
     timeoutMs: 45, attemptTimeoutMs: 30,
     fetchImpl: async (_url, request) => { calls.push(request); return new Promise(() => {}); },
   });
-  const started = Date.now();
-  await assert.rejects(provider.getHeadInfo(), /temporarily unavailable/);
-  assert(Date.now() - started < 300);
-  assert(calls.length <= 2);
+  const pending = assert.rejects(provider.getHeadInfo(), /temporarily unavailable/);
+  await advance(t, 30);
+  await advance(t, 15);
+  await pending;
+  assert.equal(calls.length, 2);
   assert(calls.every(c => c.signal.aborted));
 });
 test("Stop during the chain probe prevents the transaction POST and any fallback", async () => {
@@ -234,4 +236,70 @@ test("AMQP diagnostics do not turn resource limits or contract failures into ret
     assert.equal(calls.length, 2);
     assert(calls.every(c => c.url === A));
   }
+});
+// Exercise real production defaults without sleeping through long outages.
+async function advance(t, ms) {
+  t.mock.timers.tick(ms);
+  await new Promise(resolve => setImmediate(resolve));
+}
+test("default budget allows a slow chain-verified backup after a fully stalled primary", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  const { provider, calls } = fixture(async (url, body) => {
+    if (url === A) return new Promise(() => {});
+    // Public RPC observations: chain probe ~9.4 s, requested read ~6.5 s.
+    await new Promise(resolve => setTimeout(resolve, body.method === "chain.get_chain_id" ? 9428 : 6533));
+    return json(body.id, body.method === "chain.get_chain_id" ? { chain_id: CHAIN } : { rc: "42" });
+  });
+  const pending = provider.getAccountRc("owner").then(value => ({ value }), error => ({ error: error.code }));
+  await advance(t, 20000);
+  assert.equal(calls[0].signal.aborted, true);
+  assert.deepEqual(calls.map(c => [c.url, c.body.method]), [[A, "chain.get_chain_id"], [B, "chain.get_chain_id"]]);
+  await advance(t, 9428);
+  assert.equal(calls.at(-1).body.method, "chain.get_account_rc");
+  await advance(t, 6533);
+  assert.deepEqual(await pending, { value: "42" });
+  assert.equal(provider.readGeneration, 1);
+  assert.equal(calls.length, 3);
+  assert.deepEqual(calls.at(-1).body.params, { account: "owner" });
+});
+test("default total budget stops all stalled endpoints at 45 seconds", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  const calls = [], endpoints = [A, B, "https://third.invalid"];
+  const provider = new PinnedRpcProvider(endpoints, CHAIN, {
+    fetchImpl: async (url, request) => { calls.push({ url, signal: request.signal }); return new Promise(() => {}); },
+  });
+  let settled = false;
+  const pending = provider.getHeadInfo().then(
+    () => { settled = true; return "unexpected success"; },
+    error => { settled = true; return error.code; });
+  await advance(t, 20000);
+  await advance(t, 20000);
+  assert.deepEqual(calls.map(c => c.url), endpoints);
+  assert.equal(settled, false);
+  await advance(t, 4999);
+  assert.equal(settled, false);
+  await advance(t, 1);
+  assert.equal(await pending, "koin_rpc_unavailable");
+  assert(calls.every(c => c.signal.aborted));
+  assert.equal(provider.readGeneration, 0);
+  assert.throws(() => new PinnedRpcProvider(endpoints, CHAIN, { timeoutMs: 45001 }), /Invalid pinned KOIN RPC settings/);
+});
+test("a slow broadcast still has one attempt and preserves its exact signed bytes", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  const transaction = { id: "saved", header: { nonce: "KAE=" }, signatures: ["saved-signature"] };
+  const { provider, calls } = fixture(async (_url, body) => {
+    if (body.method !== "chain.get_chain_id") return new Promise(() => {});
+    await new Promise(resolve => setTimeout(resolve, 9428));
+    return json(body.id, { chain_id: CHAIN });
+  });
+  const pending = provider.call("chain.submit_transaction", { transaction, broadcast: true })
+    .then(() => "unexpected success", error => error.code);
+  await advance(t, 9428);
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[1].body.params, { transaction, broadcast: true });
+  await advance(t, 20000 - 9428);
+  assert.equal(await pending, "koin_rpc_unavailable");
+  assert(calls.every(c => c.url === A && c.signal.aborted));
+  assert.equal(calls.filter(c => c.body.method === "chain.submit_transaction").length, 1);
+  assert.equal(provider.readGeneration, 0);
 });

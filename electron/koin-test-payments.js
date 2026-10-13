@@ -296,7 +296,7 @@ class TestPayments {
       }
       guard(); const tx = nonces.authorizeSubmission(id, { maxRcPerDay: this.#config.maxRcPerDay }); guard();
       let reason = "credit_submission_pending";
-      try { await this.#client.submit(tx, request); }
+      try { await this.#client.submit(tx, request, { signal: task.abort.signal }); }
       catch (error) {
         // Transport messages can contain signed envelopes. Expose only fixed
         // categories and keep the original envelope reserved for recovery.

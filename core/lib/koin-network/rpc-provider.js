@@ -46,10 +46,13 @@ function rejection(error) {
 class PinnedRpcProvider extends Provider {
   #endpoints; #chainId; #fetch; #timeoutMs; #attemptTimeoutMs;
   #preferred = 0; #lastAccepted = 0; #generation = 0; #requestId = 0;
-  constructor(rpc, chainId, { fetchImpl = globalThis.fetch, timeoutMs = 18000, attemptTimeoutMs = 6000 } = {}) {
+  // Each endpoint attempt includes a chain-id probe followed by the requested
+  // operation. Allow both reads to finish on a slow node, and leave a full
+  // backup attempt after a stalled primary without removing the total bound.
+  constructor(rpc, chainId, { fetchImpl = globalThis.fetch, timeoutMs = 45000, attemptTimeoutMs = 20000 } = {}) {
     if (!Array.isArray(rpc) || !rpc.length || rpc.length > 3 || new Set(rpc).size !== rpc.length ||
         typeof chainId !== "string" || !chainId || typeof fetchImpl !== "function" ||
-        !Number.isSafeInteger(timeoutMs) || timeoutMs < 10 || timeoutMs > 30000 ||
+        !Number.isSafeInteger(timeoutMs) || timeoutMs < 10 || timeoutMs > 45000 ||
         !Number.isSafeInteger(attemptTimeoutMs) || attemptTimeoutMs < 10 || attemptTimeoutMs > timeoutMs)
       throw Error("Invalid pinned KOIN RPC settings");
     const endpoints = Object.freeze(rpc.map(value => {
