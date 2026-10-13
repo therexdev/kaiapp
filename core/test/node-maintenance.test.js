@@ -18,6 +18,7 @@ function data(root, name, value) { fs.mkdirSync(path.join(root, name), { recursi
 
 test("replay mismatch is recognized and displayed with recovery disabled after reopening", async () => {
   const mgr = new NodeManager({ dataRoot: "/unused", autoRecover: false });
+  mgr._assertControl = async () => {}; mgr.ownership = async () => ({ ok: true }); // Docker boundary; ownership is exercised in node-supervisor tests.
   const services = ["chain", "block_store", "mempool", "p2p", "block_producer"].map(service => ({ service, state: "running" }));
   let reads = 0;
   mgr.dockerInfo = async () => ({ ok: true }); mgr.services = async () => services;
@@ -79,6 +80,7 @@ test("backup deletion rejects symlinks", { skip: process.platform === "win32" },
 });
 test("an initial stopped observation does not permanently cache missing health", async () => {
  const mgr = new NodeManager({dataRoot:"/unused"});
+  mgr._assertControl = async () => {}; mgr.ownership = async () => ({ ok: true }); // Docker boundary; ownership is exercised in node-supervisor tests.
  await mgr.observe("mainnet", []);
  mgr._observations.get("mainnet").at = 0;
  mgr._compose = async () => ({ok:true,stdout:mismatch,stderr:""});
@@ -93,6 +95,7 @@ test("unreachable chain eventually fails health even without any head reading", 
 });
 test("interrupted install marker prevents starts and deletion of recovery data", async t => {
  const root=fixture(t); const mgr=new NodeManager({dataRoot:root});
+  mgr._assertControl = async () => {}; mgr.ownership = async () => ({ ok: true }); // Docker boundary; ownership is exercised in node-supervisor tests.
  fs.mkdirSync(mgr.dirs("mainnet").basedir,{recursive:true});
  fs.writeFileSync(path.join(mgr.dirs("mainnet").basedir,".kai-restore-incomplete.json"),"{}");
  await assert.rejects(mgr.start("mainnet",null),/interrupted/);
@@ -119,6 +122,7 @@ test("producer rejection is separate from node health and only a successful subm
   assert.equal(inspectLogs("chain-1 | Error while submitting block: could not burn vhp").production, null);
   assert.equal(inspectLogs(failure + "\nblock_producer-1 | Produced block - Height: 123").production.reason, null);
   const mgr = new NodeManager({ dataRoot: "/unused" });
+  mgr._assertControl = async () => {}; mgr.ownership = async () => ({ ok: true }); // Docker boundary; ownership is exercised in node-supervisor tests.
   const services = [{ service: "block_producer", state: "running" }];
   let log = failure;
   mgr._compose = async () => ({ ok: true, stdout: log, stderr: "" });
