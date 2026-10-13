@@ -89,6 +89,16 @@ function hasImageParts(messages) {
   return Array.isArray(messages) && messages.some((m) => Array.isArray(m?.content) && m.content.some((p) => p?.type === "image_url"));
 }
 
+/** §13 v1 worst-case pricing: a published USD-per-million-tokens price as
+ *  an exact µ$-per-M safe integer, or null when it is missing, non-numeric,
+ *  non-finite, negative or too large to price exactly (fail closed). The
+ *  legacy estimates in _networkRates keep their own lenient conversion. */
+function publishedMicroPerM(usdPerM) {
+  if (typeof usdPerM !== "number" || !Number.isFinite(usdPerM) || usdPerM < 0) return null;
+  const micro = Math.round(usdPerM * 1e6);
+  return Number.isSafeInteger(micro) ? micro : null;
+}
+
 class Gateway {
   constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, staticAssets, earn, network, feedback, chats, docs, voice, speech, turn, tools, memory, mcp, nodeRuntime, email, calendar, koinos, koinosNode, teams, account, dev, bench, agents, code, onEvent }) {
     this.tools = tools || null; // unified tool registry (agents/MCP/memory/…)
@@ -1987,12 +1997,28 @@ class Gateway {
     }
     // §13 v1 worst case: a metered key must cover the most these signed
     // terms can bill — prompt at its byte cap or window, whichever is
-    // smaller, plus max_tokens, at the class's published rates. Legacy
+    // smaller, plus max_tokens. A named class is priced at its own published
+    // rates; "auto" at the HIGHEST published input and output rates in the
+    // table, because the scheduler may serve any class (the first/Fast-class
+    // estimate _networkRates gives the legacy lane would let auto authorise
+    // far more than the budget). A missing or malformed price, or a worst
+    // case too large to compute exactly, refuses HERE — nothing signed or
+    // sent. A key with no budget has nothing to cover (as before). Legacy
     // keeps the zero gate above.
-    if (v1 && meterKey) {
+    if (v1 && meterKey && Number.isFinite(this.keys.budgetRemainingMicro(meterKey.id))) {
       const ctxTier = tierFor(estimateTokensV1(terms.messages) + terms.maxTokens) ?? CONTEXT_TIERS[CONTEXT_TIERS.length - 1];
       const promptBound = Math.min(24 + Buffer.byteLength(JSON.stringify(terms.messages), "utf8"), ctxTier);
-      const worstMicro = Math.ceil((promptBound * rates.inMicroPerM + terms.maxTokens * rates.outMicroPerM) / 1e6);
+      const worstRates = await this._v1WorstRates(schedulerUrl, netModel);
+      const worstNum = worstRates && promptBound * worstRates.inMicroPerM + terms.maxTokens * worstRates.outMicroPerM;
+      if (!worstRates || !Number.isSafeInteger(worstNum)) {
+        return fail(
+          429,
+          "The network's published prices for this request are unavailable or invalid, so its worst-case cost can't be checked against this API key's monthly network budget — nothing was sent. Try again later.",
+          "insufficient_quota",
+          "pricing_unavailable"
+        );
+      }
+      const worstMicro = Math.ceil(worstNum / 1e6);
       if (this.keys.budgetRemainingMicro(meterKey.id) < worstMicro) {
         return fail(
           429,
@@ -2252,6 +2278,31 @@ class Gateway {
     }
     v.maxCtxTokens = maxCtxTokens;
     return v;
+  }
+
+  /** §13 v1 worst-case rates for a metered API key, from the cached
+   *  /pricing table: a named class at its OWN published prices (own-property
+   *  lookup); "auto" at the MAXIMUM published input and the MAXIMUM published
+   *  output price over every class in the table, since the scheduler may
+   *  serve any of them. Null — the caller refuses, nothing signed — when the
+   *  table or class is missing or ANY relevant price is missing, non-numeric,
+   *  non-finite, negative or unrepresentable (for "auto", a bad price on any
+   *  class). _networkRates and the legacy estimates are unchanged. */
+  async _v1WorstRates(schedulerUrl, model) {
+    const table = (await this._pricing(schedulerUrl)).models;
+    if (!table || typeof table !== "object" || typeof model !== "string") return null;
+    const entries = model === "auto" ? Object.keys(table).map((k) => table[k]) : Object.hasOwn(table, model) ? [table[model]] : [];
+    if (!entries.length) return null;
+    let inMicroPerM = 0;
+    let outMicroPerM = 0;
+    for (const e of entries) {
+      const inM = publishedMicroPerM(e?.usdPerMInputTokens);
+      const outM = publishedMicroPerM(e?.usdPerMOutputTokens);
+      if (inM === null || outM === null) return null;
+      inMicroPerM = Math.max(inMicroPerM, inM);
+      outMicroPerM = Math.max(outMicroPerM, outM);
+    }
+    return { inMicroPerM, outMicroPerM };
   }
 
   /** The /pricing `context` block when the scheduler speaks protocol 1,

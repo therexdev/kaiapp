@@ -688,6 +688,179 @@ test("context lanes: a metered API key must cover the v1 worst case before anyth
   }
 });
 
+test("context lanes: a metered v1 'auto' request is priced at the dearest published class; malformed prices fail closed", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-lanes-auto-price-"));
+  // §16 rates: koinos-fast 100000/400000 µ$/M, qwen25-32b 1000000/4000000.
+  // Fast is listed FIRST — the class _networkRates estimates "auto" with —
+  // but the scheduler's auto may serve the 32B class.
+  const fast = { usdPerMInputTokens: 0.1, usdPerMOutputTokens: 0.4, ctxTokens: 4096, maxCtxTokens: 32768 };
+  const big = { usdPerMInputTokens: 1, usdPerMOutputTokens: 4, ctxTokens: 4096, maxCtxTokens: 32768 };
+  const context = { protocol: 1, tiers: [4096, 16384, 32768], legacyCtxTokens: 4096, legacyMaxTokens: 512, maxOutputTokens: 4096 };
+  const pricing = { ok: true, models: { "koinos-fast": fast, "qwen25-32b": big }, context };
+  const spy = ctxScheduler({ pricing });
+  const spyPort = await spy.listen();
+  const url = `http://127.0.0.1:${spyPort}`;
+  const { core, post } = await bootCore(dir);
+  // The gateway caches /pricing for an hour: drop the cache with each new table.
+  const setModels = (models) => {
+    pricing.models = models;
+    core.gateway._rates = null;
+  };
+  try {
+    await post("/core/earn/wallet", { password: "correct horse" });
+    await post("/core/earn/config", { schedulerUrl: url });
+    await post("/core/network/config", { privacyMode: "local-first" });
+    const created = await post("/core/keys", { label: "metered-auto" });
+    const key = created.json.key || created.json.token || created.json.secret;
+    const id = created.json.id;
+    assert.ok(key && id, `key create reply: ${JSON.stringify(created.json)}`);
+    const auth = { authorization: `Bearer ${key}` };
+    const budget = (usd) => post(`/core/keys/${id}/budget`, { budgetUsdMonthly: usd }, auth);
+    const send = (model, messages, extra) => post("/v1/chat/completions", { model, messages, ...extra }, auth);
+    const hello = [{ role: "user", content: "hello" }];
+    const long = [{ role: "user", content: "a".repeat(14321) }]; // legacy 3585: negotiates v1 at 512
+    const extended = { max_tokens: 4096, kai_extended_output: true };
+    const net = core.gateway.network;
+    const realSignV1 = net.signConsumeV1;
+    const realSign = net.signConsume;
+    let v1Signs = 0;
+    let legacySigns = 0;
+    net.signConsumeV1 = async (...a) => {
+      v1Signs += 1;
+      return realSignV1.apply(net, a);
+    };
+    net.signConsume = async (...a) => {
+      legacySigns += 1;
+      return realSign.apply(net, a);
+    };
+
+    // "auto" takes the highest input AND the highest output price, even when
+    // they come from different classes; a named class keeps its own.
+    setModels({ a: { usdPerMInputTokens: 2, usdPerMOutputTokens: 0.4 }, b: { usdPerMInputTokens: 0.1, usdPerMOutputTokens: 4 } });
+    assert.deepStrictEqual(await core.gateway._v1WorstRates(url, "auto"), { inMicroPerM: 2000000, outMicroPerM: 4000000 });
+    assert.deepStrictEqual(await core.gateway._v1WorstRates(url, "b"), { inMicroPerM: 100000, outMicroPerM: 4000000 });
+    for (const model of ["missing", "constructor", "__proto__", "hasOwnProperty"]) {
+      assert.strictEqual(await core.gateway._v1WorstRates(url, model), null, model);
+    }
+    setModels({ "koinos-fast": fast, "qwen25-32b": big });
+    // ...while the legacy estimate for "auto" stays the first/Fast class.
+    assert.strictEqual((await core.gateway._networkRates(url, "auto")).outMicroPerM, 400000);
+
+    // Worst cases — "hello" + 4096 out: prompt min(24 + 35 bytes, 16384) = 59;
+    // the long prompt + 512 out: prompt min(24 + 14351, 16384) = 14375.
+    //   koinos-fast ceil(59*0.1 + 4096*0.4) = 1645 µ$; ceil(14375*0.1 + 512*0.4) = 1643 µ$
+    //   qwen25-32b  59 + 4096*4 = 16443 µ$;            14375 + 512*4 = 16423 µ$
+    // A $0.005 budget (5000 µ$) lies between the two.
+    await budget(0.005);
+    for (const [model, messages, extra, cost] of [
+      ["koinos-network", hello, extended, "$0.0164"],
+      ["koinos-network", long, {}, "$0.0164"],
+      ["koinos-network", hello, { ...extended, stream: true }, "$0.0164"],
+      ["koinos-network:qwen25-32b", hello, extended, "$0.0164"],
+    ]) {
+      const r = await send(model, messages, extra);
+      const label = `${model} ${JSON.stringify(extra)}`;
+      assert.strictEqual(r.status, 429, label);
+      assert.strictEqual(r.json.error.type, "insufficient_quota", label);
+      assert.strictEqual(r.json.error.code, "worst_case_unaffordable", label);
+      assert.ok(r.json.error.message.includes(cost), `${label}: priced at the 32B class — ${r.json.error.message}`);
+    }
+    assert.strictEqual(v1Signs, 0, "a refused auto request is never signed");
+    assert.strictEqual(spy.consumes.length, 0, "and never reaches /consume");
+
+    // The same budget pinned to koinos-fast: its own price fits, signed v1.
+    let r = await send("koinos-network:koinos-fast", hello, extended);
+    assert.strictEqual(r.status, 200);
+    assert.ok(isV1(spy.consumes.at(-1).body));
+    assert.deepStrictEqual([spy.consumes.at(-1).body.model, spy.consumes.at(-1).body.max_tokens], ["koinos-fast", 4096]);
+    r = await send("koinos-network:koinos-fast", long);
+    assert.strictEqual(r.status, 200);
+    assert.ok(isV1(spy.consumes.at(-1).body));
+    assert.strictEqual(spy.consumes.at(-1).body.max_tokens, 512);
+    assert.strictEqual(v1Signs, 2);
+    // A budget that covers the 32B worst case lets auto through, signed as auto.
+    await budget(0.02);
+    r = await send("koinos-network", hello, extended);
+    assert.strictEqual(r.status, 200);
+    assert.ok(isV1(spy.consumes.at(-1).body));
+    assert.deepStrictEqual([spy.consumes.at(-1).body.model, spy.consumes.at(-1).body.max_tokens], ["auto", 4096]);
+    assert.strictEqual(v1Signs, 3);
+
+    // Malformed published prices never yield a signed v1 request, however
+    // large the budget: a string, a negative, a missing price, 1e308 (µ$
+    // conversion overflows) and 1e9 (the worst-case product overflows).
+    await budget(1000);
+    const bad = { string: "4", negative: -1, missing: undefined, null: null, huge: 1e308, overflow: 1e9 };
+    for (const [label, v] of Object.entries(bad)) {
+      for (const field of ["usdPerMInputTokens", "usdPerMOutputTokens"]) {
+        const sent = spy.consumes.length;
+        const signs = v1Signs;
+        const broken = { ...big, [field]: v };
+        if (v === undefined) delete broken[field];
+        // auto: a bad price on ANY class fails closed — here the second one.
+        setModels({ "koinos-fast": fast, "qwen25-32b": broken });
+        for (const [messages, extra] of [[hello, extended], [long, {}]]) {
+          r = await send("koinos-network", messages, extra);
+          assert.strictEqual(r.status, 429, `auto ${label} ${field}`);
+          assert.strictEqual(r.json.error.type, "insufficient_quota", `auto ${label} ${field}`);
+          assert.strictEqual(r.json.error.code, "pricing_unavailable", `auto ${label} ${field}`);
+          assert.match(r.json.error.message, /prices .* unavailable or invalid/);
+        }
+        // A named class with its own bad price fails closed too.
+        setModels({ "koinos-fast": { ...broken, maxCtxTokens: 32768 }, "qwen25-32b": big });
+        r = await send("koinos-network:koinos-fast", hello, extended);
+        assert.strictEqual(r.status, 429, `koinos-fast ${label} ${field}`);
+        assert.strictEqual(r.json.error.code, "pricing_unavailable", `koinos-fast ${label} ${field}`);
+        assert.strictEqual(v1Signs, signs, `${label} ${field}: never signed`);
+        assert.strictEqual(spy.consumes.length, sent, `${label} ${field}: no /consume request`);
+      }
+    }
+    // A named class is priced only by its own entry: another class's bad
+    // price does not block it.
+    setModels({ "koinos-fast": fast, "qwen25-32b": { ...big, usdPerMOutputTokens: "4" } });
+    r = await send("koinos-network:koinos-fast", hello, extended);
+    assert.strictEqual(r.status, 200);
+    assert.ok(isV1(spy.consumes.at(-1).body));
+    assert.strictEqual(v1Signs, 4);
+    // A key with no budget is unchanged: nothing to cover, served as before.
+    await budget(null);
+    r = await send("koinos-network", hello, extended);
+    assert.strictEqual(r.status, 200);
+    assert.ok(isV1(spy.consumes.at(-1).body));
+    assert.strictEqual(spy.consumes.at(-1).body.model, "auto");
+    assert.strictEqual(v1Signs, 5);
+
+    // Legacy lane with a small non-zero budget, exactly as before: only the
+    // zero gate applies (no worst case, whatever the table or max_tokens),
+    // legacy signature, the caller's max_tokens forwarded.
+    await budget(0.0001); // 100 µ$ — far below any v1 worst case above
+    const legacy = legacySigns;
+    for (const models of [{ "koinos-fast": fast, "qwen25-32b": big }, { "koinos-fast": fast, "qwen25-32b": { ...big, usdPerMOutputTokens: "4" } }]) {
+      setModels(models);
+      for (const [model, extra] of [["koinos-network", {}], ["koinos-network", { max_tokens: 4096 }], ["koinos-network:qwen25-32b", { max_tokens: 900 }]]) {
+        r = await send(model, hello, extra);
+        assert.strictEqual(r.status, 200, `${model} ${JSON.stringify(extra)}`);
+        const b = spy.consumes.at(-1).body;
+        assert.ok(isLegacy(b), `${model} ${JSON.stringify(extra)}: legacy lane`);
+        assert.strictEqual(b.model, model === "koinos-network" ? "auto" : "qwen25-32b");
+        assert.strictEqual(b.max_tokens, extra.max_tokens);
+      }
+    }
+    assert.strictEqual(legacySigns, legacy + 6);
+    assert.strictEqual(v1Signs, 5, "the legacy lane never signs v1 terms");
+    // ...and v1 at the same small budget is still refused before signing.
+    r = await send("koinos-network:koinos-fast", hello, { max_tokens: 1024, kai_extended_output: true });
+    assert.strictEqual(r.status, 429);
+    assert.strictEqual(r.json.error.code, "worst_case_unaffordable");
+    assert.strictEqual(v1Signs, 5);
+    net.signConsumeV1 = realSignV1;
+    net.signConsume = realSign;
+  } finally {
+    await core.stop();
+    spy.srv.close();
+  }
+});
+
 test("context lanes: a scheduler without protocol 1 only ever gets legacy requests", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-lanes-old-"));
   const spy = ctxScheduler({ context: false });
