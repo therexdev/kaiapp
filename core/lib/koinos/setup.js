@@ -409,12 +409,13 @@ class SetupService {
     }
   }
 
-  async startDocker() {
+  async startDocker({ installIfMissing = true } = {}) {
     if (this.platform === "linux") {
       throw new Error("Start the Docker service with your init system, e.g. `sudo systemctl start docker`.");
     }
     const app = await this._dockerApp();
     if (!app) {
+      if (!installIfMissing) throw new Error("Docker Desktop is not installed. Open Node setup to install it.");
       // Field report: a leftover docker CLI can make Docker look installed
       // while the Desktop app is gone, and this button answered "install it
       // first" — to the person pressing the install-shaped button. Doing the

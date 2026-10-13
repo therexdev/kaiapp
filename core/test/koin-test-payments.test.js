@@ -3,7 +3,7 @@ const test = require("node:test"), assert = require("node:assert/strict"), { Eve
 const { fixture } = require("./helpers/koin-funding-recovery-fixture");
 const { TestPayments } = require("../../electron/koin-test-payments");
 const { configuration, atoms } = require("../../electron/koin-test-config");
-const { KoinChain } = require("../lib/koin-network/chain");
+const { KoinChain, encodedAddress } = require("../lib/koin-network/chain");
 const { assertPaymentMode, FOUNDATION_CHAIN, FOUNDATION_TOKEN } = require("../lib/koin-network/payment-mode");
 const { hash } = require("../lib/koin-network/job-protocol");
 function window() { return Object.assign(new EventEmitter(), { webContents: new EventEmitter(), isDestroyed: () => false, isVisible: () => true, isMinimized: () => false }); }
@@ -49,6 +49,7 @@ test("Test refund requires an exact native review and persists signed bytes befo
   let review; const f = setup(t, { dialog: { showMessageBox: async (_w, value) => { review = value; return { response: 1 }; } } });
   const result = await f.controller.run(window(), "refund", "1");
   assert.equal(result.state, "signed"); assert.equal(f.state.submissions.length, 1);
+  assert.equal(result.creditAction, "refund"); assert.equal(result.reason, "credit_submission_pending");
   assert.ok(review.detail.includes("1.00000000")); assert.ok(review.detail.includes(f.d.credits)); assert.ok(review.detail.includes(result.txId));
   assert.equal(review.defaultId, 0); assert.equal(result.transaction, undefined);
   assert.deepEqual(f.journal.nonceCoordinator.envelope(result.id), f.state.submissions[0]);
@@ -67,12 +68,68 @@ test("Stop during native review and locked or changed wallets never sign", async
 test("a lost Test refund response cannot create another signature and resume uses identical bytes", async t => {
   const f = setup(t); let signs = 0;
   const sign = f.signer.signTransaction.bind(f.signer); f.signer.signTransaction = tx => { signs++; return sign(tx); };
-  f.provider.call = async (_method, { transaction: tx }) => { f.state.submissions.push(structuredClone(tx)); throw Error("lost"); };
+  f.provider.call = async (_method, { transaction: tx }) => { f.state.submissions.push(structuredClone(tx)); throw Error("private RPC body: " + JSON.stringify(tx)); };
   const result = await f.controller.run(window(), "refund", "1"), first = f.state.submissions[0];
+  assert.equal(result.state, "signed"); assert.equal(result.creditAction, "refund"); assert.equal(result.reason, "credit_submission_uncertain");
+  assert.ok(!JSON.stringify(result).includes("private RPC body")); assert.ok(!JSON.stringify(result).includes(first.signatures[0]));
+  const checked = await f.controller.run(window(), "check", result.id);
+  assert.equal(checked.state, "signed"); assert.equal(checked.reason, "credit_saved_review_required");
+  assert.equal(f.state.submissions.length, 1); assert.deepEqual(f.journal.nonceCoordinator.envelope(result.id), first);
   await assert.rejects(f.controller.run(window(), "refund", "2"), /owns this wallet nonce/);
-  f.state.now += 1001; await f.controller.run(window(), "resume", result.id);
+  f.state.now += 1001; const resumed = await f.controller.run(window(), "resume", result.id);
+  assert.equal(resumed.reason, "credit_submission_uncertain");
   assert.equal(signs, 1); assert.deepEqual(f.state.submissions[1], first);
   assert.equal(f.state.submissions.length, 2);
+});
+test("release reports a bounded Mana rejection while preserving its signed envelope and action label", async t => {
+  const f = setup(t), session = hash("expired-session"), read = f.provider.readContract;
+  const getSession = require("../lib/koin-network/credits-abi.json").methods.get_session.entry_point;
+  f.provider.readContract = async op => op.entry_point === getSession ? {
+    result: Buffer.from(await f.client.serializer.serialize({ session: {
+      id: Buffer.from(session, "hex").toString("base64url"), owner: encodedAddress(f.wallet.address),
+      settle_until: String(f.state.now - 1), closed: false,
+    } }, "koin.Result")).toString("base64url"),
+  } : read(op);
+  let signs = 0; const sign = f.signer.signTransaction.bind(f.signer);
+  f.signer.signTransaction = tx => { signs++; return sign(tx); };
+  f.provider.call = async (_method, { transaction }) => {
+    f.state.submissions.push(structuredClone(transaction));
+    throw Object.assign(Error("insufficient rc: private body " + JSON.stringify(transaction)), { code: "koin_rpc_insufficient_rc" });
+  };
+  const result = await f.controller.run(window(), "release", session);
+  assert.equal(result.state, "signed"); assert.equal(result.creditAction, "release"); assert.equal(result.reason, "credit_insufficient_rc");
+  const saved = f.journal.nonceCoordinator.envelope(result.id);
+  assert.deepEqual(saved, f.state.submissions[0]); assert.equal(signs, 1);
+  assert.ok(!JSON.stringify(result).includes(saved.signatures[0])); assert.ok(!JSON.stringify(result).includes("private body"));
+  assert.equal((await f.controller.status()).transactions[0].creditAction, "release");
+  assert.equal((await f.controller.run(window(), "check", result.id)).reason, "credit_saved_review_required");
+  assert.equal(f.state.submissions.length, 1); assert.equal(signs, 1);
+  assert.deepEqual(f.journal.nonceCoordinator.envelope(result.id), saved);
+});
+test("credit confirmation distinguishes reported reversible transactions from an irreversible receipt without submitting", async t => {
+  const f = setup(t), result = await f.controller.run(window(), "refund", "1");
+  await f.include(f.state.submissions[0]);
+  const pending = await f.controller.run(window(), "check", result.id);
+  assert.equal(pending.state, "signed"); assert.equal(pending.reason, "credit_await_finality"); assert.equal(pending.creditAction, "refund");
+  f.state.lib = f.state.height;
+  const confirmed = await f.controller.run(window(), "check", result.id);
+  assert.equal(confirmed.state, "finalized"); assert.equal(confirmed.reason, undefined); assert.equal(confirmed.creditAction, "refund");
+  assert.equal(f.state.submissions.length, 1);
+});
+for (const [name, change, reason] of [
+  ["changed nonce", f => { f.state.nonce = "KAI="; }, "credit_nonce_changed"],
+  ["failed transaction lookup", f => { f.provider.getTransactionsById = async () => { throw Error("private RPC response"); }; }, "credit_confirmation_unavailable"],
+  ["malformed transaction lookup", f => { f.provider.getTransactionsById = async () => ({ transactions: {} }); }, "credit_confirmation_unavailable"],
+  ["failed nonce lookup", f => { f.provider.getNextNonce = async () => { throw Error("private nonce response"); }; }, "credit_confirmation_unavailable"],
+  ["changed chain", f => { f.provider.getChainId = async () => "wrong-chain"; }, "credit_confirmation_unavailable"],
+  ["RPC transition between recovery reads", f => { f.provider.readGeneration = 0; f.provider.getNextNonce = async () => { f.provider.readGeneration++; return f.state.nonce; }; }, "credit_confirmation_unavailable"],
+]) test(`credit confirmation does not suggest resubmission after ${name}`, async t => {
+  const f = setup(t), result = await f.controller.run(window(), "refund", "1"), saved = f.journal.nonceCoordinator.envelope(result.id);
+  change(f);
+  const checked = await f.controller.run(window(), "check", result.id);
+  assert.equal(checked.state, "signed"); assert.equal(checked.creditAction, "refund"); assert.equal(checked.reason, reason);
+  assert.ok(!JSON.stringify(checked).includes("private")); assert.deepEqual(f.journal.nonceCoordinator.envelope(result.id), saved);
+  assert.equal(f.state.submissions.length, 1);
 });
 test("Test actions enforce deposit, refund and session limits before signatures", async t => {
   const f = setup(t);

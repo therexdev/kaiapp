@@ -13,7 +13,9 @@ const healthy = () => CORE_SERVICES.map(service => ({ service, state: "running",
 function fixture(t, opts = {}) {
   const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), "kai-recovery-"));
   const mgr = new NodeManager({ dataRoot, templateRoot, ...opts });
-  t.after(() => { mgr._stopWatchdog(); fs.rmSync(dataRoot, { recursive: true, force: true }); });
+  mgr._assertControl = async () => {}; mgr.ownership = async () => ({ ok: true }); // Docker boundary; ownership is exercised in node-supervisor tests.
+  mgr.ensureFiles("mainnet", null);
+  t.after(() => { mgr.dispose(); fs.rmSync(dataRoot, { recursive: true, force: true }); });
   return mgr;
 }
 function watch(mgr) {
@@ -136,26 +138,27 @@ test("watchdog polls never overlap while a probe is pending", async t => {
   await mgr._watchTick(); assert.equal(probes, 1); finish(100); await first;
 });
 
-test("reopening the app adopts running configuration but never starts a stopped node", t => {
+test("reopening the app adopts running configuration but never starts a stopped node", async t => {
   const mgr = fixture(t); mgr.ensureFiles("mainnet", "1MHGDygf9ZKmspo3gwKuMiBzBWLURPYAMD", { memorySaver: true });
-  mgr._adoptRunning("mainnet", []); assert.equal(mgr._watch, null);
-  mgr._adoptRunning("mainnet", [...healthy(), { service: "block_producer", state: "running" }]);
+  await mgr._adoptRunning("mainnet", []); assert.equal(mgr._watch, null);
+  await mgr._adoptRunning("mainnet", [...healthy(), { service: "block_producer", state: "running" }]);
   assert.equal(mgr._watch.producerAddress, "1MHGDygf9ZKmspo3gwKuMiBzBWLURPYAMD");
   assert.equal(mgr._watch.memorySaver, true);
   mgr._stopWatchdog(); mgr._desiredRunning = false;
-  mgr._adoptRunning("mainnet", healthy()); assert.equal(mgr._watch, null);
+  await mgr._adoptRunning("mainnet", healthy()); assert.equal(mgr._watch, null);
 });
 
 test("Stop during recovery down prevents up; Quick Sync cannot overlap recovery", async t => {
   const mgr = fixture(t), w = watch(mgr), calls = []; mgr.ensureFiles("mainnet", null);
   let release;
   mgr._compose = async (_, args) => { calls.push(args[0]); return new Promise(r => { release = r; }); };
-  mgr._composeOp = async (_, name) => { calls.push(name); };
+  mgr._composeOp = async (_, name) => { calls.push(name === "stop" ? "user-stop" : name); };
   const recovery = mgr._restartStack(w);
+  await new Promise(r => setImmediate(r));
   await assert.rejects(mgr.quickSync("mainnet"), /still running/);
   const stopping = mgr.stop("mainnet");
   release({ ok: true }); await recovery; await stopping;
-  assert.deepEqual(calls, ["down", "stop"]); assert.equal(mgr._desiredRunning, false);
+  assert.deepEqual(calls, ["stop", "user-stop"]); assert.equal(mgr._desiredRunning, false);
 });
 
 test("Stop arriving during recovery up is serialized after it", async t => {
@@ -163,13 +166,13 @@ test("Stop arriving during recovery up is serialized after it", async t => {
   let release;
   mgr._compose = async (_, args) => {
     calls.push(args[0]);
-    return args[0] === "down" ? { ok: true } : new Promise(r => { release = r; });
+    return args[0] === "stop" ? { ok: true } : new Promise(r => { release = r; });
   };
-  mgr._composeOp = async (_, name) => { calls.push(name); };
+  mgr._composeOp = async (_, name) => { calls.push(name === "stop" ? "user-stop" : name); };
   const recovery = mgr._restartStack(w); await new Promise(r => setImmediate(r));
-  const stopping = mgr.stop("mainnet"); assert.deepEqual(calls, ["down", "up"]);
+  const stopping = mgr.stop("mainnet"); assert.deepEqual(calls, ["stop", "up"]);
   release({ ok: true }); assert.equal(await recovery, false); await stopping;
-  assert.deepEqual(calls, ["down", "up", "stop"]);
+  assert.deepEqual(calls, ["stop", "up", "user-stop"]);
 });
 
 test("a broker restart cannot clear an unresolved failure in the same chain process", async t => {

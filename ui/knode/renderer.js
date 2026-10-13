@@ -318,7 +318,7 @@ function patchDashboardView() {
     toggle.className = "btn primary";
     toggle.dataset.action = "start";
   }
-  toggle.disabled = !!quickSync;
+  toggle.disabled = !!quickSync || d.node?.control?.ok === false;
 
   const syncEl = $("#d-sync");
   const sync = d.sync;
@@ -1114,6 +1114,7 @@ function renderNodeView() {
       <h1>Koinos node</h1>
       <div class="row">
         <button id="n-open" class="btn ghost">📁 Data folder</button>
+        <button id="n-repair-services" class="btn">Repair services</button>
         <button id="n-quicksync" class="btn" style="display:none">⚡ Quick sync</button>
         <button id="n-stop" class="btn" hidden>Stop node</button>
         <button id="n-start" class="btn primary" hidden>Start node</button>
@@ -1324,6 +1325,10 @@ function renderNodeView() {
   $("#n-backups").addEventListener("click", loadNodeBackups);
   $("#n-open").addEventListener("click", () => call("util:openPath", { which: "nodeData" }).catch(() => {}));
   $("#n-docker").addEventListener("click", onSetupClick);
+  $("#n-repair-services").addEventListener("click", async () => {
+    try { await call("node:repairServices"); await refreshNode(); }
+    catch (e) { toast(e.message, "bad"); }
+  });
   $("#n-start").addEventListener("click", onStartNode);
   $("#n-stop").addEventListener("click", onStopNode);
   $("#n-register").addEventListener("click", onRegisterKey);
@@ -1659,9 +1664,9 @@ function patchNodeView() {
   const quickSync = op?.running && op.name === "quick-sync";
   if ($("#n-start")) $("#n-start").hidden = !n || !!n.isRunning;
   if ($("#n-stop")) $("#n-stop").hidden = !n || (!n.isRunning && op?.name !== "recover");
-  for (const id of ["#n-start", "#n-stop", "#n-quicksync"]) {
+  for (const id of ["#n-start", "#n-stop", "#n-quicksync", "#n-repair-services"]) {
     const button = $(id);
-    if (button) button.disabled = (!!op?.running && !(id === "#n-stop" && op.name === "recover")) || !n;
+    if (button) button.disabled = n?.control?.ok === false || (!!op?.running && !(id === "#n-stop" && op.name === "recover")) || !n;
   }
   if (quickSync) {
     const p = op.progress ?? {};
@@ -1702,6 +1707,8 @@ function patchNodeView() {
     const recovered = h?.recoveries ? KaiI18n.html` <span class="muted small">(recovered ${h.recoveries}× recently)</span>` : "";
     if (quickSync) {
       healthEl.innerHTML = KaiI18n.html`<div class="banner info">${n?.isRunning ? "The node is stopping for a snapshot restore." : "The node is stopped while quick sync restores the chain data. Block production is paused."} Automatic recovery will not restart it during quick sync. Start the node after the restore finishes.</div>`;
+    } else if (n?.control?.ok === false || ["data-unavailable", "docker-unavailable", "supervisor-unavailable"].includes(h?.reason)) {
+      healthEl.innerHTML = KaiI18n.html`<div class="banner warn">${esc(n?.control?.message || h?.message || "Waiting for node services.")}</div>`;
     } else if (h?.needsRepair) {
       // Corrupted block data — a restart can't fix it. Offer the one-click rebuild.
       healthEl.innerHTML = KaiI18n.html`<div class="banner bad">
@@ -1711,6 +1718,8 @@ function patchNodeView() {
       $("#n-repair")?.addEventListener("click", onQuickSync);
     } else if (h?.recovering) {
       healthEl.innerHTML = KaiI18n.html`<div class="banner info"><span class="spin"></span> Restarting node services. Waiting for the local RPC to respond.</div>`;
+    } else if (h?.lastRecoveryError) {
+      healthEl.innerHTML = `<div class="banner warn">${esc(h.lastRecoveryError)} Automatic recovery will retry.</div>`;
     } else if (!n?.isRunning) {
       healthEl.innerHTML = "";
     } else if (n?.production?.reason === "vhp-burn-rejected") {

@@ -12,6 +12,7 @@
     const n = BigInt(value); return `${n / 100000000n}.${(n % 100000000n).toString().padStart(8, "0")}`;
   };
   const words = value => String(value || "").replaceAll("_", " ");
+  const creditName = action => ({ release: "Release reserved credits", reserve: "Reserve credits", refund: "Refund credits", revoke: "Revoke session" })[action];
   const unit = () => mainnet ? "mainnet KOIN" : "test KOIN";
   const funded = tx => tx?.funding?.state === "funded";
   function activityDetails() {
@@ -92,7 +93,7 @@
       const selected = select.value; select.replaceChildren();
       for (const tx of transactions) {
         const option = document.createElement("option"); option.value = tx.id;
-        option.textContent = `${words(tx.purpose)} · ${funded(tx) ? "deposit confirmed" : words(tx.state)} · ${funded(tx) && tx.correction?.state === "finalized" ? tx.correction.txId : tx.txId || tx.id}`; select.appendChild(option);
+        option.textContent = `${creditName(tx.creditAction) || words(tx.purpose)} · ${funded(tx) ? "deposit confirmed" : words(tx.state)} · ${funded(tx) && tx.correction?.state === "finalized" ? tx.correction.txId : tx.txId || tx.id}`; select.appendChild(option);
       }
       if ([...select.options].some(option => option.value === selected)) select.value = selected;
       if (!select.options.length) { const option = document.createElement("option"); option.value = ""; option.textContent = "No payment transactions yet"; select.appendChild(option); }
@@ -115,6 +116,16 @@
   }
   function outcome(result) {
     const state = result?.state || result?.status;
+    const creditMessages = {
+      credit_submission_pending: "Submission attempted. Check confirmation for this saved transaction.",
+      credit_submission_uncertain: "The submission response was unavailable. Check confirmation for the saved transaction. Do not create another transaction.",
+      credit_insufficient_rc: "The node reported insufficient Mana or a resource limit. Keep this saved transaction for diagnosis; do not create a replacement.",
+      credit_await_finality: "The node reports this transaction. Irreversible confirmation is still pending; check confirmation again shortly.",
+      credit_saved_review_required: "The node has not found this transaction and the wallet nonce is unchanged. Choose Review saved transaction to resend the original. Do not create another transaction.",
+      credit_nonce_changed: "The wallet nonce has changed, but this transaction is not confirmed. Keep the saved transaction for recovery; do not resend it yet.",
+      credit_confirmation_unavailable: "Confirmation checks are unavailable. Your saved transaction is unchanged. Retry Check confirmation after the connection recovers.",
+    };
+    const creditMessage = result?.purpose === "credits" && state === "signed" ? creditMessages[result.reason] : null;
     const fundingMessages = {
       funding_moving: "New blocks arrived during the account checks. Your saved deposit is unchanged. Wait a moment, then check confirmation again.",
       funding_reversible: "Waiting for the account checks to become irreversible. Check confirmation again shortly; then review the saved transaction if requested.",
@@ -148,6 +159,8 @@
       revoked: "New requests are stopped. Previously dispatched work stays reserved.",
     };
     if (result?.error) message(String(result.error).slice(0, 280), true);
+    else if (creditMessage) message(`${creditName(result.creditAction) || "Credit transaction"}: ${creditMessage}`,
+      ["credit_insufficient_rc", "credit_nonce_changed", "credit_confirmation_unavailable", "credit_submission_uncertain"].includes(result.reason));
     else if (funding?.state === "funded") message("Deposit confirmed. Account balances have been refreshed.");
     else if (result?.correction?.state === "finalized") message("Mana correction confirmed on chain. Check confirmation to verify your credits.");
     else if (state === "correction_simulation_failed") message((funding?.reason || result?.reason) === "funding_insufficient_rc"

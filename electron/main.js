@@ -331,6 +331,10 @@ async function start() {
     if (!quitting) app.quit();
   });
 
+  const login = require("./login-startup").loginStartup(app, { name: release.appId });
+  ipcMain.handle("shell:login-startup", event => { requireMain(event); return login.status(); });
+  ipcMain.handle("shell:set-login-startup", (event, on) => { requireMain(event); return login.set(on); });
+
   // Settings reads and writes this; in a plain browser the bridge is absent
   // and the section stays hidden, which is correct — there is no tray there.
   ipcMain.handle("shell:window-prefs", event => { requireMain(event); return {
@@ -369,9 +373,11 @@ async function start() {
   {
     const { powerMonitor } = require("electron");
     powerMonitor.on("resume", () => {
+      core?.koinosNode?.nodeMgr?.nudge();
       fetch(`http://127.0.0.1:${port}/core/earn/nudge`, { method: "POST" }).catch(() => {});
     });
     powerMonitor.on("unlock-screen", () => {
+      core?.koinosNode?.nodeMgr?.nudge();
       fetch(`http://127.0.0.1:${port}/core/earn/nudge`, { method: "POST" }).catch(() => {});
     });
   }
@@ -387,7 +393,7 @@ async function start() {
       try {
         const r = await fetch(`http://127.0.0.1:${port}/core/earn`);
         const j = await r.json();
-        const earning = !!(j.worker && j.worker.running);
+        const earning = !!(j.worker && j.worker.running) || !!core?.koinosNode?.nodeMgr?.shouldKeepAwake();
         if (earning && blockerId === null) {
           blockerId = powerSaveBlocker.start("prevent-app-suspension");
         } else if (!earning && blockerId !== null) {
@@ -401,10 +407,7 @@ async function start() {
     win.on("closed", () => clearInterval(keepAwakeTimer));
   }
 
-  // Auto-launch at login is opt-in, not default: silently installing into
-  // the user's startup list is exactly the kind of behavior alpha testers
-  // report as malware-adjacent. A Settings toggle ships it properly later;
-  // earners who want always-on can add the app to startup themselves.
+  // Windows sign-in launch is controlled by the native Settings toggle above.
 
   /*
    * Where "What's new" goes. The popup tells someone a version number; this
@@ -592,6 +595,7 @@ app.on("before-quit", () => providers?.dispose());
 app.on("before-quit", () => companionHub?.dispose());
 app.on("before-quit", () => mascot?.dispose());
 app.on("before-quit", () => core?.speech?.close());
+app.on("before-quit", () => core?.koinosNode?.nodeMgr?.dispose());
 
 app.on("window-all-closed", () => app.quit());
 

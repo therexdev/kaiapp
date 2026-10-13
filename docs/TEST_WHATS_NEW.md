@@ -1,3 +1,21 @@
+## Node reliability — October 13, 2026
+
+- Recovery runs in the background and resumes after reopening the app. It remembers a deliberately stopped node and leaves it stopped.
+- Master and Live/Test check who owns the Docker project before any node operation. An app cannot restart, stop, restore, or adopt another profile’s node, including during a later restart gap.
+- Reconnects an installed Docker Desktop after an engine outage. Restores unexpectedly missing containers, repairs individual failed services first, and backs off when a failure persists.
+- Keeps the RPC in memory-saver mode. Timeout logs cannot restart a chain that is still making progress; failed restarts and ordinary parse errors cannot trigger a corruption diagnosis.
+- Adds **Repair services** on the Node screen, preserving chain data, wallet and producer keys. **Quick Sync** remains separate for a verified chain-data failure.
+- Adds **Start at Windows sign-in** in Settings for installed Windows builds. A running blockchain node now prevents idle sleep even when AI earning is off.
+- Gives database services 120 seconds to stop cleanly and limits Docker log growth. An unavailable data drive is never replaced with a new empty node.
+- See `docs/NODE_RELIABILITY_AUDIT_2026-10-13.md` for evidence, validation and remaining host checks.
+
+## KOIN reserved-credit release recovery
+
+- Handles the RPC server's disconnected message broker as a temporary outage and checks the next pinned, chain-verified endpoint for reads. Broadcasts still require explicit review and are never automatically retried.
+- Identifies releases, reservations, refunds and revocations in Payment activity. Confirmation distinguishes a transaction reported by the node from one it cannot find with an unchanged wallet nonce, and directs the latter to **Review saved transaction**.
+- Reports uncertain submission responses and Mana rejections instead of silently returning the same signed message. Recovery keeps the original transaction, signature, nonce and spending limits.
+- An already configured account directs users to **Refresh** when they try to import its network configuration again.
+
 ## KOIN deposit confirmation recovery
 
 - Handles HTML error pages and temporary RPC failures with bounded fallback across the deployment's pinned endpoints for account reads, confirmation and non-broadcast simulations. Each endpoint must match the pinned chain. Account snapshots restart after a switch; transaction broadcasts are never automatically retried.

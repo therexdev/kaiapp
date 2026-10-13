@@ -40,6 +40,7 @@ function serviceTrouble(row) {
 function assessHealth({
   services,
   producing = false,
+  extraServices = [],
   headHeight = null,
   probeFailed = false,
   lastHeight = null,
@@ -54,7 +55,7 @@ function assessHealth({
   const byName = new Map(
     rows.map((r) => [String(r?.service ?? r?.name ?? ""), r])
   );
-  const expected = coreServicesFor(producing);
+  const expected = [...new Set([...coreServicesFor(producing), ...extraServices])];
 
   let anyOom = false;
   for (const name of expected) {
@@ -207,7 +208,7 @@ function classifyCrash(logText) {
   if (/\(137\)|signal:\s*killed|out of memory|cannot allocate memory|oom[-\s]?kill/i.test(t)) return "oom";
   if (/panic:|sigsegv|segmentation violation|nil pointer|invalid memory address|runtime error/i.test(t)) return "panic";
   if (/replayed state delta merkle root does not match block receipt/i.test(t)) return "replay-mismatch";
-  if (/corruption|checksum mismatch|bad table|truncated|malformed|failed to open (the )?database/i.test(t))
+  if (/\bcorruption\b|(?:database|rocksdb|badger|sst|table)[^\n]*(?:checksum mismatch|truncated|malformed)|bad table/i.test(t))
     return "corruption";
   return null;
 }
