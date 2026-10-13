@@ -23,6 +23,7 @@ const { RuntimeProvisioner } = require("./lib/runtime-provisioner");
 const { LlamaCppRuntime } = require("./lib/runtimes/llamacpp");
 const { RuntimeManager } = require("./lib/runtime-manager");
 const { Gateway } = require("./lib/gateway");
+const { legacyConsumeHash, consumeV1Hash } = require("./lib/context-terms");
 
 const { channelConfig } = require("./lib/release-channel");
 
@@ -102,6 +103,12 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
         ? new OllamaRuntime({ ...ollamaAddr, onEvent: events })
         : null,
     preferFallback: process.env.KAI_RUNTIME === "ollama",
+    // Network context opt-in (docs/NETWORK_CONTEXT_PROTOCOL.md §4): per-model
+    // and owner-set only, via the Core API. Absent = legacy everywhere.
+    contextSettings: {
+      get: () => settings.get("runtime.modelContext", {}),
+      set: (value) => settings.set("runtime.modelContext", value),
+    },
   });
 
   // Earn controller (M2 §5.7): wallet + worker behind the control plane.
@@ -372,12 +379,17 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
       const s = wallet.status();
       if (!s.unlocked || !s.address) return null;
       const ts = Date.now();
-      const cryptoNode = require("crypto");
-      const hash = cryptoNode
-        .createHash("sha256")
-        .update(`consume|${s.address}|${ts}|${JSON.stringify(messages)}`)
-        .digest();
+      const hash = legacyConsumeHash(s.address, ts, messages);
       return { address: s.address, ts, signature: await wallet.signHash(hash) };
+    },
+    // Network context protocol 1: the signature also covers the billable
+    // terms (model, max_tokens). Null when there is no unlocked wallet.
+    signConsumeV1: async ({ messages, model, max_tokens }) => {
+      const s = wallet.status();
+      if (!s.unlocked || !s.address) return null;
+      const ts = Date.now();
+      const hash = consumeV1Hash({ address: s.address, ts, model, max_tokens, messages });
+      return { address: s.address, ts, signature: await wallet.signHash(hash), signatureVersion: 1 };
     },
     configure: ({ privacyMode }) => {
       const m = String(privacyMode || "");
