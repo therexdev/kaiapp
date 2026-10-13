@@ -641,6 +641,14 @@
 
           <!-- Desktop shell only: a browser has no notification area, so this
                whole block stays hidden unless the shell bridge is present. -->
+          <div id="settings-startup" hidden>
+            <h2>Start at Windows sign-in</h2>
+            <div class="koinos-toggle-row">
+              <div><b>Open this app automatically</b><div class="hint">After a restart, sign in to Windows and your previously running node resumes automatically. Keep the app running in the notification area for automatic node recovery.</div></div>
+              <button id="btn-startup-toggle" class="switch" role="switch" aria-checked="false" aria-label="Start at Windows sign-in"><span class="switch-track"><span class="switch-thumb"></span></span></button>
+            </div>
+            <p id="startup-error" class="hint" role="status"></p>
+          </div>
           <div id="settings-window" hidden>
             <h2>Closing the window</h2>
             <div class="koinos-toggle-row">

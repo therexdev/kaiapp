@@ -31,6 +31,8 @@ jobs:
           KAI_RELAY_URL: http://127.0.0.1:9
           KAI_FEEDBACK_URL: http://127.0.0.1:9/feedback
           KAI_MASCOT_QA_DIR: mascot-qa
+      - name: Exercise real Docker node recovery and profile isolation
+        run: node scripts/verify-node-supervisor-docker.js
       - uses: actions/upload-artifact@v4
         if: always()
         with:

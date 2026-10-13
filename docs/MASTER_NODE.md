@@ -13,6 +13,19 @@ Master uses KAI's Docker project names. Free Node has different project names,
 but the migrated chain directory and several ports are shared: never run two
 controllers against the same node directory. Stop Free Node's containers first.
 
+## Node reliability — October 13, 2026
+
+- Recovery runs in the background and resumes after reopening the app. It remembers a deliberately stopped node and leaves it stopped.
+- Master and Live/Test check who owns the Docker project before any node operation. An app cannot restart, stop, restore, or adopt another profile’s node, including during a later restart gap.
+- Reconnects an installed Docker Desktop after an engine outage. Restores unexpectedly missing containers, repairs individual failed services first, and backs off when a failure persists.
+- Keeps the RPC in memory-saver mode. Timeout logs cannot restart a chain that is still making progress; failed restarts and ordinary parse errors cannot trigger a corruption diagnosis.
+- Adds **Repair services** on the Node screen, preserving chain data, wallet and producer keys. **Quick Sync** remains separate for a verified chain-data failure.
+- Adds **Start at Windows sign-in** in Settings for installed Windows builds. A running blockchain node now prevents idle sleep even when AI earning is off.
+- Gives database services 120 seconds to stop cleanly and limits Docker log growth. An unavailable data drive is never replaced with a new empty node.
+- See `docs/NODE_RELIABILITY_AUDIT_2026-10-13.md` for evidence, validation and remaining host checks.
+
+Version `0.54.9-master.10` also retries a temporarily unavailable local API listener. It retains the patched block-store runtime and full stored-block verification. Enabled API indexes remain enabled in memory-saver mode, with fewer service jobs.
+
 ## Sidebar balances
 
 Version `0.54.9-master.9` adds a balance card between Launch KAI and the compact

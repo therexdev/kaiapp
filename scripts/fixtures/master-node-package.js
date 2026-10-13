@@ -11,6 +11,7 @@ const runtime = require(path.join(archive, "core/lib/koinos/block-store-runtime.
   fs.writeFileSync(path.join(d.basedir, "existing-data"), "existing node data fixture");
   const commands = [];
   manager._exec = async () => { throw new Error("Packaged startup check must never invoke Docker"); };
+  manager._assertControl = async () => {}; // Docker ownership is outside this packaged file-generation check.
   manager._composeOp = async (...args) => { commands.push(args); };
   manager._startWatchdog = () => {};
   await manager.start("mainnet", null);

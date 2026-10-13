@@ -738,6 +738,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
       turn.close();
       if (this._policyTimer) clearInterval(this._policyTimer);
       producerReporter.stop();
+      koinosNodeSvc.stop();
       this.tasks?.stop();
       mcp.closeAll(); // stdio tool servers are child processes — never orphan them
       await earn.stop({ userIntent: false }).catch(() => {});

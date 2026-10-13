@@ -33,6 +33,7 @@ test("Windows template can start the patched node while retaining paused history
   const file = path.join(templateRoot, "docker-compose.yml");
   fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace(/\r\n?/g, "\n").replace(/\n/g, "\r\n"));
   const mgr = new NodeManager({ dataRoot: path.join(root, "node"), templateRoot, runtimeBundle: bundle, platform: "win32" });
+  mgr._assertControl = async () => {}; mgr.ownership = async () => ({ ok: true }); // Docker boundary; ownership is exercised in node-supervisor tests.
   const d = mgr.dirs("mainnet"); fs.mkdirSync(d.basedir, { recursive: true });
   fs.writeFileSync(path.join(d.basedir, "existing-data"), "preserve");
   const calls = []; mgr._composeOp = async (...args) => { calls.push(args); }; mgr._startWatchdog = () => {};
@@ -47,6 +48,7 @@ test("Windows template can start the patched node while retaining paused history
 test("Master stages a verified patch on normal start and recovery while preserving data and paused profiles", async t => {
   const { root, bundle } = fixture(t);
   const mgr = new NodeManager({ dataRoot: path.join(root, "node"), runtimeBundle: bundle, templateRoot: path.join(__dirname, "../koinos-node-template") });
+  mgr._assertControl = async () => {}; mgr.ownership = async () => ({ ok: true }); // Docker boundary; ownership is exercised in node-supervisor tests.
   const d = mgr.dirs("mainnet"); fs.mkdirSync(d.basedir, { recursive: true });
   fs.writeFileSync(path.join(d.basedir, "existing-data"), "chain and keys");
   mgr._composeOp = async () => {}; mgr._startWatchdog = () => {};

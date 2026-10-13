@@ -8,11 +8,12 @@ const { execFile, spawn } = require("child_process");
 const { NETWORKS } = require("./constants");
 const { parseSha256File, analyzeMembers, requiredSpace, fmtBytes } = require("./quicksync-utils");
 const { httpHead, httpGetText, httpDownload } = require("./download");
-const { assessHealth, describeRecovery, classifyCrash, isCrashLooping } = require("./node-health");
+const { assessHealth, describeRecovery, classifyCrash } = require("./node-health");
 const dataMove = require("./data-move");
+const { claimProject, inspectOwner } = require("./node-control");
 const blockStoreRuntime = require("./block-store-runtime");
 
-const { assertRestoreReady, inspectLogs, backupList, deleteBackup, installSnapshot, preflightFolders } = require("./node-maintenance");
+const { assertRestoreReady, inspectLogs, currentLogs, backupList, deleteBackup, installSnapshot, preflightFolders } = require("./node-maintenance");
 const OP_LOG_LIMIT = 400;
 const ARCHIVE_NAME = "koinos-backup.tar.gz";
 
@@ -23,27 +24,33 @@ const STALL_MS = 8 * 60 * 1000; // head height flat this long => chain wedged
 const RECOVERY_WINDOW_MS = 30 * 60 * 1000; // window for counting recent auto-recoveries
 const SAVER_AFTER_OOM = 2; // OOM-driven recoveries before switching to memory-saver
 const CHRONIC_AFTER = 5; // low-memory recoveries in the window before we suggest the cloud
-const REPAIR_AFTER = 3; // restarts that didn't stick before we call for a data repair
 const MAX_BACKOFF_MS = 15 * 60 * 1000;
 
 // Manages a per-network Koinos node directory containing the official
 // docker-compose.yml plus generated .env and config files, and drives it
 // through `docker compose`.
 class NodeManager {
-  constructor({ templateRoot, dataRoot, onEvent, autoRecover = true, probeHead = null, accountHistory = false, apiServices = false, platform = process.platform, runtimeBundle = blockStoreRuntime.defaultBundle() }) {
+  constructor({ templateRoot, dataRoot, onEvent, autoRecover = true, probeHead = null, intentPath = null, lockRoot = undefined, startDocker = null, platform = process.platform, accountHistory = false, apiServices = false, runtimeBundle = blockStoreRuntime.defaultBundle() }) {
     this.accountHistory = accountHistory;
     this.apiServices = apiServices;
+    this.runtimeBundle = runtimeBundle;
+    this.intentPath = intentPath || path.join(dataRoot, "supervisor.json");
+    this.lockRoot = lockRoot;
+    this.startDocker = startDocker;
+    this._intent = readJson(this.intentPath) || {};
+    this._control = new Map();
+    this._ownership = new Map();
+    this._disposed = false;
     this.templateRoot = templateRoot;
     this.dataRoot = dataRoot;
     this.platform = platform;
-    this.runtimeBundle = runtimeBundle;
     this.onEvent = onEvent || (() => {});
     this._composeCmd = null;
     this._op = null; // { name, network, running, startedAt, lines, code, error }
     // Self-healing: keep the node alive without the user ever touching Docker.
     this.autoRecover = autoRecover !== false;
     this.probeHead = probeHead; // async () => number|null  (local chain head height)
-    this._desiredRunning = false; // is the node meant to be up right now?
+    this._desiredRunning = null; // null permits adopting an already-running stack after app reopen
     this._observations = new Map();
     this._watch = null; // live watchdog state while the node runs
   }
@@ -80,7 +87,7 @@ class NodeManager {
     fs.copyFileSync(tpl("common", "rabbitmq.conf"), path.join(d.config, "rabbitmq.conf"));
     fs.copyFileSync(tpl(net.templateDir, "genesis_data.json"), path.join(d.config, "genesis_data.json"));
 
-    fs.writeFileSync(path.join(d.config, "config.yml"), buildConfigYml(net, producerAddress));
+    fs.writeFileSync(path.join(d.config, "config.yml"), buildConfigYml(net, producerAddress, opts));
     if (this.platform === "darwin") stageMacosConfig(d);
     fs.writeFileSync(path.join(d.root, ".env"), buildEnv(net, d.basedir, !!producerAddress, opts.memorySaver, this.accountHistory, this.apiServices));
     return d;
@@ -162,7 +169,8 @@ class NodeManager {
     if (!cmd) throw new Error("Docker Compose not available");
     const net = NETWORKS[networkId];
     const d = this.dirs(networkId);
-    return this._exec(cmd.bin, [...cmd.pre, "-p", net.composeProject, ...args], {
+    if (!["ps", "logs", "version", "config"].includes(args[0])) await this._assertControl(networkId);
+    return this._exec(cmd.bin, [...cmd.pre, "-p", net.composeProject, "-f", path.join(d.root, "docker-compose.yml"), ...args], {
       cwd: d.root,
       ...opts,
     });
@@ -173,8 +181,6 @@ class NodeManager {
     if (this._op?.running) {
       throw new Error(`Another node operation ("${this._op.name}") is still running`);
     }
-    const cmd = await this.composeCmd();
-    if (!cmd) throw new Error("Docker Compose not available");
     const net = NETWORKS[networkId];
     const d = this.dirs(networkId);
     const op = {
@@ -188,6 +194,16 @@ class NodeManager {
       error: null,
     };
     this._op = op;
+    let cmd;
+    try {
+      await this._assertControl(networkId);
+      cmd = await this.composeCmd();
+      if (!cmd) throw new Error("Docker Compose not available");
+    } catch (e) {
+      op.running = false; op.code = 1; op.finishedAt = Date.now(); op.error = e.message;
+      this.onEvent({ type: "node", level: "error", message: `${opName} failed: ${e.message}` });
+      return op;
+    }
     const push = (chunk) => {
       for (const line of String(chunk).split(/\r?\n/)) {
         const t = line.trim();
@@ -198,14 +214,20 @@ class NodeManager {
     };
     this.onEvent({ type: "node", message: `${opName} started (${net.label})` });
     return new Promise((resolve) => {
-      const child = spawn(cmd.bin, [...cmd.pre, "-p", net.composeProject, ...args], {
+      const child = spawn(cmd.bin, [...cmd.pre, "-p", net.composeProject, "-f", path.join(d.root, "docker-compose.yml"), ...args], {
         cwd: d.root,
         env: process.env,
         windowsHide: true,
       });
+      const deadline = setTimeout(() => {
+        op.error = "Node command timed out. Automatic recovery will retry after checking Docker.";
+        child.kill();
+      }, 5 * 60 * 1000);
+      deadline.unref?.();
       child.stdout.on("data", push);
       child.stderr.on("data", push);
       child.on("error", (e) => {
+        clearTimeout(deadline);
         op.running = false;
         op.finishedAt = Date.now();
         op.error = String(e.message);
@@ -213,6 +235,7 @@ class NodeManager {
         resolve(op);
       });
       child.on("close", (code) => {
+        clearTimeout(deadline);
         op.running = false;
         op.finishedAt = Date.now();
         op.code = code;
@@ -229,28 +252,129 @@ class NodeManager {
     });
   }
 
+  async ownership(networkId) {
+    const owner = await inspectOwner(this._exec.bind(this), NETWORKS[networkId].composeProject, this.dirs(networkId).root);
+    this._ownership.set(networkId, owner);
+    if (owner.reason === "managed-elsewhere" && this._intent[networkId]?.running && !this._intent[networkId]?.blockedByOtherProfile) {
+      this._intent[networkId].blockedByOtherProfile = true;
+      this._persistIntent();
+    }
+    return owner;
+  }
+
+  async _assertControl(networkId) {
+    if (this._disposed) throw new Error("Node supervisor is closed");
+    if (!this._control.has(networkId)) this._control.set(networkId, claimProject(NETWORKS[networkId].composeProject, { lockRoot: this.lockRoot }));
+    const owner = await this.ownership(networkId);
+    if (!owner.ok) {
+      this._releaseControl(networkId);
+      const error = new Error(owner.message); error.reason = owner.reason; throw error;
+    }
+  }
+
+  _releaseControl(networkId) {
+    this._control.get(networkId)?.(); this._control.delete(networkId);
+  }
+
+  _saveIntent(networkId, running, producerAddress = null, memorySaver = false) {
+    this._intent[networkId] = { running, producerAddress, memorySaver, dataRoot: path.resolve(this.dataRoot) };
+    this._persistIntent();
+  }
+
+  _persistIntent() {
+    fs.mkdirSync(path.dirname(this.intentPath), { recursive: true });
+    const tmp = `${this.intentPath}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(this._intent), { mode: 0o600 });
+    fs.renameSync(tmp, this.intentPath);
+  }
+
+  // Runs in Core, independent of renderer polling or the selected screen.
+  supervise(getNetwork) {
+    if (this._supervisor) return;
+    const tick = async () => {
+      if (this._supervising || this._disposed) return;
+      this._supervising = true;
+      try {
+        const networkId = getNetwork();
+        if (!this._watch && !this._op?.running && !this._move?.running) {
+          const saved = this._intent[networkId];
+          if (saved?.running && saved.dataRoot === path.resolve(this.dataRoot) && this._desiredRunning !== false) {
+            this._desiredRunning = true;
+            this._startWatchdog(networkId, !!saved.producerAddress, saved.producerAddress, saved.memorySaver);
+          } else if (this.filesReady(networkId) && this._desiredRunning !== false && saved?.running !== false) {
+            // Upgrade adoption verifies the existing stack owner before arming recovery.
+            await this.status(networkId);
+          }
+        }
+        await this._watchTick();
+      } catch (e) {
+        if (this._watch) this._watch.health = { ok: false, reason: e.reason || "supervisor-unavailable", message: e.message };
+      } finally { this._supervising = false; }
+    };
+    this._nudge = tick;
+    this._supervisor = setInterval(tick, WATCH_INTERVAL_MS); this._supervisor.unref?.();
+    void tick();
+  }
+
+  nudge() { return this._nudge?.(); }
+  shouldKeepAwake() { return !!this._desiredRunning && !!this._watch && this._control.has(this._watch.networkId); }
+  dispose() {
+    this._disposed = true; clearInterval(this._supervisor); this._stopWatchdog();
+    for (const id of this._control.keys()) this._releaseControl(id);
+  }
+
+  // Service repair retains the chain database and the original producer config.
+  async repair(networkId) {
+    if (this._op?.running || this._move?.running) throw new Error("Wait for the current node operation to finish.");
+    await this._assertControl(networkId);
+    if (!this.filesReady(networkId)) throw new Error("Start this node once before using Repair services.");
+    assertRestoreReady(this.dirs(networkId).basedir);
+    const config = fs.readFileSync(path.join(this.dirs(networkId).config, "config.yml"), "utf8");
+    const address = config.match(/^  producer: ([1-9A-HJ-NP-Za-km-z]{25,35})(?:\s|$)/m)?.[1] || null;
+    this._desiredRunning = true;
+    this._saveIntent(networkId, true, address, /^  jobs: 2\s*$/m.test(config));
+    this._startWatchdog(networkId, !!address, address, /^  jobs: 2\s*$/m.test(config));
+    const w = this._watch;
+    this._commandPending = this._recover(w, { ok: false, reason: "manual-repair" });
+    void this._commandPending.catch(e => { w.lastRecoveryError = e.message; });
+    return { repairing: true };
+  }
+
   // ---------- lifecycle ----------
 
   // producerAddress null -> sync-only node (no block_producer service).
   async start(networkId, producerAddress) {
+    if (this._watch && this._watch.networkId !== networkId) throw new Error("Stop the current node before changing networks.");
+    if (this._op?.running) throw new Error("Wait for the current node operation to finish.");
+    await this._assertControl(networkId);
     if (this._op?.running) throw new Error("Wait for the current node operation to finish.");
     assertRestoreReady(this.dirs(networkId).basedir);
     this._observations.delete(networkId);
-    const memorySaver = this._watch?.memorySaver || false;
+    let memorySaver = this._watch?.memorySaver || false;
+    try { memorySaver ||= /^  jobs: 2\s*$/m.test(fs.readFileSync(path.join(this.dirs(networkId).config, "config.yml"), "utf8")); } catch {}
     this.ensureFiles(networkId, producerAddress, { memorySaver });
+    this._saveIntent(networkId, true, producerAddress, memorySaver);
     this._desiredRunning = true;
     // Fire and forget; callers poll status() / currentOp().
-    this._composeOp(networkId, "start", ["up", "-d", "--remove-orphans"]);
+    this._commandPending = this._composeOp(networkId, "start", ["up", "-d", "--remove-orphans"]);
+    void this._commandPending.catch(e => this.onEvent({ type: "node", level: "error", message: e.message }));
     this._startWatchdog(networkId, !!producerAddress, producerAddress || null, memorySaver);
     return { started: true };
   }
 
   async stop(networkId) {
-    if (this._op?.running) throw new Error("Wait for the current node operation to finish.");
+    if (this._watch && this._watch.networkId !== networkId) throw new Error("Select the running node's network before stopping it.");
+    if (this._op?.running && !["recover", "start"].includes(this._op.name)) throw new Error("Wait for the current node operation to finish.");
+    // Stop wins immediately over a recovery already in flight.
+    this._saveIntent(networkId, false);
     this._desiredRunning = false;
     this._stopWatchdog();
+    if (this._restartPending) await this._restartPending.catch(() => {});
+    if (this._commandPending) await this._commandPending.catch(() => {});
+    await this._assertControl(networkId);
     if (!this.filesReady(networkId)) return { stopped: true, note: "Node was never started" };
-    this._composeOp(networkId, "stop", ["down", "--timeout", "60"]);
+    this._commandPending = this._composeOp(networkId, "stop", ["down", "--timeout", "120"]);
+    void this._commandPending.finally(() => this._releaseControl(networkId)).catch(() => {});
     return { stopping: true };
   }
 
@@ -279,12 +403,14 @@ class NodeManager {
       lastHeightAt: now,
       graceUntil: now + WATCH_GRACE_MS,
       recoveries: [], // timestamps of recent auto-recoveries
+      attempts: [],
+      checking: false,
       oomHits: 0,
       recovering: false,
       warnedChronic: false,
       needsRepair: false, // corrupted block data — a restart can't fix it
       repairReason: null,
-      health: { ok: true, reason: "starting" },
+      health: { ok: false, reason: "starting" },
       timer: null,
     };
     w.timer = setInterval(() => this._watchTick().catch(() => {}), WATCH_INTERVAL_MS);
@@ -299,60 +425,107 @@ class NodeManager {
 
   async _watchTick() {
     const w = this._watch;
-    if (!w || w.recovering || !this._desiredRunning) return;
+    if (!w || w.checking || w.recovering || !this._desiredRunning) return;
     if (this._op?.running) return; // a start/stop/quick-sync is already driving the stack
 
-    const services = await this.services(w.networkId).catch(() => []);
-    let headHeight = null;
-    if (this.probeHead) headHeight = await this.probeHead().catch(() => null);
+    w.checking = true;
+    try {
+      if (!this.filesReady(w.networkId)) {
+        w.health = { ok: false, reason: "data-unavailable", message: "The saved node folder is unavailable. Reconnect its drive; recovery will resume automatically." };
+        return;
+      }
+      if (this._intent[w.networkId]?.blockedByOtherProfile) {
+        w.health = { ok: false, reason: "managed-elsewhere", message: "Another KAI profile owns this node. Recovery here is paused. Use the owning app's Node screen." };
+        return;
+      }
+      try { await this._assertControl(w.networkId); }
+      catch (e) {
+        w.health = { ok: false, reason: e.reason || "managed-elsewhere", message: e.message };
+        if (e.reason === "docker-unavailable" && this.autoRecover && this.startDocker && Date.now() >= (w.nextDockerStart || 0)) {
+          w.nextDockerStart = Date.now() + 2 * 60000;
+          await this.startDocker().catch(error => { w.lastRecoveryError = error.message; });
+        }
+        return;
+      }
+      let services;
+      try { services = await this.services(w.networkId); }
+      catch (e) { w.health = { ok: false, reason: "docker-unavailable", message: e.message }; return; }
+      let headHeight = null;
+      if (this.probeHead) headHeight = await this.probeHead(w.networkId).catch(() => null);
 
-    const now = Date.now();
-    if (headHeight != null && (w.lastHeight == null || Number(headHeight) > Number(w.lastHeight))) {
-      w.lastHeight = headHeight;
-      w.lastHeightAt = now;
-    }
-    // Grace window: don't judge a node that's still starting up or resyncing.
-    if (now < w.graceUntil) {
-      w.health = { ok: true, reason: "starting" };
-      return;
-    }
+      const now = Date.now();
+      if (headHeight != null && (w.lastHeight == null || Number(headHeight) > Number(w.lastHeight))) {
+        w.lastHeight = headHeight;
+        w.lastHeightAt = now;
+      }
+      // Grace window: don't judge a node that's still starting up or resyncing.
+      if (now < w.graceUntil) {
+        w.health = { ok: false, reason: "starting" };
+        return;
+      }
 
-    const observed = await this.observe(w.networkId, services);
-    if (this._watch !== w || !this._desiredRunning || w.recovering || this._op?.running) return;
-    const health = observed.health?.ok === false ? observed.health : assessHealth({
-      services,
-      producing: w.producing,
-      probeFailed: !!this.probeHead && !w.memorySaver && headHeight == null,
-      headHeight,
-      lastHeight: w.lastHeight,
-      lastHeightAt: w.lastHeightAt,
-      now,
-      stallMs: STALL_MS,
-    });
-    w.health = health;
-    if (health.needsRepair) {
-      w.needsRepair = true;
-      w.repairReason = health.reason;
-    }
-    // Once we've concluded the block data is corrupted, stop restarting into the
-    // same wall — wait for the user to repair (Quick Sync).
-    if (!health.ok && health.reason !== "no-data" && this.autoRecover && !w.needsRepair) {
-      await this._recover(w, health);
-    }
+      const observed = await this.observe(w.networkId, services);
+      if (this._watch !== w || !this._desiredRunning || w.recovering || this._op?.running) return;
+      if (observed.progress?.height > (w.lastLogHeight || 0)) {
+        w.lastLogHeight = observed.progress.height;
+        // Docker timestamps, not the clock on an untrusted peer or block.
+        const at = Date.parse(observed.progress.at);
+        if (Number.isFinite(at) && at <= now + 5000) w.lastProgressAt = Math.max(w.lastProgressAt || 0, at);
+      }
+      w.probeFailures = headHeight == null ? (w.probeFailures || 0) + 1 : 0;
+      const runtimeHealth = services.length === 0 ? { ok: false, reason: "services-missing" } : assessHealth({
+        services,
+        producing: w.producing,
+        extraServices: this.apiServices ? ["account_history", "transaction_store", "contract_meta_store"] : this.accountHistory ? ["account_history"] : [],
+        probeFailed: !!this.probeHead && headHeight == null,
+        headHeight,
+        lastHeight: w.lastHeight,
+        lastHeightAt: Math.max(w.lastHeightAt, w.lastProgressAt || 0),
+        now,
+        stallMs: STALL_MS,
+      });
+      // Producer timeouts also occur during catch-up. Never restart an advancing
+      // chain just because old timeout lines remain in the recent log window.
+      const health = observed.health?.ok === false && observed.health.reason !== "chain-unresponsive"
+        ? observed.health : runtimeHealth;
+      if (health.reason === "rpc-unavailable" && w.probeFailures >= 2) health.reason = "rpc-unresponsive";
+      w.health = health;
+      if (health.ok && (!this.probeHead || headHeight != null)) w.lastRecoveryError = null;
+      const repairService = w.repairService || "chain";
+      const lifetime = services.find(s => s.service === repairService)?.startedAt;
+      if ((w.needsRepair && lifetime && w.repairStartedAt && lifetime !== w.repairStartedAt) ||
+          (health.ok && (!this.probeHead || headHeight != null))) {
+        w.needsRepair = false; w.repairReason = null;
+      }
+      if (health.needsRepair) {
+        w.needsRepair = true;
+        w.repairReason = health.reason;
+        w.repairService = health.service;
+        w.repairStartedAt = services.find(s => s.service === health.service)?.startedAt;
+      }
+      // Once we've concluded the block data is corrupted, stop restarting into the
+      // same wall — wait for the user to repair (Quick Sync).
+      if (!health.ok && !["no-data", "starting", "rpc-unavailable"].includes(health.reason) && this.autoRecover && !w.needsRepair) {
+        await this._recover(w, health);
+      }
+    } catch (e) {
+      w.health = { ok: false, reason: e.reason || "supervisor-unavailable", message: String(e.message || e) };
+      w.lastRecoveryError = String(e.message || e);
+      w.recovering = false;
+    } finally { w.checking = false; }
   }
 
   async _recover(w, health) {
-    if (!this._desiredRunning || this._watch !== w) return;
+    if (this._disposed || !this._desiredRunning || this._watch !== w) return;
     w.recovering = true;
 
-    // Diagnose the crashing service before blindly restarting. A restart fixes
-    // transient failures and (with memory-saver) low-memory kills — but NOT a
-    // code panic (segfault/nil-pointer) or corrupted on-disk data, which just
-    // reproduce the crash. Those need the block data rebuilt (Quick Sync).
+    // Use current-process logs to distinguish an actual database failure from
+    // service, resource, or connectivity trouble before attempting recovery.
     let crash = null;
-    let logText = "";
+    let logText = "", services = [];
     try {
-      logText = await this.logs(w.networkId, health.service || "block_store", 80).catch(() => "");
+      services = await this.services(w.networkId).catch(() => []);
+      logText = currentLogs(await this.logs(w.networkId, health.service || "chain", 80).catch(() => ""), services);
       crash = classifyCrash(logText);
     } catch {
       /* diagnosis is best-effort */
@@ -360,26 +533,30 @@ class NodeManager {
 
     const now = Date.now();
     w.recoveries = w.recoveries.filter((t) => now - t < RECOVERY_WINDOW_MS);
-    const recent = w.recoveries.length;
+    w.attempts = (w.attempts || []).filter(t => now - t < RECOVERY_WINDOW_MS);
+    const recent = w.attempts.length;
 
     const memoryTrouble = crash === "oom" || health.oom || health.reason === "oom";
-    const dataCrash = crash === "panic" || crash === "corruption";
-    const looping = isCrashLooping(logText);
+    const dataCrash = ["chain", "block_store"].includes(health.service) && ["corruption", "replay-mismatch"].includes(crash);
 
-    // Corrupted/panicking block data, or restarts that plainly aren't sticking:
-    // stop the futile loop and call for a one-click repair instead.
-    if ((dataCrash && (looping || recent >= 1)) || (recent >= REPAIR_AFTER && !memoryTrouble)) {
+    // A broker outage, panic, or failed restart is not proof of damaged chain data.
+    if (dataCrash) {
       w.needsRepair = true;
-      w.repairReason = dataCrash ? crash : "restart-loop";
+      w.repairReason = crash;
+      w.repairService = health.service;
+      w.repairStartedAt = services.find(s => s.service === health.service)?.startedAt;
       w.recovering = false;
       this.onEvent({
         type: "node",
         level: "warn",
         message:
-          "Your node's block data looks corrupted — restarting can't fix it. Open the Node tab and click “Repair node data” to rebuild it from a verified snapshot (a few minutes; your wallet and keys are untouched).",
+          "Your node's block data looks corrupted — restarting can't fix it. Open the Node tab and click “Repair node data” to rebuild it from a verified snapshot (your wallet and keys are untouched).",
       });
       return;
     }
+
+    if (this._watch !== w || !this._desiredRunning || this._op?.running) { w.recovering = false; return; }
+    w.attempts.push(now);
 
     // Repeated low-memory crashes -> switch to a lighter footprint for good.
     let switchedSaver = false;
@@ -399,16 +576,18 @@ class NodeManager {
     });
 
     try {
-      const ok = await this._restartStack(w);
+      this._saveIntent(w.networkId, true, w.producerAddress, w.memorySaver);
+      const ok = await this._restartStack(w, switchedSaver ? { ...health, reconfigure: true } : health);
       if (ok) {
+        w.lastRecoveryError = null;
         w.recoveries.push(Date.now());
-        this.onEvent({ type: "node", message: "Your node is back up and running." });
+        this.onEvent({ type: "node", message: "Node services restarted; checking the local RPC and chain progress." });
       }
     } catch (e) {
+      w.lastRecoveryError = String(e.message || e).slice(0, 500);
       this.onEvent({
-        type: "node",
-        level: "error",
-        message: "The app couldn't restart your node just now — it will try again in a minute.",
+        type: "node", level: "error",
+        message: `The app couldn't restart your node: ${w.lastRecoveryError}. It will retry with a delay.`,
       });
     }
 
@@ -433,17 +612,43 @@ class NodeManager {
     w.recovering = false;
   }
 
-  // Full-stack restart used by the watchdog. Regenerates .env (so memory-saver
-  // profiles take effect) and cycles compose down/up. Guards against a user Stop
-  // landing mid-recovery.
-  async _restartStack(w) {
-    this.ensureFiles(w.networkId, w.producerAddress, { memorySaver: w.memorySaver });
-    const down = await this._compose(w.networkId, ["down", "--remove-orphans", "--timeout", "60"], { timeout: 180000 });
-    if (!down.ok) throw new Error(down.error || "Could not stop the node");
-    if (this._watch !== w || !this._desiredRunning) return false;
-    const up = await this._compose(w.networkId, ["up", "-d", "--remove-orphans"], { timeout: 300000 });
-    if (!up.ok) throw new Error(up.error || up.stderr?.slice(-200) || "compose up failed");
-    return true;
+  // Repair a service first; only a repeated chain stall needs a coordinated
+  // stop/start. Keep containers/logs and allow databases time to flush.
+  async _restartStack(w, health = {}) {
+    if (this._watch !== w || !this._desiredRunning || this._op?.running) return false;
+    const op = { name: "recover", network: w.networkId, running: true, startedAt: Date.now(), lines: [], code: null, error: null };
+    this._op = op;
+    this._restartPending = (async () => {
+      await this._assertControl(w.networkId);
+      if (this._watch !== w || !this._desiredRunning) return false;
+      assertRestoreReady(this.dirs(w.networkId).basedir);
+      const disk = fs.statfsSync(this.dirs(w.networkId).basedir);
+      if (Number(disk.bavail) * Number(disk.bsize) < 512 * 1024 * 1024) throw new Error("Node drive is full. Free space on that drive; recovery retries automatically. Chain data has been kept.");
+      this._observations.delete(w.networkId);
+      this.ensureFiles(w.networkId, w.producerAddress, { memorySaver: w.memorySaver });
+      const attempt = w.attempts?.length || 1;
+      const service = health.reason === "rpc-unresponsive" ? "jsonrpc" :
+        health.reason === "stalled" && attempt === 1 ? "p2p" : health.service;
+      let args;
+      if (service && !health.reconfigure && !["chain-unresponsive", "manual-repair"].includes(health.reason)) {
+        args = ["up", "-d", "--no-deps", "--force-recreate", service];
+      } else if (["services-missing"].includes(health.reason)) {
+        args = ["up", "-d", "--remove-orphans"];
+      } else {
+        const stopped = await this._compose(w.networkId, ["stop", "--timeout", "120"], { timeout: 180000 });
+        if (!stopped.ok) throw new Error(stopped.error || stopped.stderr?.slice(-500) || "Could not stop node services");
+        if (this._watch !== w || !this._desiredRunning) return false;
+        args = ["up", "-d", "--remove-orphans"];
+      }
+      if (this._watch !== w || !this._desiredRunning) return false;
+      const up = await this._compose(w.networkId, args, { timeout: 300000 });
+      if (!up.ok) throw new Error(up.error || up.stderr?.slice(-500) || "compose up failed");
+      op.code = 0;
+      return this._watch === w && this._desiredRunning;
+    })();
+    try { return await this._restartPending; }
+    catch (e) { op.code = 1; op.error = e.message; throw e; }
+    finally { op.running = false; op.finishedAt = Date.now(); this._restartPending = null; }
   }
 
   currentOp() {
@@ -692,6 +897,9 @@ class NodeManager {
     if (this._op?.running) {
       throw new Error(`Another node operation ("${this._op.name}") is still running`);
     }
+    await this._assertControl(networkId);
+    if (this._op?.running) throw new Error("Another node operation is still running");
+    this._saveIntent(networkId, false);
     // Quick sync stops the node and leaves it stopped; stand the watchdog down so
     // it doesn't fight the restore.
     this._desiredRunning = false;
@@ -757,7 +965,7 @@ class NodeManager {
     // 1. Stop the node if it's running.
     say("stopping", "Stopping the node (if running)…");
     if (this.filesReady(networkId)) {
-      const r = await this._compose(networkId, ["down", "--timeout", "60"], { timeout: 180000 });
+      const r = await this._compose(networkId, ["down", "--timeout", "120"], { timeout: 180000 });
       if (!r.ok) throw new Error(`Could not stop and release the node's data folders: ${r.error || r.stderr}`);
     }
     say("stopping", "Checking that Windows/Docker released the data folders…");
@@ -859,12 +1067,26 @@ class NodeManager {
   async services(networkId) {
     if (!this.filesReady(networkId)) return [];
     const r = await this._compose(networkId, ["ps", "--all", "--format", "json"], { timeout: 20000 });
-    if (!r.ok) return [];
-    return parseComposePs(r.stdout);
+    if (!r.ok) throw new Error("Docker service status could not be read. Retrying automatically.");
+    const rows = parseComposePs(r.stdout);
+    if (r.stdout.trim() && r.stdout.trim() !== "[]" && !rows.length) throw new Error("Docker returned unreadable service status.");
+    const ids = rows.map(s => s.id).filter(id => /^[a-f0-9]{12,64}$/i.test(id));
+    if (ids.length) {
+      // Only runtime state, never container environment or wallet/config mounts.
+      const details = await this._exec("docker", ["inspect", "--format",
+        '{"id":{{json .Id}},"startedAt":{{json .State.StartedAt}},"oomKilled":{{json .State.OOMKilled}},"exitCode":{{json .State.ExitCode}},"restartCount":{{json .RestartCount}}}', ...ids], { timeout: 10000 });
+      if (details.ok) for (const line of details.stdout.trim().split("\n")) {
+        try {
+          const info = JSON.parse(line), row = rows.find(s => s.id && info.id.startsWith(s.id));
+          if (row) Object.assign(row, info);
+        } catch { /* keep Compose state when an inspect row cannot be read */ }
+      }
+    }
+    return rows;
   }
 
   async logs(networkId, service, tail = 120) {
-    const args = ["logs", "--no-color", "--tail", String(Math.min(Number(tail) || 120, 1000))];
+    const args = ["logs", "--no-color", "--timestamps", "--tail", String(Math.min(Number(tail) || 120, 1000))];
     if (service) args.push(String(service));
     const r = await this._compose(networkId, args, { timeout: 25000 });
     if (!r.ok) throw new Error(r.error || "Failed to read logs");
@@ -884,27 +1106,29 @@ class NodeManager {
   }
 
   async observe(networkId, services) {
-    const old = this._observations.get(networkId);
+    const lifetimes = Object.fromEntries(services.map(s => [s.service, `${s.id || ""}:${s.startedAt || ""}`]));
+    const generation = Object.entries(lifetimes).sort().map(([name, value]) => `${name}:${value}`).join("|");
+    const cached = this._observations.get(networkId);
+    const old = cached?.generation === generation ? cached : null;
     if (old?.pending) return old.pending;
     if (old && Date.now() - old.at < WATCH_INTERVAL_MS) return old.value;
-    const entry = { at: Date.now(), value: old?.value };
+    const entry = { at: Date.now(), value: old?.value, generation, lifetimes };
     entry.pending = (async () => {
       let value = { health: null, peers: null };
       if (services.length && !this._op?.running) {
-        const r = await this._compose(networkId, ["logs", "--no-color", "--timestamps", "--since", old?.value ? "2m" : "24h", "--tail", "200", "chain", "block_producer", "p2p"], { timeout: 15000 });
-        value = r.ok ? inspectLogs(r.stdout + "\n" + r.stderr) : value;
+        const r = await this._compose(networkId, ["logs", "--no-color", "--timestamps", "--since", old?.value ? "2m" : "24h", "--tail", "200", "amqp", "chain", "block_producer", "p2p", "jsonrpc"], { timeout: 15000 });
+        value = r.ok ? inspectLogs(currentLogs(r.stdout + "\n" + r.stderr, services)) : value;
         // Keep the last failed attempt visible through quiet periods. Merely
         // logging "Producing with VHP" is not a successful block submission.
         if (!value.production && services.some(s => s.service === "block_producer" && /running|up/i.test(s.state))) value.production = old?.value?.production || null;
-        if (old?.value?.health?.needsRepair && !value.chainStartupComplete) value.health = old.value.health;
-        if (!value.health) {
-          const health = assessHealth({ services, producing: services.some(s => s.service === "block_producer") });
-          value.health = health;
-        }
+        const previousFailure = cached?.value?.health;
+        if (previousFailure?.needsRepair && !value.chainStartupComplete && lifetimes[previousFailure.service] != null &&
+            cached.lifetimes?.[previousFailure.service] === lifetimes[previousFailure.service]) value.health = previousFailure;
+        const health = assessHealth({ services, producing: services.some(s => s.service === "block_producer") });
+        if (!value.health || (!value.health.needsRepair && health.ok === false)) value.health = health;
+        if (value.health.service === "amqp") value.health.reason = "broker-unavailable";
         if (value.chainStartupComplete && this._watch?.networkId === networkId && this._watch.repairReason === "replay-mismatch") {
-          this._watch.needsRepair = false;
-          this._watch.repairReason = null;
-          this._watch.health = value.health;
+          this._watch.needsRepair = false; this._watch.repairReason = null;
         }
       }
       entry.value = value;
@@ -914,13 +1138,34 @@ class NodeManager {
     return entry.pending;
   }
 
+  async _adoptRunning(networkId, services) {
+    if (this._watch || this._desiredRunning === false || this._op?.running || this._move?.running) return;
+    if (this._intent[networkId]?.blockedByOtherProfile || this._intent[networkId]?.running === false || !services.some(s => /^(running|restarting)$/.test(s.state))) return;
+    try {
+      await this._assertControl(networkId);
+      if (this._watch || this._desiredRunning === false || this._op?.running) return;
+      assertRestoreReady(this.dirs(networkId).basedir);
+      const config = fs.readFileSync(path.join(this.dirs(networkId).config, "config.yml"), "utf8");
+      const producing = services.some(s => s.service === "block_producer");
+      const address = config.match(/^  producer: ([1-9A-HJ-NP-Za-km-z]{25,35})(?:\s|$)/m)?.[1] || null;
+      if (producing && !address) return; // Never guess a reward address.
+      this._saveIntent(networkId, true, address, /^  jobs: 2\s*$/m.test(config));
+      this._desiredRunning = true;
+      this._startWatchdog(networkId, producing, address, /^  jobs: 2\s*$/m.test(config));
+    } catch { /* Never recreate a stack without its original configuration. */ }
+  }
+
   async status(networkId) {
     const docker = await this.dockerInfo();
-    const services = docker.ok ? await this.services(networkId) : [];
+    const ownership = docker.ok ? await this.ownership(networkId) : { ok: false, reason: "docker-unavailable", message: docker.error };
+    const services = docker.ok ? await this.services(networkId).catch(() => []) : [];
     const running = services.filter((s) => /running|up/i.test(s.state)).length;
-    const w = this._watch;
+    if (ownership.ok) await this._adoptRunning(networkId, services);
+    const w = this._watch?.networkId === networkId ? this._watch : null;
     const observed = await this.observe(networkId, services);
     return {
+      control: ownership,
+      desiredRunning: !!this._desiredRunning,
       peers: observed.peers,
       production: observed.production || null,
       docker,
@@ -933,10 +1178,13 @@ class NodeManager {
       dataDir: this.dirs(networkId).root,
       autoRecover: this.autoRecover,
       memorySaver: w?.memorySaver || false,
-      health: observed.health?.ok === false ? observed.health : w
+      health: !ownership.ok ? { ...ownership, recovering: false } : w?.health?.message ? { ...w.health, lastRecoveryError: w.lastRecoveryError || null } : observed.health?.ok === false && !(w && observed.health.reason === "chain-unresponsive") ? { ...observed.health, recovering: !!w?.recovering, lastRecoveryError: w?.lastRecoveryError || null } : w
         ? {
             ok: w.health?.ok !== false && !w.needsRepair,
             reason: w.needsRepair ? "needs-repair" : w.health?.reason || null,
+            message: w.health?.message || null,
+            lastRecoveryError: w.lastRecoveryError || null,
+            nextCheckAt: w.graceUntil,
             recovering: !!w.recovering,
             memorySaver: !!w.memorySaver,
             needsRepair: !!w.needsRepair,
@@ -1008,6 +1256,7 @@ function parseComposePs(stdout) {
   }
   for (const o of objects) {
     rows.push({
+      id: o.ID ?? o.Id ?? o.id ?? "",
       name: o.Name ?? o.name ?? "",
       service: o.Service ?? o.service ?? "",
       state: o.State ?? o.state ?? "",
@@ -1073,16 +1322,9 @@ function stageMacosConfig(d) {
 }
 
 function buildEnv(net, basedirAbs, producing, memorySaver, accountHistory = false, apiServices = false) {
-  // Memory-saver drops the optional API tier (jsonrpc/grpc/rest/…) so a
-  // low-memory PC only runs the core services (+ the block producer if minting),
-  // which is what keeps a small machine from running out of memory.
-  const profiles = memorySaver
-    ? producing
-      ? "block_producer"
-      : ""
-    : producing
-    ? "jsonrpc,block_producer"
-    : "jsonrpc";
+  // Keep RPC available for health checks and the desktop in every mode.
+  // Memory-saver reduces service jobs in config.yml instead of removing RPC.
+  const profiles = producing ? "jsonrpc,block_producer" : "jsonrpc";
   const lines = [
     "# Generated by Koinos Node Desktop — regenerated on every node start.",
     `BASEDIR=${basedirAbs}`,
@@ -1094,7 +1336,7 @@ function buildEnv(net, basedirAbs, producing, memorySaver, accountHistory = fals
     `GRPC_PORT=${net.ports.grpc}`,
     `REST_PORT=${net.ports.rest}`,
     "",
-    `COMPOSE_PROFILES=${profiles}${!memorySaver && apiServices ? ",account_history,transaction_store,contract_meta_store" : accountHistory && !memorySaver ? ",account_history" : ""}`,
+    `COMPOSE_PROFILES=${profiles}${apiServices ? ",account_history,transaction_store,contract_meta_store" : accountHistory ? ",account_history" : ""}`,
     "",
     ...Object.entries(net.imageTags).map(([k, v]) => `${k}=${v}`),
     "",
@@ -1102,7 +1344,7 @@ function buildEnv(net, basedirAbs, producing, memorySaver, accountHistory = fals
   return lines.join("\n");
 }
 
-function buildConfigYml(net, producerAddress) {
+function buildConfigYml(net, producerAddress, { memorySaver = false } = {}) {
   const producerLines = producerAddress
     ? `  producer: ${producerAddress}                # Address that receives block rewards (this app's wallet)`
     : `  # producer:                                 # Set automatically when block production is enabled`;
@@ -1112,7 +1354,7 @@ function buildConfigYml(net, producerAddress) {
 
 global:
   amqp: amqp://guest:guest@amqp:5672/
-  log-level: info
+${memorySaver ? "  jobs: 2\n" : ""}  log-level: info
   log-color: false
   log-datetime: true
   log-dir: logs
@@ -1123,8 +1365,7 @@ global:
     - chain.propose_block
 
 chain:
-  # Re-execute stored blocks on startup instead of replaying cached receipt deltas.
-  # A receipt mismatch must not strand an otherwise recoverable chain database.
+  # Validate stored blocks instead of replaying cached receipt deltas.
   verify-blocks: true
 
 block_producer:

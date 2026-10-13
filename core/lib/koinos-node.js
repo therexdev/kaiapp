@@ -140,6 +140,7 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
     if (distribution?._busy) throw new Error("Wait for the current distribution operation.");
     if (network !== undefined) {
       if (!NETWORKS[network]) throw new Error(`Unknown network: ${network}`);
+      if (network !== chain.network().id && (nodeMgr._desiredRunning || nodeMgr._op?.running)) throw new Error("Stop the node before changing its network.");
       settings.set("network", network);
       chain.clearCache();
       rewards.start(); // re-arm timer; reward baselines are tracked per network
@@ -407,6 +408,7 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
   });
 
   handle("node:stop", () => nodeMgr.stop(chain.network().id));
+  handle("node:repairServices", () => nodeMgr.repair(chain.network().id));
   handle("node:setAutoRecover", ({ on }) => {
     settings.set("node.autoRecover", !!on);
     nodeMgr.setAutoRecover(!!on);
@@ -938,14 +940,14 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
   // Serialize custody/network/node mutations so asynchronous RPC checks cannot
   // authorize a start, rotation or draft against a different producer context.
   let producerMutation = false;
-  for (const name of ["distribution:configure", "distribution:runNow", "distribution:distributeNow", "producer:vaultConnect", "producer:vaultUse", "producer:vaultPrepare", "producer:vaultSend", "producer:vaultDisconnect", "producer:vaultStatus", "producer:configure", "producer:key", "producer:prepare", "producer:broadcast", "producer:register", "settings:update", "node:start", "node:stop", "chain:burn", "chain:send", "rewards:runNow", "rewards:configure"]) {
+  for (const name of ["distribution:configure", "distribution:runNow", "distribution:distributeNow", "producer:vaultConnect", "producer:vaultUse", "producer:vaultPrepare", "producer:vaultSend", "producer:vaultDisconnect", "producer:vaultStatus", "producer:configure", "producer:key", "producer:prepare", "producer:broadcast", "producer:register", "settings:update", "node:start", "node:stop", "node:repairServices", "chain:burn", "chain:send", "rewards:runNow", "rewards:configure"]) {
     const fn = channels.get(name);
     if (!fn) continue;
     channels.set(name, async input => {
       if (producerMutation) throw new Error("Wait for the current producer operation to finish.");
       producerMutation = true;
       try {
-        if (!name.startsWith("producer:vault") && name !== "node:stop") vault.guardMutation();
+        if (!name.startsWith("producer:vault") && !["node:stop", "node:repairServices"].includes(name)) vault.guardMutation();
         return await fn(input); } finally { producerMutation = false; }
     });
   }
@@ -980,14 +982,15 @@ function createKoinosNode({ dataDir, wallet, appVersion, onEvent = () => {} }) {
   const nodeMgr = new NodeManager({
     templateRoot: path.join(__dirname, "..", "koinos-node-template"),
     dataRoot: chosenNodeData || defaultNodeData,
+    intentPath: path.join(root, "node-supervisor.json"),
     onEvent,
     autoRecover: settings.get("node.autoRecover", true),
     accountHistory: settings.get("node.accountHistory", false),
     apiServices: settings.get("masterApi.extendedIndexes", false),
-    probeHead: async () => {
-      const s = await chain.headInfo([chain.network().localRpcUrl]).catch(() => null);
+    probeHead: async (networkId) => {
+      const s = await chain.headInfo([NETWORKS[networkId].localRpcUrl]).catch(() => null);
       const h = s?.height;
-      return h != null ? Number(h) : null;
+      return Number.isSafeInteger(h) && h > 0 ? h : null;
     },
   });
 
@@ -998,6 +1001,9 @@ function createKoinosNode({ dataDir, wallet, appVersion, onEvent = () => {} }) {
     state,
     onEvent,
   });
+
+  nodeMgr.startDocker = () => setup.startDocker({ installIfMissing: false });
+  nodeMgr.supervise(() => chain.network().id);
 
   const stats = new ProducerStats({ chain, state });
   const rewards = new RewardEngine({ chain, wallet, settings, state, stats, onEvent });
@@ -1014,6 +1020,8 @@ function createKoinosNode({ dataDir, wallet, appVersion, onEvent = () => {} }) {
   distribution.start();
   const masterApi = new MasterNodeApi({ root, settings });
   masterApi.start().catch(e => onEvent({ type: "masterApi", level: "error", message: e.message }));
+  const apiRetryTimer = setInterval(() => masterApi.maintain().catch(() => {}), 30000);
+  apiRetryTimer.unref?.();
 
   const bridge = new BridgeOrchestrator({
     wallet,
@@ -1072,6 +1080,8 @@ function createKoinosNode({ dataDir, wallet, appVersion, onEvent = () => {} }) {
       return [...channels.keys()].sort();
     },
     stop() {
+      nodeMgr.dispose();
+      clearInterval(apiRetryTimer);
       distribution.stop();
       void masterApi.stop();
       producerCache.stop();

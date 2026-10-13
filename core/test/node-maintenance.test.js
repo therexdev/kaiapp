@@ -19,6 +19,7 @@ function data(root, name, value) { fs.mkdirSync(path.join(root, name), { recursi
 
 test("normal starts and automatic recovery retain full block verification without resetting data", async t => {
   const mgr = new NodeManager({ dataRoot: fixture(t), templateRoot: path.join(__dirname, "../koinos-node-template") });
+  mgr._assertControl = async () => {}; mgr.ownership = async () => ({ ok: true }); // Docker boundary; ownership is exercised in node-supervisor tests.
   const d = mgr.dirs("mainnet");
   data(d.basedir, "chain", "existing-chain");
   data(d.basedir, "block_producer", "existing-key");
@@ -50,7 +51,8 @@ test("a completed chain startup supersedes old replay failures but not newer fai
   assert.equal(inspectLogs(`${ready}\n${failed}`).health.needsRepair, true);
   assert.equal(inspectLogs(`${failed}\njsonrpc-1 | Listening for requests over AMQP`).health.needsRepair, true);
   const mgr = new NodeManager({ dataRoot: "/unused" });
-  const services = ["chain", "block_store", "mempool", "p2p"].map(service => ({ service, state: "running" }));
+  mgr._assertControl = async () => {}; mgr.ownership = async () => ({ ok: true }); // Docker boundary; ownership is exercised in node-supervisor tests.
+  const services = ["amqp", "jsonrpc", "chain", "block_store", "mempool", "p2p"].map(service => ({ service, state: "running" }));
   let log = failed;
   mgr._compose = async () => ({ ok: true, stdout: log, stderr: "" });
   assert.equal((await mgr.observe("mainnet", services)).health.needsRepair, true);
@@ -69,6 +71,7 @@ test("a completed chain startup supersedes old replay failures but not newer fai
 
 test("replay mismatch is recognized and displayed with recovery disabled after reopening", async () => {
   const mgr = new NodeManager({ dataRoot: "/unused", autoRecover: false });
+  mgr._assertControl = async () => {}; mgr.ownership = async () => ({ ok: true }); // Docker boundary; ownership is exercised in node-supervisor tests.
   const services = ["chain", "block_store", "mempool", "p2p", "block_producer"].map(service => ({ service, state: "running" }));
   let reads = 0;
   mgr.dockerInfo = async () => ({ ok: true }); mgr.services = async () => services;
@@ -130,6 +133,7 @@ test("backup deletion rejects symlinks", { skip: process.platform === "win32" },
 });
 test("an initial stopped observation does not permanently cache missing health", async () => {
  const mgr = new NodeManager({dataRoot:"/unused"});
+  mgr._assertControl = async () => {}; mgr.ownership = async () => ({ ok: true }); // Docker boundary; ownership is exercised in node-supervisor tests.
  await mgr.observe("mainnet", []);
  mgr._observations.get("mainnet").at = 0;
  mgr._compose = async () => ({ok:true,stdout:mismatch,stderr:""});
@@ -140,10 +144,11 @@ test("unreachable chain eventually fails health even without any head reading", 
  const {assessHealth, CORE_SERVICES}=require("../lib/koinos/node-health");
  const services=CORE_SERVICES.map(service=>({service,state:"running"}));
  assert.equal(assessHealth({services,probeFailed:true,lastHeightAt:0,now:600000}).reason,"chain-unresponsive");
- assert.equal(assessHealth({services,probeFailed:true,lastHeightAt:0,now:1000}).ok,true);
+ assert.equal(assessHealth({services,probeFailed:true,lastHeightAt:0,now:1000}).reason,"rpc-unavailable");
 });
 test("interrupted install marker prevents starts and deletion of recovery data", async t => {
  const root=fixture(t); const mgr=new NodeManager({dataRoot:root});
+  mgr._assertControl = async () => {}; mgr.ownership = async () => ({ ok: true }); // Docker boundary; ownership is exercised in node-supervisor tests.
  fs.mkdirSync(mgr.dirs("mainnet").basedir,{recursive:true});
  fs.writeFileSync(path.join(mgr.dirs("mainnet").basedir,".kai-restore-incomplete.json"),"{}");
  await assert.rejects(mgr.start("mainnet",null),/interrupted/);
@@ -170,6 +175,7 @@ test("producer rejection is separate from node health and only a successful subm
   assert.equal(inspectLogs("chain-1 | Error while submitting block: could not burn vhp").production, null);
   assert.equal(inspectLogs(failure + "\nblock_producer-1 | Produced block - Height: 123").production.reason, null);
   const mgr = new NodeManager({ dataRoot: "/unused" });
+  mgr._assertControl = async () => {}; mgr.ownership = async () => ({ ok: true }); // Docker boundary; ownership is exercised in node-supervisor tests.
   const services = [{ service: "block_producer", state: "running" }];
   let log = failure;
   mgr._compose = async () => ({ ok: true, stdout: log, stderr: "" });

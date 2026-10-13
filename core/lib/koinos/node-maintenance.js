@@ -4,6 +4,16 @@ const fsp = require("fs/promises");
 const path = require("path");
 const DATA_DIRS = ["chain", "block_store", "mempool", "transaction_store", "account_history", "contract_meta_store"];
 
+// Docker keeps logs across container restarts. Diagnose only the current
+// process lifetime when inspect provides its start time.
+function currentLogs(text, services = []) {
+  const starts = new Map(services.map(s => [s.service, Date.parse(s.startedAt)]));
+  return String(text).split(/\r?\n/).filter(line => {
+    const m = line.match(/^\s*([a-z_]+)(?:-\d+)?\s*\|\s*(\d{4}-\d\d-\d\dT[\d:.]+Z)/i);
+    return !m || !Number.isFinite(starts.get(m[1])) || Date.parse(m[2]) >= starts.get(m[1]);
+  }).join("\n");
+}
+
 function inspectLogs(text) {
   const lines = String(text).split(/\r?\n/);
   let readyIndex = -1;
@@ -45,7 +55,14 @@ function inspectLogs(text) {
     };
     else if (/Produced block - Height:/i.test(line)) production = { reason: null };
   }
-  return { health, peers, production, chainStartupComplete: readyIndex >= 0 && !health };
+  let progress = null;
+  for (const line of lines) {
+    if (!/^\s*chain(?:-\d+)?\s*\|/.test(line)) continue;
+    const m = line.match(/(?:Block applied|Sync progress|Indexing block) - Height:\s*(\d+)/);
+    const at = line.match(/\d{4}-\d\d-\d\dT[\d:.]+Z/)?.[0];
+    if (m && at) progress = { height: Number(m[1]), at };
+  }
+  return { health, peers, production, progress, chainStartupComplete: readyIndex >= 0 && !health };
 }
 
 function lockError(e) {
@@ -132,4 +149,4 @@ async function deleteBackup(root, id) {
   await fsp.rm(target, { recursive: true });
   return { deleted: true };
 }
-module.exports = { assertRestoreReady, inspectLogs, preflightFolders, installSnapshot, backupList, deleteBackup };
+module.exports = { currentLogs, assertRestoreReady, inspectLogs, preflightFolders, installSnapshot, backupList, deleteBackup };

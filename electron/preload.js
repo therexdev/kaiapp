@@ -35,6 +35,8 @@ contextBridge.exposeInMainWorld("koinosShell", {
   // Whether the X parks the app in the notification area or quits it. Only
   // the shell knows if there is a tray at all, so Settings has to ask.
   windowPrefs: () => ipcRenderer.invoke("shell:window-prefs"),
+  loginStartup: () => ipcRenderer.invoke("shell:login-startup"),
+  setLoginStartup: (on) => ipcRenderer.invoke("shell:set-login-startup", on),
   setCloseToTray: (on) => ipcRenderer.invoke("shell:set-close-to-tray", on),
   // Packaged builds check their signed installer feed in Electron. The page
   // receives only a small status object, never the updater capability itself.

@@ -147,6 +147,11 @@ class MasterNodeApi {
     const value = await index.refresh();
     if (this.active && this.index === index) this.payload = value;
   }
+  async maintain() {
+    // A temporary port conflict at login must not disable the API until the
+    // user closes/reopens Master. Configuration and explicit disable still win.
+    if (!this.changing && this.config().enabled && !this.server) await this.start();
+  }
   async start() {
     const cfg = this.config(); if (!cfg.enabled || this.server) return;
     if (this.settings.get("network","mainnet") !== "mainnet") throw new Error("Master API requires mainnet.");

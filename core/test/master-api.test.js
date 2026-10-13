@@ -3,6 +3,17 @@ const test=require("node:test"),assert=require("node:assert/strict"),fs=require(
 const {JsonStore}=require("../lib/store"),{Signer}=require("koilib");
 const {ProducerIndex,MasterNodeApi,validateConfig,rpc}=require("../lib/koinos/master-api");
 const ADDRESS=new Signer({privateKey:"1".padStart(64,"0")}).address;
+test("API listener recovers after a temporary port conflict and honors explicit disable", async t => {
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),"master-listener-"));
+  const occupied=http.createServer(); await new Promise(r=>occupied.listen(0,"127.0.0.1",r));
+  const port=occupied.address().port;
+  const settings=new JsonStore(path.join(root,"settings.json"),{network:"mainnet",masterApi:{enabled:true,port}});
+  const api=new MasterNodeApi({root,settings,fetchImpl:async()=>{throw Error("fixture offline");}});
+  t.after(async()=>{await api.stop();occupied.close();fs.rmSync(root,{recursive:true,force:true});});
+  await assert.rejects(api.start(),/could not listen/); assert.equal(api.status().listening,false);
+  await new Promise(r=>occupied.close(r)); await api.maintain(); assert.equal(api.status().listening,true);
+  await api.configure({enabled:false}); await api.maintain(); assert.equal(api.status().listening,false);
+});
 function fixture(t,n=3){
   const root=fs.mkdtempSync(path.join(os.tmpdir(),"master-index-"));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
   const f={root,n,now:Date.now(),chainId:"fixture",fork:"",calls:[]};

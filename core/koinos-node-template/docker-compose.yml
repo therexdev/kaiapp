@@ -2,6 +2,18 @@ services:
    amqp:
       image: rabbitmq:3-management
       restart: always
+      stop_grace_period: 120s
+      logging:
+         driver: json-file
+         options:
+            max-size: "10m"
+            max-file: "3"
+      healthcheck:
+         test: ["CMD-SHELL", "rabbitmq-diagnostics -q check_running && rabbitmq-diagnostics -q check_port_listener 5672"]
+         interval: 30s
+         timeout: 20s
+         retries: 3
+         start_period: 120s
       volumes:
          - "./config/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf"
       configs:
@@ -14,8 +26,15 @@ services:
    chain:
       image: koinos/koinos-chain:${CHAIN_TAG:-latest}
       restart: always
+      stop_grace_period: 120s
+      logging:
+         driver: json-file
+         options:
+            max-size: "10m"
+            max-file: "3"
       depends_on:
-         - amqp
+         amqp:
+            condition: service_healthy
       configs:
          - source: koinos-config
            target: /koinos/config.yml
@@ -28,9 +47,17 @@ services:
    mempool:
       image: koinos/koinos-mempool:${MEMPOOL_TAG:-latest}
       restart: always
+      stop_grace_period: 120s
+      logging:
+         driver: json-file
+         options:
+            max-size: "10m"
+            max-file: "3"
       depends_on:
-         - amqp
-         - chain
+         amqp:
+            condition: service_healthy
+         chain:
+            condition: service_started
       configs:
          - source: koinos-config
            target: /koinos/config.yml
@@ -41,9 +68,17 @@ services:
    block_store:
       image: koinos/koinos-block-store:${BLOCK_STORE_TAG:-latest}
       restart: always
+      stop_grace_period: 120s
+      logging:
+         driver: json-file
+         options:
+            max-size: "10m"
+            max-file: "3"
       depends_on:
-         - amqp
-         - chain
+         amqp:
+            condition: service_healthy
+         chain:
+            condition: service_started
       configs:
          - source: koinos-config
            target: /koinos/config.yml
@@ -54,10 +89,19 @@ services:
    p2p:
       image: koinos/koinos-p2p:${P2P_TAG:-latest}
       restart: always
+      stop_grace_period: 120s
+      logging:
+         driver: json-file
+         options:
+            max-size: "10m"
+            max-file: "3"
       depends_on:
-         - amqp
-         - block_store
-         - chain
+         amqp:
+            condition: service_healthy
+         block_store:
+            condition: service_started
+         chain:
+            condition: service_started
       configs:
          - source: koinos-config
            target: /koinos/config.yml
@@ -70,11 +114,20 @@ services:
    block_producer:
       image: koinos/koinos-block-producer:${BLOCK_PRODUCER_TAG:-latest}
       restart: always
+      stop_grace_period: 120s
+      logging:
+         driver: json-file
+         options:
+            max-size: "10m"
+            max-file: "3"
       profiles: ["block_producer", "all"]
       depends_on:
-         - amqp
-         - mempool
-         - chain
+         amqp:
+            condition: service_healthy
+         mempool:
+            condition: service_started
+         chain:
+            condition: service_started
       configs:
          - source: koinos-config
            target: /koinos/config.yml
@@ -85,10 +138,18 @@ services:
    jsonrpc:
       image: koinos/koinos-jsonrpc:${JSONRPC_TAG:-latest}
       restart: always
+      stop_grace_period: 120s
+      logging:
+         driver: json-file
+         options:
+            max-size: "10m"
+            max-file: "3"
       profiles: ["jsonrpc", "api", "all"]
       depends_on:
-         - amqp
-         - chain
+         amqp:
+            condition: service_healthy
+         chain:
+            condition: service_started
       configs:
          - source: koinos-config
            target: /koinos/config.yml
@@ -103,10 +164,18 @@ services:
    grpc:
       image: koinos/koinos-grpc:${GRPC_TAG:-latest}
       restart: always
+      stop_grace_period: 120s
+      logging:
+         driver: json-file
+         options:
+            max-size: "10m"
+            max-file: "3"
       profiles: ["grpc", "api", "all"]
       depends_on:
-         - amqp
-         - chain
+         amqp:
+            condition: service_healthy
+         chain:
+            condition: service_started
       configs:
          - source: koinos-config
            target: /koinos/config.yml
@@ -119,10 +188,18 @@ services:
    transaction_store:
       image: koinos/koinos-transaction-store:${TRANSACTION_STORE_TAG:-latest}
       restart: always
+      stop_grace_period: 120s
+      logging:
+         driver: json-file
+         options:
+            max-size: "10m"
+            max-file: "3"
       profiles: ["transaction_store", "api", "all"]
       depends_on:
-         - amqp
-         - chain
+         amqp:
+            condition: service_healthy
+         chain:
+            condition: service_started
       configs:
          - source: koinos-config
            target: /koinos/config.yml
@@ -133,10 +210,18 @@ services:
    contract_meta_store:
       image: koinos/koinos-contract-meta-store:${CONTRACT_META_STORE_TAG:-latest}
       restart: always
+      stop_grace_period: 120s
+      logging:
+         driver: json-file
+         options:
+            max-size: "10m"
+            max-file: "3"
       profiles: ["contract_meta_store", "api", "all"]
       depends_on:
-         - amqp
-         - chain
+         amqp:
+            condition: service_healthy
+         chain:
+            condition: service_started
       configs:
          - source: koinos-config
            target: /koinos/config.yml
@@ -147,11 +232,20 @@ services:
    account_history:
       image: koinos/koinos-account-history:${ACCOUNT_HISTORY_TAG:-latest}
       restart: always
+      stop_grace_period: 120s
+      logging:
+         driver: json-file
+         options:
+            max-size: "10m"
+            max-file: "3"
       profiles: ["account_history", "api", "all"]
       depends_on:
-        - amqp
-        - chain
-        - block_store
+         amqp:
+            condition: service_healthy
+         chain:
+            condition: service_started
+         block_store:
+            condition: service_started
       configs:
          - source: koinos-config
            target: /koinos/config.yml
@@ -162,9 +256,16 @@ services:
    rest:
       image: koinos/koinos-rest:${REST_TAG:-latest}
       restart: always
+      stop_grace_period: 120s
+      logging:
+         driver: json-file
+         options:
+            max-size: "10m"
+            max-file: "3"
       profiles: ["rest", "api", "all"]
       depends_on:
-         - jsonrpc
+         jsonrpc:
+            condition: service_started
       ports:
          - "${REST_INTERFACE:-127.0.0.1}:${REST_PORT:-3000}:3000"
       environment:

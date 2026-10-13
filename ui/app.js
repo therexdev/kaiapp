@@ -2125,6 +2125,21 @@ if (window.koinosShell) {
   /* What the X does. Older shells have no prefs bridge and no tray, so the
      section only appears once the shell says a tray actually exists — an
      offer to "keep running in the notification area" is a lie without one. */
+  if (typeof window.koinosShell.loginStartup === "function") {
+    const paintStartup = p => {
+      $("settings-startup").hidden = !p?.supported;
+      $("btn-startup-toggle").setAttribute("aria-checked", String(!!p?.enabled));
+    };
+    window.koinosShell.loginStartup().then(paintStartup).catch(() => {});
+    $("btn-startup-toggle").addEventListener("click", async () => {
+      const button = $("btn-startup-toggle"); button.disabled = true;
+      try {
+        paintStartup(await window.koinosShell.setLoginStartup(button.getAttribute("aria-checked") !== "true"));
+        $("startup-error").textContent = "";
+      } catch (error) { $("startup-error").textContent = error.message; }
+      finally { button.disabled = false; }
+    });
+  }
   if (typeof window.koinosShell.windowPrefs === "function") {
     const paintTray = (p) => {
       $("settings-window").hidden = !p || !p.trayAvailable;

@@ -139,7 +139,7 @@ test("unsupported optional indexes fail explicitly so clients can use their back
   assert.equal((await f.post(req)).status, 200);
   const env = buildEnv(NETWORKS.mainnet, "/fixture", true, false, false, true);
   assert.match(env, /COMPOSE_PROFILES=jsonrpc,block_producer,account_history,transaction_store,contract_meta_store/);
-  assert.doesNotMatch(buildEnv(NETWORKS.mainnet, "/fixture", true, true, false, true), /COMPOSE_PROFILES=.*account_history/);
+  assert.match(buildEnv(NETWORKS.mainnet, "/fixture", true, true, false, true), /COMPOSE_PROFILES=jsonrpc,block_producer,account_history,transaction_store,contract_meta_store/);
 });
 
 test("upstream timeouts, response bounds, concurrency and rate limits cannot exhaust the node", async t => {
