@@ -1,3 +1,9 @@
+## Clearer KOIN funding and reservation
+
+- Explains beside normal Chat that **Add KOIN** deposits from your wallet; **Send** uses your existing balance and asks for a reservation approval when needed. You do not need another deposit to reserve an available balance.
+- Labels the deposit amount and marks its example as an example. Empty, zero or malformed amounts show a helpful message and focus the field before any payment action opens. Valid amounts still require native approval.
+- Removes the Electron invocation prefix from payment errors while preserving the actual reason.
+
 ## KOIN in normal Chat and a clear provider switch
 
 - Adds **Add KOIN** and your available/reserved balances beside the normal chat composer. Select Koinos Network or use **Open Chat** from your network account.

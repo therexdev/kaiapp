@@ -214,18 +214,33 @@
     if (result?.deposit && funding?.state !== "funded") status.appendChild(document.createTextNode(" · Deposit: " + words(result.deposit.state)));
   }
   const refreshAfter = new Set(["import", "access", "purchase", "fund-rewards", "reserve", "refund", "revoke", "release", "check", "resume", "correct-mana", "recover", "repair", "restore", "worker-start", "worker-stop"]);
-  async function run(action) {
+  async function run(action, amountInput = el("koin-test-amount")) {
     if (action === "worker-stop") {
       try { await bridge.run(action); providing = false; paintProvider({ state: "offline", label: "OFFLINE", detail: "This computer is no longer providing AI." }); }
       catch (e) { message(e.message, true); }
       controls(); return;
     }
     if (busy && action !== "stop") return;
+    if (action === "purchase") {
+      const value = amountInput.value.trim();
+      // Match native decimal precision without rounding, inferring a value
+      // from the placeholder, or removing a currency suffix. Native review
+      // and validation remain authoritative for every actual payment.
+      const validFormat = /^(0|[1-9]\d{0,11})(\.\d{1,8})?$/.test(value);
+      const [whole, part = ""] = value.split(".");
+      const atoms = validFormat ? BigInt(whole) * 100000000n + BigInt(part.padEnd(8, "0")) : 0n;
+      if (!validFormat || atoms <= 0n || atoms > (1n << 64n) - 1n) {
+        amountInput.setAttribute("aria-invalid", "true");
+        message("To add funds, enter an amount greater than 0, such as 0.1 (up to 8 decimal places, without KOIN). To reserve your existing balance, send a chat message.", true);
+        amountInput.focus(); return;
+      }
+      amountInput.removeAttribute("aria-invalid");
+    }
     if (action !== "stop") { busy = true; message(action === "status" ? "Refreshing your account…" : "Follow the approval in the desktop window, if requested."); controls(); }
     try {
       let input;
       if (["chat", "chat-retry"].includes(action)) input = el("koin-test-prompt").value;
-      if (["purchase", "refund"].includes(action)) input = el("koin-test-amount").value.trim();
+      if (["purchase", "refund"].includes(action)) input = amountInput.value.trim();
       if (action === "fund-rewards") input = el("koin-reward-amount").value.trim();
       if (["revoke", "release"].includes(action)) input = el("koin-test-session-id").value.trim();
       if (["check", "resume", "correct-mana"].includes(action)) input = select.value;
@@ -245,7 +260,7 @@
     } catch (error) {
       activate();
       if (action === "status") { el("koin-available").textContent = el("koin-reserved").textContent = "—"; }
-      message(String(error.message || "Payment action unavailable").slice(0, 280), true);
+      message(String(error.message || "Payment action unavailable").replace(/^Error invoking remote method 'koin:test-payments': (?:Error: )?/, "").slice(0, 280), true);
     } finally { if (action !== "stop") busy = false; controls(); refreshProvider(); window.KaiNetwork?.refresh().then(() => window.KaiNetwork.paint()).catch(() => {}); }
   }
   const tabs = [...section.querySelectorAll("[data-koin-view]")];
@@ -262,7 +277,8 @@
   select.addEventListener("change", controls);
   buttons.forEach(button => button.addEventListener("click", () => run(button.dataset.koinTest)));
   el("koin-open-chat").addEventListener("click", () => window.dispatchEvent(new Event("kai-network-use")));
-  window.addEventListener("kai-network-add-koin", event => { if (busy) return; el("koin-test-amount").value = String(event.detail || ""); run("purchase"); });
+  window.addEventListener("kai-network-add-koin", event => { if (busy) return; el("koin-test-amount").value = String(event.detail || ""); run("purchase", el("network-koin-amount")); });
+  for (const id of ["network-koin-amount", "koin-test-amount"]) el(id).addEventListener("input", event => event.target.removeAttribute("aria-invalid"));
   window.addEventListener("kai-network-account-changed", () => { if (!busy) run("status"); });
   bridge.onProgress?.(value => { if (busy) message(String(value?.text || "")); });
   setInterval(refreshProvider, 10000);

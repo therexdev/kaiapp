@@ -14,7 +14,7 @@ Provider status distinguishes offline, checking/connecting, model preparation, m
 ## Buyer computer
 
 1. Choose **Open Chat** in the network account, or select **Koinos Network** in normal Chat.
-2. Use the existing balance, or enter an amount and press **Add KOIN**. Review the native deposit; the app checks its irreversible confirmation. Uncertain submissions remain attached to the original transaction.
+2. Use the existing balance. **Add KOIN** is a separate deposit from your wallet, not a reservation: use it only to add funds. Enter a number such as `0.1` without the KOIN suffix, then review the native deposit; the app checks its irreversible confirmation. An empty/invalid amount is rejected in the screen before payment IPC. Uncertain submissions remain attached to the original transaction.
 3. Type and send normally. If needed, the app reserves no more than the available balance or configured ceiling, asks for the exact native reservation and spending approvals, and waits for confirmation. An approval is bounded by amount, per-request limit, model, output limit, number of requests and expiry.
 4. Read the verified answer and its KOIN usage. Follow-ups include the conversation. No new approval is needed within the existing allowance.
 5. After an interruption, use **Recover last reply**. The original encrypted request and request ID are reused. Recovery restores its conversation separately. An expired settled request cannot silently create another paid request.

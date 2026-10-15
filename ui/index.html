@@ -173,8 +173,10 @@
         </div>
         <div id="network-chat-account" class="network-chat-account" hidden>
           <div><strong>Koinos Network</strong><span id="network-chat-balance">Balance loading…</span></div>
-          <div class="network-chat-funding"><label class="sr-only" for="network-koin-amount">KOIN amount</label><input id="network-koin-amount" inputmode="decimal" placeholder="0.1 KOIN" maxlength="22" /><button id="network-add-koin" class="primary small">Add KOIN</button><button id="network-account" class="small">Account</button></div>
-          <button id="network-recover" class="small" hidden>Recover last reply</button><p id="network-chat-status" role="status" aria-live="polite">Add KOIN, then send your message. Your first request opens the spending approval.</p>
+          <div class="network-chat-funding"><label for="network-koin-amount">Amount to add (KOIN)</label><input id="network-koin-amount" inputmode="decimal" placeholder="e.g. 0.1" maxlength="22" autocomplete="off" aria-describedby="network-chat-help network-chat-status" /><button id="network-add-koin" class="primary small">Add KOIN</button><button id="network-account" class="small">Account</button></div>
+          <button id="network-recover" class="small" hidden>Recover last reply</button>
+          <p id="network-chat-help">Send uses your existing balance and asks you to approve a reservation when needed. Add KOIN deposits more from your wallet.</p>
+          <p id="network-chat-status" role="status" aria-live="polite"></p>
         </div>
         <form id="composer">
           <div class="composer-options">
@@ -451,12 +453,12 @@
                 <div><span>Reserved for requests</span><strong id="koin-reserved">—</strong><small class="koin-currency">KOIN</small></div>
               </div>
               <div class="kp-grid">
-                <section class="kp-card" aria-labelledby="koin-credit-title"><h3 id="koin-credit-title">Usage credits</h3><p class="hint">Prepay for AI requests. Unused available credits can be refunded to your wallet.</p>
+                <section class="kp-card" aria-labelledby="koin-credit-title"><h3 id="koin-credit-title">Fund your account</h3><p id="koin-funding-help" class="hint">Add KOIN deposits funds from your wallet. You can chat using your existing credits, or refund unused available credits to your wallet.</p>
                   <label for="koin-test-amount" id="koin-test-amount-label">Amount in KOIN</label>
-                  <div class="kp-amount"><input id="koin-test-amount" type="text" inputmode="decimal" placeholder="0.1" maxlength="22" autocomplete="off" /><button data-koin-test="purchase" class="primary small">Add KOIN</button></div>
+                  <div class="kp-amount"><input id="koin-test-amount" type="text" inputmode="decimal" placeholder="e.g. 0.1" maxlength="22" autocomplete="off" aria-describedby="koin-funding-help koin-test-payment-status" /><button data-koin-test="purchase" class="primary small">Add KOIN</button></div>
                   <button data-koin-test="refund" class="kp-text-button">Refund available credits</button>
                 </section>
-                <section class="kp-card" aria-labelledby="koin-request-title"><h3 id="koin-request-title">Chat with the network</h3><p class="hint">Use the normal chat box. Your first message guides you through a bounded spending approval, then subsequent messages use that allowance.</p><p id="koin-model-label" class="hint">Connect to see your model</p>
+                <section class="kp-card" aria-labelledby="koin-request-title"><h3 id="koin-request-title">Chat with the network</h3><p class="hint">Send a message in normal Chat. When needed, you approve a reservation from your available credits and its spending limits. Subsequent messages use that allowance.</p><p id="koin-model-label" class="hint">Connect to see your model</p>
                   <button id="koin-open-chat" class="primary">Open Chat</button>
                 </section>
               </div>
