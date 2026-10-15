@@ -18,6 +18,17 @@ async function main() {
       dialog: { showMessageBox: async (_window, spec) => { approvals.push(spec); return { response: approve ? 1 : 0 }; } }, shell: {} });
     const session = await control.begin({ task: "Find The Test Movie and play it", model: "qa-local" });
     let out = await control.call(session.id, "computer_look", {});
+    // DOM readiness precedes Chromium's Windows accessibility tree. Wait for
+    // the native field to appear, checking for leakage on EVERY observation.
+    // Missing/redaction failures still fail after this bounded startup wait.
+    const readyUntil = Date.now() + 10000;
+    while (true) {
+      assert.ok(!JSON.stringify(out.screen).includes("MUST_NOT_READ"), "Password values never leave native UIA, including during startup");
+      assert.ok(out.screen.elements.filter(e => e.password).every(e => !e.value), "Every observed password field is redacted");
+      if (out.screen.elements.some(e => e.password) || Date.now() >= readyUntil) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+      out = await control.call(session.id, "computer_look", {});
+    }
     assert.match(out.screen.window.title, /KAI browser control fixture/);
     assert.match(out.screen.image, /^data:image\/png;base64,/); assert.ok(out.screen.imageWidth <= 1280);
     assert.ok(!JSON.stringify(out.screen).includes("MUST_NOT_READ"), "Password values never leave native UIA");

@@ -74,8 +74,9 @@ app.whenReady().then(async () => {
   // Dispose the fixture before Playwright asks Electron to quit. In particular,
   // no renderer may keep polling a server being closed inside before-quit.
   globalThis.__shutdownFixture = async () => {
-    await dispose();
+    const closing = dispose();
     for (const window of BrowserWindow.getAllWindows()) window.destroy();
+    await closing;
     return { windows: BrowserWindow.getAllWindows().length, listening: fixture.server.listening };
   };
   app.once("before-quit", dispose);
