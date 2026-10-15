@@ -313,6 +313,7 @@ let networkEligible = false;
 let pickable = []; // latest [{v,label}] the chat picker offers — reused by Compare/Tasks
 async function updateModelPick(aliases) {
   await KaiProviders.refresh().catch(() => {});
+  await window.KaiNetwork?.refresh().catch(() => {});
   let netBlockedWhy = "";
   try {
     const n = await coreGet("/core/network");
@@ -335,6 +336,10 @@ async function updateModelPick(aliases) {
       $("privacy-pick").value = n.privacyMode;
     }
   } catch { networkEligible = false; }
+  if (window.KaiNetwork?.info.configured) {
+    networkEligible = !KaiNetwork.info.blocked;
+    netBlockedWhy = KaiNetwork.info.blocked || "";
+  }
   const pick = $("model-pick");
   // Source + model, two boxes (field request): pick WHERE it runs, then
   // WHICH model. Local lists only models on this machine; Network lists
@@ -375,6 +380,7 @@ async function updateModelPick(aliases) {
     ...(networkEligible ? [{ v: "koinos-network", label: "Koinos Network · Auto" }] : []),
   ];
   pickable = want;
+  window.KaiNetwork?.paint();
   if (["openai", "anthropic"].includes(src.value)) {
     const providerModels = KaiProviders.models().filter(m => m.alias.startsWith("desktop:" + src.value + ":"));
     const sig = JSON.stringify(providerModels);
@@ -414,6 +420,12 @@ async function updateModelPick(aliases) {
 /** Network source: the model box lists what live providers serve NOW. */
 async function fillNetworkModelPick() {
   const pick = $("model-pick");
+  if (window.KaiNetwork?.info.configured) {
+    const model = KaiNetwork.info.model;
+    pick.replaceChildren();
+    if (model) { const option = document.createElement("option"); option.value = model; option.textContent = model + " · KOIN"; pick.appendChild(option); }
+    pick.dataset.sig = "paid:" + model; return;
+  }
   let net = { workersOnline: 0, models: [] };
   try {
     net = await coreGet("/core/network/models");
@@ -447,6 +459,33 @@ function updateProviderNote() {
   }
 }
 window.addEventListener("kai-providers-changed", () => { $("model-pick").dataset.sig = ""; refresh(); });
+window.addEventListener("kai-network-use", async () => {
+  await updateModelPick((await coreGet("/core/models")).aliases);
+  if (KaiNetwork.info.blocked) { activateView("earn"); return; }
+  $("src-pick").value = "network"; $("mode-pick").value = "chat";
+  $("src-pick").dispatchEvent(new Event("change")); activateView("chat"); $("input").focus();
+});
+window.addEventListener("kai-network-account", () => { activateView("earn"); $("koin-use-tab").click(); $("koin-test-payments").scrollIntoView({ block: "start" }); });
+window.addEventListener("kai-network-recover", async () => {
+  if (state.chatting) return;
+  state.chatting = true; $("btn-send").disabled = true; $("network-recover").disabled = true; $("btn-stop").hidden = false;
+  state.abort = new AbortController(); const stop = () => window.kaiKoinTestBridge.run("stop").catch(() => {});
+  state.abort.signal.addEventListener("abort", stop, { once: true });
+  try {
+    const { completion, messages } = await KaiNetwork.recover();
+    state.abort.signal.throwIfAborted();
+    // Recover into a separate saved conversation, preserving the request's
+    // actual turns rather than inserting its answer into an unrelated chat.
+    state.chatId = null; state.history = messages.filter(m => m.role !== "system");
+    $("messages").replaceChildren();
+    for (const m of state.history) addMsg(m.role, m.content);
+    const content = completion.choices[0].message.content, bubble = addMsg("assistant", content); attachMsgActions(bubble);
+    state.history.push({ role: "assistant", content });
+    if (await saveCurrentChat()) await KaiNetwork.acknowledge(completion.id);
+    activateView("chat");
+  } catch (e) { addMsg("error", String(e.message)); }
+  finally { state.chatting = false; state.abort = null; $("btn-send").disabled = false; $("network-recover").disabled = false; $("btn-stop").hidden = true; window.dispatchEvent(new Event("kai-network-account-changed")); }
+});
 window.addEventListener("kai-provider-use", async event => {
   await updateModelPick((await coreGet("/core/models")).aliases);
   $("src-pick").value = event.detail; $("src-pick").dispatchEvent(new Event("change")); activateView("chat");
@@ -873,6 +912,9 @@ async function send(replayText) {
   if (!text || state.chatting) return;
   const chatModel = composedChatModel();
   if (!chatModel) { addMsg("error", "Choose an available model. For OpenAI or Anthropic, connect and refresh models in Settings; Local-Only blocks online connections."); return; }
+  if (chatModel.startsWith("koinos-network") && window.KaiNetwork?.info.configured && getChatMode() !== "chat") {
+    addMsg("error", "Choose Chat for this KOIN network connection. Research, Agent and Teams are not enabled for paid Test sessions yet."); return;
+  }
   if (KaiProviders.isModel(chatModel) && getChatMode().startsWith("team:")) {
     addMsg("error", "Desktop providers work in Chat, Research and Agent. Choose one of those modes, or use a local/network model for Teams."); return;
   }
@@ -993,7 +1035,8 @@ async function send(replayText) {
 
   try {
     const turnHistory = state.history.slice(-5, -1).map(m => m.role + ": " + m.content).join("\n");
-    const route = KaiAgents.routeTurn(text, { mode: answerMode, history: turnHistory });
+    const paidChat = chatModel.startsWith("koinos-network") && window.KaiNetwork?.info.configured;
+    const route = paidChat ? { lane: "chat", needsTools: false } : KaiAgents.routeTurn(text, { mode: answerMode, history: turnHistory });
     if (!route.needsTools) {
       reqHistory = [{ role: "system", content: KaiAgents.fastContext(route) }, ...state.history];
     }
@@ -1131,20 +1174,22 @@ async function send(replayText) {
       const tokPerSec = acc.length / 4 / genS; // ~4 chars/token estimate
       const meta = document.createElement("div");
       meta.className = "msg-meta";
-      KaiI18n.setText(meta, KaiI18n.message`first reply in ${firstS.toFixed(1)}s · ~${tokPerSec.toFixed(0)} tok/s`);
+      KaiI18n.setText(meta, resp.headers.get("x-kai-buffered") === "true" ? `Verified answer in ${firstS.toFixed(1)}s` : KaiI18n.message`first reply in ${firstS.toFixed(1)}s · ~${tokPerSec.toFixed(0)} tok/s`);
       bubble.appendChild(meta);
     }
     state.history.push({ role: "assistant", content: acc, ...(webCitations ? { citations: webCitations } : {}) });
-    saveCurrentChat();
+    const saved = await saveCurrentChat();
+    const paidRequest = resp.headers.get("x-kai-paid-request");
+    if (paidRequest && saved) await KaiNetwork.acknowledge(paidRequest).catch(() => {});
   } catch (e) {
-    if (e.name === "AbortError") {
+    if (e.name === "AbortError" && !(chatModel.startsWith("koinos-network") && window.KaiNetwork?.info.configured)) {
       state.history.push({ role: "assistant", content: bubble.textContent });
       if (bubble.textContent) attachMsgActions(bubble);
       saveCurrentChat();
     } else {
       bubble.remove();
       state.history.pop(); // drop the failed user turn so retry is clean
-      addMsg("error", String(e.message));
+      addMsg("error", e.name === "AbortError" ? "Stopped. Send the same message again to check or recover the original request." : String(e.message));
       $("input").value = text;
     }
   } finally {
@@ -2259,6 +2304,7 @@ async function saveCurrentChat() {
     const j = await r.json();
     if (j.ok) state.chatId = j.id;
     refreshChatList();
+    return !!j.ok;
   } catch { /* history is a convenience — never interrupt chatting over it */ }
 }
 

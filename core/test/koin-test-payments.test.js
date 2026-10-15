@@ -196,6 +196,18 @@ test("Test reserve binds configured per-request and total limits into the on-cha
   assert.equal(s.remaining, f.config.limits.amount); assert.equal(s.per_job, f.config.limits.perJob);
   assert.equal(s.max_jobs, String(f.config.limits.maxJobs)); assert.equal(s.expires, String(f.state.now + 3600000));
 });
+test("normal chat reserves only the available KOIN below the configured ceiling, and zero balance cannot sign", async t => {
+  for (const available of ["10000000", "12"]) {
+    const f = setup(t); f.state.available = available;
+    const result = await f.controller.run(window(), "reserve"); assert.equal(result.state, "signed");
+    const s = (await f.client.serializer.deserialize(f.state.submissions[0].operations[0].call_contract.args, "koin.Request")).session;
+    assert.equal(s.remaining, available);
+    assert.equal(s.per_job, BigInt(available) < BigInt(f.config.limits.perJob) ? available : f.config.limits.perJob);
+  }
+  const f = setup(t); f.state.available = "0";
+  await assert.rejects(f.controller.run(window(), "reserve"), /Add KOIN/);
+  assert.equal(f.state.submissions.length, 0); assert.equal(f.journal.nonceCoordinator.list().length, 0);
+});
 test("desktop and backend derive the same protocol-valid session domain from deployment pins", t => {
   const f = setup(t), { testDomain } = require("../lib/koin-network/payment-mode"), D = require("../lib/koin-network/session-delegation");
   const domain = testDomain(f.d, f.config.schedulerUrl);

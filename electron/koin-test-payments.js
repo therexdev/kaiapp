@@ -93,15 +93,18 @@ class TestPayments {
     const request = { kind: "credits", method, args, actor: this.#owner(), maxRc: this.#config.maxRcPerTransaction };
     await this.#client.verifyTransaction(draft, request); return request;
   }
-  async session() {
+  async session(wanted) {
     // Restore session identity and limits from the actual reserved transaction,
     // not a replaceable config or a scheduler-provided transaction template.
     for (const item of this.#journal.nonceCoordinator.list()) if (item.purpose === "credits" && item.state === "finalized") {
       const request = await this.#scope(this.#journal.nonceCoordinator.draft(item.id));
       if (request.method !== "reserve") continue;
       const s = request.args.session, session = Buffer.from(s.id, "base64url").toString("hex");
+      if (wanted && session !== wanted) continue;
       const state = await this.#client.read("credits", "get_session", { id: s.id });
-      if (!state.session || state.session.closed || BigInt(state.session.revoked_at || "0") > 0n || Number(s.expires) <= this.#clock()) return null;
+      if (!state.session) continue;
+      if (!wanted && (state.session.closed || BigInt(state.session.revoked_at || "0") > 0n || Number(s.expires) <= this.#clock() ||
+          BigInt(state.session.remaining) === 0n || BigInt(state.session.jobs || "0") >= BigInt(s.max_jobs))) continue;
       return { schedulerUrl: this.#config.schedulerUrl,
         target: { chainId: this.#client.d.chainId, credits: this.#client.d.credits, creditsHash: this.#client.d.creditsHash,
           domain: testDomain(this.#client.d, this.#config.schedulerUrl), policyHash: this.#config.policyHash }, session,
@@ -121,8 +124,12 @@ class TestPayments {
       if (await this.session()) throw Error("Use or revoke the current session before opening another");
       const { config } = await this.#client.read("credits", "config");
       if (String(config?.version) !== String(c.version)) throw Error("Test policy version changed");
+      const { balance } = await this.#client.read("credits", "balances", { account: encodedAddress(owner) });
+      const available = BigInt(balance?.available || "0"), ceiling = BigInt(c.limits.amount);
+      if (available <= 0n) throw Error("Add KOIN to your network balance before chatting");
+      const budget = available < ceiling ? available : ceiling;
       args = { session: { id: enc(crypto.randomBytes(32).toString("hex")), owner: encodedAddress(owner), verifier: encodedAddress(c.deployment.verifier),
-        policy_hash: enc(c.policyHash), remaining: c.limits.amount, per_job: c.limits.perJob, max_jobs: String(c.limits.maxJobs), expires: String(this.#clock() + c.limits.durationMs) } };
+        policy_hash: enc(c.policyHash), remaining: String(budget), per_job: String(budget < BigInt(c.limits.perJob) ? budget : BigInt(c.limits.perJob)), max_jobs: String(c.limits.maxJobs), expires: String(this.#clock() + c.limits.durationMs) } };
     } else if (["revoke", "release"].includes(action)) {
       digest(input); const { session } = await this.#client.read("credits", "get_session", { id: enc(input) });
       if (!session || session.owner !== encodedAddress(owner) || session.closed) throw Error("Open session owned by this wallet required");

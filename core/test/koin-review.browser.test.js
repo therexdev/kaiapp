@@ -74,6 +74,8 @@ test("Earn review preview is desktop-only, disables repeat clicks and explains e
     window.testPaymentCalls = [];
     window.kaiKoinTestBridge = { run: async (action, input) => {
       window.testPaymentCalls.push({ action, input });
+      if (action === "chat-info") return { enabled: false, configured: false };
+      if (action === "provider-status") return { state: "offline", label: "OFFLINE", detail: "Not connected" };
       if (action === "status") return { enabled: true, mode: "test-deployment", configured: false };
       if (action === "stop") return { state: "stopped" };
       if (action === "chat-status") return { state: "request_cancelled", amount: "0" };
@@ -98,7 +100,7 @@ test("Earn review preview is desktop-only, disables repeat clicks and explains e
   await page.locator('[data-koin-test="status"]').click();
   await page.waitForFunction(() => document.getElementById("koin-network-badge").textContent.includes("Mainnet"));
   assert.match(await page.locator("#koin-test-network-notice").textContent(), /REAL KOIN/);
-  assert.equal(await page.locator('[data-koin-test="purchase"]').textContent(), "Add credits");
+  assert.equal(await page.locator('[data-koin-test="purchase"]').textContent(), "Add KOIN");
   assert.equal(await page.locator("#koin-available").textContent(), "1.00000000");
   assert.match(await page.locator("#koin-test-balances").textContent(), /mainnet KOIN/);
   assert.equal(await page.locator("#koin-connection").getAttribute("open"), null);
@@ -246,7 +248,8 @@ test("Earn review preview is desktop-only, disables repeat clicks and explains e
   await page.locator('[data-koin-test="status"]').click();
   await page.waitForFunction(() => document.getElementById("koin-network-badge").textContent.includes("Testnet"));
   assert.equal(await page.locator("#koin-available").textContent(), "—");
-  assert.equal(await page.locator('[data-koin-test="chat"]').isDisabled(), true);
+  assert.equal(await page.locator('[data-koin-test="chat"]').count(), 0);
+  assert.equal(await page.locator("#koin-open-chat").isEnabled(), true);
   assert.equal(await correctionButton.isVisible(), false);
   await page.setViewportSize({ width: 480, height: 900 });
   assert.equal(await page.locator("#koin-test-payments").evaluate(node => node.scrollWidth <= node.clientWidth), true);

@@ -1,3 +1,14 @@
+## KOIN in normal Chat and a clear provider switch
+
+- Adds **Add KOIN** and your available/reserved balances beside the normal chat composer. Select Koinos Network or use **Open Chat** from your network account.
+- Your first message prepares a bounded reservation and opens the existing native spending reviews. Confirmation checks run automatically. Subsequent messages reuse the approved allowance and preserve conversation history.
+- Shows verified KOIN usage on the reply, with settlement still identified as pending until confirmed. Replies are displayed after verification; the app does not report a misleading streaming token speed.
+- **Recover last reply** recovers the saved request after interruption or restart. Requests and retained answers are encrypted locally; recovery reuses the original request ID. An unresolved request blocks a different request, and native Stop/visibility/privacy cancellation still applies.
+- Adds a large **ONLINE** provider status and **Turn on / Turn off**. Green requires fresh network confirmation of eligibility, qualification, model readiness and signed worker registration. Missing or expired confirmation is never green. Starting loads the installed approved model and stops the older earning worker after native approval.
+- Moves manual session setup and old test-prompt recovery into Advanced. The main Use AI screen opens ordinary Chat.
+- Requires the matching pilot backend provider-status update. An older backend shows **CHECKING CONNECTION**. Expired provider qualification still requires operator renewal; this build does not extend it automatically. Paid Test sessions currently support the Chat mode.
+- See `docs/KOIN_SIMPLE_FLOW.md` for acceptance checks and deployment dependencies. This change does not promote the pilot to Alpha or enable public enrollment.
+
 ## KOIN recovery on slow RPC servers
 
 - Gives each pinned RPC server more time to verify the chain and finish an account check, so a slow but working backup can complete release recovery after the primary fails.

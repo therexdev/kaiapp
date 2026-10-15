@@ -27,6 +27,10 @@
     init.signal?.throwIfAborted();
     if (window.KaiCompanionClient) body = await window.KaiCompanionClient.enrich(body, init.signal);
     init.signal?.throwIfAborted();
+    if (body.model?.startsWith("koinos-network") && window.KaiNetwork) {
+      const network = await window.KaiNetwork.refresh();
+      if (network.configured) return window.KaiNetwork.chatFetch(body, init);
+    }
     if (!isModel(body.model)) return fetch(url, { ...init, body: JSON.stringify(body) });
     if (!bridge) throw new Error("This model is available only in the desktop app.");
     const signal = init.signal;

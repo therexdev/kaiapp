@@ -23,6 +23,11 @@ contextBridge.exposeInMainWorld("kaiKoinSessionBridge", {
 });
 contextBridge.exposeInMainWorld("kaiKoinTestBridge", {
   run: (action, input) => ipcRenderer.invoke("koin:test-payments", action, input),
+  onProgress: callback => {
+    const listener = (_event, value) => callback(value);
+    ipcRenderer.on("koin:chat-progress", listener);
+    return () => ipcRenderer.removeListener("koin:chat-progress", listener);
+  },
 });
 contextBridge.exposeInMainWorld("kaiLanguageBridge", {
   get: () => ipcRenderer.invoke("shell:language"),

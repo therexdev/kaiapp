@@ -11,6 +11,7 @@ const P = require("../core/lib/koin-network/job-protocol");
 const crypto = require("crypto");
 const { FundedSessionClient } = require("./koin-session-client");
 const { createSessionReview } = require("./koin-session-review");
+const { ChatFlow } = require("./koin-chat-flow");
 function readConfig(file) {
   if (fs.statSync(file).size > 16384) throw Error("Test manifest is too large");
   return configuration(JSON.parse(fs.readFileSync(file, "utf8")));
@@ -33,8 +34,8 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     }
     return payments;
   };
-  const getSession = async () => {
-    const config = await open().session(); await access.claimHost(); if (!config) throw Error("Reserve a Test session and wait for irreversible confirmation first");
+  const sessionPair = async wanted => {
+    const config = await open().session(wanted); await access.claimHost(); if (!config) return null;
     if (sessionId !== config.session) {
       sessionClient = new FundedSessionClient({ config, mainnetPilot: readConfig(configFile).mode === "mainnet-pilot", file: path.join(root, "session-" + config.session + ".json"),
         authorize: (pin, signal) => access.authorize(pin, signal),
@@ -43,14 +44,46 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
       sessionRun = createSessionReview({ client: sessionClient, dialog, testDeployment: true, mainnetPilot: readConfig(configFile).mode === "mainnet-pilot",
         track: controller => { sessionAbort = controller; const release = core.gateway.network.trackShadowRequest(controller); return () => { release(); sessionAbort = null; }; } });
     }
-    return sessionRun;
+    return { config, client: sessionClient, run: sessionRun };
+  };
+  const getSession = async () => { const pair = await sessionPair(); if (!pair) throw Error("Reserve a Test session and wait for irreversible confirmation first"); return pair.run; };
+  const flow = window => new ChatFlow({ file: path.join(root, "chat-recovery.json"), storage: core.account.safeStorage,
+    payments: open(), session: sessionPair, config: readConfig(configFile),
+    progress: text => { if (!window.isDestroyed()) window.webContents.send("koin:chat-progress", { text }); } });
+  const withChatSignal = async (window, run) => {
+    chatAbort = new AbortController(); const stop = () => chatAbort?.abort();
+    const navigation = (_event, _url, _inPlace, mainFrame) => { if (mainFrame) stop(); };
+    for (const event of ["hide", "minimize", "closed"]) window.on(event, stop);
+    window.webContents.on("did-start-navigation", navigation); window.webContents.on("render-process-gone", stop);
+    const release = core.gateway.network.trackShadowRequest(chatAbort);
+    try { return await run(AbortSignal.any([chatAbort.signal, AbortSignal.timeout(600000)])); }
+    finally { release(); for (const event of ["hide", "minimize", "closed"]) window.removeListener(event, stop);
+      window.webContents.removeListener("did-start-navigation", navigation); window.webContents.removeListener("render-process-gone", stop); chatAbort = null; }
   };
   ipcMain.handle("koin:test-payments", async (event, action, input) => {
     const window = getMainWindow();
     if (!trustedMainDocument(event, window, origin)) throw Error("Desktop window access denied");
     if (!isTest) return { enabled: false, mode: "test-deployment" };
-    if (typeof action !== "string" || JSON.stringify(input ?? null).length > 16384) throw Error("Invalid Test payment action");
-    if (action === "stop") { stopVersion++; payments?.stop(); chatAbort?.abort(); sessionAbort?.abort(); return { state: "stopped", enabled: true, mode: fs.existsSync(configFile) ? readConfig(configFile).mode : "test-deployment" }; }
+    if (typeof action !== "string" || Buffer.byteLength(JSON.stringify(input ?? null)) > (action === "chat-completion" ? 26000 : 16384)) throw Error("Invalid Test payment action");
+    if (action === "stop") { stopVersion++; payments?.stop(); chatAbort?.abort(); sessionAbort?.abort(); if (workerAbort && !worker?.running) workerAbort.abort(); return { state: "stopped", enabled: true, mode: fs.existsSync(configFile) ? readConfig(configFile).mode : "test-deployment" }; }
+    if (action === "worker-stop") {
+      if (input !== undefined) throw Error("Provider controls take no arguments");
+      workerAbort?.abort(); await worker?.stop(); workerTrack?.(); workerTrack = null; return { state: "test_worker_stopped" };
+    }
+    if (action === "chat-info") {
+      if (!fs.existsSync(configFile)) return { enabled: true, configured: false };
+      const config = readConfig(configFile); open(); let blocked = "";
+      try { access.authorize(config.schedulerUrl); } catch (e) { blocked = String(e.message).slice(0, 220); }
+      const recovery = flow(window).read();
+      return { enabled: true, configured: true, model: config.model, mode: config.mode, maxOutput: config.maxOutput, blocked,
+        recoveryAvailable: !blocked && ["pending", "answered"].includes(recovery?.state) };
+    }
+    if (action === "provider-status") {
+      if (!fs.existsSync(configFile) || !worker?.running) return { state: "offline", label: "OFFLINE", detail: "Turn on to provide AI to the network." };
+      const config = readConfig(configFile); access.authorize(config.schedulerUrl);
+      if (worker.status().backoff) return { state: "paused", label: "PAUSED", detail: worker.status().backoffReason || "This computer is busy." };
+      return require("./koin-provider-status").readProviderStatus({ config, access, signal: AbortSignal.timeout(10000) });
+    }
     if (busy || disposed) throw Error("Finish the open Test payment action first");
     busy = true; const activeVersion = stopVersion;
     const active = () => activeVersion === stopVersion && !disposed && !window.isDestroyed() && window.isVisible() && !window.isMinimized();
@@ -86,16 +119,38 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
         } finally { guard.close(); }
       }
       const controller = open();
+      if (["chat-completion", "chat-ack", "chat-recover"].includes(action)) {
+        const config = readConfig(configFile); access.authorize(config.schedulerUrl);
+        if (!active()) throw Error("Return to the visible desktop window to chat");
+        if (action === "chat-ack") { flow(window).acknowledge(input); return { state: "delivered" }; }
+        if (action === "chat-recover") {
+          if (input !== undefined) throw Error("Recovery uses the saved request");
+          return await withChatSignal(window, signal => flow(window).recover(window, signal));
+        }
+        // Previous diagnostic requests must be resolved before the normal
+        // composer can start a different request against this account.
+        for (const name of fs.readdirSync(root).filter(n => /^request-[a-f0-9]{64}\.json$/.test(n) || n === "last-request.json")) {
+          const old = JSON.parse(fs.readFileSync(path.join(root, name), "utf8"));
+          if (old.state !== "pending") continue;
+          const pair = await sessionPair(P.digest(old.session));
+          if (!pair) throw Error("An earlier diagnostic request needs recovery in your network account");
+          const result = await pair.client.requestStatus(P.digest(old.id), AbortSignal.timeout(10000));
+          if (!["cancelled", "settled"].includes(result.state)) throw Error("An earlier diagnostic request is still pending. Check it under Advanced & recovery before starting a new chat");
+          save(path.join(root, name), { ...old, state: result.state });
+        }
+        return await withChatSignal(window, signal => flow(window).chat(window, input, signal));
+      }
       if (action === "worker-start" || action === "worker-stop") {
         if (input !== undefined) throw Error("Test worker controls take no arguments");
         if (action === "worker-stop") { workerAbort?.abort(); await worker?.stop(); workerTrack?.(); workerTrack = null; return { state: "test_worker_stopped" }; }
         if (worker?.running) return { state: "test_worker_running" };
-        const config = readConfig(configFile); access.authorize(config.schedulerUrl);
+        const config = readConfig(configFile); access.authorize(config.schedulerUrl); await access.claimHost();
         const answer = await dialog.showMessageBox(window, { type: "question", title: "Run Test inference worker", message: "Serve requests for this Test backend?",
-          detail: `Backend: ${config.schedulerUrl}\nModel: ${config.model}\nWallet: ${config.owner}\n\nUses your installed models and hardware. ${config.mode === "mainnet-pilot" ? "MAINNET: funded jobs and rewards use real KOIN." : "Foundation testnet: jobs and rewards use test KOIN."} Rewards are automatic; no payout signature is requested.`,
+          detail: `Backend: ${config.schedulerUrl}\nModel: ${config.model}\nWallet: ${config.owner}\n\nUses your installed models and hardware. Pauses the older earning worker on this computer so only this connection uses its AI capacity. ${config.mode === "mainnet-pilot" ? "MAINNET: funded jobs and rewards use real KOIN." : "Foundation testnet: jobs and rewards use test KOIN."} Rewards are automatic; no payout signature is requested.`,
           buttons: ["Cancel", "Start Test worker"], defaultId: 0, cancelId: 0, noLink: true });
         if (answer.response !== 1 || !active()) return { state: "cancelled" };
         access.authorize(config.schedulerUrl);
+        if (core.gateway.earn?.stop) await core.gateway.earn.stop({ userIntent: true });
         const { Worker } = require("../core/lib/worker");
         worker = new Worker({ schedulerUrl: config.schedulerUrl, wallet: core.account.wallet, runtime: core.runtime, hardware: core.hardware,
           models: core.models, koinFundedRehearsalJobs: config.mode === "test-deployment", koinShadowJobs: false, fundedOnly: true,
@@ -103,8 +158,12 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
             policyHash: config.policyHash, domain: require("../core/lib/koin-network/payment-mode").testDomain(config.deployment, config.schedulerUrl) } });
         workerAbort = new AbortController(); workerTrack = core.gateway.network.trackShadowRequest(workerAbort);
         workerAbort.signal.addEventListener("abort", () => worker.stop().catch(() => {}), { once: true });
-        try { await worker.start(); workerAbort.signal.throwIfAborted(); return { state: "test_worker_running" }; }
-        catch (e) { await worker.stop(); workerTrack(); workerTrack = null; throw e; }
+        try {
+          const hold = await core.runtime.acquireFor(config.model); hold.release(); workerAbort.signal.throwIfAborted();
+          if (!active()) throw Error("Provider startup cancelled; return to the app and turn it on again");
+          await worker.start(); workerAbort.signal.throwIfAborted(); return { state: "test_worker_running" };
+        }
+        catch (e) { await worker.stop(); workerTrack?.(); workerTrack = null; throw e; }
       }
       if (action === "access") {
         if (input !== undefined) throw Error("Choose Test access with the native file picker");
@@ -170,9 +229,14 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
       }
       if (["session-review", "session-status", "session-retry", "session-revoke"].includes(action)) return (await getSession())(window, action.slice(8));
       if (!["purchase", "fund-rewards", "reserve", "refund", "revoke", "release", "check", "resume", "recover", "repair", "correct-mana"].includes(action)) throw Error("Unknown Test payment action");
+      if (action === "purchase") return await withChatSignal(window, async signal => {
+        const result = await controller.run(window, action, input); signal.throwIfAborted();
+        if (result.state === "cancelled") return result;
+        return await flow(window).confirm(window, result, signal);
+      });
       return await controller.run(window, action, input);
     } finally { busy = false; }
   });
-  return { dispose() { disposed = true; payments?.stop(); chatAbort?.abort(); sessionAbort?.abort(); workerAbort?.abort(); workerTrack?.(); /* In-flight signed bytes must finish staging before process exit. */ } };
+  return { isProviding: () => !!worker?.running, dispose() { disposed = true; payments?.stop(); chatAbort?.abort(); sessionAbort?.abort(); workerAbort?.abort(); workerTrack?.(); /* In-flight signed bytes must finish staging before process exit. */ } };
 }
 module.exports = { registerTestPaymentIPC, readConfig };

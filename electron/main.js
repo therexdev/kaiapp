@@ -393,7 +393,7 @@ async function start() {
       try {
         const r = await fetch(`http://127.0.0.1:${port}/core/earn`);
         const j = await r.json();
-        const earning = !!(j.worker && j.worker.running) || !!core?.koinosNode?.nodeMgr?.shouldKeepAwake();
+        const earning = !!(j.worker && j.worker.running) || testPayments.isProviding() || !!core?.koinosNode?.nodeMgr?.shouldKeepAwake();
         if (earning && blockerId === null) {
           blockerId = powerSaveBlocker.start("prevent-app-suspension");
         } else if (!earning && blockerId !== null) {

@@ -23,7 +23,7 @@
       ? `Mana correction · ${funded(tx) ? "deposit confirmed" : words(correction.state)}${correction.rcLimit ? " · Limit: " + amount(correction.rcLimit) + " Mana (not a KOIN fee)" : ""}${correction.txId ? " · Transaction: " + correction.txId : ""}`
       : "";
   }
-  function message(text, error = false) { status.textContent = text; status.dataset.error = String(error); }
+  function message(text, error = false) { status.textContent = text; status.dataset.error = String(error); if (el("network-chat-status")) el("network-chat-status").textContent = text; }
   function activate() {
     section.hidden = false;
     if (activated) return;
@@ -37,7 +37,7 @@
     const selected = transactions.find(item => item.id === select.value);
     for (const button of buttons) {
       const action = button.dataset.koinTest;
-      button.disabled = action === "stop" ? !busy : busy ||
+      button.disabled = action === "worker-stop" ? !providing : action === "stop" ? !busy : busy ||
         (!configured && !["status", "import", "restore"].includes(action)) ||
         (configured && action === "import") ||
         (!hasSession && ["session-review", "session-status", "session-revoke", "session-retry", "chat", "chat-retry", "chat-status"].includes(action)) ||
@@ -49,8 +49,23 @@
       if (action === "correct-mana") button.hidden = !mainnet;
     }
     section.setAttribute("aria-busy", String(busy));
-    el("koin-provider-state").textContent = providing ? "Providing AI capacity" : "Not providing";
+    el("network-add-koin").disabled = busy || !configured;
+    el("koin-open-chat").disabled = busy || !configured;
     activityDetails();
+  }
+  let providerPending = false, providerExpiry;
+  function paintProvider(result) {
+    clearTimeout(providerExpiry);
+    const node = el("koin-provider-state"); node.textContent = result.label; node.dataset.state = result.state;
+    el("koin-provider-detail").textContent = result.detail;
+    if (result.state === "online") providerExpiry = setTimeout(() => paintProvider({ state: "checking", label: "CHECKING CONNECTION", detail: "Refreshing network confirmation…" }), Math.max(0, Math.min(15000, result.validUntil - Date.now())));
+  }
+  async function refreshProvider() {
+    if (providerPending || !configured || document.hidden) return;
+    providerPending = true;
+    try { paintProvider(await bridge.run("provider-status")); }
+    catch { paintProvider({ state: "reconnecting", label: "CONNECTION UNCONFIRMED", detail: "The network could not confirm this computer's eligibility. Check your invitation, wallet and online access, then retry." }); }
+    finally { providerPending = false; }
   }
   function snapshot(result) {
     if (result?.enabled === false) { section.hidden = true; return; }
@@ -69,6 +84,10 @@
     // A mode default is not evidence of a connected chain.
     if (result.configured !== true && !result.balances) return;
     configured = true; mainnet = result.mode === "mainnet-pilot";
+    // A configured pilot has one provider control, rather than competing
+    // legacy and paid workers sharing the same local runtime.
+    el("btn-earn-toggle")?.closest(".form-row")?.setAttribute("hidden", "");
+    el("earn-dot")?.closest(".earn-status")?.setAttribute("hidden", "");
     const badge = el("koin-network-badge");
     badge.textContent = mainnet ? "Mainnet · real KOIN" : "Testnet · test KOIN";
     badge.dataset.network = mainnet ? "mainnet" : "testnet";
@@ -86,6 +105,7 @@
     if (result.balances) {
       el("koin-available").textContent = amount(result.balances.available);
       el("koin-reserved").textContent = amount(result.balances.reserved);
+      el("network-chat-balance").textContent = `${amount(result.balances.available)} KOIN available · ${amount(result.balances.reserved)} reserved`;
     }
     if (Array.isArray(result.transactions)) {
       const deposits = new Map((result.deposits || []).map(deposit => [deposit.id, deposit]));
@@ -107,8 +127,8 @@
         el("koin-spending-summary").textContent = `Reserved budget: ${amount(s.amount)} ${unit()}. Per request: ${amount(s.perJob)}. Review limits before sending.`;
         el("koin-model-label").textContent = s.model || "Approved network model";
       } else {
-        el("koin-spending-summary").textContent = "Reserve a budget, then review its limits before sending requests.";
-        el("koin-model-label").textContent = "Reserve a session to see your model";
+        el("koin-spending-summary").textContent = "Your first message prepares a spending allowance and asks you to approve its limits.";
+        el("koin-model-label").textContent = "The normal chat uses your approved network model.";
       }
     }
     if (Object.hasOwn(result, "worker")) providing = !!result.worker?.running;
@@ -153,7 +173,7 @@
       reverted: "Transaction reverted. Check payment activity for details.",
       access_imported: "Invitation added. Your account is ready for connection checks.",
       backed_up: "Payment history backed up.", restored: "Payment history restored. Pending transactions still need confirmation.",
-      test_worker_running: "This computer is providing AI capacity.", test_worker_stopped: "This computer has stopped providing AI capacity.",
+      test_worker_running: "Provider started. Checking network eligibility…", test_worker_stopped: "This computer has stopped providing AI capacity.",
       request_cancelled: "Request was cancelled before dispatch. You can send a new request.",
       request_unknown: "Request remains uncertain. Check or retry the original request in Advanced & recovery.",
       revoked: "New requests are stopped. Previously dispatched work stays reserved.",
@@ -195,6 +215,11 @@
   }
   const refreshAfter = new Set(["import", "access", "purchase", "fund-rewards", "reserve", "refund", "revoke", "release", "check", "resume", "correct-mana", "recover", "repair", "restore", "worker-start", "worker-stop"]);
   async function run(action) {
+    if (action === "worker-stop") {
+      try { await bridge.run(action); providing = false; paintProvider({ state: "offline", label: "OFFLINE", detail: "This computer is no longer providing AI." }); }
+      catch (e) { message(e.message, true); }
+      controls(); return;
+    }
     if (busy && action !== "stop") return;
     if (action !== "stop") { busy = true; message(action === "status" ? "Refreshing your account…" : "Follow the approval in the desktop window, if requested."); controls(); }
     try {
@@ -221,7 +246,7 @@
       activate();
       if (action === "status") { el("koin-available").textContent = el("koin-reserved").textContent = "—"; }
       message(String(error.message || "Payment action unavailable").slice(0, 280), true);
-    } finally { if (action !== "stop") busy = false; controls(); }
+    } finally { if (action !== "stop") busy = false; controls(); refreshProvider(); window.KaiNetwork?.refresh().then(() => window.KaiNetwork.paint()).catch(() => {}); }
   }
   const tabs = [...section.querySelectorAll("[data-koin-view]")];
   function choose(tab) {
@@ -236,5 +261,11 @@
   });
   select.addEventListener("change", controls);
   buttons.forEach(button => button.addEventListener("click", () => run(button.dataset.koinTest)));
+  el("koin-open-chat").addEventListener("click", () => window.dispatchEvent(new Event("kai-network-use")));
+  window.addEventListener("kai-network-add-koin", event => { if (busy) return; el("koin-test-amount").value = String(event.detail || ""); run("purchase"); });
+  window.addEventListener("kai-network-account-changed", () => { if (!busy) run("status"); });
+  bridge.onProgress?.(value => { if (busy) message(String(value?.text || "")); });
+  setInterval(refreshProvider, 10000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshProvider(); });
   controls(); run("status");
 })();
