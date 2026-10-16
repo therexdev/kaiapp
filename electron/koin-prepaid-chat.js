@@ -1,0 +1,99 @@
+"use strict";
+const crypto = require("crypto"), P = require("../core/lib/koin-network/job-protocol");
+const { ChatFlow, request } = require("./koin-chat-flow"), { fundedResultHash } = require("../core/lib/koin-network/funded-protocol");
+const { testDomain } = require("../core/lib/koin-network/payment-mode"), { protocol } = require("../core/lib/koin-network/payment-network");
+const price = (t, input, output) => String((BigInt(input) * BigInt(t.inputAtomsPerMillion) + BigInt(output) * BigInt(t.outputAtomsPerMillion) + 999999n) / 1000000n);
+// Only the private main-process IPC owns credentials and these requests.
+class PrepaidChat extends ChatFlow {
+  constructor(options) {
+    super(options); this.access = options.access; this.fetch = options.fetchImpl || fetch;
+    const d = this.config.deployment;
+    if (d.product !== "prepaid-v1") throw Error("Prepaid account required");
+    this.target = { chainId: d.chainId, credits: d.credits, creditsHash: d.creditsHash, domain: testDomain(d, this.config.schedulerUrl), policyHash: this.config.policyHash };
+  }
+  async call(action, body = {}, signal = AbortSignal.timeout(10000)) {
+    const a = this.access.authorize(this.config.schedulerUrl, signal);
+    const route = action === "chat" ? "/consume/chat/completions" : "/koin/prepaid/" + action;
+    const response = await this.fetch(this.config.schedulerUrl + route, { method: "POST", redirect: "error", signal,
+      headers: { "content-type": "application/json" }, body: JSON.stringify({ ...body, sessionToken: a.sessionToken }) });
+    let size = 0; const parts = [];
+    for await (const part of response.body) { signal.throwIfAborted(); size += part.length; if (size > 1600000) throw Error("Credit response too large"); parts.push(part); }
+    const value = JSON.parse(Buffer.concat(parts).toString("utf8")), wire = protocol(this.target);
+    this.access.authorize(this.config.schedulerUrl, signal);
+    if (value.product !== "prepaid-v1" || value.mode !== wire.mode || value.paymentsEnabled !== wire.paymentsEnabled || value.owner && value.owner !== this.config.owner) throw Error("Credit account identity changed");
+    if (!response.ok || value.ok !== true) throw Error(value.error || "The network is unavailable. Please try again.");
+    return value;
+  }
+  verify(result, input, id) {
+    const k = result?.koin, q = k?.quote, r = k?.receipt, output = result?.choices?.[0]?.message?.content;
+    if (result?.id !== id || k?.product !== "prepaid-v1" || JSON.stringify(k.target) !== JSON.stringify(this.target) ||
+        !["ready", "charged"].includes(k.state) || r?.product !== "prepaid-v1" || r.job !== id || r.owner !== this.config.owner || r.provider === this.config.owner ||
+        k.session !== P.hash("prepaid-account:" + this.config.owner) || r.quoteHash !== q?.hash || r.outputHash !== P.hash(output || "") ||
+        k.receiptHash !== P.hash(JSON.stringify(r))) throw Error("The network answer could not be verified. Retry this message to recover its saved answer.");
+    P.validateQuote(q);
+    if (q.domain !== this.target.domain || q.policyHash !== this.target.policyHash || q.tariff.model !== input.model ||
+        q.tariff.version !== this.config.version || q.requestHash !== P.hash(JSON.stringify(input.messages)) || q.maxOutput !== input.maxOutput ||
+        P.hash(JSON.stringify(["KAI-KOIN-SHADOW-TARIFFS-V1", q.tariff])) !== this.target.policyHash ||
+        r.usage.inputTokens !== q.inputTokens || !Number.isSafeInteger(r.usage.outputTokens) || r.usage.outputTokens < 1 || r.usage.outputTokens > q.maxOutput ||
+        r.usage.amount !== price(q.tariff, r.usage.inputTokens, r.usage.outputTokens) || BigInt(r.usage.amount) > BigInt(q.maxCharge)) throw Error("The answer differs from the approved credit price");
+    P.signatureMatches(fundedResultHash(this.target, { id, session: k.session, attempt: r.attempt, quote: q }, output), r.signature, r.provider);
+    return { id, object: "chat.completion", model: "koinos-network", servedModel: input.model,
+      choices: [{ index: 0, message: { role: "assistant", content: output }, finish_reason: "stop" }],
+      usage: { prompt_tokens: r.usage.inputTokens, completion_tokens: r.usage.outputTokens, total_tokens: r.usage.inputTokens + r.usage.outputTokens }, costUsd: 0,
+      koin: { product: "prepaid-v1", state: k.state, target: this.target, session: k.session, quote: q, receipt: r, receiptHash: k.receiptHash } };
+  }
+  async status() { return this.call("status"); }
+  async chat(window, value, signal) {
+    signal.throwIfAborted();
+    if (!this.storage?.isEncryptionAvailable?.()) throw Error("Unlock secure storage to chat");
+    const input = request(value, this.config), requestHash = P.hash(JSON.stringify(input));
+    let record = this.read();
+    if (record && ["pending", "answered"].includes(record.state) && record.requestHash !== requestHash) {
+      // A different prompt may proceed. Cancelling an old request cannot undo a
+      // charge, and its bounded hold also expires if the cancellation is lost.
+      await this.call("cancel", { requestId: record.id }, signal); record = null;
+    }
+    if (record?.requestHash === requestHash && record.state === "answered") {
+      const answer = this.verify(JSON.parse(this.storage.decryptString(Buffer.from(record.answer, "base64"))), input, record.id);
+      // Locally saved delivery survives an acknowledgement response loss.
+      await this.call("acknowledge", { requestId: record.id, receiptHash: answer.koin.receiptHash }, signal).catch(() => {});
+      return answer;
+    }
+    if (record?.state === "pending") {
+      const old = await this.call("result", { requestId: record.id }, signal);
+      if (old.completion) {
+        const answer = this.verify(old.completion, input, record.id);
+        this.save({ ...record, state: "answered", answer: this.storage.encryptString(JSON.stringify(answer)).toString("base64") });
+        await this.call("acknowledge", { requestId: record.id, receiptHash: answer.koin.receiptHash }, signal).catch(() => {});
+        return answer;
+      }
+      // A new explicit Send after an interruption cancels that unfinished
+      // attempt and immediately starts afresh. It cannot charge a late result.
+      await this.call("cancel", { requestId: record.id }, signal); record = null;
+    }
+    if (!record || record.state !== "pending") {
+      record = { schema: 1, owner: this.config.owner, deployment: P.hash(JSON.stringify(this.config)), id: crypto.randomBytes(32).toString("hex"),
+        session: P.hash("prepaid-account:" + this.config.owner), requestHash, state: "pending", input: this.storage.encryptString(JSON.stringify(value)).toString("base64") };
+      this.save(record);
+    }
+    this.progress("Generating your answer…");
+    try {
+      const response = await this.call("chat", { billing: "koin-prepaid-v1", requestId: record.id, model: input.model, messages: input.messages, max_tokens: input.maxOutput }, signal);
+      const answer = this.verify(response.completion, input, record.id);
+      // Persist the verified answer before displaying it. The service has already
+      // recorded this one usage charge and retains an encrypted recovery copy.
+      this.save({ ...record, state: "answered", answer: this.storage.encryptString(JSON.stringify(answer)).toString("base64") });
+      signal.throwIfAborted();
+      await this.call("acknowledge", { requestId: record.id, receiptHash: answer.koin.receiptHash }, signal).catch(() => {});
+      return answer;
+    } catch (e) {
+      if (this.read()?.state === "pending" && !signal.aborted) {
+        await this.call("cancel", { requestId: record.id }, signal).catch(() => {});
+        // Preserve the request ID: the server may have committed an answer
+        // before a lost response. Retry retrieves it without another debit.
+      }
+      throw e;
+    }
+  }
+}
+module.exports = { PrepaidChat };

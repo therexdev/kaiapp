@@ -6,7 +6,8 @@
   const status = el("koin-test-payment-status"), select = el("koin-test-transaction");
   const buttons = [...section.querySelectorAll("[data-koin-test]")];
   let busy = false, configured = false, mainnet = false, hasSession = false, providing = false, activated = false;
-  let transactions = [];
+  let transactions = [], prepaid = false;
+  const credits = value => { const n = BigInt(value || "0"); return `${n / 100000n}.${(n % 100000n).toString().padStart(5, "0")}`.replace(/\.?0+$/, "") || "0"; };
   const amount = value => {
     if (typeof value !== "string" || !/^(0|[1-9]\d*)$/.test(value)) return "—";
     const n = BigInt(value); return `${n / 100000000n}.${(n % 100000000n).toString().padStart(8, "0")}`;
@@ -38,7 +39,7 @@
     for (const button of buttons) {
       const action = button.dataset.koinTest;
       button.disabled = action === "worker-stop" ? !providing : action === "stop" ? !busy : busy ||
-        (!configured && !["status", "import", "restore"].includes(action)) ||
+        (!configured && !["status", "import", "restore", "connect-prepaid"].includes(action)) ||
         (configured && action === "import") ||
         (!hasSession && ["session-review", "session-status", "session-revoke", "session-retry", "chat", "chat-retry", "chat-status"].includes(action)) ||
         (!select.value && ["check", "resume", "correct-mana", "recover", "repair"].includes(action)) ||
@@ -47,9 +48,11 @@
       if (action === "worker-start") button.hidden = providing;
       if (action === "worker-stop") button.hidden = !providing;
       if (action === "correct-mana") button.hidden = !mainnet;
+      if (action === "connect-prepaid") button.hidden = prepaid;
     }
     section.setAttribute("aria-busy", String(busy));
     el("network-add-koin").disabled = busy || !configured;
+    el("network-retry-purchase").disabled = busy || !configured;
     el("koin-open-chat").disabled = busy || !configured;
     activityDetails();
   }
@@ -103,6 +106,37 @@
       : "Add your private invitation and allow online access in Privacy settings to use this connection.";
     el("koin-connection").open = !result.accessReady;
     if (result.owner) el("koin-connected-wallet").textContent = "Wallet · " + result.owner;
+    prepaid = result.product === "prepaid-v1";
+    el("koin-prepaid-history").hidden = !prepaid;
+    el("koin-advanced").hidden = prepaid;
+    el("koin-activity").hidden = prepaid;
+    if (prepaid) {
+      el("koin-test-network-notice").textContent = "Buy credits with KOIN. Use them in Chat. Buy more whenever you need them.";
+      el("network-add-koin").textContent = "Buy credits";
+      el("network-retry-purchase").hidden = !result.purchasePending;
+      section.querySelector('[data-koin-test="purchase-retry"]').hidden = !result.purchasePending;
+      section.querySelector('[data-koin-test="purchase"]').textContent = "Buy credits";
+      section.querySelector('[data-koin-test="refund"]').hidden = true;
+      el("koin-reserved").parentElement.hidden = true;
+      el("koin-credit-title").textContent = "Buy AI credits";
+      el("koin-funding-help").textContent = "1 KOIN = 1,000 credits. Purchased credits do not expire and are nonrefundable. Failed chats do not consume credits.";
+      el("network-chat-help").textContent = "Buy credits with KOIN, then chat. 1 KOIN = 1,000 credits. Purchases are nonrefundable.";
+      el("koin-request-title").nextElementSibling.textContent = "Send a message in Chat. Credits are used only when an answer is saved for you.";
+      el("koin-available").nextElementSibling.textContent = "credits";
+      el("network-chat-reservation").hidden = true;
+      el("koin-connection-help").textContent = "Your network account is connected. Only buying more credits requires a wallet payment.";
+      if (result.credits) {
+        el("koin-available").textContent = credits(result.credits.available);
+        el("network-chat-balance").textContent = credits(result.credits.available) + " credits";
+      }
+      const history = el("koin-prepaid-rows"); history.replaceChildren();
+      const rows = [...(result.purchases || []).map(p => ({ at: p.createdAt, text: p.state === "confirmed" ? `Purchased ${credits(p.amount)} credits` : p.state === "failed" ? "Purchase did not complete" : "Purchase confirming… You can keep using your existing credits." })),
+        ...(result.usage || []).map(u => ({ at: u.at, text: `Chat · ${credits(u.credits)} credits` }))].sort((a,b) => b.at-a.at).slice(0,50);
+      for (const row of rows) { const li = document.createElement("li"); li.textContent = `${new Date(row.at).toLocaleString()} — ${row.text}`; history.appendChild(li); }
+      if (!rows.length) { const li = document.createElement("li"); li.textContent = "Your purchases and chat usage will appear here."; history.appendChild(li); }
+      if (Object.hasOwn(result, "worker")) providing = !!result.worker?.running;
+      return;
+    }
     if (result.balances) {
       el("koin-available").textContent = amount(result.balances.available);
       el("koin-reserved").textContent = amount(result.balances.reserved);
@@ -144,6 +178,8 @@
     if (result.paused) message("New spending is paused by the network. Existing payment recovery remains available.");
   }
   function outcome(result) {
+    if (result?.product === "prepaid-v1" && result.state === "purchase_unavailable") { message("Purchase could not start. Your existing credits are available. Try again when connected.", true); return; }
+    if (result?.product === "prepaid-v1" && result.state === "purchase_pending") { message("Purchase confirming… Your credits will appear automatically. You can keep chatting with your existing credits."); return; }
     const state = result?.state || result?.status;
     const creditMessages = {
       credit_submission_pending: "Submission attempted. Check confirmation for this saved transaction.",
@@ -173,6 +209,7 @@
       : fundingMessages[funding?.reason || result?.reason];
     const messages = {
       cancelled: "Action cancelled. No new approval was granted.", stopped: "Action stopped. Check payment activity if submission had already started.",
+      prepaid_connected: "Prepaid credits connected. Add your invitation, then buy credits and chat.",
       signed: "Transaction signed. Check confirmation in Payment activity before continuing.", finalized: "Transaction confirmed on chain.",
       uncertain: "The result is uncertain. Check the saved transaction before trying again.",
       await_finality: "Deposit submission attempted. Check confirmation in Payment activity before continuing.",
@@ -222,7 +259,7 @@
     if (state === "correction_await_finality" && amount(result?.simulation?.rcUsed) !== "—") status.appendChild(document.createTextNode(" · Simulation: " + amount(result.simulation.rcUsed) + " Mana"));
     if (result?.deposit && funding?.state !== "funded") status.appendChild(document.createTextNode(" · Deposit: " + words(result.deposit.state)));
   }
-  const refreshAfter = new Set(["import", "access", "purchase", "fund-rewards", "reserve", "refund", "revoke", "release", "check", "resume", "correct-mana", "recover", "repair", "restore", "worker-start", "worker-stop"]);
+  const refreshAfter = new Set(["import", "connect-prepaid", "access", "purchase", "purchase-retry", "fund-rewards", "reserve", "refund", "revoke", "release", "check", "resume", "correct-mana", "recover", "repair", "restore", "worker-start", "worker-stop"]);
   async function run(action, amountInput = el("koin-test-amount")) {
     if (action === "worker-stop") {
       try { await bridge.run(action); providing = false; paintProvider({ state: "offline", label: "OFFLINE", detail: "This computer is no longer providing AI." }); }
@@ -240,7 +277,7 @@
       const atoms = validFormat ? BigInt(whole) * 100000000n + BigInt(part.padEnd(8, "0")) : 0n;
       if (!validFormat || atoms <= 0n || atoms > (1n << 64n) - 1n) {
         amountInput.setAttribute("aria-invalid", "true");
-        message("To add funds, enter an amount greater than 0, such as 0.1 (up to 8 decimal places, without KOIN). To reserve your existing balance, send a chat message.", true);
+        message(prepaid ? "Enter the KOIN amount to buy credits, such as 0.1 for 100 credits." : "To add funds, enter an amount greater than 0, such as 0.1 (up to 8 decimal places, without KOIN). To reserve your existing balance, send a chat message.", true);
         amountInput.focus(); return;
       }
       amountInput.removeAttribute("aria-invalid");
@@ -272,6 +309,7 @@
       message(String(error.message || "Payment action unavailable").replace(/^Error invoking remote method 'koin:test-payments': (?:Error: )?/, "").slice(0, 280), true);
     } finally { if (action !== "stop") busy = false; controls(); refreshProvider(); window.KaiNetwork?.refresh().then(() => window.KaiNetwork.paint()).catch(() => {}); }
   }
+  el("network-retry-purchase").addEventListener("click", () => run("purchase-retry"));
   const tabs = [...section.querySelectorAll("[data-koin-view]")];
   function choose(tab) {
     for (const item of tabs) { const active = item === tab; item.setAttribute("aria-selected", String(active)); item.tabIndex = active ? 0 : -1; el(item.getAttribute("aria-controls")).hidden = !active; }
@@ -291,6 +329,13 @@
   window.addEventListener("kai-network-account-changed", () => { if (!busy) run("status"); });
   bridge.onProgress?.(value => { if (busy) message(String(value?.text || "")); });
   setInterval(refreshProvider, 10000);
+  let creditRefresh = false;
+  setInterval(async () => {
+    if (!prepaid || busy || creditRefresh || document.hidden) return;
+    creditRefresh = true;
+    try { snapshot(await bridge.run("status")); } catch { /* Keep the last known credit balance visible. */ }
+    finally { creditRefresh = false; }
+  }, 5000);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshProvider(); });
   controls(); run("status");
 })();

@@ -94,6 +94,7 @@ function validateDeployment(d) {
       throw Error("Pin complete code hashes");
   if (new Set([d.credits, d.rewards, d.token]).size !== 3)
     throw Error("Separate custody contracts required");
+  if (d.product !== undefined && d.product !== "prepaid-v1") throw Error("Unknown credit product");
   return structuredClone(d);
 }
 class KoinChain {
@@ -103,10 +104,11 @@ class KoinChain {
       throw Error("Isolated mode requires an explicitly injected provider");
     Object.freeze(this.d.rpc); Object.freeze(this.d);
     this.provider = provider || new PinnedRpcProvider(this.d.rpc, this.d.chainId);
-    this.serializer = new Serializer(ABIS.credits.types);
+    this.abis = this.d.product === "prepaid-v1" ? { ...ABIS, credits: require("./prepaid-abi.json") } : ABIS;
+    this.serializer = new Serializer(this.abis.credits.types);
   }
   async operation(kind, method, args = {}) {
-    const entry = ABIS[kind]?.methods[method];
+    const entry = this.abis[kind]?.methods[method];
     if (!entry) throw Error("Unknown KOIN method");
     const bytes = await this.serializer.serialize(
       normalize(this.serializer.root.lookupType("koin.Request"), args),
@@ -133,7 +135,7 @@ class KoinChain {
       args: utils.encodeBase64url(approved) } }, deposit];
   }
   async read(kind, method, args = {}) {
-    if (!ABIS[kind]?.methods[method]?.read_only)
+    if (!this.abis[kind]?.methods[method]?.read_only)
       throw Error("Not a read method");
     const r = await this.provider.readContract(
       await this.operation(kind, method, args),
@@ -190,6 +192,7 @@ class KoinChain {
         if (c[key] !== encodedAddress(expected))
           throw Error("Unexpected on-chain " + key);
     }
+    if ((credits.product_version || 0) !== (d.product === "prepaid-v1" ? 1 : 0)) throw Error("Credit product differs from pinned deployment");
     if (String(credits.config.version) !== String(rewards.config.version))
       throw Error("Contract policies are not synchronized");
     return {
@@ -206,7 +209,7 @@ class KoinChain {
     address(actor);
     address(payer);
     P.uint(rcLimit);
-    if (ABIS[kind]?.methods[method]?.read_only || method === "initialize")
+    if (this.abis[kind]?.methods[method]?.read_only || method === "initialize")
       throw Error("Choose a mutable configured method");
     if (funding(kind, method) && state.paused) throw Error("Funding is paused");
     return Transaction.prepareTransaction(

@@ -1,3 +1,9 @@
+## Prepaid credits implementation
+
+Adds a separate prepaid account mode: Buy credits with KOIN, see a credit balance, and use normal Chat without reservation approvals. Purchased credits do not expire; failed requests release their temporary credit hold automatically. Purchases and usage appear in account history. Existing credit use is independent of blockchain settlement and provider payouts.
+
+This mode requires a verified new prepaid deployment and account connection. It does not convert existing KOIN reservations, replace live contracts, or move old balances. Existing pilot records remain preserved for migration.
+
 ## Reuse KOIN from expired spending allowances in Chat
 
 - Shows an expired reservation's remaining KOIN and actual contract release time beside normal Chat. A reservation still in its settlement window no longer asks you to add another deposit. New reservation approvals also show the release deadline up front.

@@ -12,6 +12,7 @@ function fixture(t, options = {}) {
   for (const k of ["token", "credits", "rewards", "admin", "verifier", "mining", "operations"]) d[k] = Signer.fromSeed("funding-recovery-" + k).getAddress();
   for (const k of ["token", "credits", "rewards"]) d[k + "Hash"] = "0x1220" + "1".repeat(64);
   if (options.mainnet === true) Object.assign(d, { network: "mainnet", chainId: require("../../lib/koin-network/payment-network").MAINNET_CHAIN, token: require("../../lib/koin-network/payment-network").MAINNET_TOKEN, rpc: ["https://mainnet.invalid"] });
+  if (options.prepaid === true) d.product = "prepaid-v1";
   const config = { chain_id: d.chainId, token: encodedAddress(d.token), credits: encodedAddress(d.credits), treasury: encodedAddress(d.rewards),
     admin: encodedAddress(d.admin), verifier: encodedAddress(d.verifier), mining: encodedAddress(d.mining), operations: encodedAddress(d.operations), version: "1" };
   const state = { now: 1000000, height: 10, lib: 10, nonce: "KAE=", paused: false, record: null, block: null, fork: false, liquid: "0", liabilities: "0", available: "0", allowance: "0", signed: 0, submissions: [] };
@@ -39,7 +40,7 @@ function fixture(t, options = {}) {
       }
       if (op.contract_id === d.rewards && op.entry_point === creditsABI.methods.balances.entry_point && op.args !== "")
         throw Error("Reward custody is aggregate; no customer account parameter");
-      const value = op.entry_point === creditsABI.methods.config.entry_point ? { config, paused: state.paused } : {
+      const value = op.entry_point === creditsABI.methods.config.entry_point ? { config, paused: state.paused, ...(options.prepaid && op.contract_id === d.credits ? { product_version: 1 } : {}) } : {
         liquid: state.liquid, liabilities: state.liabilities, balance: { available: state.available, reserved: "0" } };
       return { result: utils.encodeBase64url(await client.serializer.serialize(value, "koin.Result")) };
     },

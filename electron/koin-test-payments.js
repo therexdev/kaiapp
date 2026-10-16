@@ -23,7 +23,7 @@ async function submissionResponse(promise, signal) {
   } finally { clearTimeout(timer); signal.removeEventListener("abort", aborted); }
 }
 class TestPayments {
-  #config; #client; #journal; #wallet; #dialog; #funding; #task; #clock; #authorizeHost;
+  #config; #client; #journal; #wallet; #dialog; #funding; #task; #clock; #authorizeHost; #syncing = false; #syncAbort; #registeredPurchases = new Set();
   constructor({ config, client, journal, wallet, dialog, clock = Date.now, authorizeHost = null }) {
     assertPaymentMode(config.mode, client); journal.assertMode(config.mode); journal.assertClient(client);
     if (config.mode !== "isolated-rehearsal" && typeof authorizeHost !== "function") throw Error("Test signing requires a persistent host lease");
@@ -45,7 +45,7 @@ class TestPayments {
     if (signer.getAddress() !== this.#config.owner) throw Error("Test wallet changed");
     const signed = structuredClone(tx); await signer.signTransaction(signed); return signed;
   }
-  stop() { if (this.#task) { this.#task.stopped = true; this.#task.abort.abort(); } this.#funding.cancel(); }
+  stop() { this.#syncAbort?.abort(); if (this.#task) { this.#task.stopped = true; this.#task.abort.abort(); } this.#funding.cancel(); }
   #creditStatus(status, reason) {
     if (status.purpose !== "credits") return status;
     const draft = this.#journal.nonceCoordinator.draft(status.id), op = draft.operations?.length === 1 && draft.operations[0].call_contract;
@@ -79,8 +79,8 @@ class TestPayments {
   async status() {
     const owner = this.#owner(), config = await this.#client.verify();
     const balances = await this.#client.read("credits", "balances", { account: encodedAddress(owner) });
-    const expiredReservations = BigInt(balances.balance?.reserved || "0") > 0n ? await this.#expiredReservations() : [];
-    return { enabled: true, mode: this.#config.mode, mainnetPaymentsEnabled: this.#config.mode === "mainnet-pilot", owner, paused: !!config.paused,
+    const expiredReservations = this.#client.d.product !== "prepaid-v1" && BigInt(balances.balance?.reserved || "0") > 0n ? await this.#expiredReservations() : [];
+    return { product: this.#client.d.product || "legacy-reservations", enabled: true, mode: this.#config.mode, mainnetPaymentsEnabled: this.#config.mode === "mainnet-pilot", owner, paused: !!config.paused,
       balances: { available: balances.balance?.available || "0", reserved: balances.balance?.reserved || "0" },
       expiredReservations,
       deposits: this.#journal.list(), transactions: this.#journal.nonceCoordinator.list().map(status => this.#creditStatus(status)),
@@ -118,6 +118,7 @@ class TestPayments {
     return result.sort((a, b) => a.releaseAfter - b.releaseAfter).map(r => ({ ...r, canRelease: now > r.releaseAfter && chainTime > r.releaseAfter }));
   }
   async session(wanted) {
+    if (this.#client.d.product === "prepaid-v1") return null;
     // Restore session identity and limits from the actual reserved transaction,
     // not a replaceable config or a scheduler-provided transaction template.
     for (const item of this.#journal.nonceCoordinator.list()) if (item.purpose === "credits" && item.state === "finalized") {
@@ -242,7 +243,32 @@ class TestPayments {
     catch { reason = "funding_submission_uncertain"; }
     return result("correction_await_finality", { reason, simulation });
   }
+  pendingPurchase() {
+    this.#owner();
+    return this.#journal.list().find(p => p.kind === "credits" && !["funded", "reverted", "conflicted"].includes(p.state)) || null;
+  }
+  async syncPurchases(register, signal) {
+    if (this.#client.d.product !== "prepaid-v1" || this.#syncing || this.#task) return;
+    this.#syncing = true; this.#syncAbort = new AbortController();
+    const combined = AbortSignal.any([signal, this.#syncAbort.signal]);
+    try {
+      this.#owner();
+      for (const p of this.#journal.list().filter(p => p.kind === "credits" && !["reverted", "conflicted"].includes(p.state))) {
+        combined.throwIfAborted();
+        const correction = this.#journal.nonceCoordinator.correction(p.id);
+        const txId = correction?.transaction?.id || p.txId;
+        if (!this.#registeredPurchases.has(txId)) { await register(txId, combined); this.#registeredPurchases.add(txId); }
+        if (p.state === "funded") continue;
+        await this.#journal.nonceCoordinator.reconcile(p.id);
+        const decision = await this.#journal.advance(p.id, { allowSubmit: false });
+        if (decision.action === "done") continue;
+        // Read-only recovery is automatic. Re-broadcast is kept within the
+        // original visible purchase action; no background signing is possible.
+      }
+    } finally { this.#syncing = false; this.#syncAbort = null; }
+  }
   async run(window, action, input) {
+    if (this.#client.d.product === "prepaid-v1" && ["reserve", "refund", "revoke", "release"].includes(action)) throw Error("Purchased credits are used directly in Chat");
     if (this.#task) throw Error("A Test payment action is already open");
     const visible = () => window && !window.isDestroyed() && window.isVisible() && !window.isMinimized();
     if (!visible()) throw Error("Visible Test window required");
@@ -254,8 +280,20 @@ class TestPayments {
     window.webContents.on("did-start-navigation", navigation); window.webContents.on("render-process-gone", stop);
     try {
       this.#owner(); guard();
-      if (["purchase", "fund-rewards", "reserve", "refund", "revoke", "release", "resume", "correct-mana"].includes(action)) { await this.#authorizeHost?.(); guard(); }
+      if (["purchase", "purchase-retry", "fund-rewards", "reserve", "refund", "revoke", "release", "resume", "correct-mana"].includes(action)) { await this.#authorizeHost?.(); guard(); }
       if (["purchase", "fund-rewards", "reserve", "refund", "revoke", "release"].includes(action) && this.#wallet.signer.getAddress() !== this.#owner()) throw Error("Unlock the configured Test wallet");
+      if (["purchase", "purchase-retry"].includes(action) && this.#client.d.product === "prepaid-v1") {
+        const existing = this.pendingPurchase();
+        if (existing && action === "purchase") return { status: "await_finality", deposit: existing };
+        if (action === "purchase-retry") {
+          if (!existing) return { status: "complete" };
+          await this.#journal.nonceCoordinator.reconcile(existing.id); guard();
+          const checked = await this.#journal.advance(existing.id, { allowSubmit: false }); guard();
+          if (checked.action === "done") return { status: "complete", deposit: this.#journal.status(existing.id) };
+          if (this.#journal.nonceCoordinator.correction(existing.id)) return await this.#correctMana(window, existing.id, guard);
+          return await this.#funding.resume(window, existing.id, () => this.#journal.saved(existing.id).intent);
+        }
+      }
       if (action === "purchase" || action === "fund-rewards") {
         const amount = atoms(input), kind = action === "purchase" ? "credits" : "rewards";
         if (BigInt(amount) > BigInt(this.#config.limits.amount)) throw Error("Deposit exceeds the configured Test limit");

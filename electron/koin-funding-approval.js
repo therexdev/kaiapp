@@ -59,9 +59,9 @@ function createFundingApproval({ mode, client, journal, dialog, sign, submit, cl
       const line = (name, value) => `${tr(name)}: ${value}`;
       const { response } = await waiting(dialog.showMessageBox(window, {
         type: "question", title: tr(mainnet ? "Mainnet KOIN funding — real funds" : mode === "test-deployment" ? "Test KOIN funding" : "Isolated KOIN funding rehearsal"),
-        message: tr(resume ? "Review the saved deposit for resubmission" : (mainnet ? "Approve this real KOIN deposit" : mode === "test-deployment" ? "Approve this testnet deposit" : "Approve this fixture-wallet deposit")),
+        message: tr(client.d.product === "prepaid-v1" && request.kind === "credits" ? (resume ? "Retry this saved credit purchase" : "Buy AI credits with KOIN") : resume ? "Review the saved deposit for resubmission" : (mainnet ? "Approve this real KOIN deposit" : mode === "test-deployment" ? "Approve this testnet deposit" : "Approve this fixture-wallet deposit")),
         detail: [tr(mainnet ? "MAINNET: This transfers real KOIN to the displayed custody contract. A Test installer does not make these funds test tokens." : mode === "test-deployment" ? "Foundation testnet tokens only. This transfers test KOIN to the displayed custody contract." : "Isolated fixture chain only. This approval cannot enable live payments."), "",
-          tr(request.kind === "credits" ? "This deposit backs refundable usage credits." : "This funds provider rewards, not a refundable customer balance."),
+          tr(request.kind === "credits" ? (client.d.product === "prepaid-v1" ? "Buy nonrefundable AI credits. 1 KOIN buys 1,000 credits. Credits do not expire and cannot be transferred or withdrawn. Failed chats do not consume credits. The service accounts for usage; KOIN settlement runs in the background." : "This deposit backs refundable usage credits.") : "This funds provider rewards, not a refundable customer balance."),
           line("Amount", koin(request.args.amount)), line("Wallet and Mana payer", request.actor),
           line("Custody contract", client.d[request.kind]), line("Custody code", client.d[request.kind + "Hash"]),
           line("Native token contract", client.d.token), line("Native token code", client.d.tokenHash), line("Chain", client.d.chainId),

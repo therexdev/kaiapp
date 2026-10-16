@@ -309,6 +309,53 @@ export namespace koin {
     }
   }
 
+  @unmanaged
+  export class PrepaidAccount {
+    static encode(message: PrepaidAccount, writer: Writer): void {
+      if (message.purchased != 0) {
+        writer.uint32(8);
+        writer.uint64(message.purchased);
+      }
+
+      if (message.consumed != 0) {
+        writer.uint32(16);
+        writer.uint64(message.consumed);
+      }
+    }
+
+    static decode(reader: Reader, length: i32): PrepaidAccount {
+      const end: usize = length < 0 ? reader.end : reader.ptr + length;
+      const message = new PrepaidAccount();
+
+      while (reader.ptr < end) {
+        const tag = reader.uint32();
+        switch (tag >>> 3) {
+          case 1:
+            message.purchased = reader.uint64();
+            break;
+
+          case 2:
+            message.consumed = reader.uint64();
+            break;
+
+          default:
+            reader.skipType(tag & 7);
+            break;
+        }
+      }
+
+      return message;
+    }
+
+    purchased: u64;
+    consumed: u64;
+
+    constructor(purchased: u64 = 0, consumed: u64 = 0) {
+      this.purchased = purchased;
+      this.consumed = consumed;
+    }
+  }
+
   export class Session {
     static encode(message: Session, writer: Writer): void {
       const unique_name_id = message.id;
@@ -1223,6 +1270,19 @@ export namespace koin {
         writer.uint32(72);
         writer.bool(message.claimed);
       }
+
+      const unique_name_prepaid = message.prepaid;
+      if (unique_name_prepaid !== null) {
+        writer.uint32(82);
+        writer.fork();
+        PrepaidAccount.encode(unique_name_prepaid, writer);
+        writer.ldelim();
+      }
+
+      if (message.product_version != 0) {
+        writer.uint32(88);
+        writer.uint32(message.product_version);
+      }
     }
 
     static decode(reader: Reader, length: i32): Result {
@@ -1268,6 +1328,14 @@ export namespace koin {
             message.claimed = reader.bool();
             break;
 
+          case 10:
+            message.prepaid = PrepaidAccount.decode(reader, reader.uint32());
+            break;
+
+          case 11:
+            message.product_version = reader.uint32();
+            break;
+
           default:
             reader.skipType(tag & 7);
             break;
@@ -1286,6 +1354,8 @@ export namespace koin {
     liquid: u64;
     paused: bool;
     claimed: bool;
+    prepaid: PrepaidAccount | null;
+    product_version: u32;
 
     constructor(
       config: Config | null = null,
@@ -1296,7 +1366,9 @@ export namespace koin {
       liabilities: u64 = 0,
       liquid: u64 = 0,
       paused: bool = false,
-      claimed: bool = false
+      claimed: bool = false,
+      prepaid: PrepaidAccount | null = null,
+      product_version: u32 = 0
     ) {
       this.config = config;
       this.balance = balance;
@@ -1307,6 +1379,8 @@ export namespace koin {
       this.liquid = liquid;
       this.paused = paused;
       this.claimed = claimed;
+      this.prepaid = prepaid;
+      this.product_version = product_version;
     }
   }
 }

@@ -173,7 +173,7 @@
         </div>
         <div id="network-chat-account" class="network-chat-account" hidden>
           <div><strong>Koinos Network</strong><span id="network-chat-balance">Balance loading…</span></div>
-          <div class="network-chat-funding"><label for="network-koin-amount">Amount to add (KOIN)</label><input id="network-koin-amount" inputmode="decimal" placeholder="e.g. 0.1" maxlength="22" autocomplete="off" aria-describedby="network-chat-help network-chat-status" /><button id="network-add-koin" class="primary small">Add KOIN</button><button id="network-account" class="small">Account</button></div>
+          <div class="network-chat-funding"><label for="network-koin-amount">Amount to add (KOIN)</label><input id="network-koin-amount" inputmode="decimal" placeholder="e.g. 0.1" maxlength="22" autocomplete="off" aria-describedby="network-chat-help network-chat-status" /><button id="network-add-koin" class="primary small">Add KOIN</button><button id="network-retry-purchase" class="small" hidden>Retry purchase</button><button id="network-account" class="small">Account</button></div>
           <button id="network-recover" class="small" hidden>Recover last reply</button>
           <p id="network-chat-help">Send uses your existing balance and asks you to approve a reservation when needed. Add KOIN deposits more from your wallet.</p>
           <p id="network-chat-reservation" role="status" hidden></p>
@@ -439,7 +439,7 @@
             <details id="koin-connection" class="kp-details" open>
               <summary>Network connection <span id="koin-connection-state">Setup required</span></summary>
               <div class="kp-details-body"><p class="hint" id="koin-connection-help">Connect using your network configuration, then add your private invitation. Both must match this wallet.</p>
-                <div class="kp-actions"><button data-koin-test="import" class="primary small">Connect network</button><button data-koin-test="access" class="small">Add invitation</button></div>
+                <div class="kp-actions"><button data-koin-test="import" class="primary small">Connect network</button><button data-koin-test="access" class="small">Add invitation</button><button data-koin-test="connect-prepaid" class="small">Connect prepaid credits</button></div>
                 <p id="koin-connected-wallet" class="hint kp-wallet"></p>
               </div>
             </details>
@@ -473,6 +473,8 @@
               </div>
             </div>
 
+            <button data-koin-test="purchase-retry" class="small" hidden>Retry purchase</button>
+            <details id="koin-prepaid-history" class="kp-details" hidden><summary>Purchases &amp; usage</summary><ul id="koin-prepaid-rows" class="kp-details-body"></ul></details>
             <details id="koin-activity" class="kp-details">
               <summary>Payment activity <span id="koin-activity-count">No activity loaded</span></summary>
               <div class="kp-details-body"><p class="hint">Check confirmation before continuing after a payment. A pending transaction is not a completed payment.</p><label for="koin-test-transaction">Transaction</label><select id="koin-test-transaction"><option value="">No transactions loaded</option></select>

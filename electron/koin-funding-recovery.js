@@ -218,6 +218,40 @@ class FundingRecovery {
     await this.#validate(observed.transaction, observed);
     const finality = await this.#observer.finality(observed.transaction, observed.intent);
     const confirmed = ["finalized", "reverted"].includes(finality.state);
+    if (this.#client.d.product === "prepaid-v1") {
+      // A prepaid purchase is proven by its exact irreversible native transfer.
+      // No refundable session snapshot needs to remain unchanged across blocks.
+      const config = await this.#client.verify();
+      const next = confirmed ? null : await this.#client.provider.getNextNonce(initial.intent.actor);
+      const result = this.#tx(() => {
+        const r = this.#row(id);
+        if (terminal(r.state)) return { action: "done", ...this.status(id) };
+        if (confirmed) {
+          r.finality = finality; r.state = finality.state === "finalized" ? "funded" : "reverted"; r.reason = null; this.#save(r);
+          return { action: "done", ...this.status(id) };
+        }
+        if (correction || r.held || r.state === "needs_review") return { action: "review", ...this.status(id) };
+        if (finality.state !== "unknown" || !allowSubmit) return { action: "wait", ...this.status(id) };
+        let reason = null;
+        if (hash(JSON.stringify(config)) !== r.policyHash || config.paused) reason = "funding_policy_changed";
+        else if (nonce(next) !== nonce(r.draft.header.nonce)) reason = "wallet_nonce_changed";
+        else if (r.attempts === 0 && this.#time() >= r.expires) reason = "funding_review_expired";
+        else if (r.attempts >= this.#policy.maxAttempts) reason = "funding_attempt_limit";
+        if (reason) { r.state = "needs_review"; r.reason = reason; this.#save(r); return { action: "review", ...this.status(id), reason }; }
+        const now = this.#time();
+        if (r.lastAttemptAt !== null && now - r.lastAttemptAt < this.#policy.minRetryMs) return { action: "wait", ...this.status(id) };
+        const day = String(Math.floor(now / DAY));
+        if (!r.days.includes(day)) {
+          const used = this.#db.prepare("SELECT amount FROM mana WHERE day=? AND owner=?").all(day, r.intent.actor).reduce((sum, m) => sum + uint(m.amount), 0n);
+          if (used + uint(r.intent.maxRc) > uint(this.#policy.maxRcPerDay)) return { action: "wait", reason: "funding_daily_rc_budget", ...this.status(id) };
+          this.#db.prepare("INSERT INTO mana VALUES(?,?,?,?)").run(day, r.intent.actor, id, r.intent.maxRc); r.days.push(day);
+        }
+        r.attempts++; r.lastAttemptAt = now; r.state = "unknown"; this.#save(r);
+        return { action: "submit_exact_transaction", id, transaction: structuredClone(r.transaction), intent: structuredClone(r.intent), paymentsEnabled: this.paymentsEnabled };
+      });
+      if (result.action === "done") await this.#nonces.reconcile(id);
+      return result;
+    }
     const evidence = await this.#observer.inspect(initial.intent, confirmed ? finality.height : "0");
     const nextNonce = confirmed ? null : await this.#client.provider.getNextNonce(initial.intent.actor);
     const result = this.#tx(() => {

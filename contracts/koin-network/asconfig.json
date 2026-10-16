@@ -17,6 +17,15 @@
       "shrinkLevel": 0,
       "converge": false,
       "noAssert": false
+    },
+    "prepaid": {
+      "binaryFile": "build/release/prepaid.wasm",
+      "textFile": "build/release/prepaid.wat",
+      "sourceMap": true,
+      "optimizeLevel": 3,
+      "shrinkLevel": 0,
+      "converge": false,
+      "noAssert": false
     }
   },
   "options": {}

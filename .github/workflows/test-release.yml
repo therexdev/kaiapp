@@ -36,6 +36,7 @@ jobs:
       - run: npm test
         env:
           KAI_MASCOT_QA_DIR: mascot-qa
+          KAI_PREPAID_QA_DIR: mascot-qa
           # Tests provide their own loopback services. Never use production
           # defaults for background polls from temporary test profiles.
           KAI_SCHEDULER_URL: http://127.0.0.1:9/scheduler
@@ -79,6 +80,7 @@ jobs:
         with:
           name: koin-custody-contracts
           path: |
+            contracts/koin-network/build/release/prepaid.wasm
             contracts/koin-network/build/release/credits.wasm
             contracts/koin-network/build/release/rewards.wasm
             contracts/koin-network/abi/*.json

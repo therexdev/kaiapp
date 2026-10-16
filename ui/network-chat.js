@@ -25,7 +25,8 @@
       const result = await bridge.run("chat-completion", body);
       signal?.throwIfAborted();
       const charge = result.koin?.receipt?.usage?.amount;
-      const warning = charge ? `${amount(charge)} KOIN · ${result.koin.state === "settled" ? "settled" : "verified usage, settlement pending"}` : "Verified network answer";
+      const creditText = charge ? (() => { const n = BigInt(charge); return `${n / 100000n}.${(n % 100000n).toString().padStart(5, "0")}`.replace(/\.?0+$/, "") || "0"; })() : "0";
+      const warning = result.koin?.product === "prepaid-v1" ? `${creditText} credits` : charge ? `${amount(charge)} KOIN · ${result.koin.state === "settled" ? "settled" : "verified usage, settlement pending"}` : "Verified network answer";
       const headers = { "x-kai-paid-request": result.id, "x-kai-buffered": "true" };
       progress(warning);
       if (body.stream === false) return Response.json(result, { headers });
