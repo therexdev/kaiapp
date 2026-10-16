@@ -248,7 +248,9 @@ export class Base {
     this.configs.remove(PENDING);
   }
   pause(value: bool): void {
-    auth(this.config().admin!);
-    this.totals.put(PAUSE, new K.Amount(value ? 1 : 0));
+    System.log("pause:config"); const c = this.config();
+    System.log("pause:authority"); auth(c.admin!);
+    System.log("pause:write"); this.totals.put(PAUSE, new K.Amount(value ? 1 : 0));
+    System.log("pause:done");
   }
 }
