@@ -304,6 +304,14 @@ class TestPayments {
       if (action === "purchase" || action === "fund-rewards") {
         const amount = atoms(input), kind = action === "purchase" ? "credits" : "rewards";
         if (BigInt(amount) > BigInt(this.#config.limits.amount)) throw Error("Deposit exceeds the configured Test limit");
+        if (action === "purchase" && this.#client.d.product === "prepaid-v1" && this.#config.mode === "mainnet-pilot") {
+          // Reject an underfunded resource ceiling before reserving a nonce or
+          // creating a signature. A failed precheck cannot strand a purchase.
+          await this.#client.verify(); guard();
+          const mana = await this.#client.provider.getAccountRc(this.#owner()); guard();
+          if (typeof mana !== "string" || !/^(0|[1-9]\d*)$/.test(mana)) throw Error("Could not check this purchase. No KOIN was sent.");
+          if (BigInt(mana) < BigInt(this.#config.maxRcPerTransaction)) throw Error("Your wallet needs more available Mana to buy credits. No KOIN was sent. Your existing credits are still usable.");
+        }
         return await this.#funding.approve(window, hash(crypto.randomBytes(32)), () => ({ kind, method: kind === "credits" ? "purchase" : "fund",
           actor: this.#owner(), args: { account: encodedAddress(this.#owner()), amount }, maxRc: this.#config.maxRcPerTransaction }));
       }
