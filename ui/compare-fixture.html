@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Compare Models — fixture consent demo</title><link rel="stylesheet" href="/styles.css"><script defer src="/compare-fixture.js"></script></head>
+<body><main class="cmp-wrap">
+  <h1>Compare Models <span class="soon">Development fixture</span></h1>
+  <p class="lede">Prepared fixture responses only. No real model runs. This separate demo does not open your app profile or use wallets, accounts, network inference or payments.</p>
+  <section class="api-card" aria-label="Plugin status">
+    <h2>Bundled first-party plugin</h2>
+    <p class="hint">firstparty.compare-fixture · version 1.0.0 · session-only installation</p>
+    <p id="plugin-status" role="status">Connecting to the development host…</p>
+    <div class="cmp-controls"><button id="install" class="primary small">Install fixture</button><button id="toggle">Disable</button><button id="uninstall">Uninstall</button></div>
+    <p class="hint">Installation grants no access. Each model needs native owner approval for one response, up to 240 input characters and 64 requested output tokens, expiring after 30 seconds. All permissions disappear on close.</p>
+  </section>
+  <section class="api-card" aria-label="Per-model permissions">
+    <h2>Choose two fixture models</h2>
+    <div class="cmp-controls"><label for="model-a">First model</label><select id="model-a"></select><button id="approve-a">Review permission</button><button id="revoke-a">Revoke</button></div>
+    <p id="permission-a" class="hint"></p>
+    <div class="cmp-controls"><label for="model-b">Second model</label><select id="model-b"></select><button id="approve-b">Review permission</button><button id="revoke-b">Revoke</button></div>
+    <p id="permission-b" class="hint"></p>
+    <label for="prompt">Fixture prompt (not sent to any model)</label>
+    <textarea id="prompt" rows="3" maxlength="240" placeholder="Try: Compare two ways to explain this idea."></textarea>
+    <div class="cmp-controls"><button id="run" class="primary">Try fixture comparison</button><button id="stop">Cancel / revoke all</button></div>
+    <p id="notice" role="status" aria-live="polite"></p><p id="error" class="error" role="alert"></p>
+  </section>
+  <section class="api-card" aria-label="Fixture results">
+    <h2>Fixture results — no model execution</h2>
+    <div class="cmp-pane"><div id="label-a" class="cmp-pane-head">First fixture</div><div id="answer-a" class="cmp-pane-body">No accepted fixture response.</div></div>
+    <div class="cmp-pane"><div id="label-b" class="cmp-pane-head">Second fixture</div><div id="answer-b" class="cmp-pane-body">No accepted fixture response.</div></div>
+    <p id="counter" class="hint"></p>
+  </section>
+</main></body></html>

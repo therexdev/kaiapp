@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "community.compare-models",
+  "version": "0.1.0",
+  "permissions": [
+    { "kind": "local-inference", "resource": "model:example-a", "action": "infer" },
+    { "kind": "local-inference", "resource": "model:example-b", "action": "infer" }
+  ]
+}
