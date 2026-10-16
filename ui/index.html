@@ -463,6 +463,8 @@
                   <button id="koin-open-chat" class="primary">Open Chat</button>
                 </section>
               </div>
+            <button data-koin-test="purchase-retry" class="small" hidden>Retry purchase</button>
+            <details id="koin-prepaid-history" class="kp-details" hidden><summary>Purchases &amp; usage</summary><ul id="koin-prepaid-rows" class="kp-details-body"></ul></details>
             </div>
             <div id="koin-earn-panel" role="tabpanel" aria-labelledby="koin-earn-tab" hidden>
               <div class="kp-grid">
@@ -473,8 +475,6 @@
               </div>
             </div>
 
-            <button data-koin-test="purchase-retry" class="small" hidden>Retry purchase</button>
-            <details id="koin-prepaid-history" class="kp-details" hidden><summary>Purchases &amp; usage</summary><ul id="koin-prepaid-rows" class="kp-details-body"></ul></details>
             <details id="koin-activity" class="kp-details">
               <summary>Payment activity <span id="koin-activity-count">No activity loaded</span></summary>
               <div class="kp-details-body"><p class="hint">Check confirmation before continuing after a payment. A pending transaction is not a completed payment.</p><label for="koin-test-transaction">Transaction</label><select id="koin-test-transaction"><option value="">No transactions loaded</option></select>

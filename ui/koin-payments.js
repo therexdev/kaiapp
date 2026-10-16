@@ -111,6 +111,9 @@
     el("koin-advanced").hidden = prepaid;
     el("koin-activity").hidden = prepaid;
     if (prepaid) {
+      el("koin-test-title").textContent = "Your AI account";
+      el("network-koin-amount").previousElementSibling.textContent = "KOIN to spend";
+      el("koin-model-label").textContent = "Use your credits in the normal Chat screen.";
       el("koin-test-network-notice").textContent = "Buy credits with KOIN. Use them in Chat. Buy more whenever you need them.";
       el("network-add-koin").textContent = "Buy credits";
       el("network-retry-purchase").hidden = !result.purchasePending;
@@ -294,12 +297,13 @@
       const result = await bridge.run(action, input);
       let refreshFailed = false;
       snapshot(result);
-      if (action === "status" && result?.configured && !result.paused) message("Account updated. Payments require your approval.");
+      if (action === "status" && result?.configured && !result.paused) message(prepaid ? "Credits updated. You can chat." : "Account updated. Payments require your approval.");
       if (refreshAfter.has(action) && result?.state !== "cancelled") {
         try { snapshot(await bridge.run("status")); }
         catch { refreshFailed = true; el("koin-available").textContent = el("koin-reserved").textContent = "—"; el("network-chat-reservation").hidden = true; }
       }
       outcome(result);
+      if (prepaid && action === "worker-start") message("Sharing AI capacity. Connection status is shown below.");
       if (action === "import" && result?.configured) message("Network connected. Add your invitation to continue.");
       if (refreshFailed) message(status.textContent + " Account refresh unavailable. Check confirmation before starting another payment.", true);
       if (result?.id && [...select.options].some(option => option.value === result.id)) select.value = result.id;
