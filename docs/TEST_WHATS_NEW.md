@@ -1,3 +1,11 @@
+## USD-valued credits and independently funded rewards
+
+Adds the separate `prepaid-usd-v1` contract product. Buy credits shows the exact KOIN payment, USD credit value, current signed rate, expiry and Master Node destination before signing. 1,000 display credits represent $1; purchased credits retain that value. The native transaction pays purchase KOIN directly to `15CM9Qr4GKREDgqnyXJ8tckPj2biERTM1T` and attributes the credits atomically.
+
+Normal Chat uses these credits without session approvals. Consumption records USD usage without transferring KOIN. Daily provider rewards come from a separately funded pool, budgeting 5% of uncommitted KOIN with the existing 70% availability / 30% work split. Existing accounts and payment records retain their original product and units.
+
+This is deployment support, not a live contract upgrade or a funded launch. New purchases require fresh market quotes; stale/unavailable quotes cannot change existing balances. The current public KOIN feeds did not pass freshness/availability checks on October 16, so production pricing remains a deployment blocker. See `docs/koin-network/USD_CREDITS.md` for exact units, trust boundaries, funding and remaining acceptance.
+
 ## Prepaid credits implementation
 
 Adds a separate prepaid account mode: Buy credits with KOIN, see a credit balance, and use normal Chat without reservation approvals. Purchased credits do not expire; failed requests release their temporary credit hold automatically. Purchases and usage appear in account history. Existing credit use is independent of blockchain settlement and provider payouts.

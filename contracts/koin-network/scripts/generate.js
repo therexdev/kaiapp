@@ -13,11 +13,12 @@ const common = ["initialize", "config", "schedule_policy", "activate_policy", "s
 const creditMethods = [...common, "purchase", "refund", "reserve", "revoke", "release", "settle", "get_session", "get_spend", "seal_day"];
 const rewardMethods = [...common, "fund", "open_epoch", "propose_root", "finalize_root", "cancel_root", "expire_epoch", "claim", "get_epoch", "claimed", "withdraw_free"];
 const prepaidMethods = [...common, "purchase", "settle_usage", "get_charge", "get_spend", "seal_day"];
-const methods = [...new Set([...creditMethods, ...rewardMethods, ...prepaidMethods])];
+const prepaidUsdMethods = [...prepaidMethods, "get_purchase"];
+const methods = [...new Set([...creditMethods, ...rewardMethods, ...prepaidUsdMethods])];
 const crypto = require("crypto"), entries = Object.fromEntries(methods.map(name => [name, parseInt(crypto.createHash("sha256").update(name).digest("hex").slice(0, 8), 16)]));
 fs.writeFileSync("assembly/entries.ts", Object.entries(entries).map(([k, v]) => `export const ${k}: u32 = ${v};`).join("\n") + "\n");
-for (const [kind, names] of [["credits", creditMethods], ["rewards", rewardMethods], ["prepaid", prepaidMethods]]) {
- const abi = { methods: Object.fromEntries(names.map(name => [name, { argument: "koin.Request", return: "koin.Result", entry_point: entries[name], read_only: ["config", "balances", "get_session", "get_spend", "get_epoch", "claimed", "get_charge"].includes(name) }])), types: root.toJSON(), descriptor: Buffer.from(desc.FileDescriptorSet.encode(descriptor).finish()).toString("base64") };
+for (const [kind, names] of [["credits", creditMethods], ["rewards", rewardMethods], ["prepaid", prepaidMethods], ["prepaid-usd", prepaidUsdMethods]]) {
+ const abi = { methods: Object.fromEntries(names.map(name => [name, { argument: "koin.Request", return: "koin.Result", entry_point: entries[name], read_only: ["config", "balances", "get_session", "get_spend", "get_epoch", "claimed", "get_charge", "get_purchase"].includes(name) }])), types: root.toJSON(), descriptor: Buffer.from(desc.FileDescriptorSet.encode(descriptor).finish()).toString("base64") };
  fs.writeFileSync(`abi/${kind}.json`, JSON.stringify(abi, null, 2)+"\n");
  fs.copyFileSync(`abi/${kind}.json`, `../../core/lib/koin-network/${kind}-abi.json`);
 }

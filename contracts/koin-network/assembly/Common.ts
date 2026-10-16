@@ -7,6 +7,7 @@ import {
   Crypto,
   Protobuf,
   token,
+  u128,
 } from "@koinos/sdk-as";
 import { koin as K } from "./proto/koin";
 export const DAY: u64 = 86400000;
@@ -38,6 +39,12 @@ export function sub(a: u64, b: u64): u64 {
 export function part(a: u64, n: u64, d: u64 = 10000): u64 {
   System.require(d > 0 && d <= DAY && n <= d, "invalid proportion");
   return (a / d) * n + ((a % d) * n) / d;
+}
+export function ratio(a: u64, n: u64, d: u64): u64 {
+  System.require(d > 0, "zero divisor");
+  const result = (u128.fromU64(a) * u128.fromU64(n)) / u128.fromU64(d);
+  System.require(result <= u128.fromU64(u64.MAX_VALUE), "amount overflow");
+  return result.toU64();
 }
 export function now(): u64 {
   return System.getBlockField("header.timestamp")!.uint64_value;
@@ -96,6 +103,11 @@ export class Base {
     return c!;
   }
   validate(c: K.Config): void {
+    System.require(c.reward_basis <= 1, "invalid reward basis");
+    if (c.reward_basis == 1) {
+      addr(c.master_node);
+      System.require(!equal(c.master_node, c.credits) && !equal(c.master_node, c.treasury) && !equal(c.master_node, c.token), "invalid master node");
+    } else System.require(c.master_node === null || c.master_node!.length == 0, "unexpected master node");
     addr(c.token);
     addr(c.admin);
     addr(c.verifier);
@@ -158,17 +170,18 @@ export class Base {
     }
     return out.code == 0;
   }
-  nativeBalance(): u64 {
+  nativeBalanceOf(account: Uint8Array): u64 {
     const out = System.call(
       this.config().token!,
       0x5c721497,
-      Protobuf.encode(new token.balance_of_arguments(this.id), token.balance_of_arguments.encode),
+      Protobuf.encode(new token.balance_of_arguments(account), token.balance_of_arguments.encode),
     );
     System.require(out.code == 0, "failed to retrieve token balance");
     // Native zero balances have an empty protobuf result. sdk-as Token's
     // balanceOf assumes a non-null buffer and traps on that valid response.
     return out.res.object === null ? 0 : Protobuf.decode<token.balance_of_result>(out.res.object!, token.balance_of_result.decode).value;
   }
+  nativeBalance(): u64 { return this.nativeBalanceOf(this.id); }
   liability(n: u64, increase: bool): void {
     const t = this.totals.get(KEY)!;
     t.value = increase ? add(t.value, n) : sub(t.value, n);
@@ -213,7 +226,8 @@ export class Base {
       equal(c.token, old.token) &&
         equal(c.chain_id, old.chain_id) &&
         equal(c.credits, old.credits) &&
-        equal(c.treasury, old.treasury),
+        equal(c.treasury, old.treasury) &&
+        equal(c.master_node, old.master_node) && c.reward_basis == old.reward_basis,
       "immutable custody domain",
     );
     System.require(

@@ -1,16 +1,16 @@
 "use strict";
 const { test } = require("node:test"), assert = require("node:assert/strict"), fs = require("fs"), os = require("os"), path = require("path");
 const { navClick } = require("./ui-nav"), CHROMIUM = process.env.KAI_TEST_CHROMIUM || "/opt/pw-browsers/chromium";
-test("prepaid customer uses Buy credits and normal Chat; provider has ONLINE and Off", { skip: !fs.existsSync(CHROMIUM), timeout: 60000 }, async t => {
+for (const product of ["prepaid-v1", "prepaid-usd-v1"]) test(product + " customer uses Buy credits and normal Chat; provider has ONLINE and Off", { skip: !fs.existsSync(CHROMIUM), timeout: 60000 }, async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-prepaid-ui-")), core = await require("../server").createCore({ dataDir: dir, port: 0, onEvent() {} });
   let browser; t.after(async () => { await browser?.close(); await core.stop(); fs.rmSync(dir, { recursive: true, force: true }); });
   browser = await require("playwright-core").chromium.launch({ executablePath: CHROMIUM, args: ["--no-sandbox", "--disable-gpu"] });
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-  await page.addInitScript(() => {
+  await page.addInitScript(product => {
     localStorage.setItem("kai-interface-language", "en"); window.calls = []; window.balance = "10000000"; window.provider = false;
     window.kaiKoinTestBridge = { onProgress: () => () => {}, run: async (action, input) => {
       window.calls.push({ action, input });
-      const common = { enabled: true, configured: true, product: "prepaid-v1", mode: "mainnet-pilot" };
+      const common = { enabled: true, configured: true, product, mode: "mainnet-pilot" };
       if (action === "chat-info") return { ...common, model: "koinos-fast", maxOutput: 128, blocked: "" };
       if (action === "status") return { ...common, accessReady: true, credits: { available: window.balance, purchased: "10000000", spent: "0", held: "0" }, purchases: [], usage: [], purchasePending: !!window.pendingPurchase, worker: { running: window.provider } };
       if (["purchase", "purchase-retry"].includes(action)) { window.pendingPurchase = true; return { ...common, state: "purchase_pending" }; }
@@ -18,7 +18,7 @@ test("prepaid customer uses Buy credits and normal Chat; provider has ONLINE and
         if (window.failChat) throw Error("No answer was delivered. Your credits are available; please try again.");
         window.balance = "9999875";
         return { id: "a".repeat(64), servedModel: "koinos-fast", choices: [{ message: { role: "assistant", content: "Prepaid answer" } }],
-          koin: { product: "prepaid-v1", receipt: { usage: { amount: "125" } } } };
+          koin: { product, receipt: { usage: { amount: "125" } } } };
       }
       if (action === "chat-ack") return { state: "delivered" };
       if (action === "worker-start") { window.provider = true; return {}; }
@@ -26,11 +26,12 @@ test("prepaid customer uses Buy credits and normal Chat; provider has ONLINE and
       if (action === "provider-status") return { state: window.provider ? "online" : "offline", label: window.provider ? "ONLINE" : "OFFLINE", detail: "Ready to provide AI", validUntil: Date.now() + 15000 };
       throw Error("Unexpected action " + action);
     } };
-  });
+  }, product);
   await page.goto(`http://127.0.0.1:${await core.start()}`); await navClick(page, '.nav-item[data-view="earn"]');
   await page.locator("#koin-open-chat").click(); await page.locator("#network-chat-account").waitFor({ state: "visible" });
   await page.waitForFunction(() => document.getElementById("network-chat-balance").textContent === "100 credits");
   assert.equal(await page.locator("#network-add-koin").textContent(), "Buy credits");
+  if (product === "prepaid-usd-v1") { assert.match(await page.locator("#network-chat-help").textContent(), /1,000 credits = \$1/); assert.doesNotMatch(await page.locator("#network-chat-help").textContent(), /1 KOIN =/); }
   assert.doesNotMatch(await page.locator("#network-chat-account").innerText(), /reservation|reserved|settlement|allowance/i);
   await page.fill("#network-koin-amount", "0.1"); await page.locator("#network-add-koin").click();
   await page.waitForFunction(() => !document.getElementById("network-add-koin").disabled);

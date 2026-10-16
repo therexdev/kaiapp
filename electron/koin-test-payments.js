@@ -1,4 +1,5 @@
 "use strict";
+const { isPrepaid, isUsd } = require("../core/lib/koin-network/product");
 // Test-only private controller. Renderer input chooses a narrow action/amount,
 // never a transaction, contract, key, RPC endpoint or signing callback.
 const crypto = require("crypto");
@@ -23,11 +24,11 @@ async function submissionResponse(promise, signal) {
   } finally { clearTimeout(timer); signal.removeEventListener("abort", aborted); }
 }
 class TestPayments {
-  #config; #client; #journal; #wallet; #dialog; #funding; #task; #clock; #authorizeHost; #syncing = false; #syncAbort; #registeredPurchases = new Set();
-  constructor({ config, client, journal, wallet, dialog, clock = Date.now, authorizeHost = null }) {
+  #config; #client; #journal; #wallet; #dialog; #funding; #task; #clock; #authorizeHost; #purchaseQuote; #syncing = false; #syncAbort; #registeredPurchases = new Set();
+  constructor({ config, client, journal, wallet, dialog, clock = Date.now, authorizeHost = null, purchaseQuote = null }) {
     assertPaymentMode(config.mode, client); journal.assertMode(config.mode); journal.assertClient(client);
     if (config.mode !== "isolated-rehearsal" && typeof authorizeHost !== "function") throw Error("Test signing requires a persistent host lease");
-    this.#authorizeHost = authorizeHost;
+    this.#authorizeHost = authorizeHost; this.#purchaseQuote = purchaseQuote;
     this.#config = structuredClone(config); this.#client = client; this.#journal = journal; this.#wallet = wallet; this.#dialog = dialog; this.#clock = clock;
     this.#funding = createFundingApproval({ mode: config.mode, client, journal, dialog, clock, timeoutMs: 30000,
       sign: async d => this.#sign(d.transaction), submit: async (d, { signal }) => {
@@ -79,7 +80,7 @@ class TestPayments {
   async status() {
     const owner = this.#owner(), config = await this.#client.verify();
     const balances = await this.#client.read("credits", "balances", { account: encodedAddress(owner) });
-    const expiredReservations = this.#client.d.product !== "prepaid-v1" && BigInt(balances.balance?.reserved || "0") > 0n ? await this.#expiredReservations() : [];
+    const expiredReservations = !isPrepaid(this.#client.d) && BigInt(balances.balance?.reserved || "0") > 0n ? await this.#expiredReservations() : [];
     return { product: this.#client.d.product || "legacy-reservations", enabled: true, mode: this.#config.mode, mainnetPaymentsEnabled: this.#config.mode === "mainnet-pilot", owner, paused: !!config.paused,
       balances: { available: balances.balance?.available || "0", reserved: balances.balance?.reserved || "0" },
       expiredReservations,
@@ -118,7 +119,7 @@ class TestPayments {
     return result.sort((a, b) => a.releaseAfter - b.releaseAfter).map(r => ({ ...r, canRelease: now > r.releaseAfter && chainTime > r.releaseAfter }));
   }
   async session(wanted) {
-    if (this.#client.d.product === "prepaid-v1") return null;
+    if (isPrepaid(this.#client.d)) return null;
     // Restore session identity and limits from the actual reserved transaction,
     // not a replaceable config or a scheduler-provided transaction template.
     for (const item of this.#journal.nonceCoordinator.list()) if (item.purpose === "credits" && item.state === "finalized") {
@@ -248,7 +249,7 @@ class TestPayments {
     return this.#journal.list().find(p => p.kind === "credits" && !["funded", "reverted", "conflicted"].includes(p.state)) || null;
   }
   async syncPurchases(register, signal) {
-    if (this.#client.d.product !== "prepaid-v1" || this.#syncing || this.#task) return;
+    if (!isPrepaid(this.#client.d) || this.#syncing || this.#task) return;
     this.#syncing = true; this.#syncAbort = new AbortController();
     const combined = AbortSignal.any([signal, this.#syncAbort.signal]);
     const run = async () => {
@@ -273,7 +274,7 @@ class TestPayments {
   async run(window, action, input, signal) {
     signal?.throwIfAborted();
     this.#syncAbort?.abort();
-    if (this.#client.d.product === "prepaid-v1" && ["reserve", "refund", "revoke", "release"].includes(action)) throw Error("Purchased credits are used directly in Chat");
+    if (isPrepaid(this.#client.d) && ["reserve", "refund", "revoke", "release"].includes(action)) throw Error("Purchased credits are used directly in Chat");
     if (this.#task) throw Error("A Test payment action is already open");
     const visible = () => window && !window.isDestroyed() && window.isVisible() && !window.isMinimized();
     if (!visible()) throw Error("Visible Test window required");
@@ -289,7 +290,7 @@ class TestPayments {
       this.#owner(); guard();
       if (["purchase", "purchase-retry", "fund-rewards", "reserve", "refund", "revoke", "release", "resume", "correct-mana"].includes(action)) { await this.#authorizeHost?.(); guard(); }
       if (["purchase", "fund-rewards", "reserve", "refund", "revoke", "release"].includes(action) && this.#wallet.signer.getAddress() !== this.#owner()) throw Error("Unlock the configured Test wallet");
-      if (["purchase", "purchase-retry"].includes(action) && this.#client.d.product === "prepaid-v1") {
+      if (["purchase", "purchase-retry"].includes(action) && isPrepaid(this.#client.d)) {
         const existing = this.pendingPurchase();
         if (existing && action === "purchase") return { status: "await_finality", deposit: existing };
         if (action === "purchase-retry") {
@@ -304,7 +305,7 @@ class TestPayments {
       if (action === "purchase" || action === "fund-rewards") {
         const amount = atoms(input), kind = action === "purchase" ? "credits" : "rewards";
         if (BigInt(amount) > BigInt(this.#config.limits.amount)) throw Error("Deposit exceeds the configured Test limit");
-        if (action === "purchase" && this.#client.d.product === "prepaid-v1" && this.#config.mode === "mainnet-pilot") {
+        if (action === "purchase" && isPrepaid(this.#client.d) && this.#config.mode === "mainnet-pilot") {
           // Reject an underfunded resource ceiling before reserving a nonce or
           // creating a signature. A failed precheck cannot strand a purchase.
           await this.#client.verify(); guard();
@@ -312,8 +313,15 @@ class TestPayments {
           if (typeof mana !== "string" || !/^(0|[1-9]\d*)$/.test(mana)) throw Error("Could not check this purchase. No KOIN was sent.");
           if (BigInt(mana) < BigInt(this.#config.maxRcPerTransaction)) throw Error("Your wallet needs more available Mana to buy credits. No KOIN was sent. Your existing credits are still usable.");
         }
+        let args = { account: encodedAddress(this.#owner()), amount };
+        if (kind === "credits" && isUsd(this.#client.d)) {
+          if (typeof this.#purchaseQuote !== "function") throw Error("Credit pricing is unavailable. Your existing credits are still usable.");
+          args = await this.#purchaseQuote(amount, this.#owner(), task.abort.signal); guard();
+          if (args?.account !== encodedAddress(this.#owner()) || args?.amount !== amount) throw Error("Purchase price does not match your request");
+          await require("../core/lib/koin-network/purchase-quote").verify(this.#client.d, args, { now: this.#clock(), version: this.#config.version });
+        }
         return await this.#funding.approve(window, hash(crypto.randomBytes(32)), () => ({ kind, method: kind === "credits" ? "purchase" : "fund",
-          actor: this.#owner(), args: { account: encodedAddress(this.#owner()), amount }, maxRc: this.#config.maxRcPerTransaction }));
+          actor: this.#owner(), args, maxRc: this.#config.maxRcPerTransaction }));
       }
       const nonces = this.#journal.nonceCoordinator;
       if (action === "correct-mana") return await this.#correctMana(window, digest(input), guard);

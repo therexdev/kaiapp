@@ -81,6 +81,7 @@ jobs:
           name: koin-custody-contracts
           path: |
             contracts/koin-network/build/release/prepaid.wasm
+            contracts/koin-network/build/release/prepaid-usd.wasm
             contracts/koin-network/build/release/credits.wasm
             contracts/koin-network/build/release/rewards.wasm
             contracts/koin-network/abi/*.json

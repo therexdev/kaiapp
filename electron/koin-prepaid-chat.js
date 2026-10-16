@@ -1,4 +1,5 @@
 "use strict";
+const { isPrepaid, isUsd } = require("../core/lib/koin-network/product");
 const crypto = require("crypto"), P = require("../core/lib/koin-network/job-protocol");
 const { ChatFlow, request } = require("./koin-chat-flow"), { fundedResultHash } = require("../core/lib/koin-network/funded-protocol");
 const { testDomain } = require("../core/lib/koin-network/payment-mode"), { protocol } = require("../core/lib/koin-network/payment-network");
@@ -8,7 +9,8 @@ class PrepaidChat extends ChatFlow {
   constructor(options) {
     super(options); this.access = options.access; this.fetch = options.fetchImpl || fetch;
     const d = this.config.deployment;
-    if (d.product !== "prepaid-v1") throw Error("Prepaid account required");
+    if (!isPrepaid(d)) throw Error("Prepaid account required");
+    this.product = d.product;
     this.target = { chainId: d.chainId, credits: d.credits, creditsHash: d.creditsHash, domain: testDomain(d, this.config.schedulerUrl), policyHash: this.config.policyHash };
   }
   async call(action, body = {}, signal = AbortSignal.timeout(10000)) {
@@ -20,14 +22,14 @@ class PrepaidChat extends ChatFlow {
     for await (const part of response.body) { signal.throwIfAborted(); size += part.length; if (size > 1600000) throw Error("Credit response too large"); parts.push(part); }
     const value = JSON.parse(Buffer.concat(parts).toString("utf8")), wire = protocol(this.target);
     this.access.authorize(this.config.schedulerUrl, signal);
-    if (value.product !== "prepaid-v1" || value.mode !== wire.mode || value.paymentsEnabled !== wire.paymentsEnabled || value.owner && value.owner !== this.config.owner) throw Error("Credit account identity changed");
+    if (value.product !== this.product || value.mode !== wire.mode || value.paymentsEnabled !== wire.paymentsEnabled || value.owner && value.owner !== this.config.owner) throw Error("Credit account identity changed");
     if (!response.ok || value.ok !== true) throw Error(value.error || "The network is unavailable. Please try again.");
     return value;
   }
   verify(result, input, id) {
     const k = result?.koin, q = k?.quote, r = k?.receipt, output = result?.choices?.[0]?.message?.content;
-    if (result?.id !== id || k?.product !== "prepaid-v1" || JSON.stringify(k.target) !== JSON.stringify(this.target) ||
-        !["ready", "charged"].includes(k.state) || r?.product !== "prepaid-v1" || r.job !== id || r.owner !== this.config.owner || r.provider === this.config.owner ||
+    if (result?.id !== id || k?.product !== this.product || JSON.stringify(k.target) !== JSON.stringify(this.target) ||
+        !["ready", "charged"].includes(k.state) || r?.product !== this.product || r.job !== id || r.owner !== this.config.owner || r.provider === this.config.owner ||
         k.session !== P.hash("prepaid-account:" + this.config.owner) || r.quoteHash !== q?.hash || r.outputHash !== P.hash(output || "") ||
         k.receiptHash !== P.hash(JSON.stringify(r))) throw Error("The network answer could not be verified. Retry this message to recover its saved answer.");
     P.validateQuote(q);
@@ -39,8 +41,8 @@ class PrepaidChat extends ChatFlow {
     P.signatureMatches(fundedResultHash(this.target, { id, session: k.session, attempt: r.attempt, quote: q }, output), r.signature, r.provider);
     return { id, object: "chat.completion", model: "koinos-network", servedModel: input.model,
       choices: [{ index: 0, message: { role: "assistant", content: output }, finish_reason: "stop" }],
-      usage: { prompt_tokens: r.usage.inputTokens, completion_tokens: r.usage.outputTokens, total_tokens: r.usage.inputTokens + r.usage.outputTokens }, costUsd: 0,
-      koin: { product: "prepaid-v1", state: k.state, target: this.target, session: k.session, quote: q, receipt: r, receiptHash: k.receiptHash } };
+      usage: { prompt_tokens: r.usage.inputTokens, completion_tokens: r.usage.outputTokens, total_tokens: r.usage.inputTokens + r.usage.outputTokens }, costUsd: isUsd(this.product) ? Number(r.usage.amount) / 1e8 : 0,
+      koin: { product: this.product, state: k.state, target: this.target, session: k.session, quote: q, receipt: r, receiptHash: k.receiptHash } };
   }
   async status() { return this.call("status"); }
   async chat(window, value, signal) {
@@ -78,7 +80,7 @@ class PrepaidChat extends ChatFlow {
     }
     this.progress("Generating your answer…");
     try {
-      const response = await this.call("chat", { billing: "koin-prepaid-v1", requestId: record.id, model: input.model, messages: input.messages, max_tokens: input.maxOutput }, signal);
+      const response = await this.call("chat", { billing: "koin-" + this.product, requestId: record.id, model: input.model, messages: input.messages, max_tokens: input.maxOutput }, signal);
       const answer = this.verify(response.completion, input, record.id);
       // Persist the verified answer before displaying it. The service has already
       // recorded this one usage charge and retains an encrypted recovery copy.

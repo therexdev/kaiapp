@@ -106,7 +106,7 @@
       : "Add your private invitation and allow online access in Privacy settings to use this connection.";
     el("koin-connection").open = !result.accessReady;
     if (result.owner) el("koin-connected-wallet").textContent = "Wallet · " + result.owner;
-    prepaid = result.product === "prepaid-v1";
+    prepaid = ["prepaid-v1", "prepaid-usd-v1"].includes(result.product);
     el("koin-prepaid-history").hidden = !prepaid;
     el("koin-advanced").hidden = prepaid;
     el("koin-activity").hidden = prepaid;
@@ -122,8 +122,8 @@
       section.querySelector('[data-koin-test="refund"]').hidden = true;
       el("koin-reserved").parentElement.hidden = true;
       el("koin-credit-title").textContent = "Buy AI credits";
-      el("koin-funding-help").textContent = "1 KOIN = 1,000 credits. Purchased credits do not expire and are nonrefundable. Failed chats do not consume credits.";
-      el("network-chat-help").textContent = "Buy credits with KOIN, then chat. 1 KOIN = 1,000 credits. Purchases are nonrefundable.";
+      el("koin-funding-help").textContent = result.product === "prepaid-usd-v1" ? "1,000 credits = $1. Your payment approval shows the current KOIN price and credits received. Purchased credits do not expire and are nonrefundable. Failed chats do not consume credits." : "1 KOIN = 1,000 credits. Purchased credits do not expire and are nonrefundable. Failed chats do not consume credits.";
+      el("network-chat-help").textContent = result.product === "prepaid-usd-v1" ? "Buy credits with KOIN, then chat. 1,000 credits = $1. Purchases are nonrefundable." : "Buy credits with KOIN, then chat. 1 KOIN = 1,000 credits. Purchases are nonrefundable.";
       el("koin-request-title").nextElementSibling.textContent = "Send a message in Chat. Credits are used only when an answer is saved for you.";
       el("koin-available").nextElementSibling.textContent = "credits";
       el("network-chat-reservation").hidden = true;
@@ -181,8 +181,8 @@
     if (result.paused) message("New spending is paused by the network. Existing payment recovery remains available.");
   }
   function outcome(result) {
-    if (result?.product === "prepaid-v1" && result.state === "purchase_unavailable") { message("Purchase could not start. Your existing credits are available. Try again when connected.", true); return; }
-    if (result?.product === "prepaid-v1" && result.state === "purchase_pending") { message("Purchase confirming… Your credits will appear automatically. You can keep chatting with your existing credits."); return; }
+    if (["prepaid-v1", "prepaid-usd-v1"].includes(result?.product) && result.state === "purchase_unavailable") { message("Purchase could not start. Your existing credits are available. Try again when connected.", true); return; }
+    if (["prepaid-v1", "prepaid-usd-v1"].includes(result?.product) && result.state === "purchase_pending") { message("Purchase confirming… Your credits will appear automatically. You can keep chatting with your existing credits."); return; }
     const state = result?.state || result?.status;
     const creditMessages = {
       credit_submission_pending: "Submission attempted. Check confirmation for this saved transaction.",

@@ -18,6 +18,7 @@ import {
   join,
   integer,
   hash,
+  ratio,
 } from "./Common";
 import * as E from "./entries";
 export function leaf(
@@ -85,6 +86,7 @@ export class Rewards extends Base {
     e.credits = c.credits;
     e.verifier = c.verifier;
     e.work_cap_bps = c.work_cap_bps;
+    e.reward_basis = c.reward_basis;
     e.budget = part(
       part(sub(this.invariant(), this.totals.get(KEY)!.value), c.daily_bps),
       DAY - (time % DAY),
@@ -126,7 +128,7 @@ export class Rewards extends Base {
     this.creditCall(e!, E.seal_day, req);
     const charged = this.creditCall(e!, E.get_spend, req).amount;
     System.require(
-      root.work <= part(charged, e!.work_cap_bps),
+      root.work <= (e!.reward_basis == 1 ? (charged > 0 ? e!.work_budget : 0) : part(charged, e!.work_cap_bps)),
       "work exceeds paid-usage cap",
     );
     e!.root = root;
@@ -213,8 +215,15 @@ export class Rewards extends Base {
       q.account = to;
       q.epoch = r.epoch;
       const charged = this.creditCall(e!, E.get_spend, q).amount;
+      let cap = part(charged, e!.work_cap_bps);
+      if (e!.reward_basis == 1) {
+        q.account = null;
+        const total = this.creditCall(e!, E.get_spend, q).amount;
+        System.require(charged <= total, "invalid completed work");
+        cap = total > 0 ? ratio(e!.work_budget, charged, total) : 0;
+      }
       System.require(
-        r.work <= part(charged, e!.work_cap_bps),
+        r.work <= cap,
         "provider work exceeds paid cap",
       );
     }

@@ -17,7 +17,7 @@ function configuration(value) {
   if (BigInt(c.maxRcPerTransaction) > BigInt(c.maxRcPerDay)) throw Error("Transaction resource limit exceeds daily limit");
   if (!c.limits || Object.keys(c.limits).sort().join() !== "amount,durationMs,maxJobs,perJob") throw Error("Explicit Test spending limits required");
   D.amount(c.limits.amount); D.amount(c.limits.perJob); P.integer(c.limits.maxJobs, 1, 10000); P.integer(c.limits.durationMs, 60000, 86400000);
-  if (BigInt(c.limits.perJob) > BigInt(c.limits.amount)) throw Error("Request limit exceeds session limit");
+  if (!require("../core/lib/koin-network/product").isUsd(c.deployment) && BigInt(c.limits.perJob) > BigInt(c.limits.amount)) throw Error("Request limit exceeds session limit");
   return c;
 }
 function atoms(text) {

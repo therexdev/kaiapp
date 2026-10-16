@@ -1,4 +1,5 @@
 "use strict";
+const { isPrepaid, isUsd } = require("../core/lib/koin-network/product");
 const fs = require("fs"), path = require("path");
 const { trustedMainDocument } = require("./window-security");
 const { configuration } = require("./koin-test-config");
@@ -22,8 +23,9 @@ function save(file, value) {
   fs.renameSync(temp, file);
 }
 function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, dataDir, isTest }) {
-  const prepaidRoot = path.join(dataDir, "koin-prepaid-v1");
-  let root = fs.existsSync(path.join(prepaidRoot, "deployment.json")) ? prepaidRoot : path.join(dataDir, "koin-foundation-test");
+  const prepaidRoot = path.join(dataDir, "koin-prepaid-v1"), usdRoot = path.join(dataDir, "koin-prepaid-usd-v1");
+  const productRoot = d => isUsd(d) ? usdRoot : prepaidRoot;
+  let root = fs.existsSync(path.join(usdRoot, "deployment.json")) ? usdRoot : fs.existsSync(path.join(prepaidRoot, "deployment.json")) ? prepaidRoot : path.join(dataDir, "koin-foundation-test");
   let configFile = path.join(root, "deployment.json"), journals = path.join(root, "journals");
   let journal, payments, sessionClient, sessionId, sessionRun, access, chatAbort, sessionAbort, worker, workerAbort, workerTrack, stopVersion = 0, busy = false, disposed = false;
   const open = () => {
@@ -32,7 +34,8 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
       const config = readConfig(configFile), client = new KoinChain(config.deployment);
       journal = new FundingRecovery(journals, { mode: config.mode, client, maxRcPerDay: config.maxRcPerDay });
       access = new TestAccess({ file: path.join(root, "test-access.enc"), config, wallet: core.account.wallet, settings: core.account.settings, safeStorage: core.account.safeStorage });
-      payments = new TestPayments({ config, client, journal, wallet: core.account.wallet, dialog, authorizeHost: () => access.claimHost() });
+      payments = new TestPayments({ config, client, journal, wallet: core.account.wallet, dialog, authorizeHost: () => access.claimHost(),
+        purchaseQuote: async (amount, owner, signal) => (await flow(getMainWindow()).call("quote", { amount }, signal)).args });
     }
     return payments;
   };
@@ -50,7 +53,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
   };
   const getSession = async () => { const pair = await sessionPair(); if (!pair) throw Error("Reserve a Test session and wait for irreversible confirmation first"); return pair.run; };
   const flow = window => {
-    const config = readConfig(configFile), prepaid = config.deployment.product === "prepaid-v1";
+    const config = readConfig(configFile), prepaid = isPrepaid(config.deployment);
     const Type = prepaid ? require("./koin-prepaid-chat").PrepaidChat : ChatFlow;
     return new Type({ file: path.join(root, prepaid ? "prepaid-chat-recovery.json" : "chat-recovery.json"), storage: core.account.safeStorage,
       payments: open(), session: sessionPair, config, access,
@@ -65,7 +68,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     const signal = AbortSignal.any([chatAbort.signal, AbortSignal.timeout(600000)]);
     try { return await run(signal); }
     catch (error) {
-      if (signal.aborted && readConfig(configFile).deployment.product === "prepaid-v1") throw Error("Chat stopped. Unused credits become available automatically; any saved answer can be recovered.");
+      if (signal.aborted && isPrepaid(readConfig(configFile).deployment)) throw Error("Chat stopped. Unused credits become available automatically; any saved answer can be recovered.");
       if (signal.aborted) throw Error(signal.reason?.name === "TimeoutError"
         ? "The network request timed out. Your saved payment and any pending request are preserved. Send the same message again to continue"
         : "Network chat stopped. Your saved payment and any pending request are preserved. Keep the app open and send the same message again to continue");
@@ -106,11 +109,12 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
       if (action === "connect-prepaid") {
         if (purchaseSync) throw Error("Purchase confirmation is finishing. Try connecting again in a moment.");
         if (input !== undefined) throw Error("Choose the prepaid connection with the native picker");
-        if (root === prepaidRoot && fs.existsSync(configFile)) throw Error("Your prepaid account is already connected");
         const picked = await dialog.showOpenDialog(window, { title: "Connect prepaid AI credits", filters: [{ name: "JSON", extensions: ["json"] }], properties: ["openFile"] });
         if (picked.canceled) return { state: "cancelled" };
         const next = readConfig(picked.filePaths[0]);
-        if (next.deployment.product !== "prepaid-v1" || next.owner !== core.account.wallet.address) throw Error("Prepaid connection must match this wallet");
+        if (!isPrepaid(next.deployment) || next.owner !== core.account.wallet.address) throw Error("Prepaid connection must match this wallet");
+        const destination = productRoot(next.deployment);
+        if (fs.existsSync(path.join(destination, "deployment.json"))) throw Error("This credit product is already connected; keep its existing records");
         const previous = fs.existsSync(configFile) ? readConfig(configFile) : null;
         if (previous && (previous.deployment.credits === next.deployment.credits || previous.deployment.rewards === next.deployment.rewards)) throw Error("Prepaid uses separate contracts; legacy balances must be preserved");
         if (previous) {
@@ -125,10 +129,10 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
         if (answer.response !== 1 || !active()) return { state: "cancelled" };
         workerAbort?.abort(); await worker?.stop(); workerTrack?.(); workerTrack = null; worker = null;
         payments?.stop(); journal?.close(); payments = journal = sessionClient = sessionRun = access = null; sessionId = null;
-        fs.mkdirSync(prepaidRoot, { recursive: true, mode: 0o700 });
-        save(path.join(prepaidRoot, "deployment.json"), next);
-        root = prepaidRoot; configFile = path.join(root, "deployment.json"); journals = path.join(root, "journals");
-        open(); return { enabled: true, configured: true, product: "prepaid-v1", mode: next.mode, state: "prepaid_connected" };
+        fs.mkdirSync(destination, { recursive: true, mode: 0o700 });
+        save(path.join(destination, "deployment.json"), next);
+        root = destination; configFile = path.join(root, "deployment.json"); journals = path.join(root, "journals");
+        open(); return { enabled: true, configured: true, product: next.deployment.product, mode: next.mode, state: "prepaid_connected" };
       }
       if (action === "import") {
         if (input !== undefined) throw Error("Choose the manifest with the native file picker");
@@ -141,7 +145,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
           detail: `Test wallet: ${config.owner}\nBackend: ${config.schedulerUrl}\nCredits: ${config.deployment.credits}\nRewards: ${config.deployment.rewards}\nModel: ${config.model}\nChain: ${config.deployment.chainId}\n\n${config.mode === "mainnet-pilot" ? "MAINNET: payments and rewards use real KOIN. Each deposit and spending approval requires a native review." : "Foundation testnet: payments and rewards use test KOIN."} Your existing profile remains in use. No transaction is signed by importing this file.`,
           buttons: ["Cancel", config.mode === "mainnet-pilot" ? "Use mainnet pilot" : "Use Test deployment"], defaultId: 0, cancelId: 0, noLink: true });
         if (review.response !== 1 || !active()) return { state: "cancelled" };
-        if (config.deployment.product === "prepaid-v1") { root = prepaidRoot; configFile = path.join(root, "deployment.json"); journals = path.join(root, "journals"); }
+        if (isPrepaid(config.deployment)) { root = productRoot(config.deployment); configFile = path.join(root, "deployment.json"); journals = path.join(root, "journals"); }
         fs.mkdirSync(root, { recursive: true, mode: 0o700 }); save(configFile, config);
         return { enabled: true, configured: true, mode: config.mode, mainnetPaymentsEnabled: config.mode === "mainnet-pilot" };
       }
@@ -171,7 +175,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
         }
         // Previous diagnostic requests must be resolved before the normal
         // composer can start a different request against this account.
-        for (const name of (config.deployment.product === "prepaid-v1" ? [] : fs.readdirSync(root)).filter(n => /^request-[a-f0-9]{64}\.json$/.test(n) || n === "last-request.json")) {
+        for (const name of (isPrepaid(config.deployment) ? [] : fs.readdirSync(root)).filter(n => /^request-[a-f0-9]{64}\.json$/.test(n) || n === "last-request.json")) {
           const old = JSON.parse(fs.readFileSync(path.join(root, name), "utf8"));
           if (old.state !== "pending") continue;
           const pair = await sessionPair(P.digest(old.session));
@@ -268,9 +272,9 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
         let accessReady = false;
         try { access.authorize(readConfig(configFile).schedulerUrl); accessReady = true; } catch { /* Missing invitation, locked storage or offline mode. */ }
         const cfg = readConfig(configFile);
-        if (cfg.deployment.product === "prepaid-v1" && accessReady) {
+        if (isPrepaid(cfg.deployment) && accessReady) {
           const credit = await flow(window).status();
-          return { enabled: true, configured: true, accessReady, product: "prepaid-v1", owner: cfg.owner, mode: cfg.mode,
+          return { enabled: true, configured: true, accessReady, product: cfg.deployment.product, owner: cfg.owner, mode: cfg.mode,
             mainnetPaymentsEnabled: cfg.mode === "mainnet-pilot", worker: worker?.status() || null, session: null,
             credits: credit.balance, purchases: credit.purchases, usage: credit.usage, purchasePending: !!controller.pendingPurchase() };
         }
@@ -282,9 +286,9 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
       if (["purchase", "purchase-retry"].includes(action)) return await withChatSignal(window, async signal => {
         const result = await controller.run(window, action, input, signal); signal.throwIfAborted();
         if (result.state === "cancelled") return result;
-        if (readConfig(configFile).deployment.product === "prepaid-v1") {
+        if (isPrepaid(readConfig(configFile).deployment)) {
           if (result.deposit?.txId) await flow(window).call("purchase", { txId: result.deposit.txId }, signal).catch(() => {});
-          return { ...result, product: "prepaid-v1", state: result.status === "cancelled" ? "cancelled" : !result.deposit ? "purchase_unavailable" : "purchase_pending" };
+          return { ...result, product: readConfig(configFile).deployment.product, state: result.status === "cancelled" ? "cancelled" : !result.deposit ? "purchase_unavailable" : "purchase_pending" };
         }
         return await flow(window).confirm(window, result, signal);
       });
@@ -293,7 +297,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
   });
   let purchaseSync = false;
   const purchaseTimer = setInterval(async () => {
-    if (disposed || busy || purchaseSync || !payments || readConfig(configFile).deployment.product !== "prepaid-v1") return;
+    if (disposed || busy || purchaseSync || !payments || !isPrepaid(readConfig(configFile).deployment)) return;
     const window = getMainWindow(); if (!window || window.isDestroyed()) return;
     purchaseSync = true; const abort = new AbortController(), untrack = core.gateway.network.trackShadowRequest(abort);
     try {

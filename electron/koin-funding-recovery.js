@@ -1,4 +1,5 @@
 "use strict";
+const { isPrepaid, isUsd } = require("../core/lib/koin-network/product");
 const fs = require("fs"), path = require("path"), { DatabaseSync } = require("node:sqlite");
 const { Signer, utils } = require("koilib");
 const { KoinChain } = require("../core/lib/koin-network/chain");
@@ -218,7 +219,7 @@ class FundingRecovery {
     await this.#validate(observed.transaction, observed);
     const finality = await this.#observer.finality(observed.transaction, observed.intent);
     const confirmed = ["finalized", "reverted"].includes(finality.state);
-    if (this.#client.d.product === "prepaid-v1") {
+    if (isPrepaid(this.#client.d)) {
       // A prepaid purchase is proven by its exact irreversible native transfer.
       // No refundable session snapshot needs to remain unchanged across blocks.
       const config = await this.#client.verify();

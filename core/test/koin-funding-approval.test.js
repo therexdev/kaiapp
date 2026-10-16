@@ -157,3 +157,25 @@ test("read-only reconciliation never reserves an attempt and approval cannot mix
   assert.throws(() => controller(f, { mode: "production" }), /isolated/);
   await assert.rejects(f.journal.beginReviewed(hash("no-review"), f.request, null, () => true), /review required/);
 });
+
+test("USD approval shows fixed credits and Master destination, verifies finality after price expiry, and never signs an expired quote", async t => {
+  const { Signer } = require("koilib"), USD = require("../lib/koin-network/purchase-quote");
+  for (const expiresDuringReview of [false, true]) {
+    const f = fixture(t, { usd: true });
+    f.request.args = await USD.issue({ deployment: f.d, signer: Signer.fromSeed("funding-recovery-verifier"), account: f.request.actor,
+      amount: "500000000", usdPerKoin: "25000000", version: 1, now: f.state.now, ttlMs: 60000 });
+    const c = controller(f, { dialog: { showMessageBox: async (_window, view) => {
+      assert.match(view.detail, /Credits received: 1250/); assert.match(view.detail, /USD credit value: \$1.25/);
+      assert.ok(view.detail.includes(f.d.masterNode)); assert.doesNotMatch(view.detail, /1 KOIN buys/);
+      if (expiresDuringReview) f.state.now += 60001;
+      return { response: 1 };
+    } } });
+    const result = await c.approve(window(),f.id,()=>f.request);
+    if (expiresDuringReview) { assert.equal(f.state.signed,0); assert.equal(f.journal.saved(f.id),null); continue; }
+    assert.equal(result.status,"await_finality"); assert.equal(f.state.signed,1);
+    await f.include(f.state.submissions[0], { irreversible: true }); f.state.now += 60001;
+    assert.equal((await c.check(f.id)).state,"funded"); assert.equal(f.state.signed,1);
+    const observed = await new (require("../lib/koin-network/funding-observer").FundingObserver)(f.client,{clock:()=>f.state.now}).finality(f.state.submissions[0],f.request);
+    assert.equal(observed.credits,"125000000"); assert.equal(observed.koinAmount,"500000000");
+  }
+});

@@ -13,8 +13,9 @@ function fixture(t, options = {}) {
   for (const k of ["token", "credits", "rewards"]) d[k + "Hash"] = "0x1220" + "1".repeat(64);
   if (options.mainnet === true) Object.assign(d, { network: "mainnet", chainId: require("../../lib/koin-network/payment-network").MAINNET_CHAIN, token: require("../../lib/koin-network/payment-network").MAINNET_TOKEN, rpc: ["https://mainnet.invalid"] });
   if (options.prepaid === true) d.product = "prepaid-v1";
+  if (options.usd) { d.product = "prepaid-usd-v1"; d.masterNode = require("../../lib/koin-network/product").MASTER_NODE; }
   const config = { chain_id: d.chainId, token: encodedAddress(d.token), credits: encodedAddress(d.credits), treasury: encodedAddress(d.rewards),
-    admin: encodedAddress(d.admin), verifier: encodedAddress(d.verifier), mining: encodedAddress(d.mining), operations: encodedAddress(d.operations), version: "1" };
+    admin: encodedAddress(d.admin), verifier: encodedAddress(d.verifier), mining: encodedAddress(d.mining), operations: encodedAddress(d.operations), version: "1", ...(options.usd ? { master_node: encodedAddress(d.masterNode), reward_basis: 1 } : {}) };
   const state = { now: 1000000, height: 10, lib: 10, nonce: "KAE=", paused: false, record: null, block: null, fork: false, liquid: "0", liabilities: "0", available: "0", allowance: "0", signed: 0, submissions: [] };
   const blockTimes = new Map();
   const headBlock = height => {
@@ -40,7 +41,7 @@ function fixture(t, options = {}) {
       }
       if (op.contract_id === d.rewards && op.entry_point === creditsABI.methods.balances.entry_point && op.args !== "")
         throw Error("Reward custody is aggregate; no customer account parameter");
-      const value = op.entry_point === creditsABI.methods.config.entry_point ? { config, paused: state.paused, ...(options.prepaid && op.contract_id === d.credits ? { product_version: 1 } : {}) } : {
+      const value = op.entry_point === creditsABI.methods.config.entry_point ? { config, paused: state.paused, ...((options.prepaid || options.usd) && op.contract_id === d.credits ? { product_version: options.usd ? 2 : 1 } : {}) } : {
         liquid: state.liquid, liabilities: state.liabilities, balance: { available: state.available, reserved: "0" } };
       return { result: utils.encodeBase64url(await client.serializer.serialize(value, "koin.Result")) };
     },
@@ -58,8 +59,9 @@ function fixture(t, options = {}) {
     state.block = headBlock(state.height); state.block.block.transactions = [structuredClone(tx)];
     const receipt = { id: tx.id, payer: signer.getAddress(), rc_used: "1000", reverted };
     if (!reverted) {
-      receipt.events = [{ source: d.token, name: "token.transfer_event", data: utils.encodeBase64url(await native.serialize({ from: request.actor, to: d[request.kind], value: request.args.amount }, "token.transfer_event")) }];
-      state.liquid = request.args.amount; state.liabilities = request.kind === "credits" ? request.args.amount : "0"; state.available = state.liabilities;
+      receipt.events = [{ source: d.token, name: "token.transfer_event", data: utils.encodeBase64url(await native.serialize({ from: request.actor, to: options.usd && request.kind === "credits" ? d.masterNode : d[request.kind], value: request.args.amount }, "token.transfer_event")) }];
+      if (options.usd && request.kind === "credits") receipt.events.push({ source: d.credits, name: "kai.prepaid_usd_purchase", data: utils.encodeBase64url(await client.serializer.serialize(request.args.purchase_quote, "koin.PurchaseQuote")) });
+      state.liquid = options.usd ? "0" : request.args.amount; state.liabilities = !options.usd && request.kind === "credits" ? request.args.amount : "0"; state.available = options.usd ? request.args.purchase_quote.credits : state.liabilities;
     }
     state.block.receipt = { id: state.block.block_id, height: String(state.height), transaction_receipts: [receipt] };
     if (irreversible) state.lib = state.height;

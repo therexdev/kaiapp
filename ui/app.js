@@ -423,7 +423,7 @@ async function fillNetworkModelPick() {
   if (window.KaiNetwork?.info.configured) {
     const model = KaiNetwork.info.model;
     pick.replaceChildren();
-    if (model) { const option = document.createElement("option"); option.value = model; option.textContent = model + (KaiNetwork.info.product === "prepaid-v1" ? " · credits" : " · KOIN"); pick.appendChild(option); }
+    if (model) { const option = document.createElement("option"); option.value = model; option.textContent = model + (["prepaid-v1", "prepaid-usd-v1"].includes(KaiNetwork.info.product) ? " · credits" : " · KOIN"); pick.appendChild(option); }
     pick.dataset.sig = "paid:" + model; return;
   }
   let net = { workersOnline: 0, models: [] };

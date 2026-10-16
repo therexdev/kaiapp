@@ -90,6 +90,17 @@ export namespace koin {
         writer.uint32(128);
         writer.uint64(message.effective_at);
       }
+
+      const unique_name_master_node = message.master_node;
+      if (unique_name_master_node !== null) {
+        writer.uint32(138);
+        writer.bytes(unique_name_master_node);
+      }
+
+      if (message.reward_basis != 0) {
+        writer.uint32(144);
+        writer.uint32(message.reward_basis);
+      }
     }
 
     static decode(reader: Reader, length: i32): Config {
@@ -163,6 +174,14 @@ export namespace koin {
             message.effective_at = reader.uint64();
             break;
 
+          case 17:
+            message.master_node = reader.bytes();
+            break;
+
+          case 18:
+            message.reward_basis = reader.uint32();
+            break;
+
           default:
             reader.skipType(tag & 7);
             break;
@@ -188,6 +207,8 @@ export namespace koin {
     operations_bps: u32;
     work_cap_bps: u32;
     effective_at: u64;
+    master_node: Uint8Array | null;
+    reward_basis: u32;
 
     constructor(
       chain_id: Uint8Array | null = null,
@@ -205,7 +226,9 @@ export namespace koin {
       mining_bps: u32 = 0,
       operations_bps: u32 = 0,
       work_cap_bps: u32 = 0,
-      effective_at: u64 = 0
+      effective_at: u64 = 0,
+      master_node: Uint8Array | null = null,
+      reward_basis: u32 = 0
     ) {
       this.chain_id = chain_id;
       this.token = token;
@@ -223,6 +246,8 @@ export namespace koin {
       this.operations_bps = operations_bps;
       this.work_cap_bps = work_cap_bps;
       this.effective_at = effective_at;
+      this.master_node = master_node;
+      this.reward_basis = reward_basis;
     }
   }
 
@@ -353,6 +378,129 @@ export namespace koin {
     constructor(purchased: u64 = 0, consumed: u64 = 0) {
       this.purchased = purchased;
       this.consumed = consumed;
+    }
+  }
+
+  export class PurchaseQuote {
+    static encode(message: PurchaseQuote, writer: Writer): void {
+      const unique_name_id = message.id;
+      if (unique_name_id !== null) {
+        writer.uint32(10);
+        writer.bytes(unique_name_id);
+      }
+
+      const unique_name_account = message.account;
+      if (unique_name_account !== null) {
+        writer.uint32(18);
+        writer.bytes(unique_name_account);
+      }
+
+      if (message.amount != 0) {
+        writer.uint32(24);
+        writer.uint64(message.amount);
+      }
+
+      if (message.credits != 0) {
+        writer.uint32(32);
+        writer.uint64(message.credits);
+      }
+
+      if (message.usd_per_koin != 0) {
+        writer.uint32(40);
+        writer.uint64(message.usd_per_koin);
+      }
+
+      if (message.issued_at != 0) {
+        writer.uint32(48);
+        writer.uint64(message.issued_at);
+      }
+
+      if (message.expires_at != 0) {
+        writer.uint32(56);
+        writer.uint64(message.expires_at);
+      }
+
+      if (message.policy_version != 0) {
+        writer.uint32(64);
+        writer.uint64(message.policy_version);
+      }
+    }
+
+    static decode(reader: Reader, length: i32): PurchaseQuote {
+      const end: usize = length < 0 ? reader.end : reader.ptr + length;
+      const message = new PurchaseQuote();
+
+      while (reader.ptr < end) {
+        const tag = reader.uint32();
+        switch (tag >>> 3) {
+          case 1:
+            message.id = reader.bytes();
+            break;
+
+          case 2:
+            message.account = reader.bytes();
+            break;
+
+          case 3:
+            message.amount = reader.uint64();
+            break;
+
+          case 4:
+            message.credits = reader.uint64();
+            break;
+
+          case 5:
+            message.usd_per_koin = reader.uint64();
+            break;
+
+          case 6:
+            message.issued_at = reader.uint64();
+            break;
+
+          case 7:
+            message.expires_at = reader.uint64();
+            break;
+
+          case 8:
+            message.policy_version = reader.uint64();
+            break;
+
+          default:
+            reader.skipType(tag & 7);
+            break;
+        }
+      }
+
+      return message;
+    }
+
+    id: Uint8Array | null;
+    account: Uint8Array | null;
+    amount: u64;
+    credits: u64;
+    usd_per_koin: u64;
+    issued_at: u64;
+    expires_at: u64;
+    policy_version: u64;
+
+    constructor(
+      id: Uint8Array | null = null,
+      account: Uint8Array | null = null,
+      amount: u64 = 0,
+      credits: u64 = 0,
+      usd_per_koin: u64 = 0,
+      issued_at: u64 = 0,
+      expires_at: u64 = 0,
+      policy_version: u64 = 0
+    ) {
+      this.id = id;
+      this.account = account;
+      this.amount = amount;
+      this.credits = credits;
+      this.usd_per_koin = usd_per_koin;
+      this.issued_at = issued_at;
+      this.expires_at = expires_at;
+      this.policy_version = policy_version;
     }
   }
 
@@ -904,6 +1052,11 @@ export namespace koin {
         writer.uint32(112);
         writer.uint64(message.paid);
       }
+
+      if (message.reward_basis != 0) {
+        writer.uint32(120);
+        writer.uint32(message.reward_basis);
+      }
     }
 
     static decode(reader: Reader, length: i32): Epoch {
@@ -969,6 +1122,10 @@ export namespace koin {
             message.paid = reader.uint64();
             break;
 
+          case 15:
+            message.reward_basis = reader.uint32();
+            break;
+
           default:
             reader.skipType(tag & 7);
             break;
@@ -992,6 +1149,7 @@ export namespace koin {
     finalized: bool;
     expired: bool;
     paid: u64;
+    reward_basis: u32;
 
     constructor(
       id: u64 = 0,
@@ -1007,7 +1165,8 @@ export namespace koin {
       review_until: u64 = 0,
       finalized: bool = false,
       expired: bool = false,
-      paid: u64 = 0
+      paid: u64 = 0,
+      reward_basis: u32 = 0
     ) {
       this.id = id;
       this.opened_at = opened_at;
@@ -1023,6 +1182,7 @@ export namespace koin {
       this.finalized = finalized;
       this.expired = expired;
       this.paid = paid;
+      this.reward_basis = reward_basis;
     }
   }
 
@@ -1104,6 +1264,20 @@ export namespace koin {
         writer.uint32(96);
         writer.bool(message.paused);
       }
+
+      const unique_name_purchase_quote = message.purchase_quote;
+      if (unique_name_purchase_quote !== null) {
+        writer.uint32(106);
+        writer.fork();
+        PurchaseQuote.encode(unique_name_purchase_quote, writer);
+        writer.ldelim();
+      }
+
+      const unique_name_price_signature = message.price_signature;
+      if (unique_name_price_signature !== null) {
+        writer.uint32(114);
+        writer.bytes(unique_name_price_signature);
+      }
     }
 
     static decode(reader: Reader, length: i32): Request {
@@ -1161,6 +1335,17 @@ export namespace koin {
             message.paused = reader.bool();
             break;
 
+          case 13:
+            message.purchase_quote = PurchaseQuote.decode(
+              reader,
+              reader.uint32()
+            );
+            break;
+
+          case 14:
+            message.price_signature = reader.bytes();
+            break;
+
           default:
             reader.skipType(tag & 7);
             break;
@@ -1182,6 +1367,8 @@ export namespace koin {
     work: u64;
     proof: Array<Node>;
     paused: bool;
+    purchase_quote: PurchaseQuote | null;
+    price_signature: Uint8Array | null;
 
     constructor(
       config: Config | null = null,
@@ -1195,7 +1382,9 @@ export namespace koin {
       availability: u64 = 0,
       work: u64 = 0,
       proof: Array<Node> = [],
-      paused: bool = false
+      paused: bool = false,
+      purchase_quote: PurchaseQuote | null = null,
+      price_signature: Uint8Array | null = null
     ) {
       this.config = config;
       this.account = account;
@@ -1209,6 +1398,8 @@ export namespace koin {
       this.work = work;
       this.proof = proof;
       this.paused = paused;
+      this.purchase_quote = purchase_quote;
+      this.price_signature = price_signature;
     }
   }
 
@@ -1283,6 +1474,14 @@ export namespace koin {
         writer.uint32(88);
         writer.uint32(message.product_version);
       }
+
+      const unique_name_purchase = message.purchase;
+      if (unique_name_purchase !== null) {
+        writer.uint32(98);
+        writer.fork();
+        PurchaseQuote.encode(unique_name_purchase, writer);
+        writer.ldelim();
+      }
     }
 
     static decode(reader: Reader, length: i32): Result {
@@ -1336,6 +1535,10 @@ export namespace koin {
             message.product_version = reader.uint32();
             break;
 
+          case 12:
+            message.purchase = PurchaseQuote.decode(reader, reader.uint32());
+            break;
+
           default:
             reader.skipType(tag & 7);
             break;
@@ -1356,6 +1559,7 @@ export namespace koin {
     claimed: bool;
     prepaid: PrepaidAccount | null;
     product_version: u32;
+    purchase: PurchaseQuote | null;
 
     constructor(
       config: Config | null = null,
@@ -1368,7 +1572,8 @@ export namespace koin {
       paused: bool = false,
       claimed: bool = false,
       prepaid: PrepaidAccount | null = null,
-      product_version: u32 = 0
+      product_version: u32 = 0,
+      purchase: PurchaseQuote | null = null
     ) {
       this.config = config;
       this.balance = balance;
@@ -1381,6 +1586,7 @@ export namespace koin {
       this.claimed = claimed;
       this.prepaid = prepaid;
       this.product_version = product_version;
+      this.purchase = purchase;
     }
   }
 }

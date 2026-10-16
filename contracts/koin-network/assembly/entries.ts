@@ -25,3 +25,4 @@ export const claimed: u32 = 3617403992;
 export const withdraw_free: u32 = 538054530;
 export const settle_usage: u32 = 2073213911;
 export const get_charge: u32 = 1673795352;
+export const get_purchase: u32 = 242675301;
