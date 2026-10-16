@@ -80,3 +80,53 @@ test("cancelled approval, unavailable secure storage and hostile renderer fields
   await assert.rejects(new ChatFlow(f.options).chat({}, f.body, f.signal), /secure storage/);
   for (const body of [{ ...f.body, sessionToken: "bad" }, { ...f.body, model: "https://other" }, { ...f.body, max_tokens: 129 }]) assert.throws(() => request(body, f.config));
 });
+function expiredFixture(t) {
+  const f = fixture(t), expired = { session: hash("expired-reservation"), remaining: "10000000", releaseAfter: Date.now() - 1000, canRelease: true };
+  f.status.balances = { available: "0", reserved: "10000000" }; f.status.expiredReservations = [expired];
+  let active = false, released = false;
+  f.options.session = async () => active ? f.pair : null;
+  f.payments.run = async (_w, action, input) => {
+    f.calls.push({ action, input });
+    if (action === "release") { assert.equal(input, expired.session); return { id: "release", state: "signed" }; }
+    if (action === "check" && input === "release") { released = true; f.status.balances = { available: "10000000", reserved: "0" }; f.status.expiredReservations = []; return { state: "finalized" }; }
+    if (action === "reserve") { assert.equal(released, true); return { id: "reserve", state: "signed" }; }
+    if (action === "check" && input === "reserve") { active = true; return { state: "finalized" }; }
+    throw Error("Unexpected payment action " + action);
+  };
+  return { ...f, expired, flow: new ChatFlow(f.options) };
+}
+test("normal Chat releases an eligible expired allowance through native review, confirms it, and reuses KOIN without a deposit", async t => {
+  const f = expiredFixture(t);
+  const answer = await f.flow.chat({}, f.body, f.signal);
+  assert.equal(answer.choices[0].message.content, "Verified answer");
+  assert.deepEqual(f.calls.filter(c => c.action).map(c => [c.action, c.input]), [["release", f.expired.session], ["check", "release"], ["reserve", undefined], ["check", "reserve"]]);
+  assert.equal(f.calls.filter(c => c.requestId).length, 1);
+});
+test("expired reserved funds inside the settlement window show the actual deadline without a deposit, release or dispatch", async t => {
+  const f = expiredFixture(t); f.expired.canRelease = false; f.expired.releaseAfter = Date.now() + 3600000;
+  await assert.rejects(f.flow.chat({}, f.body, f.signal), error => {
+    assert.match(error.message, /settlement window ends/); assert.ok(error.message.includes(new Date(f.expired.releaseAfter).toLocaleString()));
+    assert.doesNotMatch(error.message, /Add KOIN/); return true;
+  });
+  assert.equal(f.calls.length, 0); assert.equal(f.flow.read(), null);
+});
+test("cancelling an expired allowance release never reserves again or dispatches", async t => {
+  const f = expiredFixture(t); f.payments.run = async (_w, action) => { assert.equal(action, "release"); return { state: "cancelled" }; };
+  await assert.rejects(f.flow.chat({}, f.body, f.signal), /Release cancelled/);
+  assert.equal(f.calls.length, 0); assert.equal(f.flow.read(), null);
+});
+test("an uncertain release blocks renewal; restart confirms that exact transaction and refreshes its available balance", async t => {
+  const f = expiredFixture(t), original = f.payments.run;
+  f.payments.run = async (w, action, id) => action === "check" ? { state: "signed", reason: "credit_saved_review_required" } : original(w, action, id);
+  await assert.rejects(f.flow.chat({}, f.body, f.signal), /saved payment needs review/);
+  assert.deepEqual(f.calls.map(c => c.action), ["release"]); assert.equal(f.flow.read(), null);
+  f.status.transactions = [{ id: "release", state: "signed" }]; f.payments.run = original;
+  await new ChatFlow(f.options).chat({}, f.body, f.signal);
+  assert.equal(f.calls.filter(c => c.action === "release").length, 1);
+  assert.equal(f.calls.filter(c => c.action === "reserve").length, 1);
+});
+test("an existing usable session is retained even when another expired reservation is releasable", async t => {
+  const f = expiredFixture(t); f.options.session = async () => f.pair;
+  await new ChatFlow(f.options).chat({}, f.body, f.signal);
+  assert.equal(f.calls.length, 1); assert.equal(f.calls[0].action, undefined);
+});

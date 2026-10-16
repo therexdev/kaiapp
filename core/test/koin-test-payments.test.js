@@ -208,6 +208,41 @@ test("normal chat reserves only the available KOIN below the configured ceiling,
   await assert.rejects(f.controller.run(window(), "reserve"), /Add KOIN/);
   assert.equal(f.state.submissions.length, 0); assert.equal(f.journal.nonceCoordinator.list().length, 0);
 });
+test("expired reservations retain their saved identity and show the contract deadline; release waits for both local and chain time", async t => {
+  const f = setup(t), reserved = await f.controller.run(window(), "reserve"), tx = f.state.submissions[0];
+  const original = (await f.client.serializer.deserialize(tx.operations[0].call_contract.args, "koin.Request")).session;
+  await f.include(tx, { irreversible: true });
+  await f.controller.run(window(), "check", reserved.id);
+  const session = { ...original, settle_until: String(Number(original.expires) + 86400000) };
+  const read = f.provider.readContract, abi = require("../lib/koin-network/credits-abi.json");
+  f.provider.readContract = async op => {
+    let value;
+    if (op.entry_point === abi.methods.get_session.entry_point) value = { session };
+    else if (op.entry_point === abi.methods.balances.entry_point && op.args) value = { balance: { available: "0", reserved: original.remaining } };
+    else return read(op);
+    return { result: Buffer.from(await f.client.serializer.serialize(value, "koin.Result")).toString("base64url") };
+  };
+  let chainTime = Number(original.expires) + 1;
+  f.provider.getHeadInfo = async () => ({ head_block_time: String(chainTime) });
+  assert.deepEqual((await f.controller.status()).expiredReservations, []);
+  f.state.now = Number(original.expires) + 1;
+  const [expired] = (await f.controller.status()).expiredReservations;
+  assert.equal(expired.session, Buffer.from(original.id, "base64url").toString("hex"));
+  assert.equal(expired.remaining, original.remaining); assert.equal(expired.canRelease, false); assert.equal(expired.releaseAfter, Number(session.settle_until));
+  await assert.rejects(f.controller.run(window(), "release", expired.session), /settlement window/);
+  assert.equal(f.state.submissions.length, 1);
+  f.state.now = Number(session.settle_until) + 1;
+  assert.equal((await f.controller.status()).expiredReservations[0].canRelease, false);
+  chainTime = f.state.now;
+  assert.equal((await f.controller.status()).expiredReservations[0].canRelease, true);
+  session.owner = encodedAddress(f.d.admin);
+  await assert.rejects(f.controller.status(), /differs from its saved approval/);
+  session.owner = original.owner; session.remaining = "0";
+  assert.deepEqual((await f.controller.status()).expiredReservations, []);
+  session.remaining = original.remaining; session.closed = true;
+  assert.deepEqual((await f.controller.status()).expiredReservations, []);
+  assert.equal(f.state.submissions.length, 1);
+});
 test("desktop and backend derive the same protocol-valid session domain from deployment pins", t => {
   const f = setup(t), { testDomain } = require("../lib/koin-network/payment-mode"), D = require("../lib/koin-network/session-delegation");
   const domain = testDomain(f.d, f.config.schedulerUrl);

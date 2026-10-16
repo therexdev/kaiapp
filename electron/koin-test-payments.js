@@ -79,8 +79,10 @@ class TestPayments {
   async status() {
     const owner = this.#owner(), config = await this.#client.verify();
     const balances = await this.#client.read("credits", "balances", { account: encodedAddress(owner) });
+    const expiredReservations = BigInt(balances.balance?.reserved || "0") > 0n ? await this.#expiredReservations() : [];
     return { enabled: true, mode: this.#config.mode, mainnetPaymentsEnabled: this.#config.mode === "mainnet-pilot", owner, paused: !!config.paused,
       balances: { available: balances.balance?.available || "0", reserved: balances.balance?.reserved || "0" },
+      expiredReservations,
       deposits: this.#journal.list(), transactions: this.#journal.nonceCoordinator.list().map(status => this.#creditStatus(status)),
       automaticPayouts: true, payoutNotice: "Rewards are sent automatically after the daily review and irreversible confirmation." };
   }
@@ -92,6 +94,28 @@ class TestPayments {
     const args = await this.#client.serializer.deserialize(op.args, "koin.Request");
     const request = { kind: "credits", method, args, actor: this.#owner(), maxRc: this.#config.maxRcPerTransaction };
     await this.#client.verifyTransaction(draft, request); return request;
+  }
+  async #expiredReservations() {
+    const result = [], owner = encodedAddress(this.#owner()), now = this.#clock();
+    for (const item of this.#journal.nonceCoordinator.list()) {
+      if (item.purpose !== "credits" || item.state !== "finalized") continue;
+      const request = await this.#scope(this.#journal.nonceCoordinator.draft(item.id)), original = request.args.session;
+      if (request.method !== "reserve" || Number(original.expires) > now) continue;
+      const { session: s } = await this.#client.read("credits", "get_session", { id: original.id });
+      if (!s) throw Error("The reserved session could not be checked. Refresh your account; your saved reservation is preserved");
+      if (s.closed) continue;
+      const remaining = s.remaining ?? "0";
+      if (["id", "owner", "verifier", "policy_hash", "expires", "per_job", "max_jobs"].some(k => s[k] !== original[k]) || s.owner !== owner ||
+          !/^\d+$/.test(remaining) || BigInt(remaining) > BigInt(original.remaining) ||
+          !Number.isSafeInteger(Number(s.settle_until)) || Number(s.settle_until) <= 0)
+        throw Error("The reserved session differs from its saved approval. Keep it for review");
+      if (BigInt(remaining) === 0n) continue;
+      result.push({ session: Buffer.from(s.id, "base64url").toString("hex"), remaining, releaseAfter: Number(s.settle_until) });
+    }
+    if (!result.length) return result;
+    const head = await this.#client.provider.getHeadInfo(), chainTime = Number(head?.head_block_time);
+    if (!Number.isSafeInteger(chainTime) || chainTime <= 0) throw Error("The blockchain release time could not be checked. Refresh your account");
+    return result.sort((a, b) => a.releaseAfter - b.releaseAfter).map(r => ({ ...r, canRelease: now > r.releaseAfter && chainTime > r.releaseAfter }));
   }
   async session(wanted) {
     // Restore session identity and limits from the actual reserved transaction,
@@ -284,8 +308,9 @@ class TestPayments {
       const args = request.args, s = args.session, mainnet = this.#config.mode === "mainnet-pilot";
       const display = n => koin(n) + (mainnet ? " (mainnet)" : " (testnet)");
       const detail = [mainnet ? "MAINNET: real KOIN. This approval can spend real funds." : "Foundation testnet tokens only.", `Action: ${request.method}`, `Wallet: ${request.actor}`,
+        ...(request.method === "release" ? ["Release moves unused reserved KOIN back into your available network balance so you can use it for chat again."] : []),
         ...(args.amount ? [`Amount: ${display(args.amount)}`] : []),
-        ...(s ? [`Session budget: ${display(s.remaining)}`, `Per request: ${display(s.per_job)}`, `Maximum requests: ${s.max_jobs}`, `Expires: ${new Date(Number(s.expires)).toISOString()}`, `Model: ${this.#config.model}`] : []),
+        ...(s ? [`Session budget: ${display(s.remaining)}`, `Per request: ${display(s.per_job)}`, `Maximum requests: ${s.max_jobs}`, `Expires: ${new Date(Number(s.expires)).toISOString()}`, `Unused KOIN release: after ${new Date(Number(s.expires) + 86400000).toLocaleString()} and blockchain confirmation (24-hour settlement window).`, `Model: ${this.#config.model}`] : []),
         ...(args.id ? [`Session: ${Buffer.from(args.id, "base64url").toString("hex")}`] : []),
         "Revocation stops new work; reserved credits remain locked through the settlement window.",
         `Chain: ${this.#client.d.chainId}`, `Contract: ${this.#client.d.credits}`, `Code: ${this.#client.d.creditsHash}`,

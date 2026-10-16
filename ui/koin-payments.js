@@ -73,6 +73,7 @@
     activate();
     if (result.configured === false) {
       configured = false; hasSession = false;
+      el("network-chat-reservation").hidden = true;
       el("koin-network-badge").textContent = "Not connected";
       el("koin-network-badge").dataset.network = "";
       el("koin-test-network-notice").textContent = "Connect a verified network to see its currency and spending limits.";
@@ -106,6 +107,14 @@
       el("koin-available").textContent = amount(result.balances.available);
       el("koin-reserved").textContent = amount(result.balances.reserved);
       el("network-chat-balance").textContent = `${amount(result.balances.available)} KOIN available · ${amount(result.balances.reserved)} reserved`;
+    }
+    if (Array.isArray(result.expiredReservations)) {
+      const note = el("network-chat-reservation"), expired = result.expiredReservations;
+      const ready = expired.find(r => r.canRelease), waiting = expired[0];
+      note.hidden = !waiting;
+      note.textContent = ready
+        ? `${amount(ready.remaining)} KOIN from an expired allowance can be reused. Send your message to review its release and a new spending allowance.`
+        : waiting ? `${amount(waiting.remaining)} KOIN is in an expired spending allowance. Its settlement window ends ${new Date(waiting.releaseAfter).toLocaleString()}. After that time and blockchain confirmation, Send will offer to release and reuse it. No additional deposit is required.` : "";
     }
     if (Array.isArray(result.transactions)) {
       const deposits = new Map((result.deposits || []).map(deposit => [deposit.id, deposit]));
@@ -251,7 +260,7 @@
       if (action === "status" && result?.configured && !result.paused) message("Account updated. Payments require your approval.");
       if (refreshAfter.has(action) && result?.state !== "cancelled") {
         try { snapshot(await bridge.run("status")); }
-        catch { refreshFailed = true; el("koin-available").textContent = el("koin-reserved").textContent = "—"; }
+        catch { refreshFailed = true; el("koin-available").textContent = el("koin-reserved").textContent = "—"; el("network-chat-reservation").hidden = true; }
       }
       outcome(result);
       if (action === "import" && result?.configured) message("Network connected. Add your invitation to continue.");
@@ -259,7 +268,7 @@
       if (result?.id && [...select.options].some(option => option.value === result.id)) select.value = result.id;
     } catch (error) {
       activate();
-      if (action === "status") { el("koin-available").textContent = el("koin-reserved").textContent = "—"; }
+      if (action === "status") { el("koin-available").textContent = el("koin-reserved").textContent = "—"; el("network-chat-reservation").hidden = true; }
       message(String(error.message || "Payment action unavailable").replace(/^Error invoking remote method 'koin:test-payments': (?:Error: )?/, "").slice(0, 280), true);
     } finally { if (action !== "stop") busy = false; controls(); refreshProvider(); window.KaiNetwork?.refresh().then(() => window.KaiNetwork.paint()).catch(() => {}); }
   }

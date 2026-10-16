@@ -1,3 +1,10 @@
+## Reuse KOIN from expired spending allowances in Chat
+
+- Shows an expired reservation's remaining KOIN and actual contract release time beside normal Chat. A reservation still in its settlement window no longer asks you to add another deposit. New reservation approvals also show the release deadline up front.
+- When release is permitted by both the desktop clock and blockchain time, **Send** opens the existing native release review, confirms that transaction, then prepares a new allowance using the released balance. Cancelling stops the flow; an uncertain release keeps its original transaction for recovery.
+- Refreshes balances after confirming an earlier payment, including a release recovered after restart. Active allowances and pending chat requests keep their existing identities.
+- The contract's settlement window remains unchanged: normally 24 hours after session expiry. This update cannot unlock funds early, and it does not alter the server's outstanding reward transaction.
+
 ## Clearer network spending-approval recovery
 
 - Shows when reserved KOIN is waiting for irreversible blockchain confirmation, and when a changing block interrupts the account check.

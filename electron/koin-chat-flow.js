@@ -57,16 +57,34 @@ class ChatFlow {
   }
   async prepare(window, signal) {
     signal.throwIfAborted(); this.progress("Checking your network balance…");
-    const status = await this.payments.status(); signal.throwIfAborted();
+    let status = await this.payments.status(); signal.throwIfAborted();
     if (status.paused) throw Error("The network has paused new spending. Your unused KOIN remains in your account");
     // Reconcile existing transactions before considering a new reservation.
+    let reconciled = false;
     for (const tx of status.transactions || []) {
       const funding = status.deposits?.find(d => d.id === tx.id);
-      if (!terminal(tx.state) || tx.state === "finalized" && funding && funding.state !== "funded") await this.confirm(window, tx, signal);
+      if (!terminal(tx.state) || tx.state === "finalized" && funding && funding.state !== "funded") { await this.confirm(window, tx, signal); reconciled = true; }
     }
+    if (reconciled) { status = await this.payments.status(); signal.throwIfAborted(); }
+    if (status.paused) throw Error("The network has paused new spending. Your unused KOIN remains in your account");
     let pair = await this.session(); signal.throwIfAborted();
     if (!pair) {
-      if (BigInt(status.balances.available) <= 0n) throw Error("Add KOIN to your network balance to start chatting. If KOIN is reserved in an expired session, use Release in payment activity");
+      if (BigInt(status.balances.available) <= 0n && BigInt(status.balances.reserved || "0") > 0n) {
+        const expired = status.expiredReservations || [], ready = expired.find(r => r.canRelease);
+        if (!ready) {
+          const waiting = expired[0];
+          if (waiting) throw Error(`Your KOIN is still reserved in an expired spending allowance. Its settlement window ends ${new Date(waiting.releaseAfter).toLocaleString()}. Send again after that time and blockchain confirmation to release and reuse it. No additional deposit is required`);
+          throw Error("Your KOIN is reserved, but its spending session could not be recovered. Open Account to check the existing reservation; do not add another deposit to retry");
+        }
+        this.progress("Your old spending allowance expired. Review the release of its unused KOIN to continue…");
+        const released = await this.payments.run(window, "release", ready.session); signal.throwIfAborted();
+        if (released.state === "cancelled") throw Object.assign(Error("Release cancelled. Your existing KOIN remains reserved"), { name: "AbortError" });
+        await this.confirm(window, released, signal);
+        status = await this.payments.status(); signal.throwIfAborted();
+        if (status.paused) throw Error("The network has paused new spending. Your released KOIN remains in your account");
+        if (BigInt(status.balances.available) <= 0n) throw Error("Your release was confirmed, but the refreshed balance is not available yet. Send the same message again to check it; no additional deposit is needed");
+      }
+      if (BigInt(status.balances.available) <= 0n) throw Error("Add KOIN to your network balance to start chatting");
       this.progress("Review your chat spending limit…");
       const tx = await this.payments.run(window, "reserve"); signal.throwIfAborted();
       if (tx.state === "cancelled") throw Object.assign(Error("Spending approval cancelled"), { name: "AbortError" });

@@ -17,7 +17,7 @@ test("normal Chat uses existing KOIN without a deposit, validates Add KOIN, and 
     window.kaiKoinTestBridge = { onProgress: callback => { window.chatProgress = callback; return () => {}; }, run: async (action, input) => {
       window.paidCalls.push({ action, input });
       if (action === "chat-info") return { enabled: true, configured: true, mode: "mainnet-pilot", model: "koinos-fast", maxOutput: 128, blocked: "" };
-      if (action === "status") return { enabled: true, configured: true, mode: "mainnet-pilot", accessReady: true, balances: { available: window.balance, reserved: "0" }, transactions: [], worker: { running: window.providerOn }, session: null };
+      if (action === "status") return { enabled: true, configured: true, mode: "mainnet-pilot", accessReady: true, balances: { available: window.balance, reserved: window.reserved || "0" }, expiredReservations: window.expiredReservations || [], transactions: [], worker: { running: window.providerOn }, session: null };
       if (action === "purchase") {
         if (window.purchaseError) throw Error("Error invoking remote method 'koin:test-payments': Error: Native approval cancelled");
         return { state: "finalized", funding: { state: "funded" } };
@@ -74,11 +74,24 @@ test("normal Chat uses existing KOIN without a deposit, validates Add KOIN, and 
   await page.locator("#network-add-koin").click();
   await page.waitForFunction(() => !document.getElementById("network-add-koin").disabled);
   assert.equal(await page.locator("#network-chat-status").textContent(), "Native approval cancelled");
+  await page.evaluate(() => {
+    window.balance = "0"; window.reserved = "10000000";
+    window.expiredReservations = [{ session: "b".repeat(64), remaining: "10000000", releaseAfter: Date.now() + 3600000, canRelease: false }];
+    window.dispatchEvent(new Event("kai-network-account-changed"));
+  });
+  await page.waitForFunction(() => document.getElementById("network-chat-reservation").textContent.includes("settlement window ends"));
+  assert.equal(await page.locator("#network-chat-reservation").isVisible(), true);
+  assert.match(await page.locator("#network-chat-reservation").textContent(), /0.10000000 KOIN.*No additional deposit is required/);
+  await page.evaluate(() => { window.expiredReservations[0].canRelease = true; window.dispatchEvent(new Event("kai-network-account-changed")); });
+  await page.waitForFunction(() => document.getElementById("network-chat-reservation").textContent.includes("Send your message to review its release"));
+  assert.equal(await page.evaluate(() => window.paidCalls.filter(c => c.action === "release").length), 0);
   await page.setViewportSize({ width: 480, height: 900 });
   assert.equal(await page.locator("#network-chat-account").evaluate(n => n.scrollWidth <= n.clientWidth), true);
   await page.setViewportSize({ width: 1280, height: 900 });
   const qa = process.env.KAI_MASCOT_QA_DIR;
   if (qa) { fs.mkdirSync(qa, { recursive: true }); await page.screenshot({ path: path.join(qa, "koin-normal-chat.png") }); }
+  await page.evaluate(() => { window.expiredReservations = []; window.balance = "10000000"; window.reserved = "0"; window.dispatchEvent(new Event("kai-network-account-changed")); });
+  await page.waitForFunction(() => document.getElementById("network-chat-reservation").hidden);
   await page.locator("#network-account").click();
   await page.fill("#koin-test-amount", ""); await page.locator('[data-koin-test="purchase"]').click();
   assert.equal(await page.locator("#koin-test-amount").getAttribute("aria-invalid"), "true");
