@@ -70,6 +70,53 @@ test("one session signature survives a lost acknowledgment and restart without m
   assert.equal((await restarted.revoke()).state, "revoked");
   assert.equal((await f.open().retry()).state, "revoked"); assert.equal(f.signs(), 1);
 });
+test("finality waits and transient verification failures keep the original observation", async t => {
+  const f = await fixture(t), base = f.options.fetchImpl;
+  let mode = "reversible";
+  const client = f.open({ fetchImpl: async (url, request) => {
+    if (url.endsWith("/review")) {
+      if (mode === "moving") return Response.json({ ok: false, error: "Head changed during contract reads; retry observation" }, { status: 400 });
+      if (mode === "offline") throw Error("Connection lost");
+      if (mode === "reversible") return Response.json({ ok: true, mode: "funded-rehearsal", paymentsEnabled: false, state: mode });
+    }
+    return base(url, request);
+  } });
+  await assert.rejects(client.prepare(), e => e.code === "koin_session_wait" && /irreversible/.test(e.message));
+  mode = "moving"; await assert.rejects(client.prepare(), e => e.code === "koin_session_wait");
+  mode = "offline"; await assert.rejects(client.prepare(), /Connection lost/);
+  mode = "ready"; const review = await client.prepare();
+  assert.equal(f.calls.filter(c => c.action === "observe").length, 1);
+  assert.equal(f.signs(), 0); await client.approve(review); assert.equal(f.signs(), 1);
+});
+test("changed funding requires a new observation and never signs before another review", async t => {
+  const f = await fixture(t), client = f.open();
+  f.change((action, result) => { if (action === "review") result.state = "changed"; });
+  await assert.rejects(client.prepare(), e => e.code === "koin_session_wait");
+  assert.equal(f.signs(), 0); f.change(null); await client.prepare();
+  assert.equal(f.calls.filter(c => c.action === "observe").length, 2);
+});
+test("an approval HTTP timeout is bounded, explained and preserves the observed reservation", async t => {
+  const f = await fixture(t), base = f.options.fetchImpl, timeout = new AbortController();
+  t.mock.method(AbortSignal, "timeout", ms => { assert.equal(ms, 30000); return timeout.signal; });
+  let stall = true;
+  const client = f.open({ fetchImpl: async (url, request) => {
+    if (url.endsWith("/review") && stall) {
+      stall = false; timeout.abort(new DOMException("Timed out", "TimeoutError")); throw timeout.signal.reason;
+    }
+    return base(url, request);
+  } });
+  await assert.rejects(client.prepare(), /approval check timed out.*reservation.*preserved/i);
+  assert.equal(f.signs(), 0); assert.equal(fs.existsSync(f.file), false);
+  t.mock.restoreAll(); await client.prepare();
+  assert.equal(f.calls.filter(c => c.action === "observe").length, 1);
+});
+test("native review exposes a retryable funding wait without opening a signing prompt", async () => {
+  let prompts = 0;
+  const run = createSessionReview({ client: { prepare: async () => { throw Object.assign(Error("Waiting for irreversible confirmation"), { code: "koin_session_wait" }); } },
+    dialog: { showMessageBox: async () => { prompts++; return { response: 1 }; } } });
+  const result = await run(windowFixture(), "review");
+  assert.equal(result.state, "unavailable"); assert.equal(result.retryable, true); assert.equal(prompts, 0);
+});
 test("pending request status is bound to its saved session and rejects a charged cancellation", async t => {
   const f = await fixture(t), client = f.open(), review = await client.prepare(); await client.approve(review);
   const requestId = P.hash("pending-request");

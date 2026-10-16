@@ -56,7 +56,14 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     for (const event of ["hide", "minimize", "closed"]) window.on(event, stop);
     window.webContents.on("did-start-navigation", navigation); window.webContents.on("render-process-gone", stop);
     const release = core.gateway.network.trackShadowRequest(chatAbort);
-    try { return await run(AbortSignal.any([chatAbort.signal, AbortSignal.timeout(600000)])); }
+    const signal = AbortSignal.any([chatAbort.signal, AbortSignal.timeout(600000)]);
+    try { return await run(signal); }
+    catch (error) {
+      if (signal.aborted) throw Error(signal.reason?.name === "TimeoutError"
+        ? "The network request timed out. Your saved payment and any pending request are preserved. Send the same message again to continue"
+        : "Network chat stopped. Your saved payment and any pending request are preserved. Keep the app open and send the same message again to continue");
+      throw error;
+    }
     finally { release(); for (const event of ["hide", "minimize", "closed"]) window.removeListener(event, stop);
       window.webContents.removeListener("did-start-navigation", navigation); window.webContents.removeListener("render-process-gone", stop); chatAbort = null; }
   };

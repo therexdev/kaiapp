@@ -1,3 +1,10 @@
+## Clearer network spending-approval recovery
+
+- Shows when reserved KOIN is waiting for irreversible blockchain confirmation, and when a changing block interrupts the account check.
+- Keeps the original funding observation across temporary read failures, so retrying does not unnecessarily restart its finality wait. Changed funding or an expired observation still requires fresh verification.
+- Bounds each session HTTP request and explains how to continue the saved reservation after a timeout or stopped chat. Normal Chat removes the Electron error wrapper.
+- Requires the matching pilot backend timing fix: completed verification receives its completion timestamp, and parallel account reads still require an unchanged head and RPC endpoint generation. No finality, native approval, spending limit or payment-recovery checks are relaxed.
+
 ## Clearer KOIN funding and reservation
 
 - Explains beside normal Chat that **Add KOIN** deposits from your wallet; **Send** uses your existing balance and asks for a reservation approval when needed. You do not need another deposit to reserve an available balance.

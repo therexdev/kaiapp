@@ -49,6 +49,30 @@ test("confirmation polls the original payment and never resubmits or creates a r
   f.payments.run = async () => ({ state: "signed", reason: "credit_saved_review_required" });
   await assert.rejects(f.flow.confirm({}, { id: "original" }, f.signal), /saved payment needs review/);
 });
+test("normal chat explains finality waits and reuses the existing reserved session", async t => {
+  const f = fixture(t), progress = []; let reviews = 0;
+  f.status.balances.available = "0";
+  f.client.hasSavedApproval = () => false;
+  f.client.status = async () => ({ state: "unapproved" });
+  f.pair.run = async () => ++reviews === 1
+    ? { state: "unavailable", retryable: true, error: "Your KOIN is reserved. Waiting for irreversible confirmation…" }
+    : { state: "active", remainingJobs: 2, available: "1000" };
+  const flow = new ChatFlow({ ...f.options, progress: message => progress.push(message) });
+  await flow.chat({}, f.body, f.signal);
+  assert.equal(reviews, 2); assert.equal(f.calls.length, 1); assert.equal(typeof f.calls[0], "object");
+  assert(progress.some(message => message.includes("irreversible confirmation")));
+});
+test("a bounded approval wait dispatches nothing and the next send resumes the same reservation", async t => {
+  const f = fixture(t); let reviews = 0;
+  f.status.balances.available = "0";
+  f.client.hasSavedApproval = () => false;
+  f.client.status = async () => ({ state: "unapproved" });
+  f.pair.run = async () => { reviews++; return { state: "unavailable", retryable: true, error: "Waiting for confirmation" }; };
+  await assert.rejects(f.flow.chat({}, f.body, f.signal), /existing reservation is preserved/);
+  assert.equal(reviews, 2); assert.equal(f.calls.length, 0); assert.equal(f.flow.read(), null);
+  f.pair.run = async () => ({ state: "active", remainingJobs: 2, available: "1000" });
+  await f.flow.chat({}, f.body, f.signal); assert.equal(f.calls.length, 1);
+});
 test("cancelled approval, unavailable secure storage and hostile renderer fields cannot dispatch", async t => {
   const f = fixture(t); f.options.session = async () => null; f.payments.run = async () => ({ state: "cancelled" });
   await assert.rejects(new ChatFlow(f.options).chat({}, f.body, f.signal), /cancelled/); assert.equal(f.calls.length, 0);

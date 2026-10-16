@@ -23,6 +23,7 @@ test("normal Chat uses existing KOIN without a deposit, validates Add KOIN, and 
         return { state: "finalized", funding: { state: "funded" } };
       }
       if (action === "chat-completion") {
+        if (window.chatError) throw Error("Error invoking remote method 'koin:test-payments': Error: Spending approval is still waiting for network confirmation. Your existing reservation is preserved. Send the same message again to continue");
         window.chatProgress?.({ text: "The network is generating your answer…" });
         return { id: "a".repeat(64), servedModel: "koinos-fast", choices: [{ message: { role: "assistant", content: "Network reply " + input.messages.filter(m => m.role === "user").length } }],
           koin: { state: "verified", receipt: { usage: { amount: "125" } } } };
@@ -60,6 +61,11 @@ test("normal Chat uses existing KOIN without a deposit, validates Add KOIN, and 
   assert.equal(chats.length, 2); assert.ok(chats[1].input.messages.some(m => m.role === "assistant" && m.content === "Network reply 1"));
   assert.equal(legacyRequests, 0);
   assert.equal(await page.evaluate(() => window.paidCalls.filter(c => c.action === "purchase").length), 0);
+  await page.evaluate(() => { window.chatError = true; });
+  await page.fill("#input", "Continue my existing reservation"); await page.locator("#btn-send").click();
+  await page.waitForFunction(() => document.getElementById("messages").textContent.includes("Your existing reservation is preserved") && !document.getElementById("btn-send").disabled);
+  assert.doesNotMatch(await page.locator("#messages").textContent(), /Error invoking remote method/);
+  await page.evaluate(() => { window.chatError = false; });
   await page.fill("#network-koin-amount", " 0.12345678 "); await page.locator("#network-add-koin").click();
   await page.waitForFunction(() => !document.getElementById("network-add-koin").disabled);
   assert.deepEqual(await page.evaluate(() => window.paidCalls.filter(c => c.action === "purchase")), [{ action: "purchase", input: "0.12345678" }]);

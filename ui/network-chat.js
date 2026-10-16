@@ -31,7 +31,11 @@
       if (body.stream === false) return Response.json(result, { headers });
       const frame = { model: "koinos-network", servedModel: result.servedModel, choices: [{ delta: { content: result.choices[0].message.content } }], warning };
       return new Response("data: " + JSON.stringify(frame) + "\n\ndata: [DONE]\n\n", { headers: { ...headers, "content-type": "text/event-stream" } });
-    } catch (error) { progress(error.message || "Request interrupted. Send the original message again to recover it."); throw error; }
+    } catch (error) {
+      const message = String(error.message || "Request interrupted. Send the original message again to recover it.")
+        .replace(/^Error invoking remote method 'koin:test-payments': (?:Error: )?/, "");
+      progress(message); throw Object.assign(new Error(message), { name: error.name });
+    }
     finally { signal?.removeEventListener("abort", stop); window.dispatchEvent(new Event("kai-network-account-changed")); }
   }
   bridge?.onProgress?.(value => progress(String(value?.text || "")));

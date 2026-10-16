@@ -80,8 +80,10 @@ class ChatFlow {
       // until createSessionReview displays the exact native approval.
       for (let i = 0; i < this.attempts; i++) {
         signal.throwIfAborted(); this.progress("Preparing your spending approval…");
-        state = await pair.run(window, "review");
-        if (!/awaiting finality|funding changed|observed again/i.test(state.error || "")) break;
+        state = await pair.run(window, "review"); signal.throwIfAborted();
+        if (!state.retryable && !/awaiting finality|funding changed|observed again/i.test(state.error || "")) break;
+        this.progress(state.error || "Waiting for your reservation to be confirmed…");
+        if (i + 1 === this.attempts) throw Error("Spending approval is still waiting for network confirmation. Your existing reservation is preserved. Send the same message again to continue");
         await this.wait(this.pollMs, signal);
       }
     } else if (pair.client.hasSavedApproval() && state.state !== "active") {

@@ -52,7 +52,7 @@ function createSessionReview({ client, dialog, track = () => () => {}, tr = x =>
       changing = true; return await client.approve(review, signal);
     } catch (e) {
       const state = signal.aborted ? changing && client.hasSavedApproval?.() ? "uncertain" : "cancelled" : "unavailable";
-      return { ...result(state), error: String(e.message).slice(0, 220) };
+      return { ...result(state), error: String(e.message).slice(0, 220), ...(e.code === "koin_session_wait" ? { retryable: true } : {}) };
     }
     finally {
       release(); pending = false;

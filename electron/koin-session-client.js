@@ -5,6 +5,7 @@ const { protocol } = require("../core/lib/koin-network/payment-network");
 const fs = require("fs"), path = require("path");
 const P = require("../core/lib/koin-network/job-protocol"), D = require("../core/lib/koin-network/session-delegation");
 const { scheduler } = require("../core/lib/koin-network/grant-chat");
+const waiting = message => Object.assign(Error(message), { code: "koin_session_wait" });
 function configuration(value) {
   if (!value || Object.keys(value).sort().join() !== "amount,expires,maxJobs,maxOutput,model,perJob,schedulerUrl,session,target,version") throw Error("Exact funded rehearsal configuration required");
   const c = structuredClone(value);
@@ -46,8 +47,11 @@ class FundedSessionClient {
     return auth;
   }
   async #call(action, body, auth, signal) {
+    const timeout = AbortSignal.timeout(30000);
+    const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
+    try {
     const response = await this.#fetch(this.#config.schedulerUrl + protocol(this.#config.target).prefix + action, {
-      method: "POST", redirect: "error", signal, headers: { "content-type": "application/json", connection: "close" },
+      method: "POST", redirect: "error", signal: requestSignal, headers: { "content-type": "application/json", connection: "close" },
       body: JSON.stringify({ ...body, sessionToken: auth.sessionToken }),
     });
     const chunks = []; let size = 0;
@@ -56,6 +60,11 @@ class FundedSessionClient {
     if (!response.ok || result.ok !== true) throw Error(typeof result.error === "string" ? result.error.split(auth.sessionToken).join("[redacted]").slice(0, 220) : "Session request failed");
     if (result.mode !== protocol(this.#config.target).mode || result.paymentsEnabled !== protocol(this.#config.target).paymentsEnabled) throw Error("Invalid session rehearsal response");
     return result;
+    } catch (error) {
+      if (signal?.aborted) throw signal.reason;
+      if (timeout.aborted) throw Error("The network approval check timed out. Your reservation and any saved approval are preserved. Send the same message again to continue");
+      throw error;
+    }
   }
   #matching(t, auth) {
     const c = this.#config;
@@ -67,16 +76,31 @@ class FundedSessionClient {
   async prepare(signal) {
     if (this.#record) throw Error("Use the saved session approval or revoke it; a second approval is not created");
     const auth = await this.#auth(signal), c = this.#config;
-    if (!this.#observation) {
-      const result = await this.#call("observe", { grantId: auth.grantId, session: c.session }, auth, signal);
-      this.#observation = P.digest(result.observationId);
-    }
     const proposal = Object.fromEntries(["model", "version", "maxOutput", "amount", "perJob", "maxJobs", "expires"].map(k => [k, c[k]]));
     let result;
-    try { result = await this.#call("review", { grantId: auth.grantId, observationId: this.#observation, proposal }, auth, signal); }
-    catch (e) { this.#observation = null; throw e; }
-    if (result.state === "reversible") throw Error("Session funding is awaiting finality. Retry this review in a moment");
-    if (result.state) { this.#observation = null; throw Error("Session funding changed. Review it again"); }
+    try {
+      if (!this.#observation) {
+        const observed = await this.#call("observe", { grantId: auth.grantId, session: c.session }, auth, signal);
+        this.#observation = P.digest(observed.observationId);
+      }
+      result = await this.#call("review", { grantId: auth.grantId, observationId: this.#observation, proposal }, auth, signal);
+    } catch (e) {
+      if (/^(Head changed during contract reads; retry observation|RPC changed during session verification; retry observation)$/.test(e.message))
+        throw waiting("New blocks or an RPC change interrupted the account check. Rechecking your existing reservation…");
+      if (/^Unknown or expired observation/.test(e.message)) {
+        this.#observation = null;
+        throw waiting("Refreshing the network's confirmation of your existing reservation…");
+      }
+      // A transport failure does not invalidate an observation that may
+      // already be irreversible. Keep it for the next explicit retry.
+      throw e;
+    }
+    if (result.state === "reversible") throw waiting("Your KOIN is reserved. Waiting for irreversible blockchain confirmation before showing spending approval…");
+    if (["changed", "forked"].includes(result.state)) {
+      this.#observation = null;
+      throw waiting("The account or chain changed during verification. Rechecking your existing reservation…");
+    }
+    if (result.state) throw Error("Unexpected funding verification state. Your reservation is preserved");
     const t = D.terms(result.terms); this.#matching(t, auth);
     if (D.id(t) !== result.delegationId) throw Error("Session commitment mismatch");
     return { terms: t, tariff: D.tariff(t, result.tariffs), id: result.delegationId, observationId: this.#observation };
