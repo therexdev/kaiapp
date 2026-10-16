@@ -303,3 +303,16 @@ test("a slow broadcast still has one attempt and preserves its exact signed byte
   assert.equal(calls.filter(c => c.body.method === "chain.submit_transaction").length, 1);
   assert.equal(provider.readGeneration, 0);
 });
+test("a privacy abort scopes inherited RPC reads without cancelling unrelated requests", async () => {
+  const controller = new AbortController();
+  const { provider, calls } = fixture((_url, body) => body.method === "chain.get_head_info" ? new Promise(() => {}) : undefined);
+  const pending = provider.withSignal(controller.signal, () => provider.getHeadInfo()).catch(e => e.code);
+  await new Promise(resolve => setImmediate(resolve));
+  controller.abort();
+  assert.equal(await pending, "koin_rpc_stopped");
+  assert.ok(calls.at(-1).signal.aborted);
+  const count = calls.length;
+  await assert.rejects(provider.withSignal(controller.signal, () => provider.getChainId()), e => e.code === "koin_rpc_stopped");
+  assert.equal(calls.length, count, "No fresh RPC after privacy cancellation");
+  assert.equal(await provider.getChainId(), CHAIN);
+});

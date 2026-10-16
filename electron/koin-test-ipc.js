@@ -280,7 +280,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
       if (["session-review", "session-status", "session-retry", "session-revoke"].includes(action)) return (await getSession())(window, action.slice(8));
       if (!["purchase", "purchase-retry", "fund-rewards", "reserve", "refund", "revoke", "release", "check", "resume", "recover", "repair", "correct-mana"].includes(action)) throw Error("Unknown Test payment action");
       if (["purchase", "purchase-retry"].includes(action)) return await withChatSignal(window, async signal => {
-        const result = await controller.run(window, action, input); signal.throwIfAborted();
+        const result = await controller.run(window, action, input, signal); signal.throwIfAborted();
         if (result.state === "cancelled") return result;
         if (readConfig(configFile).deployment.product === "prepaid-v1") {
           if (result.deposit?.txId) await flow(window).call("purchase", { txId: result.deposit.txId }, signal).catch(() => {});

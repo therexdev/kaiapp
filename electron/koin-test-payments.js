@@ -251,23 +251,28 @@ class TestPayments {
     if (this.#client.d.product !== "prepaid-v1" || this.#syncing || this.#task) return;
     this.#syncing = true; this.#syncAbort = new AbortController();
     const combined = AbortSignal.any([signal, this.#syncAbort.signal]);
-    try {
+    const run = async () => {
       this.#owner();
       for (const p of this.#journal.list().filter(p => p.kind === "credits" && !["reverted", "conflicted"].includes(p.state))) {
         combined.throwIfAborted();
         const correction = this.#journal.nonceCoordinator.correction(p.id);
         const txId = correction?.transaction?.id || p.txId;
         if (!this.#registeredPurchases.has(txId)) { await register(txId, combined); this.#registeredPurchases.add(txId); }
+        combined.throwIfAborted();
         if (p.state === "funded") continue;
-        await this.#journal.nonceCoordinator.reconcile(p.id);
+        await this.#journal.nonceCoordinator.reconcile(p.id); combined.throwIfAborted();
         const decision = await this.#journal.advance(p.id, { allowSubmit: false });
         if (decision.action === "done") continue;
         // Read-only recovery is automatic. Re-broadcast is kept within the
         // original visible purchase action; no background signing is possible.
       }
-    } finally { this.#syncing = false; this.#syncAbort = null; }
+    };
+    try { return await (this.#client.provider.withSignal ? this.#client.provider.withSignal(combined, run) : run()); }
+    finally { this.#syncing = false; this.#syncAbort = null; }
   }
-  async run(window, action, input) {
+  async run(window, action, input, signal) {
+    signal?.throwIfAborted();
+    this.#syncAbort?.abort();
     if (this.#client.d.product === "prepaid-v1" && ["reserve", "refund", "revoke", "release"].includes(action)) throw Error("Purchased credits are used directly in Chat");
     if (this.#task) throw Error("A Test payment action is already open");
     const visible = () => window && !window.isDestroyed() && window.isVisible() && !window.isMinimized();
@@ -278,6 +283,8 @@ class TestPayments {
     const timer = setTimeout(stop, 180000);
     for (const event of ["hide", "minimize", "closed"]) window.on(event, stop);
     window.webContents.on("did-start-navigation", navigation); window.webContents.on("render-process-gone", stop);
+    signal?.addEventListener("abort", stop, { once: true });
+    const execute = async () => {
     try {
       this.#owner(); guard();
       if (["purchase", "purchase-retry", "fund-rewards", "reserve", "refund", "revoke", "release", "resume", "correct-mana"].includes(action)) { await this.#authorizeHost?.(); guard(); }
@@ -374,9 +381,12 @@ class TestPayments {
       }
       return this.#creditStatus(nonces.status(id), reason);
     } finally {
+      signal?.removeEventListener("abort", stop);
       clearTimeout(timer); task.abort.abort(); for (const event of ["hide", "minimize", "closed"]) window.removeListener(event, stop);
       window.webContents.removeListener("did-start-navigation", navigation); window.webContents.removeListener("render-process-gone", stop); this.#task = null;
     }
+    };
+    return this.#client.provider.withSignal ? this.#client.provider.withSignal(task.abort.signal, execute) : execute();
   }
 }
 module.exports = { TestPayments };
