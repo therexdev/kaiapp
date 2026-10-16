@@ -42,6 +42,12 @@ The pool can receive ordinary native KOIN transfers from the Master Node. Config
 
 ## Trust and launch gates
 
+### Contract verification
+
+The native Koinos rehearsal deploys fresh contracts, uses the private desktop purchase and normal Chat clients, transfers native fixture KOIN to the Master account, seeds a separate 10,000 KOIN pool, recovers a lost settlement response, and pays the provider automatically. Legacy customer principal remains intact. The compiled-WASM suite additionally checks real quote signatures, price changes, replay/domain/expiry failures, atomic transfer failure, integer limits and maximum-depth reward proofs.
+
+Builds explicitly use AssemblyScript's `stub` allocator: each bounded invocation owns its allocations until the VM discards that instance. The default incremental runtime reproduced a native-only pause trap; diagnostic logging hid it. Switching the allocator with the original pause body restored the complete native sequence, including repeated pause/resume on both prepaid products and rewards. This identifies a runtime compatibility issue, not an independently established upstream compiler root cause. Requests remain limited to 16 KiB and claims to 16 siblings. The WASM test exercises a valid 16-sibling claim and rejects 17/400-sibling inputs while staying below 1 MiB per tested invocation. Native receipts remain the basis for production Mana calibration.
+
 The pinned verifier attests the market quote and work/availability evidence. Contracts enforce signatures, identity, conversion, budgets, sum proofs and duplicate protection; they cannot independently determine external USD market value or semantic answer quality. Model qualification and economic abuse controls remain backend responsibilities. This has not received an independent contract audit.
 
 The initial purchase-price adapter requires two fresh KOIN/USD market observations, maximum age ten minutes, disagreement at most 10%, no stale fallback, and a five-minute signed purchase quote. These are backend implementation defaults. They must pass live feed validation before funding/launch. On October 16, 2026, the CoinGecko KOIN endpoint returned a March timestamp and the CoinPaprika ticker was unavailable. The app's existing Uniswap dashboard quote is a spot estimate from a thin pool, not a reviewed purchase oracle; it has deliberately not been substituted silently. A dependable current feed (or a reviewed time-weighted pool oracle and liquidity policy) is still required.

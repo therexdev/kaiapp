@@ -6,6 +6,8 @@ Normal Chat uses these credits without session approvals. Consumption records US
 
 This is deployment support, not a live contract upgrade or a funded launch. New purchases require fresh market quotes; stale/unavailable quotes cannot change existing balances. The current public KOIN feeds did not pass freshness/availability checks on October 16, so production pricing remains a deployment blocker. See `docs/koin-network/USD_CREDITS.md` for exact units, trust boundaries, funding and remaining acceptance.
 
+The isolated native-chain rehearsal now covers the complete USD purchase, normal Chat, restart recovery and automatic provider payout. Contract builds use invocation-scoped allocation after native testing exposed a pause-control runtime incompatibility; repeated pause/resume and bounded reward-proof tests are included.
+
 ## Prepaid credits implementation
 
 Adds a separate prepaid account mode: Buy credits with KOIN, see a credit balance, and use normal Chat without reservation approvals. Purchased credits do not expire; failed requests release their temporary credit hold automatically. Purchases and usage appear in account history. Existing credit use is independent of blockchain settlement and provider payouts.

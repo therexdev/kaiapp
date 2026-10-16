@@ -131,6 +131,37 @@ test("compiled rewards finalize a work-only root with multiple open days and a b
 });
 
 const USD = require("../../../core/lib/koin-network/purchase-quote");
+test("invocation-scoped WASM stays bounded for maximum-depth rewards and rejects oversized proofs", async () => {
+  const vm = await initialized("rewards"), DAY = 86400000;
+  const clock = timestamp => put(vm, "BLOCK_KEY", koinos.protocol.block.encode({ header: { timestamp } }).finish());
+  const tree = require("../../../core/lib/koin-network/merkle");
+  const domain = { chainId: b64(chain), contract: utils.encodeBase58(addr(3)), epoch: 1, version: 1 };
+  const row = { address: utils.encodeBase58(addr(8)), availability: "1", work: "0" };
+  let root = tree.leaf(domain, row);
+  const proof = [];
+  const wire = n => ({ hash: b64(n.hash), availability: String(n.availability), work: String(n.work) });
+  for (let i = 0; i < 16; i++) {
+    const sibling = { hash: Buffer.alloc(32, i + 1), availability: 1n, work: 0n };
+    proof.push(wire(sibling)); root = tree.parent(root, sibling);
+  }
+  clock(DAY); calls(vm, [await amount("100000")]);
+  await run(vm, "rewards", "open_epoch", { epoch: "1" });
+  clock(2 * DAY); authority(vm, addr(5));
+  calls(vm, [Buffer.alloc(0), Buffer.alloc(0), await amount("100000"), await amount("100000")]);
+  await run(vm, "rewards", "propose_root", { epoch: "1", root: wire(root) });
+  clock(3 * DAY); calls(vm, [await amount("100000"), await amount("100000")]);
+  await run(vm, "rewards", "finalize_root", { epoch: "1", root: wire(root) });
+  const claim = { epoch: "1", account: b64(addr(8)), availability: "1", proof };
+  for (const length of [17, 400]) {
+    const raw = await serializer.serialize({ ...claim, proof: Array.from({ length }, () => ({ hash: proof[0].hash, availability: "1" })) }, "koin.Request");
+    await assert.rejects(run(vm, "rewards", "claim", {}, raw), /invalid proof/);
+    assert.ok(vm.memory.buffer.byteLength <= 1048576, "Oversized proof decoding must stay within 1 MiB");
+  }
+  calls(vm, [await amount("100000"), Buffer.alloc(0), await amount("99999"), await amount("99999"), await amount("99999")]);
+  const paid = await run(vm, "rewards", "claim", claim);
+  assert.equal(paid.liabilities, "16");
+  assert.ok(vm.memory.buffer.byteLength <= 1048576, "Maximum-depth claim must stay within 1 MiB");
+});
 const usdConfig = { ...config, reward_basis: 1, master_node: b64(addr(10)) };
 const usdDeployment = { product: "prepaid-usd-v1", chainId: b64(chain), credits: utils.encodeBase58(addr(2)),
   masterNode: utils.encodeBase58(addr(10)), verifier: utils.encodeBase58(addr(5)) };
