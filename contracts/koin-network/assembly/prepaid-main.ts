@@ -1,3 +1,4 @@
+import { contractAbort } from "./Abort";
 import { System, Protobuf } from "@koinos/sdk-as";
 import { equal } from "./Common";
 import { Prepaid } from "./Prepaid";

@@ -111,3 +111,21 @@ test("JavaScript Merkle-sum allocation settles through compiled rewards WASM and
   assert.equal(paid.liabilities, "500");
   await assert.rejects(run(vm, "rewards", "claim", request), /duplicate claim/);
 });
+test("compiled rewards finalize a work-only root with multiple open days and a budget above uint32", async () => {
+  const vm = await initialized("rewards"), DAY = 86400000, liquid = "100000000000";
+  const clock = timestamp => put(vm, "BLOCK_KEY", koinos.protocol.block.encode({ header: { timestamp } }).finish());
+  clock(DAY + 10000); calls(vm, [await amount(liquid)]);
+  const opened = await run(vm, "rewards", "open_epoch", { epoch: "1" });
+  assert.ok(BigInt(opened.epoch.budget) > 4294967295n);
+  const { build } = require("../../../core/lib/koin-network/merkle");
+  const tree = build({ chainId: b64(chain), contract: utils.encodeBase58(addr(3)), epoch: 1, version: 1 }, [{ address: utils.encodeBase58(addr(8)), availability: "0", work: "30" }]);
+  const root = { hash: b64(Buffer.from(tree.root.hash, "hex")), work: "30" };
+  clock(2 * DAY + 10000); authority(vm, addr(5));
+  calls(vm, [Buffer.alloc(0), await serializer.serialize({ amount: "38" }, "koin.Result"), await amount(liquid), await amount(liquid)]);
+  await run(vm, "rewards", "propose_root", { epoch: "1", root });
+  calls(vm, [await amount(liquid)]); await run(vm, "rewards", "open_epoch", { epoch: "2" });
+  clock(3 * DAY + 10001); calls(vm, [await amount(liquid)]); await run(vm, "rewards", "open_epoch", { epoch: "3" });
+  calls(vm, [await amount(liquid), await amount(liquid)]);
+  await run(vm, "rewards", "finalize_root", { epoch: "1", root });
+  assert.equal((await run(vm, "rewards", "get_epoch", { epoch: "1" })).epoch.finalized, true);
+});

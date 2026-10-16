@@ -5,7 +5,7 @@
   "license": "MIT",
   "scripts": {
     "generate": "node scripts/generate.js",
-    "build": "node scripts/generate.js && asc assembly/credits-main.ts --target credits --use abort= && asc assembly/rewards-main.ts --target rewards --use abort= && asc assembly/prepaid-main.ts --target prepaid --use abort=",
+    "build": "node scripts/generate.js && asc assembly/credits-main.ts --target credits --use abort=assembly/Abort/contractAbort && asc assembly/rewards-main.ts --target rewards --use abort=assembly/Abort/contractAbort && asc assembly/prepaid-main.ts --target prepaid --use abort=assembly/Abort/contractAbort",
     "test": "node ../verify-coverage-toolchain.js && node scripts/generate.js && asp --nologo"
   },
   "devDependencies": {
