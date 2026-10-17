@@ -44,6 +44,21 @@ try {
   scripted = [];
 }
 
+// FAKE_LLAMA_LOG names a file that receives this process's argv once and a
+// line per /props hit — how a test proves the exact legacy launch and that
+// the legacy path never probes. /props mimics b10423: without --parallel the
+// slot count is "auto" (FAKE_LLAMA_AUTO_SLOTS, default 4) and --ctx-size is
+// split across the slots.
+const log = (line) => {
+  if (!process.env.FAKE_LLAMA_LOG) return;
+  try {
+    require("fs").appendFileSync(process.env.FAKE_LLAMA_LOG, line + "\n");
+  } catch {
+    /* logging never breaks the fixture */
+  }
+};
+log(JSON.stringify({ argv: process.argv.slice(2) }));
+
 const server = http.createServer((req, res) => {
   if (req.url === "/health") {
     if (Date.now() - startedAt < READY_DELAY_MS) {
@@ -52,6 +67,14 @@ const server = http.createServer((req, res) => {
     }
     res.writeHead(200, { "content-type": "application/json" });
     return res.end('{"status":"ok"}');
+  }
+
+  if (req.url === "/props") {
+    log(JSON.stringify({ props: true }));
+    const slots = Number(argValue("--parallel") || process.env.FAKE_LLAMA_AUTO_SLOTS || 4);
+    const ctx = Number(argValue("--ctx-size") || 4096);
+    res.writeHead(200, { "content-type": "application/json" });
+    return res.end(JSON.stringify({ default_generation_settings: { n_ctx: Math.floor(ctx / slots) }, total_slots: slots }));
   }
 
   if (req.url === "/v1/chat/completions" && req.method === "POST") {

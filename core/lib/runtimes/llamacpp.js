@@ -17,6 +17,7 @@ const path = require("path");
 
 const HEALTH_TIMEOUT_MS = 120000; // model load can be slow on first start
 const HEALTH_POLL_MS = 500;
+const PROPS_TIMEOUT_MS = 3000;
 
 /** An OS-assigned free port on `host`, released just before we hand it out. */
 function freePort(host) {
@@ -29,6 +30,26 @@ function freePort(host) {
       srv.close(() => resolve(port));
     });
   });
+}
+
+/**
+ * llama-server argv. `parallel == null` is the legacy launch and returns
+ * exactly the array every release has used. An opted-in context pins
+ * `--parallel <n>` after the GPU pair: b10423 defaults --parallel to auto,
+ * which splits --ctx-size across slots, so the window alone proves nothing
+ * about what one request may use.
+ */
+function launchArgs({ modelPath, host, port, contextSize = 4096, gpuLayers = 0, parallel = null, extraArgs = [] }) {
+  return [
+    "--model", modelPath,
+    "--host", host,
+    "--port", String(port),
+    "--ctx-size", String(contextSize),
+    // GPU offload only when hardware detection approved it; 0 = pure CPU.
+    "--n-gpu-layers", String(gpuLayers),
+    ...(parallel == null ? [] : ["--parallel", String(parallel)]),
+    ...extraArgs,
+  ];
 }
 
 /**
@@ -280,19 +301,11 @@ class LlamaCppRuntime {
     throw new Error("llama-server did not become healthy in time");
   }
 
-  async start({ modelPath, contextSize = 4096, gpuLayers = 0, extraArgs = [], sizeBytes = 0 }) {
+  async start({ modelPath, contextSize = 4096, gpuLayers = 0, extraArgs = [], sizeBytes = 0, parallel = null }) {
     if (this.child) throw new Error("Runtime already running — stop it first");
     this._stopping = false;
     this.port = this._fixedPort ?? (await freePort(this.host));
-    const args = [
-      "--model", modelPath,
-      "--host", this.host,
-      "--port", String(this.port),
-      "--ctx-size", String(contextSize),
-      // GPU offload only when hardware detection approved it; 0 = pure CPU.
-      "--n-gpu-layers", String(gpuLayers),
-      ...extraArgs,
-    ];
+    const args = launchArgs({ modelPath, host: this.host, port: this.port, contextSize, gpuLayers, parallel, extraArgs });
 
     ensureCrtBeside(this.binPath);
     // Windows CRT comes from the beside-copies above (System32-preferred);
@@ -308,6 +321,9 @@ class LlamaCppRuntime {
     });
     this.child = child;
     this.model = modelPath;
+    // Resolves when THIS child is gone, even after stop() forgot it — an
+    // opted-in engine must release device memory before a legacy retry.
+    this._exitPromise = new Promise((resolve) => child.once("exit", () => resolve()));
 
     /*
      * Courtesy: the engine runs BELOW NORMAL priority (niceness 10 on
@@ -357,6 +373,36 @@ class LlamaCppRuntime {
     return { endpoint: this.endpoint };
   }
 
+  /** Wait (bounded) for the last spawned child to exit. True once it has. */
+  waitForExit(timeoutMs = 10000) {
+    const p = this._exitPromise;
+    if (!p) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(false), timeoutMs);
+      p.then(() => {
+        clearTimeout(timer);
+        resolve(true);
+      });
+    });
+  }
+
+  /**
+   * One bounded GET /props: the per-request window llama-server actually
+   * runs with, or null when it cannot say. Callers retry; the legacy path
+   * never calls this.
+   */
+  async probeContext() {
+    if (!this.child) return null;
+    try {
+      const r = await fetch(`${this.endpoint}/props`, { signal: AbortSignal.timeout(PROPS_TIMEOUT_MS) });
+      if (!r.ok) return null;
+      const j = await r.json();
+      return { nCtx: j?.default_generation_settings?.n_ctx ?? null, totalSlots: j?.total_slots ?? null };
+    } catch {
+      return null;
+    }
+  }
+
   stop() {
     if (!this.child) return;
     this._stopping = true;
@@ -370,4 +416,4 @@ class LlamaCppRuntime {
   }
 }
 
-module.exports = { LlamaCppRuntime, selfTest, engineEnv, ensureCrtBeside, removeCrtBeside, stripCpuVariants, dirSnapshot };
+module.exports = { LlamaCppRuntime, launchArgs, selfTest, engineEnv, ensureCrtBeside, removeCrtBeside, stripCpuVariants, dirSnapshot };
