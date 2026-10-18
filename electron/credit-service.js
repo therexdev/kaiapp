@@ -13,8 +13,9 @@ function manifest(value) {
   return { schema: 1, state: "ready", config };
 }
 class CreditService {
-  constructor({ dataDir, account, storage, service, fetchImpl = fetch, progress = () => {} }) {
+  constructor({ dataDir, account, storage, service, fetchImpl = fetch, progress = () => {}, dialog }) {
     Object.assign(this, { dataDir, account, storage, fetchImpl, progress }); this.service = manifest(service);
+    this.purchases = new (require("./credit-purchases").CreditPurchases)({ dataDir, account, storage, dialog, fetchImpl });
   }
   async context(signal) {
     if (this.service.state !== "ready") throw Error(this.service.reason);
@@ -58,7 +59,7 @@ class CreditService {
         if (record && ["pending", "answered"].includes(record.state)) recoverable.unshift({ flow: candidate, record });
       }
     }
-    return { config, flow, auth, recoverable };
+    return { config, flow, auth, recoverable, directory };
   }
   async info(signal) {
     if (this.service.state !== "ready") return { enabled: true, configured: true, product: "prepaid-usd-v1", blocked: this.service.reason, activation: "unavailable", recoveryAvailable: false };
@@ -68,9 +69,11 @@ class CreditService {
         maxRequestCredits: require("../core/lib/koin-network/purchase-quote").credits(c.config.limits.perJob), recoveryAvailable: c.recoverable.length > 0 };
     } catch (error) { return { enabled: true, configured: true, product: "prepaid-usd-v1", activation: "signin-required", blocked: String(error.message), recoveryAvailable: false }; }
   }
-  async run(action, input, signal) {
+  async run(action, input, signal, window) {
     const c = await this.context(signal);
-    if (["purchase-preview", "purchase-approve"].includes(action)) throw Error("Purchases are unavailable until validated exchange pricing and payment approval are activated. Existing credits remain usable.");
+    if (action === "purchase-preview") return this.purchases.preview(c, input, signal);
+    if (["purchase-approve", "purchase-retry"].includes(action)) return this.purchases.run(c, window, action, input, signal);
+    if (action === "purchase-sync") return this.purchases.sync(c, signal);
     if (action === "credit-status") return c.flow.status();
     if (action === "network-overview") return c.flow.call("network", {}, signal);
     if (action === "chat-estimate") return c.flow.estimate(input, signal);

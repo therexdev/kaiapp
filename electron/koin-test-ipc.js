@@ -28,7 +28,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
   let root = fs.existsSync(path.join(usdRoot, "deployment.json")) ? usdRoot : fs.existsSync(path.join(prepaidRoot, "deployment.json")) ? prepaidRoot : path.join(dataDir, "koin-foundation-test");
   let configFile = path.join(root, "deployment.json"), journals = path.join(root, "journals");
   let journal, payments, sessionClient, sessionId, sessionRun, access, chatAbort, sessionAbort, worker, workerAbort, workerTrack, stopVersion = 0, busy = false, disposed = false;
-  const creditService = new (require("./credit-service").CreditService)({ dataDir, account: core.account,
+  const creditService = new (require("./credit-service").CreditService)({ dataDir, account: core.account, dialog,
     storage: core.account?.safeStorage, service: require("../core/lib/koin-network/credit-service.json"),
     progress: value => { const window = getMainWindow(); if (window && !window.isDestroyed()) window.webContents.send("koin:chat-progress", typeof value === "string" ? { text: value } : value); } });
   let creditBusy = false;
@@ -64,7 +64,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
       payments: open(), session: sessionPair, config, access,
       progress: value => { if (!window.isDestroyed()) window.webContents.send("koin:chat-progress", typeof value === "string" ? { text: value } : value); } });
   };
-  const withChatSignal = async (window, run) => {
+  const withChatSignal = async (window, run, payment = false) => {
     const controller = new AbortController(); activeRequests.add(controller); const stop = () => controller.abort();
     const navigation = (_event, _url, _inPlace, mainFrame) => { if (mainFrame) stop(); };
     for (const event of ["hide", "minimize", "closed"]) window.on(event, stop);
@@ -73,6 +73,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(600000)]);
     try { return await run(signal); }
     catch (error) {
+      if (signal.aborted && payment) throw Error("Payment review stopped. Any signed transaction remains saved; check confirmation before retrying.");
       if (signal.aborted && (creditService.service.state === "ready" || (fs.existsSync(configFile) && isPrepaid(readConfig(configFile).deployment)))) throw Error("Chat stopped. Unused credits become available automatically; any saved answer can be recovered.");
       if (signal.aborted) throw Error(signal.reason?.name === "TimeoutError"
         ? "The network request timed out. Your saved payment and any pending request are preserved. Send the same message again to continue"
@@ -87,7 +88,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     if (!trustedMainDocument(event, window, origin)) throw Error("Desktop window access denied");
     if (!isTest) return { enabled: false, mode: "test-deployment" };
     if (typeof action !== "string" || Buffer.byteLength(JSON.stringify(input ?? null)) > (["chat-completion", "chat-estimate"].includes(action) ? 26000 : 16384)) throw Error("Invalid Test payment action");
-    if (action === "stop") { stopVersion++; payments?.stop(); for (const controller of activeRequests) controller.abort(); chatAbort?.abort(); sessionAbort?.abort(); if (workerAbort && !worker?.running) workerAbort.abort(); return { state: "stopped", enabled: true, mode: fs.existsSync(configFile) ? readConfig(configFile).mode : "test-deployment" }; }
+    if (action === "stop") { stopVersion++; payments?.stop(); creditService.purchases.stop(); for (const controller of activeRequests) controller.abort(); chatAbort?.abort(); sessionAbort?.abort(); if (workerAbort && !worker?.running) workerAbort.abort(); return { state: "stopped", enabled: true, mode: fs.existsSync(configFile) ? readConfig(configFile).mode : "test-deployment" }; }
     // Account activation is independent of historical wallet manifests. Do not
     // migrate, rewrite, or consume old custody balances to activate USD credits.
     if (creditService.service.state === "ready") {
@@ -105,7 +106,14 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
       if (input !== undefined) throw Error("Provider controls take no arguments");
       workerAbort?.abort(); await worker?.stop(); workerTrack?.(); workerTrack = null; return { state: "test_worker_stopped" };
     }
-    if (["purchase-preview", "purchase-approve"].includes(action)) return creditService.run(action, input, AbortSignal.timeout(10000));
+    if (action === "purchase-preview") return withChatSignal(window, signal => creditService.run(action, input, signal), true);
+    if (["purchase-approve", "credit-purchase-retry"].includes(action)) {
+      if (disposed || busy || purchaseSync) throw Error("Finish the current payment review or confirmation check first");
+      if (!window.isVisible() || window.isMinimized()) throw Error("Return to the visible desktop window to review payment");
+      busy = true;
+      try { return await withChatSignal(window, signal => creditService.run(action === "credit-purchase-retry" ? "purchase-retry" : action, input, signal, window), true); }
+      finally { busy = false; }
+    }
     if (action === "chat-info") {
       if (!fs.existsSync(configFile)) return creditService.info();
       const config = readConfig(configFile);
@@ -134,6 +142,8 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     busy = true; const activeVersion = stopVersion;
     const active = () => activeVersion === stopVersion && !disposed && !window.isDestroyed() && window.isVisible() && !window.isMinimized();
     try {
+      if (["purchase", "purchase-retry", "fund-rewards", "reserve", "refund", "revoke", "release", "resume", "correct-mana"].includes(action) && fs.existsSync(configFile))
+        require("./credit-purchase-journals").guardOtherJournals(dataDir, journals, readConfig(configFile));
       if (action === "status" && !fs.existsSync(configFile)) return { enabled: true, configured: false, mode: "test-deployment" };
       if (action === "connect-prepaid") {
         if (purchaseSync) throw Error("Purchase confirmation is finishing. Try connecting again in a moment.");
@@ -326,15 +336,21 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
   });
   let purchaseSync = false;
   const purchaseTimer = setInterval(async () => {
-    if (disposed || busy || purchaseSync || !payments || !isPrepaid(readConfig(configFile).deployment)) return;
+    if (disposed || busy || purchaseSync) return;
+    const publicReady = creditService.service.state === "ready", legacyReady = payments && isPrepaid(readConfig(configFile).deployment);
+    if (!publicReady && !legacyReady) return;
     const window = getMainWindow(); if (!window || window.isDestroyed()) return;
     purchaseSync = true; const abort = new AbortController(), untrack = core.gateway.network.trackShadowRequest(abort);
     try {
-      access.authorize(readConfig(configFile).schedulerUrl, abort.signal);
-      await payments.syncPurchases((txId, signal) => flow(window).call("purchase", { txId }, signal), AbortSignal.any([abort.signal, AbortSignal.timeout(30000)]));
+      const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(30000)]);
+      if (legacyReady) {
+        access.authorize(readConfig(configFile).schedulerUrl, signal);
+        await payments.syncPurchases((txId, nextSignal) => flow(window).call("purchase", { txId }, nextSignal), signal);
+      }
+      if (publicReady) await creditService.run("purchase-sync", undefined, signal);
     } catch { /* Existing credits and chat remain independent of RPC recovery. */ }
     finally { untrack(); purchaseSync = false; }
   }, 10000); purchaseTimer.unref();
-  return { isProviding: () => !!worker?.running, dispose() { disposed = true; clearInterval(purchaseTimer); payments?.stop(); for (const controller of activeRequests) controller.abort(); chatAbort?.abort(); sessionAbort?.abort(); workerAbort?.abort(); workerTrack?.(); /* In-flight signed bytes must finish staging before process exit. */ } };
+  return { isProviding: () => !!worker?.running, dispose() { disposed = true; clearInterval(purchaseTimer); payments?.stop(); creditService.purchases.stop(); for (const controller of activeRequests) controller.abort(); chatAbort?.abort(); sessionAbort?.abort(); workerAbort?.abort(); workerTrack?.(); /* In-flight signed bytes must finish staging before process exit. */ } };
 }
 module.exports = { registerTestPaymentIPC, readConfig };
