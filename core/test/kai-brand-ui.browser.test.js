@@ -32,29 +32,22 @@ test("KAI workspace: artwork, welcome drafts, all navigation and narrow-window h
       minimize() {}, toggleMaximize() {}, close() {}, onMaximizeChanged() {} };
   });
   await page.goto(base);
-  await page.waitForSelector('#view-chat:not([hidden]) [data-kai-mounted="ready"] svg');
+  await page.waitForSelector('#view-chat:not([hidden]) .product-emblem svg');
   const texture = await page.evaluate(() => new Promise(resolve => {
     const image = new Image(); image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
     image.onerror = () => resolve(null); image.src = "assets/kai-character.png";
   }));
   assert.deepEqual(texture, { width: 1024, height: 1536 }, "The real Core serves the bundled texture");
   await shot(page, "chat-home");
-  // Only one menu group is exposed, including to keyboard navigation.
-  for (const group of ["toolkit", "contribute", "workspace"]) {
-    await page.click("#nav-group-" + group);
-    assert.equal(await page.locator('#nav .nav-group-label[aria-expanded="true"]').count(), 1);
+  // Primary navigation stays expanded; More reveals the remaining workspaces.
+  for (const group of ["workspace", "contribute"]) {
     assert.equal(await page.locator("#nav-items-" + group).evaluate(el => el.inert), false);
-    for (const other of ["workspace", "toolkit", "contribute"].filter(v => v !== group)) {
-      assert.equal(await page.locator("#nav-items-" + other).evaluate(el => el.inert), true);
-    }
   }
   await page.focus("#nav-group-toolkit"); await page.keyboard.press("Enter");
   await page.locator('#nav-group-toolkit[aria-expanded="true"]').waitFor();
+  assert.equal(await page.locator("#nav-items-toolkit").evaluate(el => el.inert), false);
   await page.evaluate(() => showView("chat"));
-  assert.equal(await page.getAttribute("#nav-group-workspace", "aria-expanded"), "true", "programmatic navigation reveals its group");
-  await page.click("#nav-group-contribute");
-  await page.evaluate(() => showView("chat", { navOnly: true }));
-  assert.equal(await page.getAttribute("#nav-group-contribute", "aria-expanded"), "true", "background refresh does not reopen the old group");
+  assert.equal(await page.getAttribute("#nav-group-workspace", "aria-expanded"), "true");
   await navClick(page, '[data-view="chat"]');
 
   await page.click('[data-chat-prompt*="turn an idea"]');
@@ -125,11 +118,11 @@ test("KAI workspace: artwork, welcome drafts, all navigation and narrow-window h
   await page.click('[data-knode="koinos-wallet"]');
   await frame.locator("#view-wallet.active").waitFor(); await shot(page, "wallet");
   await navClick(page, '[data-view="chat"]'); await page.setViewportSize({ width: 820, height: 700 });
-  await page.click("#history-toggle");
+  await page.click("#product-history-all");
   assert.equal(await page.locator("#chats-pane").isVisible(), true);
   await page.click("#btn-new-chat");
-  assert.equal(await page.locator("#chats-pane").isVisible(), false);
-  await page.waitForSelector('#chat-empty [data-kai-mounted="ready"]');
+  assert.equal(await page.locator("#chats-pane").isVisible(), true, "recent chats remain in the sidebar");
+  await page.waitForSelector('#chat-empty .product-emblem');
   await page.click('[data-chat-prompt*="brainstorm"]'); assert.match(await page.inputValue("#input"), /brainstorm/);
   const bounds = await page.evaluate(() => {
     const pane = document.querySelector(".chat-pane").getBoundingClientRect(), composer = document.getElementById("composer").getBoundingClientRect();

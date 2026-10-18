@@ -40,7 +40,7 @@ test("compare view: preset chips fill the prompt box and never auto-run", { skip
     await page.goto(base);
     await page.waitForSelector("#view-chat:not([hidden])");
 
-    await page.click('.nav-item[data-view="compare"]');
+    await require("./ui-nav").navClick(page, '.nav-item[data-view="compare"]');
     await page.waitForSelector("#view-compare:not([hidden])");
 
     const chips = await page.$$("#cmp-presets .cmp-preset");

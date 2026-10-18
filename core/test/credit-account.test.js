@@ -18,3 +18,10 @@ test("invalid combined balance cannot replace the account's trusted state", () =
   const bad = value("2"); bad.credits.available = "999";
   assert.throws(() => store.accept(bad), /verified/); assert.equal(store.get().snapshot.credits.version, "1");
 });
+
+test("sign-out clears the prior balance and rejects a late response from that session", async () => {
+  let resolve; const store = createCreditState({ read: () => new Promise(done => { resolve = done; }) });
+  store.accept(value("1")); const refresh = store.refresh(); await Promise.resolve();
+  store.clear(); resolve(value("2")); await refresh;
+  assert.equal(store.get().snapshot, null); assert.equal(store.get().status, "unavailable");
+});

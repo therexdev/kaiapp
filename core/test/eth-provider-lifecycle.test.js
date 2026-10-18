@@ -58,3 +58,12 @@ test("price quotes destroy owned providers on success and failure, preserve supp
   assert.ok((await fetchUsdPerKoin({ provider })).usdPerKoin > 0);
   assert.equal(destroyed, 2, "injected provider belongs to its caller");
 });
+
+test("stopping the price cache aborts discovery and prevents a new background refresh", async () => {
+  const { createPriceCache } = require("../lib/koinos/koin-price");
+  let calls = 0, observedSignal;
+  const cache = createPriceCache({ fetcher: ({ signal }) => { calls++; observedSignal = signal; return new Promise(resolve => signal.addEventListener("abort", () => resolve({ usdPerKoin: null, error: "stopped" }), { once: true })); } });
+  cache.snapshot(); assert.equal(calls, 1); cache.stop(); assert.equal(observedSignal.aborted, true);
+  await new Promise(resolve => setImmediate(resolve)); cache.snapshot(); assert.equal(calls, 1);
+  await assert.rejects(cache.get(), /stopped/);
+});

@@ -1020,6 +1020,7 @@ function createKoinosNode({ dataDir, wallet, appVersion, onEvent = () => {} }) {
     stop() {
       nodeMgr.dispose();
       producerCache.stop();
+      priceCache.stop();
       clearInterval(bridgeTimer);
       clearInterval(routeCTimer);
       try { rewards.stop(); } catch { /* already stopped */ }

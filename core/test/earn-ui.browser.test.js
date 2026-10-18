@@ -44,6 +44,7 @@ test("earn wallet UI: create -> lock -> unlock -> restore -> unlock (real browse
     await page.goto(base);
     await page.waitForSelector("#view-chat:not([hidden])");
     await navClick(page, '.nav-item[data-view="earn"]');
+    await page.locator("#product-legacy-account > summary").click();
     await page.waitForSelector("#earn-setup:not([hidden])");
 
     // Create: typed keystrokes, both fields, mismatch first (guard works),
@@ -137,6 +138,7 @@ test("wallet card: receive address shown, sends demand a password and a second c
     await page.goto(base);
     await page.waitForSelector("#view-chat:not([hidden])");
     await navClick(page, '.nav-item[data-view="earn"]');
+    await page.locator("#product-legacy-account > summary").click();
     await page.waitForSelector("#earn-ready:not([hidden])");
 
     // Receive: the card carries this wallet's real address.

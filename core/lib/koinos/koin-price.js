@@ -149,12 +149,15 @@ function valuation({ balances, windows, usdPerKoin } = {}) {
  * { usdPerKoin: null, error } so a dashboard can keep drawing everything else.
  * A node with no internet must still show its balances.
  */
-async function fetchUsdPerKoin({ provider, probeUsdt = DEFAULT_PROBE_USDT, now = Date.now() } = {}) {
+async function fetchUsdPerKoin({ provider, probeUsdt = DEFAULT_PROBE_USDT, now = Date.now(), signal } = {}) {
   const { quoteVkoinOut } = require("./eth-swap");
   const usdtSats = BigInt(Math.round(probeUsdt * USDT_UNITS));
-  let p;
+  let p; const stop = () => { if (!provider) p?.destroy(); };
   try {
-    p = provider || (await require("./eth-bridge").makeProvider());
+    signal?.throwIfAborted();
+    p = provider || (await require("./eth-bridge").makeProvider(undefined, { signal }));
+    signal?.addEventListener("abort", stop, { once: true });
+    signal?.throwIfAborted();
     const vkoinSats = await quoteVkoinOut({ usdtSats, provider: p });
     const executable = computeUsdPerKoin({ usdtSats, vkoinSats });
     if (executable == null) {
@@ -174,6 +177,7 @@ async function fetchUsdPerKoin({ provider, probeUsdt = DEFAULT_PROBE_USDT, now =
   } finally {
     // A background quote owns only the provider it created. Failed or complete
     // quotes must not leave discovery/retry timers running after Core stops.
+    signal?.removeEventListener("abort", stop);
     if (!provider) p?.destroy();
   }
 }
@@ -187,16 +191,18 @@ async function fetchUsdPerKoin({ provider, probeUsdt = DEFAULT_PROBE_USDT, now =
  * current.
  */
 function createPriceCache({ ttlMs = PRICE_TTL_MS, staleMs = PRICE_STALE_MS, fetcher = fetchUsdPerKoin } = {}) {
+  const controller = new AbortController();
   let last = null;      // last SUCCESSFUL result
   let lastError = null;
   let inFlight = null;  // collapses concurrent callers onto one round trip
 
   return {
     async get({ now = Date.now(), force = false } = {}) {
+      controller.signal.throwIfAborted();
       const fresh = last && now - last.at < ttlMs;
       if (fresh && !force) return { ...last, ageMs: now - last.at, stale: false, error: lastError };
       if (!inFlight) {
-        inFlight = fetcher({ now }).finally(() => { inFlight = null; });
+        inFlight = fetcher({ now, signal: controller.signal }).finally(() => { inFlight = null; });
       }
       const r = await inFlight;
       if (r.usdPerKoin != null) { last = r; lastError = null; }
@@ -219,7 +225,7 @@ function createPriceCache({ ttlMs = PRICE_TTL_MS, staleMs = PRICE_STALE_MS, fetc
      */
     snapshot({ now = Date.now() } = {}) {
       const due = !last || now - last.at >= ttlMs;
-      if (due && !inFlight) {
+      if (due && !inFlight && !controller.signal.aborted) {
         // Fire and forget: errors are recorded by get() and surface as
         // `error` on a later snapshot.
         this.get({ now }).catch(() => {});
@@ -232,6 +238,7 @@ function createPriceCache({ ttlMs = PRICE_TTL_MS, staleMs = PRICE_STALE_MS, fetc
       };
     },
 
+    stop: () => controller.abort(new Error("Price service stopped")),
     _peek: () => last,
   };
 }

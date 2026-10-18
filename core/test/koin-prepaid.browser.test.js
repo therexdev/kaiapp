@@ -34,17 +34,18 @@ for (const product of ["prepaid-v1", "prepaid-usd-v1"]) test(product + " custome
     } };
   }, product);
   await page.goto(`http://127.0.0.1:${await core.start()}`); await navClick(page, '.nav-item[data-view="earn"]');
+  await page.locator("#product-legacy-account > summary").click();
+  await page.fill("#koin-test-amount", "0.1"); await page.locator('[data-koin-test="purchase"]').click();
+  await page.waitForFunction(() => !document.querySelector('[data-koin-test="purchase"]').disabled);
+  await page.locator('[data-koin-test="purchase-retry"]').click();
+  await page.waitForFunction(() => !document.querySelector('[data-koin-test="purchase-retry"]').disabled);
   await page.locator("#koin-open-chat").click(); await page.locator("#network-chat-account").waitFor({ state: "visible" });
   await page.waitForFunction(() => document.getElementById("network-chat-balance").textContent === "100 credits");
   assert.equal(await page.locator("#network-add-koin").textContent(), "Buy credits");
   if (product === "prepaid-usd-v1") { assert.match(await page.locator("#network-chat-help").textContent(), /1,000 credits = \$1/); assert.doesNotMatch(await page.locator("#network-chat-help").textContent(), /1 KOIN =/); }
   assert.doesNotMatch(await page.locator("#network-chat-account").innerText(), /reservation|reserved|settlement|allowance/i);
-  await page.fill("#network-koin-amount", "0.1"); await page.locator("#network-add-koin").click();
-  await page.waitForFunction(() => !document.getElementById("network-add-koin").disabled);
-  assert.match(await page.locator("#network-chat-status").textContent(), /Purchase confirming/);
-  assert.equal(await page.locator("#network-retry-purchase").isVisible(), true);
-  await page.locator("#network-retry-purchase").click();
-  await page.waitForFunction(() => !document.getElementById("network-retry-purchase").disabled);
+  assert.equal(await page.locator("#network-add-koin").isVisible(), false);
+  assert.equal(await page.locator("#network-chat-reservation").isVisible(), false);
   if (product === "prepaid-usd-v1") { await page.locator("#network-free-only").check(); await page.evaluate(() => { window.streamChat = true; }); }
   await page.fill("#input", "Use my existing credits while the purchase confirms"); await page.locator("#btn-send").click();
   if (product === "prepaid-usd-v1") {
@@ -70,7 +71,7 @@ for (const product of ["prepaid-v1", "prepaid-usd-v1"]) test(product + " custome
   assert.equal(actions.filter(a => a === "purchase").length, 1); assert.ok(!actions.some(a => /reserve|session|release|refund/.test(a)));
   const qa = process.env.KAI_PREPAID_QA_DIR;
   if (qa) { fs.mkdirSync(qa, { recursive: true }); await page.screenshot({ path: path.join(qa, "prepaid-chat.png") }); }
-  await page.locator("#network-account").click(); assert.equal(await page.locator("#koin-advanced").isVisible(), false);
+  await navClick(page, '.nav-item[data-view="earn"]'); assert.equal(await page.locator("#koin-advanced").isVisible(), false);
   assert.equal(await page.locator('[data-koin-test="refund"]').isVisible(), false);
   await page.locator("#koin-earn-tab").click(); await page.locator('[data-koin-test="worker-start"]').click();
   await page.waitForFunction(() => document.getElementById("koin-provider-state").textContent === "ONLINE");

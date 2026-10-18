@@ -1,7 +1,7 @@
 "use strict";
 (() => {
   function createCreditState({ read, clock = Date.now }) {
-    const listeners = new Set(); let pending, value = { status: "loading", snapshot: null, error: null };
+    const listeners = new Set(); let pending, generation = 0, value = { status: "loading", snapshot: null, error: null };
     const notify = () => { for (const listener of listeners) listener(structuredClone(value)); };
     const atoms = n => typeof n === "string" && /^(0|[1-9]\d{0,19})$/.test(n) && BigInt(n) <= (1n << 64n) - 1n;
     function accept(result) {
@@ -15,16 +15,17 @@
         purchases: structuredClone(result.purchases || []), usage: structuredClone(result.usage || []), receivedAt: clock() } }; notify();
     }
     async function refresh() {
-      if (!pending) pending = Promise.resolve().then(read).then(accept).catch(error => {
+      if (!pending) { const epoch = generation; pending = Promise.resolve().then(read).then(result => { if (epoch === generation) accept(result); }).catch(error => {
+        if (epoch !== generation) return;
         value = { ...value, status: "unavailable", error: String(error.message || "Credit balance unavailable") }; notify();
-      }).finally(() => { pending = null; });
+      }).finally(() => { if (epoch === generation) pending = null; }); }
       await pending; return structuredClone(value);
     }
-    return { accept, refresh, get: () => structuredClone(value), subscribe(listener) { listeners.add(listener); listener(structuredClone(value)); return () => listeners.delete(listener); } };
+    return { accept, refresh, clear() { generation++; pending = null; value = { status: "unavailable", snapshot: null, error: "Sign in to check your credit account." }; notify(); }, get: () => structuredClone(value), subscribe(listener) { listeners.add(listener); listener(structuredClone(value)); return () => listeners.delete(listener); } };
   }
   if (typeof module === "object") module.exports = { createCreditState };
   if (typeof window === "undefined") return;
-  window.KaiCredits = createCreditState({ read: () => window.kaiKoinTestBridge.run("credit-status") });
+  window.KaiCredits = createCreditState({ read: () => { if (!window.kaiKoinTestBridge) throw Error("Open the desktop app to check network credits. Local AI remains available."); return window.kaiKoinTestBridge.run("credit-status"); } });
   const credits = v => { const n = BigInt(v); return `${n / 100000n}.${String(n % 100000n).padStart(5, "0")}`.replace(/\.?0+$/, "") || "0"; };
   function paint(state) {
     if (!state.snapshot) return;
@@ -37,5 +38,6 @@
   }
   window.KaiCredits.subscribe(paint);
   setInterval(() => { if (!document.hidden) paint(window.KaiCredits.get()); }, 1000);
+  window.addEventListener("kai-account-signed-out", () => window.KaiCredits.clear());
   window.addEventListener("kai-network-account-changed", () => window.KaiCredits.refresh());
 })();

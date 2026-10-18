@@ -14,7 +14,7 @@ test("Earn review preview is desktop-only, disables repeat clicks and explains e
   const page = await browser.newPage();
   await page.addInitScript(() => { localStorage.setItem("kai-interface-language", "en"); });
   await page.goto(base);
-  await navClick(page, '.nav-item[data-view="earn"]');
+  await navClick(page, '.nav-item[data-view="earn"]'); await page.locator("#product-legacy-account > summary").click();
   assert.equal(await page.locator("#koin-review-preview").isVisible(), false);
   assert.equal(await page.locator("#koin-session-rehearsal").isVisible(), false);
   await page.addInitScript(() => {
@@ -25,7 +25,7 @@ test("Earn review preview is desktop-only, disables repeat clicks and explains e
     } };
   });
   await page.reload();
-  await navClick(page, '.nav-item[data-view="earn"]');
+  await navClick(page, '.nav-item[data-view="earn"]'); await page.locator("#product-legacy-account > summary").click();
   const button = page.locator("#btn-koin-review-preview"), status = page.locator("#koin-review-status");
   assert.equal(await button.isVisible(), true);
   for (const [result, message] of [
@@ -56,7 +56,7 @@ test("Earn review preview is desktop-only, disables repeat clicks and explains e
       retry: async () => ({ ...base, state: "active" }), revoke: async () => ({ ...base, state: "revoked" }),
     };
   });
-  await page.reload(); await navClick(page, '.nav-item[data-view="earn"]');
+  await page.reload(); await navClick(page, '.nav-item[data-view="earn"]'); await page.locator("#product-legacy-account > summary").click();
   const sessionButton = page.locator("#btn-koin-session-review");
   assert.equal(await sessionButton.isVisible(), true); await sessionButton.click();
   assert.equal(await sessionButton.isDisabled(), true);
@@ -82,7 +82,7 @@ test("Earn review preview is desktop-only, disables repeat clicks and explains e
       return new Promise(r => { window.finishTestPayment = r; });
     } };
   });
-  await page.reload(); await navClick(page, '.nav-item[data-view="earn"]');
+  await page.reload(); await navClick(page, '.nav-item[data-view="earn"]'); await page.locator("#product-legacy-account > summary").click();
   assert.equal(await page.locator("#koin-test-payments").isVisible(), true);
   assert.equal(await page.locator("#koin-network-badge").textContent(), "Not connected");
   assert.equal(await page.locator('[data-koin-test="purchase"]').isDisabled(), true);

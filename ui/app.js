@@ -459,13 +459,19 @@ function updateProviderNote() {
   }
 }
 window.addEventListener("kai-providers-changed", () => { $("model-pick").dataset.sig = ""; refresh(); });
-window.addEventListener("kai-network-use", async () => {
+window.addEventListener("kai-network-use", async event => {
   await updateModelPick((await coreGet("/core/models")).aliases);
-  if (KaiNetwork.info.blocked) { activateView("earn"); return; }
+  if (KaiNetwork.info.blocked) {
+    if (KaiNetwork.info.activation === "signin-required") { activateView("settings"); $("btn-account-signin").scrollIntoView({ block: "center" }); }
+    else if (KaiNetwork.info.product === "prepaid-usd-v1") { activateView("credits"); }
+    else activateView("earn");
+    return;
+  }
   $("src-pick").value = "network"; $("mode-pick").value = "chat";
   $("src-pick").dispatchEvent(new Event("change")); activateView("chat"); $("input").focus();
+  if (event.detail?.model) { await fillNetworkModelPick(); if ([...$("model-pick").options].some(o => o.value === event.detail.model)) $("model-pick").value = event.detail.model; }
 });
-window.addEventListener("kai-network-account", () => { activateView("earn"); $("koin-use-tab").click(); $("koin-test-payments").scrollIntoView({ block: "start" }); });
+window.addEventListener("kai-network-account", () => { activateView("earn"); if ($("product-legacy-account")) $("product-legacy-account").open = true; $("koin-use-tab").click(); $("koin-test-payments").scrollIntoView({ block: "start" }); });
 window.addEventListener("kai-network-recover", async () => {
   if (state.chatting) return;
   state.chatting = true; $("btn-send").disabled = true; $("network-recover").disabled = true; $("btn-stop").hidden = false;
@@ -519,7 +525,7 @@ function setStatus(kind, text) {
 
 function expandNavGroup(selected) {
   for (const header of document.querySelectorAll("#nav .nav-group-label")) {
-    const open = header === selected;
+    const open = header === selected || (document.body.classList.contains("product-v2") && ["nav-group-workspace", "nav-group-contribute"].includes(header.id));
     header.setAttribute("aria-expanded", String(open));
     const items = document.getElementById(header.getAttribute("aria-controls"));
     items.inert = !open;
@@ -537,14 +543,15 @@ function showView(name, { navOnly = false } = {}) {
   // every caller — clicks and the boot poll alike — comes through this door.
   const phys = name.startsWith("koinos") ? "koinos" : name;
   const headings = {
-    chat: ["Chat with KAI", "A little curiosity goes a long way."],
+    chat: ["Chat", "Your work. Your choice of AI."],
+    credits: ["Credits", ""], "buy-credits": ["Buy credits", ""], "network-overview": ["Network", ""], recovery: ["Recovery", ""],
     docs: ["Documents", "From a first thought to the final draft."],
     compare: ["Compare models", "One question. A few different perspectives."],
     models: ["Model library", "Find the right mind for the job."],
     agents: ["Agents", "Build a service. Connect with other agents."], brain: ["Brain", "Your world, remembered."], workflows: ["Workflows", "Give your routines to KAI."], connections: ["Connections", "Your accounts, your control."],
     tasks: ["Tasks", "Put your ideas in motion."], tools: ["Tools", "Give your AI a few more abilities."],
     api: ["Local API", "Your models, connected to your workflow."],
-    earn: ["Earn KAI", "Let your compute contribute."],
+    earn: ["Earn", "Share your AI. Earn KOIN."],
     settings: ["Settings", "Make this space your own."], network: ["Network", "Connected on your terms."],
     code: ["Koinos Code", "Build something you want to exist."], devtools: ["Developer tools", "Everything you need to get hands-on."],
     koinos: ["Koinos Node", "Your wallet. Your node. Your contribution."], onboarding: ["Welcome to Koinos AI", "Let’s get you ready."]
@@ -704,6 +711,7 @@ function activateView(name) {
   if (name === "network") renderNetwork();
   if (name === "settings") renderSettings();
   if (name === "docs") renderDocs();
+  window.KaiProduct?.render(name);
 }
 
 for (const b of document.querySelectorAll("[data-view]")) {
@@ -2009,6 +2017,7 @@ $("btn-account-signout").addEventListener("click", async () => {
     await fetch("/core/account/logout", { method: "POST" });
   } catch { /* signing out locally regardless */ }
   $("btn-account-signin").disabled = false;
+  window.dispatchEvent(new Event("kai-account-signed-out"));
   accountMsg("Signed out on this device.", true);
   renderAccount(true);
 });

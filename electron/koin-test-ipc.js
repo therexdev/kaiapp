@@ -92,7 +92,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     // migrate, rewrite, or consume old custody balances to activate USD credits.
     if (creditService.service.state === "ready") {
       if (action === "chat-info") return creditService.info(AbortSignal.timeout(10000));
-      if (["credit-status", "chat-estimate"].includes(action)) return creditService.run(action, input, AbortSignal.timeout(10000));
+      if (["credit-status", "chat-estimate", "network-overview"].includes(action)) return creditService.run(action, input, AbortSignal.timeout(10000));
       if (["chat-completion", "chat-recover", "chat-ack"].includes(action)) {
         if (disposed || creditBusy) throw Error("Finish or stop the current chat first");
         if (!window.isVisible() || window.isMinimized()) throw Error("Return to the visible desktop window to chat");
@@ -105,21 +105,24 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
       if (input !== undefined) throw Error("Provider controls take no arguments");
       workerAbort?.abort(); await worker?.stop(); workerTrack?.(); workerTrack = null; return { state: "test_worker_stopped" };
     }
+    if (["purchase-preview", "purchase-approve"].includes(action)) return creditService.run(action, input, AbortSignal.timeout(10000));
     if (action === "chat-info") {
       if (!fs.existsSync(configFile)) return creditService.info();
-      const config = readConfig(configFile); open(); let blocked = "";
+      const config = readConfig(configFile);
+      if (!isPrepaid(config.deployment)) return { ...await creditService.info(), legacyRecoveryAvailable: true };
+      open(); let blocked = "";
       try { access.authorize(config.schedulerUrl); } catch (e) { blocked = String(e.message).slice(0, 220); }
       const recovery = flow(window).read();
       return { product: config.deployment.product || "legacy-reservations", enabled: true, configured: true, model: config.model, mode: config.mode, maxOutput: config.maxOutput,
         ...(isPrepaid(config.deployment) ? { maxRequestCredits: require("../core/lib/koin-network/purchase-quote").credits(config.limits.perJob) } : {}), blocked,
         recoveryAvailable: !blocked && ["pending", "answered"].includes(recovery?.state) };
     }
-    if (["chat-estimate", "credit-status"].includes(action)) {
+    if (["chat-estimate", "credit-status", "network-overview"].includes(action)) {
       if (!fs.existsSync(configFile)) throw Error("The credit service is not available yet");
       const config = readConfig(configFile);
       if (!isPrepaid(config.deployment)) throw Error("The earlier KOIN account is preserved for recovery. Credit service activation is pending.");
       open(); access.authorize(config.schedulerUrl);
-      return action === "credit-status" ? flow(window).status() : flow(window).estimate(input, AbortSignal.timeout(10000));
+      return action === "network-overview" ? flow(window).call("network") : action === "credit-status" ? flow(window).status() : flow(window).estimate(input, AbortSignal.timeout(10000));
     }
     if (action === "provider-status") {
       if (!fs.existsSync(configFile) || !worker?.running) return { state: "offline", label: "OFFLINE", detail: "Turn on to provide AI to the network." };

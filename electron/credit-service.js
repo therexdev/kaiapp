@@ -70,7 +70,9 @@ class CreditService {
   }
   async run(action, input, signal) {
     const c = await this.context(signal);
+    if (["purchase-preview", "purchase-approve"].includes(action)) throw Error("Purchases are unavailable until validated exchange pricing and payment approval are activated. Existing credits remain usable.");
     if (action === "credit-status") return c.flow.status();
+    if (action === "network-overview") return c.flow.call("network", {}, signal);
     if (action === "chat-estimate") return c.flow.estimate(input, signal);
     if (action === "chat-recover") {
       const saved = c.recoverable.at(-1); if (!saved) return { state: "none" };
