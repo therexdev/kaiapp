@@ -1,3 +1,7 @@
+## Purchase sync and outage recovery follow-up
+
+Purchase synchronization now checks which signed transaction actually won before registering it, avoiding a losing Mana correction consuming the last confirmation slot. Historical provider availability survives long outages and restart regardless of which provider reconnects first. These changes do not activate network credits or earning; backend deployment and acceptance gates remain pending.
+
 ## Purchase recovery and availability fairness fixes
 
 Fixes a purchase-recovery case where an original payment finalized while a same-nonce Mana correction was being simulated. After restart, confirmation sync now registers the verified winning transaction, preserving both signed envelopes without another signature or broadcast. Expired-quote safety checks remain unchanged.

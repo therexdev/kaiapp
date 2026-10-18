@@ -138,3 +138,19 @@ test("restart sync registers the original finalized purchase when its Mana corre
   assert.deepEqual([...seen], [f.original.id]); assert.ok(!seen.has(correctedId));
   assert.equal(f.calls.filter(c => c.broadcast).length, 0); assert.equal(f.signs(), 1);
 });
+test("sync discovers the original winner before using the last purchase admission slot", async t => {
+  const f = await setup(t, { prepaid: true });
+  f.provider.call = async () => { throw Error("simulation unavailable"); };
+  const result = await f.make().run(window(), "correct-mana", f.id);
+  assert.equal(result.state, "correction_simulation_failed");
+  const losing = f.journal.nonceCoordinator.correction(f.id).transaction.id;
+  await f.include(f.original, { irreversible: true });
+  f.journal.close(); const journal = f.open(), payments = f.make(journal);
+  assert.notEqual(journal.nonceCoordinator.correction(f.id).state, "superseded");
+  const claims = new Set(Array.from({ length: 7 }, (_, i) => "other-" + i)), registrations = [];
+  const register = async id => { if (!claims.has(id) && claims.size >= 8) throw Error("Purchase confirmation queue is full"); claims.add(id); registrations.push(id); };
+  await payments.syncPurchases(register, AbortSignal.timeout(5000));
+  await payments.syncPurchases(register, AbortSignal.timeout(5000));
+  assert.deepEqual(registrations, [f.original.id]); assert.ok(!claims.has(losing));
+  assert.equal(journal.status(f.id).state, "funded"); assert.equal(f.signs(), 1); assert.equal(f.calls.length, 0);
+});

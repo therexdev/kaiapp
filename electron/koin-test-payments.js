@@ -254,8 +254,16 @@ class TestPayments {
     const combined = AbortSignal.any([signal, this.#syncAbort.signal]);
     const run = async () => {
       this.#owner();
-      for (const p of this.#journal.list().filter(p => p.kind === "credits" && !["reverted", "conflicted"].includes(p.state))) {
+      for (let p of this.#journal.list().filter(p => p.kind === "credits" && !["reverted", "conflicted"].includes(p.state))) {
         combined.throwIfAborted();
+        // Discover the winning envelope before consuming any registration slot.
+        // This is read-only recovery: no signing or background broadcast.
+        if (p.state !== "funded") {
+          await this.#journal.nonceCoordinator.reconcile(p.id); combined.throwIfAborted();
+          await this.#journal.advance(p.id, { allowSubmit: false }); combined.throwIfAborted();
+          p = this.#journal.status(p.id);
+        }
+        if (["reverted", "conflicted"].includes(p.state)) continue;
         const correction = this.#journal.nonceCoordinator.correction(p.id);
         // The original can win while a same-nonce Mana correction is being
         // simulated. Its verified finality, not the presence of a correction
@@ -264,12 +272,7 @@ class TestPayments {
           : correction?.state === "superseded" ? p.txId : correction?.transaction?.id || p.txId;
         if (!this.#registeredPurchases.has(txId)) { await register(txId, combined); this.#registeredPurchases.add(txId); }
         combined.throwIfAborted();
-        if (p.state === "funded") continue;
-        await this.#journal.nonceCoordinator.reconcile(p.id); combined.throwIfAborted();
-        const decision = await this.#journal.advance(p.id, { allowSubmit: false });
-        if (decision.action === "done") continue;
-        // Read-only recovery is automatic. Re-broadcast is kept within the
-        // original visible purchase action; no background signing is possible.
+
       }
     };
     try { return await (this.#client.provider.withSignal ? this.#client.provider.withSignal(combined, run) : run()); }
