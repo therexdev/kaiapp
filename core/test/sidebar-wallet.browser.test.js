@@ -3,7 +3,7 @@ const { test } = require("node:test"), assert = require("node:assert/strict");
 const fs = require("node:fs"), os = require("node:os"), path = require("node:path");
 const CHROMIUM = process.env.KAI_TEST_CHROMIUM || "/opt/pw-browsers/chromium";
 
-test("sidebar wallet renders money, unknowns, translations and a compact model row", { skip: !fs.existsSync(CHROMIUM), timeout: 60000 }, async t => {
+test("sidebar credits do not relabel KOIN; older wallet formatting and recovery remain intact", { skip: !fs.existsSync(CHROMIUM), timeout: 60000 }, async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-sidebar-"));
   const core = await require("../server").createCore({ dataDir: dir, port: 0, onEvent() {} });
   const base = "http://127.0.0.1:" + await core.start();
@@ -35,7 +35,9 @@ test("sidebar wallet renders money, unknowns, translations and a compact model r
       const rect = id => { const r = document.getElementById(id).getBoundingClientRect(); return { top: r.top, bottom: r.bottom, height: r.height }; };
       return { launch: rect("launch-kai"), wallet: rect("sidebar-wallet"), model: rect("status-pane"), name: rect("status-model") };
     });
-    assert.ok(layout.wallet.top >= layout.launch.bottom);
+    assert.equal(await page.locator("#sidebar-wallet").isVisible(), false);
+    assert.equal(await page.locator(".product-sidebar-credits").isVisible(), true);
+    assert.equal(await page.locator("[data-credit-total]").first().textContent(), "—");
     assert.ok(layout.model.top >= layout.wallet.bottom);
     assert.ok(layout.model.height <= 34 && layout.name.height > 0, "model stays one visible row even in short windows");
   }
@@ -67,7 +69,8 @@ test("sidebar wallet renders money, unknowns, translations and a compact model r
     wallet = example.wallet;
     await page.click("#nav-settings");
     await page.locator("#view-settings:not([hidden])").waitFor();
-    await page.click("#sidebar-wallet");
+    await page.locator('.product-sidebar-credits [data-product-view="credits"]').click();
+    await page.locator('#view-credits [data-product-action="legacy"]').click();
     // Exercise the same polls that used to restore the previous page a
     // second after the click. The wallet contents must also initialize.
     await page.evaluate(async () => { await refresh(); await refreshSidebarWallet(); await refresh(); });

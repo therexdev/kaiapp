@@ -99,7 +99,8 @@ test("onboarding -> download -> streaming chat -> key lockdown (real browser)", 
     await page.waitForFunction(() => document.querySelector("#hw-summary").childElementCount > 0);
     assert.match(await page.textContent("#offer-name"), /Dev Tiny/);
 
-    // Download: progress bar appears, then chat unlocks.
+    // Local setup remains opt-in from the first-use choice.
+    await page.locator('[data-product-action="setup-local"]').click();
     await page.click("#btn-download");
     await page.waitForSelector("#download-progress:not([hidden])");
     await page.waitForSelector("#view-chat:not([hidden])", { timeout: 60000 });
@@ -147,7 +148,7 @@ test("onboarding -> download -> streaming chat -> key lockdown (real browser)", 
  * This pins the new shape so it cannot drift back: the list and the New chat
  * button are inside the Chat view, and the sidebar holds navigation only.
  */
-test("chat keeps its conversations in its own rail, not the app sidebar", { skip: !available, timeout: 180000 }, async () => {
+test("chat preserves search and conversations in the expanded app sidebar", { skip: !available, timeout: 180000 }, async () => {
   const { chromium } = require("playwright-core");
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-chatrail-"));
   fs.mkdirSync(path.join(dataDir, "models"), { recursive: true });
@@ -165,8 +166,8 @@ test("chat keeps its conversations in its own rail, not the app sidebar", { skip
     for (const sel of ["#chat-list", "#btn-new-chat", "#chat-search"]) {
       const insideView = await page.$eval(sel, (el) => Boolean(el.closest("#view-chat")));
       const insideSidebar = await page.$eval(sel, (el) => Boolean(el.closest("#sidebar")));
-      assert.strictEqual(insideView, true, `${sel} should live inside the Chat view`);
-      assert.strictEqual(insideSidebar, false, `${sel} should NOT be in the app sidebar`);
+      assert.strictEqual(insideView, false, `${sel} moves out of the Chat view`);
+      assert.strictEqual(insideSidebar, true, `${sel} remains available in the expanded sidebar`);
     }
 
     // The rail sits BESIDE the conversation, not above it — the same two-column
@@ -200,7 +201,7 @@ test("chat keeps its conversations in its own rail, not the app sidebar", { skip
     const rows = await rowsOf("#composer > *");
     assert.ok(rows.length <= 3, `composer should settle in at most three rows, got ${rows.length} (${rows})`);
 
-    const pickerRows = await rowsOf("#composer select");
+    const pickerRows = await rowsOf(".composer-options select");
     assert.strictEqual(pickerRows.length, 1,
       `the pickers should share a single row, got ${pickerRows.length} (${pickerRows})`);
 
