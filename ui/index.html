@@ -173,11 +173,13 @@
         </div>
         <div id="network-chat-account" class="network-chat-account" hidden>
           <div><strong>Koinos Network</strong><span id="network-chat-balance">Balance loading…</span></div>
-          <div class="network-chat-funding"><label for="network-koin-amount">Amount to add (KOIN)</label><input id="network-koin-amount" inputmode="decimal" placeholder="e.g. 0.1" maxlength="22" autocomplete="off" aria-describedby="network-chat-help network-chat-status" /><button id="network-add-koin" class="primary small">Add KOIN</button><button id="network-retry-purchase" class="small" hidden>Retry purchase</button><button id="network-account" class="small">Account</button></div>
+          <div class="network-chat-funding"><label for="network-koin-amount">Amount to add (KOIN)</label><input id="network-koin-amount" inputmode="decimal" placeholder="Enter KOIN amount" maxlength="22" autocomplete="off" aria-describedby="network-chat-help network-chat-status" /><button id="network-add-koin" class="primary small">Add KOIN</button><button id="network-retry-purchase" class="small" hidden>Retry purchase</button><button id="network-account" class="small">Account</button></div>
           <button id="network-recover" class="small" hidden>Recover last reply</button>
           <p id="network-chat-help">Send uses your existing balance and asks you to approve a reservation when needed. Add KOIN deposits more from your wallet.</p>
           <p id="network-chat-reservation" role="status" hidden></p>
           <p id="network-chat-status" role="status" aria-live="polite"></p>
+          <p id="network-credit-sources" role="status"></p>
+          <label id="network-free-preference" hidden><input type="checkbox" id="network-free-only" /> Free only — never continue with purchased credits</label>
         </div>
         <form id="composer">
           <div class="composer-options">
@@ -456,7 +458,7 @@
               <div class="kp-grid">
                 <section class="kp-card" aria-labelledby="koin-credit-title"><h3 id="koin-credit-title">Fund your account</h3><p id="koin-funding-help" class="hint">Add KOIN deposits funds from your wallet. You can chat using your existing credits, or refund unused available credits to your wallet.</p>
                   <label for="koin-test-amount" id="koin-test-amount-label">Amount in KOIN</label>
-                  <div class="kp-amount"><input id="koin-test-amount" type="text" inputmode="decimal" placeholder="e.g. 0.1" maxlength="22" autocomplete="off" aria-describedby="koin-funding-help koin-test-payment-status" /><button data-koin-test="purchase" class="primary small">Add KOIN</button></div>
+                  <div class="kp-amount"><input id="koin-test-amount" type="text" inputmode="decimal" placeholder="Enter KOIN amount" maxlength="22" autocomplete="off" aria-describedby="koin-funding-help koin-test-payment-status" /><button data-koin-test="purchase" class="primary small">Add KOIN</button></div>
                   <button data-koin-test="refund" class="kp-text-button">Refund available credits</button>
                 </section>
                 <section class="kp-card" aria-labelledby="koin-request-title"><h3 id="koin-request-title">Chat with the network</h3><p class="hint">Send a message in normal Chat. When needed, you approve a reservation from your available credits and its spending limits. Subsequent messages use that allowance.</p><p id="koin-model-label" class="hint">Connect to see your model</p>
@@ -490,7 +492,7 @@
                 <section><h3>Earlier test request recovery</h3><p class="hint">For an interrupted request from the old test panel only. Normal chat recovers by resending the original message in Chat.</p><label for="koin-test-prompt">Original test prompt</label><textarea id="koin-test-prompt" rows="2" maxlength="12000"></textarea><div class="kp-actions"><button data-koin-test="chat-status" class="small">Check pending request</button><button data-koin-test="chat-retry" class="small">Retry pending request</button><button data-koin-test="session-retry" class="small">Recover spending approval</button></div><div id="koin-answer-wrap" class="kp-answer" hidden><span>Recovered response</span><div id="koin-test-answer" aria-live="polite"></div></div></section>
                 <section><h3>Release reserved credits</h3><p class="hint">Revocation stops new work. Reserved credits can be released after settlement, then refunded.</p><label for="koin-test-session-id">Session ID</label><input id="koin-test-session-id" type="text" maxlength="64" /><div class="kp-actions"><button data-koin-test="revoke" class="small">Revoke on chain</button><button data-koin-test="release" class="small">Release expired reservation</button></div></section>
                 <section><h3>Transaction recovery</h3><p class="hint">Select a transaction in Payment activity. Use its original transaction ID from chain history. A nonce conflict requires irreversible chain evidence.</p><label for="koin-test-recovery-tx">Transaction ID</label><input id="koin-test-recovery-tx" type="text" maxlength="70" placeholder="Transaction ID from chain history" /><div class="kp-actions"><button data-koin-test="recover" class="small">Recover original transaction</button><button data-koin-test="repair" class="small">Review nonce conflict</button></div></section>
-                <section><h3>Fund the reward pool</h3><p class="hint">This deposit funds network rewards. It does not buy credits for your own requests.</p><label for="koin-reward-amount">Reward funding amount in KOIN</label><div class="kp-amount"><input id="koin-reward-amount" type="text" inputmode="decimal" maxlength="22" placeholder="0.1" /><button data-koin-test="fund-rewards" class="small">Fund rewards</button></div></section>
+                <section><h3>Fund the reward pool</h3><p class="hint">This deposit funds network rewards. It does not buy credits for your own requests.</p><label for="koin-reward-amount">Reward funding amount in KOIN</label><div class="kp-amount"><input id="koin-reward-amount" type="text" inputmode="decimal" maxlength="22" placeholder="Enter KOIN amount" /><button data-koin-test="fund-rewards" class="small">Fund rewards</button></div></section>
                 <details id="koin-developer-tools"><summary>Developer previews</summary><div id="koin-developer-content"></div></details>
               </div>
             </details>
@@ -1208,6 +1210,7 @@
   <script src="agents.js"></script>
   <script src="connection-profiles.js"></script>
   <script src="companion-client.js"></script>
+  <script src="credit-account.js"></script>
   <script src="network-chat.js"></script>
   <script src="desktop-providers.js"></script>
   <script src="brand.js"></script>

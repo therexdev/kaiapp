@@ -1,6 +1,6 @@
 # Revision 2 implementation continuation — 2026-10-18
 
-Status: blocked, partial preparation only. No Windows test update published.
+Status: implementation checkpoint, not the complete Revision 2 product. No Windows test update published.
 
 ## Source lineage
 
@@ -26,26 +26,35 @@ Exact metadata was resolved. PDF text (all 23 pages) was read through Library. N
 
 The PDF content ID is `file_00000000116881f99e859eba561288c8`; the prototype content ID is `file_00000000d044820caea2fd76c81e583b`. The PDF metadata confirms the October 18 04:17 UTC revision.
 
-## Completed source changes
+## Implemented source changes
 
-- Desktop purchase-validation copy removes the false fixed KOIN-to-credit example.
-- Backend runtime no longer selects the superseded two-ticker USD purchase oracle. A purchase-only guard reports unavailable; explicit fixture pricing is confined to isolated rehearsal. The exact approved v4 market is pinned in source. This is a guard, not an implemented exchange adapter.
-- Existing balances, custody journals, contracts, qualifications and production services were not modified.
+- Backend verified-account mode reuses the existing account/email verification and device-link service; a free account does not need a payment wallet. Explicit daily USD budgets, model eligibility, concurrency and origin/global caps persist atomically with purchased-credit accounting. No default commercial entitlement is supplied.
+- Free-first allocation, Free only, maximum-paid binding, exact mixed debits, cancellation and UTC reset are covered by local tests. Sponsored usage is recorded separately, never as a fake purchase. **Its contract settlement and reward inclusion are still unfinished.**
+- Purchase claims are keyed by both transaction and claimant; a false claimant cannot occupy the legitimate owner's purchase ID. Confirmed transactions have a unique index and exact finality attribution. The original purchase table remains intact.
+- Providers now send signed, sequenced cumulative output over the actual inference SSE stream. The backend meters and persists verified prefixes before delivery; the desktop verifies and encrypts each prefix before rendering it. Stop/restart preserve delivered text and charge no further output. Buffered legacy inference remains separate.
+- The desktop has a shared versioned credit store, Free only preference, partial-reply preservation, and a packaged-service activation path using the signed-in account. New files use `credit-account-v2`; earlier journals are not migrated or relabelled. Activation rejects reuse of old custody/reward addresses. The packaged manifest is deliberately unavailable until a valid service configuration exists. Automatic purchase/provider activation and complete old-account UI migration remain unfinished.
+- The obsolete ticker price feed is disconnected from new USD purchases. The exact approved v4 market is pinned. The actual v4 observation/quote adapter is still unfinished; existing balances do not require a price quote.
+- Removed sample KOIN purchase amounts and misleading fixed-value validation copy.
 
-## Verification and limitations
+## Verification
 
-Local verification: all 328 backend KOIN regression tests passed (including the new purchase-price guard); 10 targeted desktop prepaid-chat, prepaid-purchase and provider-status tests passed. Backend command: `node --test --test-concurrency=2 scripts/probe-koin*.js`. Syntax and diff-whitespace checks passed. Tests used Node 24.19.0; backend requests Node 22.x, so this is not the release-CI environment. Desktop tests resolved koilib using the backend dependency directory. No browser, installed Windows, real two-computer, delayed payout or full-suite acceptance is claimed.
+Backend: 343 KOIN tests passed with `node --test --test-concurrency=2 scripts/probe-koin-*.js`, including real loopback HTTP signup, verified free account, signed stream and cancellation. Desktop targeted tests cover encrypted recovery, wallet-free activation, old-address refusal, session/privacy revocation and shared balances. Chromium tests cover purchase-pending chat, Free only, incremental display and interrupted prefix retention. These use local services and fixture commercial policies, not live financial operations.
 
-`gh auth status` reports the provided GH_TOKEN invalid. CI/release API verification is pending authenticated access. Git fetch/read access succeeded independently. No release was requested because the product is incomplete.
+The full desktop suite is being rerun after fixing four chat/IPC regressions. The original run had 1,233 passes, 11 failures and 66 skips; five failures were the absent default browser path and pass with `/usr/bin/chromium`, and two are missing Smart-Turn model assets. `npm run live-senses:prepare` failed with `Could not prepare KAI Live Senses: fetch failed`. Final totals are recorded in the task report. Backend declares Node 22; this executor runs Node 24.19.0. Windows release CI and packaged acceptance have not run.
 
-## Remaining implementation
+GitHub connector repository access succeeds, although CLI `gh` authentication is invalid. No release was requested because the implementation and validation are incomplete. Implementation branches are pushed separately from `test` and production.
 
-All seven screens and their interaction checks; verified-account bootstrap without a payment wallet; durable daily free grants and sponsorship; atomic free-first/paid metering with Free only; account migration/activation preserving legacy units and signed journals; authenticated real streaming, Stop and partial-answer restart recovery; guided provider setup and automatic qualification renewal; stale network states and Back to Earn; Research/Agents/Teams metering and run budgets; the actual v4 oracle and exact USD-pack purchase protocol; whole-app regression, browser/Windows build verification and publication.
+## Remaining implementation and release gates
 
-The current source still buffers prepaid answers, ties prepaid auth to one wallet and contains purchased/spent-only accounting. This branch must not be presented as the completed redesign.
+- Actual mockup/prototype inspection, all seven approved layouts, sidebar/recent chats, network secondary page with stale timestamps and Back to Earn.
+- Complete automatic customer/provider activation and purchase UI, including existing account migration and multiple linked-wallet handling. Earlier KOIN recovery must remain accessible without presenting it as USD credits.
+- Sponsored usage contract settlement and inclusion in provider work accounting; real v4 reorg-aware, time-weighted/depth/deviation pricing, fresh USDT/USD and explicit native/wrapped parity; exact USD purchase packs.
+- Guided provider setup, qualification proof renewal and recovery. The existing live qualification expired October 16; this code does not renew it.
+- Research/Agents/Teams integration and run budgets. These are not enabled by the streaming Chat changes.
+- Complete browser/Windows integration, release CI and artifact verification, real two-computer earning acceptance and delayed payout observation.
 
 ## Decisions and operator handoffs
 
-No commercial policy was invented: USD model tariffs, a free budget comparable to the historical 25,000 AI tokens/day, and Master allocation remain unchosen. Three closed reward days versus seven telemetry days remains unresolved. Qualification evidence expired October 16; tests do not renew live eligibility. Old reward epoch 20742 and the 0.1 KOIN obligation remain untouched.
+USD model tariffs, the daily free USD budget comparable to historical 25,000 AI tokens/day, and Master allocation remain unchosen. Three closed reward days versus seven telemetry days remains unresolved. No sample figure has become an entitlement.
 
-Fresh contract deployment, credentials, seed/funding, transfers and live financial operations require a separate authorized operator handoff. Source/test-build authorization does not authorize these actions.
+Fresh contract deployment, credentials, seed/funding, transfers and live financial operations require a separate authorized operator handoff. Production services, the old 0.1 KOIN obligation, old signed journals, and unresolved reward epoch 20742 remain untouched. Source/test-build authorization does not authorize these operations.

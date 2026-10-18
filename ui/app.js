@@ -945,6 +945,7 @@ async function send(replayText) {
   if (pendingImages) renderMsgImages(userEl, pendingImages);
 
   const bubble = addMsg("assistant", "");
+  let verifiedPartial = "";
   bubble.classList.add("streaming");
   // Three swelling dots until the first token lands — a blank bubble read as
   // "stuck" during model load / network dispatch (field feedback).
@@ -1128,6 +1129,7 @@ async function send(replayText) {
       if (content) {
         if (tFirst == null) tFirst = performance.now();
         acc += content;
+        verifiedPartial = acc;
         // Markdown live during the stream, throttled so re-rendering
         // doesn't chew CPU the model needs.
         const now = performance.now();
@@ -1182,7 +1184,13 @@ async function send(replayText) {
     const paidRequest = resp.headers.get("x-kai-paid-request");
     if (paidRequest && saved) await KaiNetwork.acknowledge(paidRequest).catch(() => {});
   } catch (e) {
-    if (e.name === "AbortError" && !(chatModel.startsWith("koinos-network") && window.KaiNetwork?.info.configured)) {
+    if (verifiedPartial) {
+      const partial = verifiedPartial;
+      bubble.innerHTML = mdToHtml(partial); attachMsgActions(bubble);
+      state.history.push({ role: "assistant", content: partial, interrupted: true });
+      await saveCurrentChat();
+      addMsg("error", "Reply interrupted. The received text is saved; recover the original request to check its verified usage.");
+    } else if (e.name === "AbortError" && !(chatModel.startsWith("koinos-network") && window.KaiNetwork?.info.configured)) {
       state.history.push({ role: "assistant", content: bubble.textContent });
       if (bubble.textContent) attachMsgActions(bubble);
       saveCurrentChat();

@@ -13,11 +13,32 @@ class PrepaidChat extends ChatFlow {
     this.product = d.product;
     this.target = { chainId: d.chainId, credits: d.credits, creditsHash: d.creditsHash, domain: testDomain(d, this.config.schedulerUrl), policyHash: this.config.policyHash };
   }
-  async call(action, body = {}, signal = AbortSignal.timeout(10000)) {
+  async call(action, body = {}, signal = AbortSignal.timeout(10000), onCompletion) {
     const a = this.access.authorize(this.config.schedulerUrl, signal);
     const route = action === "chat" ? "/consume/chat/completions" : "/koin/prepaid/" + action;
     const response = await this.fetch(this.config.schedulerUrl + route, { method: "POST", redirect: "error", signal,
       headers: { "content-type": "application/json" }, body: JSON.stringify({ ...body, sessionToken: a.sessionToken }) });
+    if (action === "chat" && response.ok && (response.headers.get("content-type") || "").includes("text/event-stream")) {
+      let buffer = "", last, done = false, frames = 0; const decoder = new TextDecoder(), wire = protocol(this.target);
+      for await (const part of response.body) {
+        signal.throwIfAborted(); this.access.authorize(this.config.schedulerUrl, signal);
+        buffer += decoder.decode(part, { stream: true });
+        if (Buffer.byteLength(buffer) > 1600000) throw Error("Credit stream frame too large");
+        let end;
+        while ((end = buffer.indexOf("\n\n")) >= 0) {
+          const frame = buffer.slice(0, end); buffer = buffer.slice(end + 2);
+          if (!frame.startsWith("data: ")) throw Error("Invalid credit stream frame");
+          const data = frame.slice(6); if (data === "[DONE]") { done = true; continue; }
+          if (done || ++frames > 4098) throw Error("Invalid credit stream sequence");
+          const value = JSON.parse(data);
+          if (!value.ok) throw Error(value.error || "Network stream interrupted");
+          if (value.product !== this.product || value.mode !== wire.mode || value.paymentsEnabled !== wire.paymentsEnabled) throw Error("Credit stream identity changed");
+          await onCompletion?.(value.completion); last = value;
+        }
+      }
+      if (!done || !last || buffer.trim()) throw Error("Network stream interrupted. Your saved reply can be recovered without another charge.");
+      return last;
+    }
     let size = 0; const parts = [];
     for await (const part of response.body) { signal.throwIfAborted(); size += part.length; if (size > 1600000) throw Error("Credit response too large"); parts.push(part); }
     const value = JSON.parse(Buffer.concat(parts).toString("utf8")), wire = protocol(this.target);
@@ -29,7 +50,7 @@ class PrepaidChat extends ChatFlow {
   verify(result, input, id) {
     const k = result?.koin, q = k?.quote, r = k?.receipt, output = result?.choices?.[0]?.message?.content;
     if (result?.id !== id || k?.product !== this.product || JSON.stringify(k.target) !== JSON.stringify(this.target) ||
-        !["ready", "charged"].includes(k.state) || r?.product !== this.product || r.job !== id || r.owner !== this.config.owner || r.provider === this.config.owner ||
+        !["ready", "charged", "streaming"].includes(k.state) || r?.product !== this.product || r.job !== id || r.owner !== this.config.owner || r.provider === this.config.owner ||
         k.session !== P.hash("prepaid-account:" + this.config.owner) || r.quoteHash !== q?.hash || r.outputHash !== P.hash(output || "") ||
         k.receiptHash !== P.hash(JSON.stringify(r))) throw Error("The network answer could not be verified. Retry this message to recover its saved answer.");
     P.validateQuote(q);
@@ -38,13 +59,23 @@ class PrepaidChat extends ChatFlow {
         P.hash(JSON.stringify(["KAI-KOIN-SHADOW-TARIFFS-V1", q.tariff])) !== this.target.policyHash ||
         r.usage.inputTokens !== q.inputTokens || !Number.isSafeInteger(r.usage.outputTokens) || r.usage.outputTokens < 1 || r.usage.outputTokens > q.maxOutput ||
         r.usage.amount !== price(q.tariff, r.usage.inputTokens, r.usage.outputTokens) || BigInt(r.usage.amount) > BigInt(q.maxCharge)) throw Error("The answer differs from the approved credit price");
-    P.signatureMatches(fundedResultHash(this.target, { id, session: k.session, attempt: r.attempt, quote: q }, output), r.signature, r.provider);
+    const job = { id, session: k.session, attempt: r.attempt, quote: q };
+    P.signatureMatches(r.sequence === undefined ? fundedResultHash(this.target, job, output) : require("../core/lib/koin-network/funded-protocol").fundedChunkHash(this.target, job, output, r.sequence), r.signature, r.provider);
     return { id, object: "chat.completion", model: "koinos-network", servedModel: input.model,
-      choices: [{ index: 0, message: { role: "assistant", content: output }, finish_reason: "stop" }],
+      choices: [{ index: 0, message: { role: "assistant", content: output }, finish_reason: k.state === "streaming" ? null : "stop" }],
       usage: { prompt_tokens: r.usage.inputTokens, completion_tokens: r.usage.outputTokens, total_tokens: r.usage.inputTokens + r.usage.outputTokens }, costUsd: isUsd(this.product) ? Number(r.usage.amount) / 1e8 : 0,
       koin: { product: this.product, state: k.state, target: this.target, session: k.session, quote: q, receipt: r, receiptHash: k.receiptHash } };
   }
   async status() { return this.call("status"); }
+  async estimate(value, signal) {
+    const input = request(value, this.config);
+    const result = await this.call("estimate", { model: input.model, messages: input.messages, max_tokens: input.maxOutput, freeOnly: input.freeOnly === true }, signal);
+    const e = result.estimate;
+    if (!e || e.model !== input.model || e.unit !== (isUsd(this.product) ? "USD-1e-8" : "legacy-KOIN-1e-8") || typeof e.allowed !== "boolean" ||
+        ![e.maxCharge, e.maxFree, e.maxPaid].every(n => typeof n === "string" && /^(0|[1-9]\d{0,19})$/.test(n)) || BigInt(e.maxFree) + BigInt(e.maxPaid) !== BigInt(e.maxCharge)) throw Error("Credit estimate could not be verified");
+    if (this.config.limits?.perJob && BigInt(e.maxCharge) > BigInt(this.config.limits.perJob)) throw Error("This message exceeds your saved per-request credit limit. Shorten it or choose a local model.");
+    return e;
+  }
   async chat(window, value, signal) {
     signal.throwIfAborted();
     if (!this.storage?.isEncryptionAvailable?.()) throw Error("Unlock secure storage to chat");
@@ -74,13 +105,26 @@ class PrepaidChat extends ChatFlow {
       await this.call("cancel", { requestId: record.id }, signal); record = null;
     }
     if (!record || record.state !== "pending") {
+      const estimate = await this.estimate(value, signal);
+      if (!estimate.allowed) throw Error(input.freeOnly ? "Free only is on. This request exceeds your available free credits." : "Not enough credits for this request. Buy credits or choose a local model.");
+      const credits = require("../core/lib/koin-network/purchase-quote").credits;
+      this.progress(`Maximum ${credits(estimate.maxCharge)} credits · free first (${credits(estimate.maxFree)}) · up to ${credits(estimate.maxPaid)} purchased credits`);
       record = { schema: 1, owner: this.config.owner, deployment: P.hash(JSON.stringify(this.config)), id: crypto.randomBytes(32).toString("hex"),
-        session: P.hash("prepaid-account:" + this.config.owner), requestHash, state: "pending", input: this.storage.encryptString(JSON.stringify(value)).toString("base64") };
+        session: P.hash("prepaid-account:" + this.config.owner), requestHash, state: "pending", maxPaid: estimate.maxPaid, costEstimate: estimate, input: this.storage.encryptString(JSON.stringify(value)).toString("base64") };
       this.save(record);
     }
-    this.progress("Generating your answer…");
+    this.progress(record.costEstimate ? `Generating your answer · maximum ${require("../core/lib/koin-network/purchase-quote").credits(record.costEstimate.maxCharge)} credits · up to ${require("../core/lib/koin-network/purchase-quote").credits(record.maxPaid)} purchased credits after free credits` : "Generating your answer…");
     try {
-      const response = await this.call("chat", { billing: "koin-" + this.product, requestId: record.id, model: input.model, messages: input.messages, max_tokens: input.maxOutput }, signal);
+      let prefix = "", sequence = 0, amount = 0n;
+      const delivered = completion => {
+        const answer = this.verify(completion, input, record.id), next = answer.choices[0].message.content, receipt = answer.koin.receipt;
+        if (!next.startsWith(prefix) || BigInt(receipt.usage.amount) < amount || (receipt.sequence !== undefined && receipt.sequence < sequence)) throw Error("Network stream prefix changed");
+        const delta = next.slice(prefix.length); prefix = next; sequence = receipt.sequence ?? sequence; amount = BigInt(receipt.usage.amount);
+        this.save({ ...record, state: "answered", answer: this.storage.encryptString(JSON.stringify(answer)).toString("base64") });
+        if (delta) this.progress({ requestId: record.id, delta, servedModel: input.model, creditsAtoms: receipt.usage.amount });
+      };
+      const response = await this.call("chat", { billing: "koin-" + this.product, requestId: record.id, model: input.model, messages: input.messages, max_tokens: input.maxOutput,
+        stream: value.stream !== false, ...(record.maxPaid !== undefined ? { maxPaid: record.maxPaid } : {}), ...(input.freeOnly !== undefined ? { freeOnly: input.freeOnly } : {}) }, signal, delivered);
       const answer = this.verify(response.completion, input, record.id);
       // Persist the verified answer before displaying it. The service has already
       // recorded this one usage charge and retains an encrypted recovery copy.

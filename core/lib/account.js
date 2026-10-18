@@ -240,6 +240,25 @@ class AccountService {
   }
 
   /* --------------------------------------------------- spend grants ---- */
+  async creditAuthorization(pinnedScheduler, signal) {
+    const { scheduler } = require("./koin-network/grant-chat"), pinned = scheduler(pinnedScheduler);
+    const token = this._token();
+    if (!token || !this._encrypted()) throw Error("Sign in and unlock secure account storage to use network credits");
+    if (this.settings.get("network.privacyMode", "local-only") === "local-only") throw Error("Choose an online route to use network credits");
+    if (new URL(pinned).origin !== this.origin()) throw Error("Sign in to the account service for this network");
+    const response = await fetch(new URL(pinned).origin + "/auth/session", { redirect: "error", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10000)]) : AbortSignal.timeout(10000), headers: { authorization: "Bearer " + token } });
+    const chunks = []; let size = 0;
+    for await (const part of response.body) { size += part.length; if (size > 65536) throw Error("Account response too large"); chunks.push(part); }
+    const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    if (!response.ok || value.ok !== true || typeof value.account?.id !== "string" || !value.account.id || value.account.id.length > 200 || !Array.isArray(value.account.wallets) || value.account.wallets.length > 1) throw Error("Sign in to your credit account; choose a single payment wallet if several are linked");
+    const accountId = value.account.id, wallet = value.account.wallets[0]?.address;
+    const auth = { sessionToken: token, accountId, owner: wallet || "account-" + crypto.createHash("sha256").update("verified-account:" + accountId).digest("hex"), schedulerUrl: pinned };
+    this.assertCreditAuthorization(auth, pinned); return auth;
+  }
+  assertCreditAuthorization(auth, pinned) {
+    if (auth.schedulerUrl !== pinned || new URL(pinned).origin !== this.origin() || auth.sessionToken !== this._token() ||
+        !this._encrypted() || this.settings.get("network.privacyMode", "local-only") === "local-only") throw Error("Account or privacy settings changed");
+  }
   // Private Core-to-scheduler credential handoff for the explicitly pinned
   // rehearsal. Never returned by status(), IPC, a tool or a public API.
   async shadowAuthorization(pinnedScheduler, signal, { grantId = null, allowInactive = false } = {}) {

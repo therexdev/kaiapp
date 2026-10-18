@@ -6,14 +6,15 @@ const P = require("../core/lib/koin-network/job-protocol");
 const terminal = s => ["finalized", "reverted", "consumed_elsewhere"].includes(s);
 const delay = (ms, signal) => require("node:timers/promises").setTimeout(ms, undefined, { signal });
 function request(value, config) {
-  if (!value || Object.keys(value).some(k => !["model", "messages", "max_tokens", "stream"].includes(k))) throw Error("Unsupported network chat request");
+  if (!value || Object.keys(value).some(k => !["model", "messages", "max_tokens", "stream", "freeOnly"].includes(k))) throw Error("Unsupported network chat request");
+  if (value.freeOnly !== undefined && (typeof value.freeOnly !== "boolean" || !require("../core/lib/koin-network/product").isPrepaid(config.deployment))) throw Error("Invalid Free only preference");
   if (!["koinos-network", "koinos-network:" + config.model].includes(value.model)) throw Error("Choose the approved network model");
   if (value.stream !== undefined && typeof value.stream !== "boolean") throw Error("Invalid stream flag");
   const messages = P.messages(value.messages);
   // Leave room for private session authorization within the server body limit.
   if (Buffer.byteLength(JSON.stringify(messages)) > 24000) throw Error("This conversation is too long for the current network model. Start a new chat or shorten the message");
   const maxOutput = value.max_tokens === undefined ? config.maxOutput : P.integer(value.max_tokens, 1, config.maxOutput);
-  return { messages, model: config.model, maxOutput };
+  return { messages, model: config.model, maxOutput, ...(value.freeOnly !== undefined ? { freeOnly: value.freeOnly } : {}) };
 }
 class ChatFlow {
   constructor({ file, storage, payments, session, config, progress = () => {}, wait = delay, pollMs = 5000, attempts = 36 }) {

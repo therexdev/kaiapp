@@ -11,7 +11,7 @@ async function readJson(response, max = 1500000) {
   }
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
-async function executeShadow({ job, catalog, runtime, signal }) {
+async function executeShadow({ job, catalog, runtime, signal, onChunk }) {
   const j = ["koin-funded-rehearsal-chat", "koin-mainnet-pilot-chat"].includes(job?.type) ? require("./funded-protocol").validateJob(job, catalog) : validateJob(job, catalog), q = j.quote;
   const abort = AbortSignal.any([signal || new AbortController().signal, AbortSignal.timeout(Math.max(1, j.deadline - Date.now()))]);
   abort.throwIfAborted();
@@ -31,8 +31,35 @@ async function executeShadow({ job, catalog, runtime, signal }) {
         hash(JSON.stringify(tokenized.tokens)) !== q.inputIdsHash) throw Error("Local tokenizer differs from quoted tokenizer");
     // Raw, committed prompt prevents the local server from applying a second
     // chat template. Only text inference parameters cross this boundary.
-    const result = await readJson(await post("/completion", { prompt: j.prompt, n_predict: q.maxOutput,
-      temperature: 0, stream: false, cache_prompt: false }));
+    const response = await post("/completion", { prompt: j.prompt, n_predict: q.maxOutput,
+      temperature: 0, stream: j.stream === true, cache_prompt: false });
+    let result;
+    if (j.stream) {
+      if (!response.ok || !(response.headers.get("content-type") || "").includes("text/event-stream") || typeof onChunk !== "function") throw Error("Metered streaming is unavailable from this runtime");
+      let buffer = "", output = "", last = 0, sent = "", stopped = false;
+      const decoder = new TextDecoder();
+      for await (const bytes of response.body) {
+        abort.throwIfAborted(); buffer += decoder.decode(bytes, { stream: true });
+        if (Buffer.byteLength(buffer) > 1500000) throw Error("Stream frame too large");
+        let end;
+        while ((end = buffer.indexOf("\n")) >= 0) {
+          const line = buffer.slice(0, end).trim(); buffer = buffer.slice(end + 1);
+          if (!line.startsWith("data:")) continue;
+          const data = line.slice(5).trim(); if (data === "[DONE]") { stopped = true; continue; }
+          const part = JSON.parse(data);
+          if (part.error || part.truncated || typeof part.content !== "string") throw Error("Invalid runtime stream");
+          output += part.content;
+          if (Buffer.byteLength(output) > 1048576) throw Error("Stream output too large");
+          if (part.stop === true) stopped = true;
+          if (output.trim() && output !== sent && (Date.now() - last >= 250 || stopped)) {
+            await onChunk(output); sent = output; last = Date.now();
+          }
+        }
+      }
+      if (!stopped || buffer.trim()) throw Error("Runtime stream interrupted");
+      if (output.trim() && output !== sent) await onChunk(output);
+      result = { content: output };
+    } else result = await readJson(response);
     if (result.truncated || typeof result.content !== "string" || !result.content.length || Buffer.byteLength(result.content) > 1048576) throw Error("Invalid or truncated shadow response");
     abort.throwIfAborted();
     return { output: result.content, usage: { prompt_tokens: q.inputTokens, completion_tokens: 0 } };

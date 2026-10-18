@@ -8,7 +8,8 @@ for (const product of ["prepaid-v1", "prepaid-usd-v1"]) test(product + " custome
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   await page.addInitScript(product => {
     localStorage.setItem("kai-interface-language", "en"); window.calls = []; window.balance = "10000000"; window.provider = false;
-    window.kaiKoinTestBridge = { onProgress: () => () => {}, run: async (action, input) => {
+    const listeners = new Set();
+    window.kaiKoinTestBridge = { onProgress: callback => { listeners.add(callback); return () => listeners.delete(callback); }, run: async (action, input) => {
       window.calls.push({ action, input });
       const common = { enabled: true, configured: true, product, mode: "mainnet-pilot" };
       if (action === "chat-info") return { ...common, model: "koinos-fast", maxOutput: 128, blocked: "" };
@@ -16,6 +17,11 @@ for (const product of ["prepaid-v1", "prepaid-usd-v1"]) test(product + " custome
       if (["purchase", "purchase-retry"].includes(action)) { window.pendingPurchase = true; return { ...common, state: "purchase_pending" }; }
       if (action === "chat-completion") {
         if (window.failChat) throw Error("No answer was delivered. Your credits are available; please try again.");
+        if (window.streamChat) {
+          for (const listener of listeners) listener({ requestId: "a".repeat(64), delta: "Prepaid ", servedModel: "koinos-fast", creditsAtoms: "100" });
+          await new Promise(resolve => { window.finishStream = resolve; });
+          if (window.interruptStream) throw Error("Connection interrupted. Recover your saved reply.");
+        }
         window.balance = "9999875";
         return { id: "a".repeat(64), servedModel: "koinos-fast", choices: [{ message: { role: "assistant", content: "Prepaid answer" } }],
           koin: { product, receipt: { usage: { amount: "125" } } } };
@@ -39,9 +45,25 @@ for (const product of ["prepaid-v1", "prepaid-usd-v1"]) test(product + " custome
   assert.equal(await page.locator("#network-retry-purchase").isVisible(), true);
   await page.locator("#network-retry-purchase").click();
   await page.waitForFunction(() => !document.getElementById("network-retry-purchase").disabled);
+  if (product === "prepaid-usd-v1") { await page.locator("#network-free-only").check(); await page.evaluate(() => { window.streamChat = true; }); }
   await page.fill("#input", "Use my existing credits while the purchase confirms"); await page.locator("#btn-send").click();
+  if (product === "prepaid-usd-v1") {
+    await page.waitForFunction(() => document.getElementById("messages").textContent.includes("Prepaid ") && window.finishStream);
+    assert.equal(await page.locator("#btn-send").isDisabled(), true);
+    assert.equal(await page.evaluate(() => window.calls.find(c => c.action === "chat-completion").input.freeOnly), true);
+    await page.evaluate(() => window.finishStream());
+  }
   await page.waitForFunction(() => document.getElementById("messages").textContent.includes("Prepaid answer") && !document.getElementById("btn-send").disabled);
   assert.match(await page.locator("#messages").textContent(), /0.00125 credits/);
+  if (product === "prepaid-usd-v1") {
+    await page.evaluate(() => { window.interruptStream = true; window.finishStream = null; });
+    await page.fill("#input", "Keep the interrupted prefix"); await page.locator("#btn-send").click();
+    await page.waitForFunction(() => !!window.finishStream); await page.evaluate(() => window.finishStream());
+    await page.waitForFunction(() => !document.getElementById("btn-send").disabled);
+    assert.match(await page.locator("#messages").textContent(), /Keep the interrupted prefix/);
+    assert.ok((await page.locator("#messages").textContent()).split("Prepaid").length >= 3);
+    await page.evaluate(() => { window.streamChat = false; });
+  }
   await page.evaluate(() => { window.failChat = true; }); await page.fill("#input", "Test failure"); await page.locator("#btn-send").click();
   await page.waitForFunction(() => document.getElementById("messages").textContent.includes("Your credits are available") && !document.getElementById("btn-send").disabled);
   const actions = await page.evaluate(() => window.calls.map(c => c.action));

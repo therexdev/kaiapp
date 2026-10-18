@@ -1,0 +1,87 @@
+"use strict";
+const fs = require("fs"), path = require("path"), P = require("../core/lib/koin-network/job-protocol");
+const { PrepaidChat } = require("./koin-prepaid-chat"), { configuration } = require("./koin-test-config");
+function manifest(value) {
+  if (!value || value.schema !== 1 || !["ready", "unavailable"].includes(value.state)) throw Error("Invalid packaged credit service");
+  if (value.state === "unavailable") {
+    if (Object.keys(value).sort().join() !== "reason,schema,state" || typeof value.reason !== "string" || !value.reason || value.reason.length > 300) throw Error("Credit availability reason required");
+    return structuredClone(value);
+  }
+  if (Object.keys(value).sort().join() !== "config,schema,state" || Object.hasOwn(value.config || {}, "owner") || value.config?.deployment?.product !== "prepaid-usd-v1") throw Error("Separate USD service configuration required");
+  const validated = configuration({ ...value.config, owner: value.config.deployment.masterNode });
+  const { owner, ...config } = validated;
+  return { schema: 1, state: "ready", config };
+}
+class CreditService {
+  constructor({ dataDir, account, storage, service, fetchImpl = fetch, progress = () => {} }) {
+    Object.assign(this, { dataDir, account, storage, fetchImpl, progress }); this.service = manifest(service);
+  }
+  async context(signal) {
+    if (this.service.state !== "ready") throw Error(this.service.reason);
+    const base = this.service.config;
+    for (const name of ["koin-foundation-test", "koin-prepaid-v1"]) {
+      const file = path.join(this.dataDir, name, "deployment.json");
+      if (!fs.existsSync(file)) continue;
+      if (fs.statSync(file).size > 16384) throw Error("Earlier deployment records need recovery before activation");
+      const old = JSON.parse(fs.readFileSync(file, "utf8")).deployment;
+      if (!old || [old.credits, old.rewards].some(address => [base.deployment.credits, base.deployment.rewards].includes(address))) throw Error("USD activation requires fresh contracts; earlier balances and journals remain preserved");
+    }
+    const auth = await this.account.creditAuthorization(base.schedulerUrl, signal);
+    const config = { ...base, owner: auth.owner }, root = path.join(this.dataDir, "credit-account-v2", P.hash(auth.accountId)), key = P.hash(JSON.stringify(config));
+    // New product files never overwrite custody/prepaid-v1 or their journals.
+    const directory = path.join(root, key); fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+    const metadata = path.join(directory, "context.json");
+    if (!fs.existsSync(metadata)) fs.writeFileSync(metadata, JSON.stringify({ config, accountId: auth.accountId }), { flag: "wx", mode: 0o600 });
+    const access = { authorize: (pin, nextSignal) => {
+      nextSignal?.throwIfAborted();
+      this.account.assertCreditAuthorization(auth, pin);
+      return auth;
+    } };
+    const make = (cfg, dir) => new PrepaidChat({ config: cfg, file: path.join(dir, "chat.json"), storage: this.storage, access, fetchImpl: this.fetchImpl, progress: this.progress });
+    const flow = make(config, directory), recoverable = [];
+    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !/^[a-f0-9]{64}$/.test(entry.name)) continue;
+      const dir = path.join(root, entry.name), file = path.join(dir, "context.json");
+      if (!fs.existsSync(file) || fs.statSync(file).size > 16384) continue;
+      const saved = JSON.parse(fs.readFileSync(file, "utf8"));
+      if (saved.accountId !== auth.accountId || saved.config.schedulerUrl !== config.schedulerUrl || JSON.stringify(saved.config.deployment) !== JSON.stringify(config.deployment)) continue;
+      const checked = manifest({ schema: 1, state: "ready", config: Object.fromEntries(Object.entries(saved.config).filter(([key]) => key !== "owner")) });
+      const candidate = make({ ...checked.config, owner: saved.config.owner }, dir), record = candidate.read();
+      if (record && ["pending", "answered"].includes(record.state)) recoverable.push({ flow: candidate, record });
+    }
+    const earlierRoot = path.join(this.dataDir, "koin-prepaid-usd-v1"), earlierConfig = path.join(earlierRoot, "deployment.json");
+    if (fs.existsSync(earlierConfig) && fs.statSync(earlierConfig).size <= 16384) {
+      const saved = configuration(JSON.parse(fs.readFileSync(earlierConfig, "utf8")));
+      if (saved.owner === auth.owner && saved.schedulerUrl === config.schedulerUrl && JSON.stringify(saved.deployment) === JSON.stringify(config.deployment)) {
+        const candidate = new PrepaidChat({ config: saved, file: path.join(earlierRoot, "prepaid-chat-recovery.json"), storage: this.storage, access, fetchImpl: this.fetchImpl, progress: this.progress });
+        const record = candidate.read();
+        if (record && ["pending", "answered"].includes(record.state)) recoverable.unshift({ flow: candidate, record });
+      }
+    }
+    return { config, flow, auth, recoverable };
+  }
+  async info(signal) {
+    if (this.service.state !== "ready") return { enabled: true, configured: true, product: "prepaid-usd-v1", blocked: this.service.reason, activation: "unavailable", recoveryAvailable: false };
+    try {
+      const c = await this.context(signal);
+      return { enabled: true, configured: true, product: "prepaid-usd-v1", activation: "ready", blocked: "", model: c.config.model, maxOutput: c.config.maxOutput,
+        maxRequestCredits: require("../core/lib/koin-network/purchase-quote").credits(c.config.limits.perJob), recoveryAvailable: c.recoverable.length > 0 };
+    } catch (error) { return { enabled: true, configured: true, product: "prepaid-usd-v1", activation: "signin-required", blocked: String(error.message), recoveryAvailable: false }; }
+  }
+  async run(action, input, signal) {
+    const c = await this.context(signal);
+    if (action === "credit-status") return c.flow.status();
+    if (action === "chat-estimate") return c.flow.estimate(input, signal);
+    if (action === "chat-recover") {
+      const saved = c.recoverable.at(-1); if (!saved) return { state: "none" };
+      return saved.flow.recover(null, signal);
+    }
+    if (action === "chat-ack") {
+      P.digest(input); for (const r of c.recoverable) if (r.record.id === input) r.flow.acknowledge(input);
+      return { state: "delivered" };
+    }
+    if (action === "chat-completion") return c.flow.chat(null, input, signal);
+    throw Error("Unknown credit service operation");
+  }
+}
+module.exports = { CreditService, manifest };

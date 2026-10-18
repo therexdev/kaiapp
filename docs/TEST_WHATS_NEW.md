@@ -1,6 +1,8 @@
-## Unreleased Revision 2 preparation
+## Unreleased Revision 2 implementation checkpoint
 
-Purchase amount validation no longer claims a sample KOIN amount buys a fixed number of USD-valued credits. This is a preparatory correction, not completion or activation of the approved redesign. The existing release below still requires the documented deployment and migration work.
+Adds verified incremental network replies with encrypted partial-reply recovery, a shared credit balance and Free only preference, and account-based USD service activation without a wallet manifest. Earlier payment journals and units are preserved. Purchase inputs no longer suggest a sample KOIN amount or fixed USD exchange rate.
+
+This is not a completed or activated redesign. The packaged USD service remains unavailable pending configuration; the seven-screen redesign, provider renewal, sponsored settlement, advanced-mode billing and live purchase oracle still need implementation. See `docs/koin-network/REVISION_2_CONTINUATION.md` for validation and release blockers.
 
 ## USD-valued credits and independently funded rewards
 

@@ -9,6 +9,11 @@
     if (!pending) pending = bridge.run("chat-info").then(value => {
       if (!value || typeof value.enabled !== "boolean") throw Error("Network configuration unavailable");
       info = value;
+      const freePreference = document.getElementById("network-free-preference");
+      if (freePreference) freePreference.hidden = value.product !== "prepaid-usd-v1";
+      if (value.activation === "ready") window.KaiCredits?.refresh();
+      const help = document.getElementById("network-chat-help");
+      if (help && value.maxRequestCredits) help.textContent = `Up to ${value.maxRequestCredits} credits per message. Free credits are used first; purchased credits may cover the rest. Turn on Free only to prevent paid continuation.`;
       const recover = document.getElementById("network-recover"); if (recover) recover.hidden = !info.recoveryAvailable;
       return info;
     }).catch(error => { info = { ...info, configured: true, blocked: "Network configuration unavailable. Refresh your network account." }; throw error; }).finally(() => { pending = null; });
@@ -18,6 +23,8 @@
     const current = await refresh();
     if (!current.configured) throw Error("Connect your network account before using paid chat");
     if (current.blocked) throw Error(current.blocked);
+    if (current.product === "prepaid-usd-v1") body = { ...body, freeOnly: document.getElementById("network-free-only")?.checked === true };
+    if (body.stream !== false && ["prepaid-v1", "prepaid-usd-v1"].includes(current.product)) return streamFetch(body, init);
     const signal = init.signal, stop = () => { bridge.run("stop").catch(() => {}); };
     signal?.throwIfAborted(); signal?.addEventListener("abort", stop, { once: true });
     progress("Checking your network account…");
@@ -39,7 +46,46 @@
     }
     finally { signal?.removeEventListener("abort", stop); window.dispatchEvent(new Event("kai-network-account-changed")); }
   }
-  bridge?.onProgress?.(value => progress(String(value?.text || "")));
+  function streamFetch(body, init) {
+    const signal = init.signal; signal?.throwIfAborted();
+    let response, controller, prefix = "", requestId, finished = false, unsubscribe;
+    const encoder = new TextEncoder(), stop = () => { bridge.run("stop").catch(() => {}); };
+    const cleanup = () => { unsubscribe?.(); signal?.removeEventListener("abort", stop); window.dispatchEvent(new Event("kai-network-account-changed")); };
+    const frame = value => { if (!finished) controller.enqueue(encoder.encode("data: " + JSON.stringify(value) + "\n\n")); };
+    const stream = new ReadableStream({
+      start(c) { controller = c; },
+      cancel() { finished = true; stop(); cleanup(); },
+    });
+    response = new Response(stream, { headers: { "content-type": "text/event-stream" } });
+    unsubscribe = bridge.onProgress?.(value => {
+      if (finished || typeof value?.delta !== "string" || !/^[a-f0-9]{64}$/.test(value.requestId || "")) return;
+      if (requestId && requestId !== value.requestId) return;
+      requestId = value.requestId; response.headers.set("x-kai-paid-request", requestId);
+      prefix += value.delta;
+      frame({ model: "koinos-network", servedModel: value.servedModel, choices: [{ delta: { content: value.delta } }] });
+    });
+    signal?.addEventListener("abort", stop, { once: true });
+    bridge.run("chat-completion", body).then(result => {
+      if (finished) return;
+      const output = result.choices?.[0]?.message?.content || "";
+      if (!output.startsWith(prefix)) throw Error("The saved reply differs from the verified stream");
+      response.headers.set("x-kai-paid-request", result.id);
+      if (!prefix) response.headers.set("x-kai-buffered", "true");
+      const n = BigInt(result.koin?.receipt?.usage?.amount || "0");
+      const credits = `${n / 100000n}.${(n % 100000n).toString().padStart(5, "0")}`.replace(/\.?0+$/, "") || "0";
+      frame({ model: "koinos-network", servedModel: result.servedModel, choices: [{ delta: { content: output.slice(prefix.length) } }], warning: `${credits} credits` });
+      controller.enqueue(encoder.encode("data: [DONE]\n\n")); finished = true; controller.close(); progress(`${credits} credits`);
+    }).catch(error => {
+      if (!finished) { finished = true; controller.error(error); progress(String(error.message || "Stream interrupted. Your saved reply can be recovered.")); }
+    }).finally(cleanup);
+    return response;
+  }
+  bridge?.onProgress?.(value => { if (typeof value?.text === "string") progress(value.text); });
+  const freeOnly = document.getElementById("network-free-only");
+  if (freeOnly) {
+    freeOnly.checked = localStorage.getItem("kai-credit-free-only") === "true";
+    freeOnly.addEventListener("change", () => localStorage.setItem("kai-credit-free-only", String(freeOnly.checked)));
+  }
   document.getElementById("network-add-koin")?.addEventListener("click", () => {
     window.dispatchEvent(new CustomEvent("kai-network-add-koin", { detail: document.getElementById("network-koin-amount").value }));
   });

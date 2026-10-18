@@ -28,6 +28,11 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
   let root = fs.existsSync(path.join(usdRoot, "deployment.json")) ? usdRoot : fs.existsSync(path.join(prepaidRoot, "deployment.json")) ? prepaidRoot : path.join(dataDir, "koin-foundation-test");
   let configFile = path.join(root, "deployment.json"), journals = path.join(root, "journals");
   let journal, payments, sessionClient, sessionId, sessionRun, access, chatAbort, sessionAbort, worker, workerAbort, workerTrack, stopVersion = 0, busy = false, disposed = false;
+  const creditService = new (require("./credit-service").CreditService)({ dataDir, account: core.account,
+    storage: core.account?.safeStorage, service: require("../core/lib/koin-network/credit-service.json"),
+    progress: value => { const window = getMainWindow(); if (window && !window.isDestroyed()) window.webContents.send("koin:chat-progress", typeof value === "string" ? { text: value } : value); } });
+  let creditBusy = false;
+  const activeRequests = new Set();
   const open = () => {
     if (disposed) throw Error("Test payments are closing");
     if (!payments) {
@@ -57,43 +62,64 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     const Type = prepaid ? require("./koin-prepaid-chat").PrepaidChat : ChatFlow;
     return new Type({ file: path.join(root, prepaid ? "prepaid-chat-recovery.json" : "chat-recovery.json"), storage: core.account.safeStorage,
       payments: open(), session: sessionPair, config, access,
-      progress: text => { if (!window.isDestroyed()) window.webContents.send("koin:chat-progress", { text }); } });
+      progress: value => { if (!window.isDestroyed()) window.webContents.send("koin:chat-progress", typeof value === "string" ? { text: value } : value); } });
   };
   const withChatSignal = async (window, run) => {
-    chatAbort = new AbortController(); const stop = () => chatAbort?.abort();
+    const controller = new AbortController(); activeRequests.add(controller); const stop = () => controller.abort();
     const navigation = (_event, _url, _inPlace, mainFrame) => { if (mainFrame) stop(); };
     for (const event of ["hide", "minimize", "closed"]) window.on(event, stop);
     window.webContents.on("did-start-navigation", navigation); window.webContents.on("render-process-gone", stop);
-    const release = core.gateway.network.trackShadowRequest(chatAbort);
-    const signal = AbortSignal.any([chatAbort.signal, AbortSignal.timeout(600000)]);
+    const release = core.gateway.network.trackShadowRequest(controller);
+    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(600000)]);
     try { return await run(signal); }
     catch (error) {
-      if (signal.aborted && isPrepaid(readConfig(configFile).deployment)) throw Error("Chat stopped. Unused credits become available automatically; any saved answer can be recovered.");
+      if (signal.aborted && (creditService.service.state === "ready" || (fs.existsSync(configFile) && isPrepaid(readConfig(configFile).deployment)))) throw Error("Chat stopped. Unused credits become available automatically; any saved answer can be recovered.");
       if (signal.aborted) throw Error(signal.reason?.name === "TimeoutError"
         ? "The network request timed out. Your saved payment and any pending request are preserved. Send the same message again to continue"
         : "Network chat stopped. Your saved payment and any pending request are preserved. Keep the app open and send the same message again to continue");
       throw error;
     }
     finally { release(); for (const event of ["hide", "minimize", "closed"]) window.removeListener(event, stop);
-      window.webContents.removeListener("did-start-navigation", navigation); window.webContents.removeListener("render-process-gone", stop); chatAbort = null; }
+      window.webContents.removeListener("did-start-navigation", navigation); window.webContents.removeListener("render-process-gone", stop); activeRequests.delete(controller); }
   };
   ipcMain.handle("koin:test-payments", async (event, action, input) => {
     const window = getMainWindow();
     if (!trustedMainDocument(event, window, origin)) throw Error("Desktop window access denied");
     if (!isTest) return { enabled: false, mode: "test-deployment" };
-    if (typeof action !== "string" || Buffer.byteLength(JSON.stringify(input ?? null)) > (action === "chat-completion" ? 26000 : 16384)) throw Error("Invalid Test payment action");
-    if (action === "stop") { stopVersion++; payments?.stop(); chatAbort?.abort(); sessionAbort?.abort(); if (workerAbort && !worker?.running) workerAbort.abort(); return { state: "stopped", enabled: true, mode: fs.existsSync(configFile) ? readConfig(configFile).mode : "test-deployment" }; }
+    if (typeof action !== "string" || Buffer.byteLength(JSON.stringify(input ?? null)) > (["chat-completion", "chat-estimate"].includes(action) ? 26000 : 16384)) throw Error("Invalid Test payment action");
+    if (action === "stop") { stopVersion++; payments?.stop(); for (const controller of activeRequests) controller.abort(); chatAbort?.abort(); sessionAbort?.abort(); if (workerAbort && !worker?.running) workerAbort.abort(); return { state: "stopped", enabled: true, mode: fs.existsSync(configFile) ? readConfig(configFile).mode : "test-deployment" }; }
+    // Account activation is independent of historical wallet manifests. Do not
+    // migrate, rewrite, or consume old custody balances to activate USD credits.
+    if (creditService.service.state === "ready") {
+      if (action === "chat-info") return creditService.info(AbortSignal.timeout(10000));
+      if (["credit-status", "chat-estimate"].includes(action)) return creditService.run(action, input, AbortSignal.timeout(10000));
+      if (["chat-completion", "chat-recover", "chat-ack"].includes(action)) {
+        if (disposed || creditBusy) throw Error("Finish or stop the current chat first");
+        if (!window.isVisible() || window.isMinimized()) throw Error("Return to the visible desktop window to chat");
+        creditBusy = true;
+        try { return await withChatSignal(window, signal => creditService.run(action, input, signal)); }
+        finally { creditBusy = false; }
+      }
+    }
     if (action === "worker-stop") {
       if (input !== undefined) throw Error("Provider controls take no arguments");
       workerAbort?.abort(); await worker?.stop(); workerTrack?.(); workerTrack = null; return { state: "test_worker_stopped" };
     }
     if (action === "chat-info") {
-      if (!fs.existsSync(configFile)) return { enabled: true, configured: false };
+      if (!fs.existsSync(configFile)) return creditService.info();
       const config = readConfig(configFile); open(); let blocked = "";
       try { access.authorize(config.schedulerUrl); } catch (e) { blocked = String(e.message).slice(0, 220); }
       const recovery = flow(window).read();
-      return { product: config.deployment.product || "legacy-reservations", enabled: true, configured: true, model: config.model, mode: config.mode, maxOutput: config.maxOutput, blocked,
+      return { product: config.deployment.product || "legacy-reservations", enabled: true, configured: true, model: config.model, mode: config.mode, maxOutput: config.maxOutput,
+        ...(isPrepaid(config.deployment) ? { maxRequestCredits: require("../core/lib/koin-network/purchase-quote").credits(config.limits.perJob) } : {}), blocked,
         recoveryAvailable: !blocked && ["pending", "answered"].includes(recovery?.state) };
+    }
+    if (["chat-estimate", "credit-status"].includes(action)) {
+      if (!fs.existsSync(configFile)) throw Error("The credit service is not available yet");
+      const config = readConfig(configFile);
+      if (!isPrepaid(config.deployment)) throw Error("The earlier KOIN account is preserved for recovery. Credit service activation is pending.");
+      open(); access.authorize(config.schedulerUrl);
+      return action === "credit-status" ? flow(window).status() : flow(window).estimate(input, AbortSignal.timeout(10000));
     }
     if (action === "provider-status") {
       if (!fs.existsSync(configFile) || !worker?.running) return { state: "offline", label: "OFFLINE", detail: "Turn on to provide AI to the network." };
@@ -276,7 +302,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
           const credit = await flow(window).status();
           return { enabled: true, configured: true, accessReady, product: cfg.deployment.product, owner: cfg.owner, mode: cfg.mode,
             mainnetPaymentsEnabled: cfg.mode === "mainnet-pilot", worker: worker?.status() || null, session: null,
-            credits: credit.balance, purchases: credit.purchases, usage: credit.usage, purchasePending: !!controller.pendingPurchase() };
+            credits: credit.balance, creditState: credit.credits, purchases: credit.purchases, usage: credit.usage, purchasePending: !!controller.pendingPurchase() };
         }
         const status = await controller.status();
         return { worker: worker?.status() || null, configured: true, accessReady, ...status, session: await controller.session() };
@@ -306,6 +332,6 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     } catch { /* Existing credits and chat remain independent of RPC recovery. */ }
     finally { untrack(); purchaseSync = false; }
   }, 10000); purchaseTimer.unref();
-  return { isProviding: () => !!worker?.running, dispose() { disposed = true; clearInterval(purchaseTimer); payments?.stop(); chatAbort?.abort(); sessionAbort?.abort(); workerAbort?.abort(); workerTrack?.(); /* In-flight signed bytes must finish staging before process exit. */ } };
+  return { isProviding: () => !!worker?.running, dispose() { disposed = true; clearInterval(purchaseTimer); payments?.stop(); for (const controller of activeRequests) controller.abort(); chatAbort?.abort(); sessionAbort?.abort(); workerAbort?.abort(); workerTrack?.(); /* In-flight signed bytes must finish staging before process exit. */ } };
 }
 module.exports = { registerTestPaymentIPC, readConfig };

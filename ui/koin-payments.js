@@ -132,6 +132,8 @@
         el("koin-available").textContent = credits(result.credits.available);
         el("network-chat-balance").textContent = credits(result.credits.available) + " credits";
       }
+      el("network-free-preference").hidden = result.product !== "prepaid-usd-v1";
+      if (result.creditState) window.KaiCredits?.accept({ product: result.product, owner: result.owner, credits: result.creditState, purchases: result.purchases, usage: result.usage });
       const history = el("koin-prepaid-rows"); history.replaceChildren();
       const rows = [...(result.purchases || []).map(p => ({ at: p.createdAt, text: p.state === "confirmed" ? `Purchased ${credits(p.amount)} credits` : p.state === "failed" ? "Purchase did not complete" : "Purchase confirming… You can keep using your existing credits." })),
         ...(result.usage || []).map(u => ({ at: u.at, text: `Chat · ${credits(u.credits)} credits` }))].sort((a,b) => b.at-a.at).slice(0,50);

@@ -326,6 +326,7 @@ class Worker {
             koinShadowJobs: this.koinShadowJobs ? 1 : 0,
             koinFundedRehearsalJobs: this.koinFundedRehearsalJobs ? 1 : 0,
             koinMainnetPilotJobs: this.koinMainnetPilotJobs ? 1 : 0,
+            koinMeteredStreaming: this.koinMainnetPilotJobs || this.koinFundedRehearsalJobs ? 1 : 0,
             ...(ramGb ? { ramGb: Math.round(ramGb) } : {}),
             ...(this.preferredModel ? { preferredModel: this.preferredModel } : {}),
           },
@@ -585,7 +586,22 @@ class Worker {
           }).catch(() => {});
         };
         this._executing = true;
-        const { output, usage } = await this._execute(job, (d) => postDelta(d, false));
+        let sequence = 0;
+        const postPrefix = async output => {
+          if (!funded || !job.stream || !this.running) throw Error("Metered stream stopped");
+          const next = sequence + 1;
+          const signature = await this.wallet.signHash(require("./koin-network/funded-protocol").fundedChunkHash(job.target, job, output, next));
+          const response = await fetch(`${this.schedulerUrl}${wire.prefix}chunk?token=${this.token}`, {
+            method: "POST", headers: { "content-type": "application/json", connection: "close" },
+            body: JSON.stringify({ jobId: job.id, output, signature, sequence: next }),
+            signal: AbortSignal.any([AbortSignal.timeout(10000), this._shadowAbort.signal]),
+          });
+          const value = await response.json();
+          if (!response.ok || value.accepted !== true || value.sequence !== next || value.mode !== wire.mode || value.paymentsEnabled !== wire.paymentsEnabled)
+            throw Error(value.error || "Metered stream was not accepted");
+          sequence = next;
+        };
+        const { output, usage } = await this._execute(job, (d) => postDelta(d, false), postPrefix);
         postDelta("", true); // flush the tail
         // §51 CU groundwork: generation speed is the capability signal —
         // completion tokens over wall time (prefill is folded in; the
@@ -628,7 +644,7 @@ class Worker {
   }
 
   /** §31: only approved profiles execute — anything else is refused. */
-  async _execute(job, onDelta) {
+  async _execute(job, onDelta, onPrefix) {
     if (this.fundedOnly && !["koin-funded-rehearsal-chat", "koin-mainnet-pilot-chat"].includes(job.type)) throw Error("This Test worker accepts only funded Test requests");
     if (["koin-shadow-chat", "koin-funded-rehearsal-chat", "koin-mainnet-pilot-chat"].includes(job.type)) {
       if (job.type === "koin-mainnet-pilot-chat") {
@@ -636,7 +652,7 @@ class Worker {
       } else if (job.type === "koin-funded-rehearsal-chat" ? !this.koinFundedRehearsalJobs : !this.koinShadowJobs) throw Error("Shadow jobs require explicit opt-in");
       this._shadowAbort = new AbortController();
       return require("./koin-network/shadow-worker").executeShadow({ job, catalog: this.models?.catalog,
-        runtime: this.runtime, signal: this._shadowAbort.signal });
+        runtime: this.runtime, signal: this._shadowAbort.signal, onChunk: onPrefix });
     }
     if (job.type !== "inference-eval" && job.type !== "chat") {
       throw new Error(`Unapproved job type: ${job.type}`);
