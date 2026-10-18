@@ -26,7 +26,7 @@ async function claimHost({ c, account, wallet, installation: id, fetchImpl = fet
   const guard = () => { signal?.throwIfAborted(); account.assertCreditAuthorization(c.auth, c.config.schedulerUrl); if (wallet.address !== c.config.owner) throw Error("Unlock the payment wallet linked to this account"); };
   guard();
   const response = await fetchImpl(c.config.schedulerUrl + "/koin/test/lease", { method: "POST", redirect: "error", signal: AbortSignal.any([signal || new AbortController().signal, AbortSignal.timeout(10000)]),
-    headers: { "content-type": "application/json", authorization: "Bearer " + c.auth.sessionToken }, body: JSON.stringify({ installation: id }) });
+    headers: { "content-type": "application/json", authorization: "Bearer " + c.auth.sessionToken }, body: JSON.stringify({ installation: id, creditWallet: c.config.owner }) });
   const parts = []; let size = 0;
   for await (const part of response.body) { guard(); size += part.length; if (size > 4096) throw Error("Invalid payment host response"); parts.push(part); }
   guard(); const value = JSON.parse(Buffer.concat(parts).toString("utf8"));

@@ -15,9 +15,11 @@ class PrepaidChat extends ChatFlow {
   }
   async call(action, body = {}, signal = AbortSignal.timeout(10000), onCompletion) {
     const a = this.access.authorize(this.config.schedulerUrl, signal);
+    const selectedOwner = a.owner || this.config.owner;
     const route = action === "chat" ? "/consume/chat/completions" : "/koin/prepaid/" + action;
     const response = await this.fetch(this.config.schedulerUrl + route, { method: "POST", redirect: "error", signal,
-      headers: { "content-type": "application/json" }, body: JSON.stringify({ ...body, sessionToken: a.sessionToken }) });
+      headers: { "content-type": "application/json" }, body: JSON.stringify({ ...body, sessionToken: a.sessionToken,
+        ...(isUsd(this.product) ? { creditWallet: /^account-[a-f0-9]{64}$/.test(selectedOwner) ? null : selectedOwner } : {}) }) });
     if (action === "chat" && response.ok && (response.headers.get("content-type") || "").includes("text/event-stream")) {
       let buffer = "", last, done = false, frames = 0; const decoder = new TextDecoder(), wire = protocol(this.target);
       for await (const part of response.body) {

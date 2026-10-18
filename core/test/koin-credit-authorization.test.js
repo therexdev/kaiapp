@@ -16,3 +16,14 @@ test("credit authorization uses a verified session without a wallet, and revocat
   global.fetch = async () => new Response("x".repeat(65537));
   await assert.rejects(account.creditAuthorization(auth.schedulerUrl), /too large/);
 });
+test("multiple linked wallets use the device's selected wallet and preserve walletless free access", async t => {
+  const { Signer } = require("koilib"), first = Signer.fromSeed("credit-wallet-first").getAddress(), second = Signer.fromSeed("credit-wallet-second").getAddress();
+  const account = new AccountService({ dataDir: "/unused", settings: { get: key => key === "network.privacyMode" ? "online" : "https://credit.invalid/scheduler" } });
+  account._token = () => "private-session"; account._encrypted = () => true; account.wallet = { address: second };
+  const original = global.fetch; t.after(() => { global.fetch = original; });
+  global.fetch = async () => Response.json({ ok: true, account: { id: "verified-user", wallets: [{ address: first }, { address: second }] } });
+  const auth = await account.creditAuthorization("https://credit.invalid/scheduler"); assert.equal(auth.owner, second);
+  account.wallet.address = first; assert.throws(() => account.assertCreditAuthorization(auth, auth.schedulerUrl), /changed/);
+  assert.equal((await account.creditAuthorization(auth.schedulerUrl)).owner, first);
+  account.wallet.address = null; assert.match((await account.creditAuthorization(auth.schedulerUrl)).owner, /^account-/);
+});

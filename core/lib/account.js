@@ -250,14 +250,17 @@ class AccountService {
     const chunks = []; let size = 0;
     for await (const part of response.body) { size += part.length; if (size > 65536) throw Error("Account response too large"); chunks.push(part); }
     const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    if (!response.ok || value.ok !== true || typeof value.account?.id !== "string" || !value.account.id || value.account.id.length > 200 || !Array.isArray(value.account.wallets) || value.account.wallets.length > 1) throw Error("Sign in to your credit account; choose a single payment wallet if several are linked");
-    const accountId = value.account.id, wallet = value.account.wallets[0]?.address;
-    const auth = { sessionToken: token, accountId, owner: wallet || "account-" + crypto.createHash("sha256").update("verified-account:" + accountId).digest("hex"), schedulerUrl: pinned };
+    if (!response.ok || value.ok !== true || typeof value.account?.id !== "string" || !value.account.id || value.account.id.length > 200 || !Array.isArray(value.account.wallets) || value.account.wallets.length > 64 || value.account.wallets.some(w => !require("koilib").utils.isChecksumAddress(w?.address))) throw Error("Sign in to your credit account");
+    const accountId = value.account.id, localWallet = this.wallet?.address || null;
+    // With several linked wallets, use only the wallet explicitly loaded on
+    // this device. No arbitrary first-wallet selection or balance transfer.
+    const wallet = value.account.wallets.length === 1 ? value.account.wallets[0].address : value.account.wallets.find(w => w.address === localWallet)?.address;
+    const auth = { sessionToken: token, accountId, localWallet, owner: wallet || "account-" + crypto.createHash("sha256").update("verified-account:" + accountId).digest("hex"), schedulerUrl: pinned };
     this.assertCreditAuthorization(auth, pinned); return auth;
   }
   assertCreditAuthorization(auth, pinned) {
     if (auth.schedulerUrl !== pinned || new URL(pinned).origin !== this.origin() || auth.sessionToken !== this._token() ||
-        !this._encrypted() || this.settings.get("network.privacyMode", "local-only") === "local-only") throw Error("Account or privacy settings changed");
+        (Object.hasOwn(auth, "localWallet") && auth.localWallet !== (this.wallet?.address || null)) || !this._encrypted() || this.settings.get("network.privacyMode", "local-only") === "local-only") throw Error("Account or privacy settings changed");
   }
   // Private Core-to-scheduler credential handoff for the explicitly pinned
   // rehearsal. Never returned by status(), IPC, a tool or a public API.
