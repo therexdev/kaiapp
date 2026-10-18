@@ -93,6 +93,18 @@ class CreditProvider {
     if (this.worker.status().backoff) return { state: "paused", label: "PAUSED", detail: this.worker.status().backoffReason || "This computer is busy." };
     return this.readStatus({ config: c.config, access: { authorize: pin => { this.core.account.assertCreditAuthorization(c.auth, pin); return c.auth; } }, fetchImpl: this.service.fetchImpl, signal: AbortSignal.timeout(10000) });
   }
+  async earnings() {
+    const c = await this.service.context(AbortSignal.timeout(10000));
+    const value = await require("./koin-provider-status").readProviderAccount({ config: c.config,
+      access: { authorize: pin => { this.core.account.assertCreditAuthorization(c.auth, pin); return c.auth; } }, fetchImpl: this.service.fetchImpl, signal: AbortSignal.timeout(10000) });
+    if (!Number.isSafeInteger(value.observedAt) || Math.abs(Date.now() - value.observedAt) > 30000 || !Array.isArray(value.payouts) || value.payouts.length > 4096) throw Error("Reward history observation is unavailable or stale");
+    const payouts = value.payouts.filter(p => p.account === c.config.owner).slice(0, 64).map(p => {
+      if (typeof p.epoch !== "string" || !/^(0|[1-9]\d{0,9})$/.test(p.epoch) || typeof p.state !== "string" || !/^[a-z_]{1,40}$/.test(p.state) ||
+          [p.availability, p.work].some(n => typeof n !== "string" || !/^(0|[1-9]\d{0,19})$/.test(n))) throw Error("Reward history could not be verified");
+      return { epoch: p.epoch, state: p.state, availability: p.availability, work: p.work };
+    });
+    return { observedAt: value.observedAt, lastCycleCheck: Number.isSafeInteger(value.lastCycleCheck) ? value.lastCycleCheck : null, payouts };
+  }
   async tick() {
     if (this.busy || this.closed) return;
     try {

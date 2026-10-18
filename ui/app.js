@@ -920,11 +920,14 @@ async function send(replayText) {
   if (!text || state.chatting) return;
   const chatModel = composedChatModel();
   if (!chatModel) { addMsg("error", "Choose an available model. For OpenAI or Anthropic, connect and refresh models in Settings; Local-Only blocks online connections."); return; }
-  if (chatModel.startsWith("koinos-network") && window.KaiNetwork?.info.configured && getChatMode() !== "chat") {
-    addMsg("error", "Choose Chat for this KOIN network connection. Research, Agent and Teams are not enabled for paid Test sessions yet."); return;
-  }
   if (KaiProviders.isModel(chatModel) && getChatMode().startsWith("team:")) {
     addMsg("error", "Desktop providers work in Chat, Research and Agent. Choose one of those modes, or use a local/network model for Teams."); return;
+  }
+  const creditRun = !replayText && chatModel.startsWith("koinos-network") && getChatMode() !== "chat";
+  if (creditRun) {
+    if (state.attachment?.kind === "image") { addMsg("error", "The current network model does not support images. Choose a local vision model."); return; }
+    try { if (!await window.KaiCreditRuns.begin(getChatMode().startsWith("team:") ? "team" : getChatMode())) return; }
+    catch (e) { addMsg("error", e.message); return; }
   }
   if (!replayText) $("input").value = "";
   // An attached IMAGE rides on the question turn itself (vision input) —
@@ -990,11 +993,12 @@ async function send(replayText) {
           "The Analyst team writes and runs code in the sandbox (its own scratch folder, no network, no other programs). Allow for this run?"
         );
       }
-      const resp = await fetch("/core/teams/run", {
+      const teamBody = { template, question: text, model: chatModel, allowSensitive };
+      const resp = creditRun ? await KaiCreditRuns.execute("team", teamBody, { signal: state.abort.signal }) : await fetch("/core/teams/run", {
         method: "POST",
         headers: { "content-type": "application/json" },
         signal: state.abort.signal,
-        body: JSON.stringify({ template, question: text, model: chatModel, allowSensitive }),
+        body: JSON.stringify(teamBody),
       });
       if (!resp.ok || !resp.body) throw new Error(`teams endpoint answered ${resp.status}`);
       const decoder = new TextDecoder();
@@ -1033,6 +1037,7 @@ async function send(replayText) {
         $("input").value = text;
       }
     } finally {
+      if (creditRun) await KaiCreditRuns.finish();
       bubble.classList.remove("streaming");
       state.chatting = false;
       $("btn-send").disabled = false;
@@ -1045,7 +1050,7 @@ async function send(replayText) {
   try {
     const turnHistory = state.history.slice(-5, -1).map(m => m.role + ": " + m.content).join("\n");
     const paidChat = chatModel.startsWith("koinos-network") && window.KaiNetwork?.info.configured;
-    const route = paidChat ? { lane: "chat", needsTools: false } : KaiAgents.routeTurn(text, { mode: answerMode, history: turnHistory });
+    const route = paidChat && !creditRun ? { lane: "chat", needsTools: false } : KaiAgents.routeTurn(text, { mode: answerMode, history: turnHistory });
     if (!route.needsTools) {
       reqHistory = [{ role: "system", content: KaiAgents.fastContext(route) }, ...state.history];
     }
@@ -1077,7 +1082,7 @@ async function send(replayText) {
           reqHistory = [...state.history.slice(0, -1), { role: "user", content: phase.context }, state.history[state.history.length - 1]];
         }
       } catch (e) {
-        if (e.name === "AbortError") throw e;
+        if (e.name === "AbortError" || creditRun) throw e;
         KaiI18n.setText(status, KaiI18n.message`⚠ ${String(e.message || e).slice(0, 140)} — answering without tools.`);
       } finally {
         if (!status.textContent) status.remove();
@@ -1209,6 +1214,7 @@ async function send(replayText) {
       $("input").value = text;
     }
   } finally {
+    if (creditRun) await KaiCreditRuns.finish();
     bubble.classList.remove("streaming");
     state.chatting = false;
     $("btn-send").disabled = false;

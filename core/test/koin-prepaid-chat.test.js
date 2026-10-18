@@ -17,8 +17,9 @@ function setup(t, product = "prepaid-v1") {
     let value = {};
     if (action === "estimate") value.estimate = { model: "fixture", unit: product === "prepaid-usd-v1" ? "USD-1e-8" : "legacy-KOIN-1e-8", maxCharge: "21", maxFree: b.freeOnly ? "21" : "0", maxPaid: b.freeOnly ? "0" : "21", allowed: true };
     if (action === "completions") {
+      const at = Date.now();
       const q = { schema: 2, mode: "shadow", domain: flow.target.domain, policyHash: config.policyHash, tariff, requestHash: P.hash(JSON.stringify(b.messages)),
-        promptHash: P.hash("prompt"), inputIdsHash: P.hash("ids"), inputTokens: 5, maxOutput: b.max_tokens, maxCharge: "21", at: Date.now(), expires: Date.now() + 300000 };
+        promptHash: P.hash("prompt"), inputIdsHash: P.hash("ids"), inputTokens: 5, maxOutput: b.max_tokens, maxCharge: "21", at, expires: at + 300000 };
       q.hash = P.hash(JSON.stringify(q));
       const id = b.requestId, session = P.hash("prepaid-account:" + owner), attempt = P.hash("attempt"), output = "A private answer";
       const signature = Buffer.from(await signer.signHash(fundedResultHash(flow.target, { id, session, attempt, quote: q }, output))).toString("base64");
@@ -90,4 +91,41 @@ test("interrupted metered stream preserves the last verified prefix and restart 
   assert.equal(result.completion.choices[0].message.content, "A private");
   assert.equal(f.calls.filter(c => c.action === "completions").length, 1);
   assert.ok(!fs.readFileSync(f.file, "utf8").includes("A private"));
+});
+test("advanced subcalls keep separate encrypted recovery records and repeated calls do not charge again", async t => {
+  const f = setup(t, "prepaid-usd-v1"), { CreditRuns, creditAtoms } = require("../../electron/credit-runs"), directory = path.dirname(f.file);
+  assert.equal(creditAtoms("12.34567"), "1234567"); assert.throws(() => creditAtoms("0")); assert.throws(() => creditAtoms("1.000001"));
+  let approved;
+  const original = f.options.fetchImpl;
+  const transport = async (url, init) => {
+    const b = JSON.parse(init.body), action = url.split("/").at(-1);
+    if (action.startsWith("run-")) {
+      if (action === "run-open") approved = { id: b.runId, maxTotal: b.maxTotal, freeOnly: b.freeOnly, state: "open" };
+      if (action === "run-stop") approved.state = "stopped";
+      return Response.json({ ok: true, product: "prepaid-usd-v1", mode: "mainnet-pilot", paymentsEnabled: true, owner: f.options.config.owner, run: approved });
+    }
+    return original(url, init);
+  };
+  f.flow.fetch = transport;
+  const service = { storage: f.options.storage, account: { assertCreditAuthorization() {} }, fetchImpl: transport, progress() {} };
+  const c = { directory, config: f.options.config, flow: f.flow, auth: { owner: f.options.config.owner, sessionToken: "secret" } };
+  const create = () => { const r = new CreditRuns(service), make = r.flow.bind(r); r.flow = (...args) => { const flow = make(...args); f.flow.file = flow.file; return flow; }; return r; };
+  let runs = create(); const { run } = await runs.open(c, { budget: "1", mode: "research", freeOnly: false }, f.signal);
+  const first = { runId: run.id, callId: P.hash("first subcall"), request: { ...f.body, stream: false } };
+  const answer = await runs.chat(c, first, f.signal); runs = create();
+  assert.equal((await runs.chat(c, first, f.signal)).id, answer.id);
+  assert.equal(f.calls.filter(c => c.action === "completions").length, 1);
+  assert.equal(f.calls.find(c => c.action === "completions").b.runId, run.id);
+  await runs.chat(c, { ...first, callId: P.hash("second subcall") }, f.signal);
+  const recovered = await runs.status(c, run.id, f.signal); assert.equal(recovered.steps.length, 2);
+  assert.ok(recovered.steps.every(s => s.text === "A private answer"));
+  assert.equal(runs.list(c).length, 1);
+  const otherDirectory = path.join(directory, "new-wallet-context"); fs.mkdirSync(otherDirectory);
+  const switched = { ...c, directory: otherDirectory, config: { ...c.config, owner: require("koilib").Signer.fromSeed("second-linked-wallet").getAddress() }, contexts: [c] };
+  assert.equal(runs.list(switched)[0].id, run.id);
+  assert.equal((await runs.status(switched, run.id, f.signal)).steps.length, 2, "linked-wallet selection retains original receipt verification and saved results");
+  assert.equal((await runs.stop(switched, run.id, f.signal)).run.state, "stopped");
+  for (const file of fs.readdirSync(runs.directory(c, run.id))) {
+    const text = fs.readFileSync(path.join(runs.directory(c, run.id), file), "utf8"); assert.ok(!text.includes("A private answer")); assert.ok(!text.includes("A private question"));
+  }
 });

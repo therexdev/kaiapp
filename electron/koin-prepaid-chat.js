@@ -71,7 +71,7 @@ class PrepaidChat extends ChatFlow {
   async status() { return this.call("status"); }
   async estimate(value, signal) {
     const input = request(value, this.config);
-    const result = await this.call("estimate", { model: input.model, messages: input.messages, max_tokens: input.maxOutput, freeOnly: input.freeOnly === true }, signal);
+    const result = await this.call("estimate", { model: input.model, messages: input.messages, max_tokens: input.maxOutput, freeOnly: input.freeOnly === true, ...(input.runId ? { runId: input.runId } : {}) }, signal);
     const e = result.estimate;
     if (!e || e.model !== input.model || e.unit !== (isUsd(this.product) ? "USD-1e-8" : "legacy-KOIN-1e-8") || typeof e.allowed !== "boolean" ||
         ![e.maxCharge, e.maxFree, e.maxPaid].every(n => typeof n === "string" && /^(0|[1-9]\d{0,19})$/.test(n)) || BigInt(e.maxFree) + BigInt(e.maxPaid) !== BigInt(e.maxCharge)) throw Error("Credit estimate could not be verified");
@@ -126,7 +126,7 @@ class PrepaidChat extends ChatFlow {
         if (delta) this.progress({ requestId: record.id, delta, servedModel: input.model, creditsAtoms: receipt.usage.amount });
       };
       const response = await this.call("chat", { billing: "koin-" + this.product, requestId: record.id, model: input.model, messages: input.messages, max_tokens: input.maxOutput,
-        stream: value.stream !== false, ...(record.maxPaid !== undefined ? { maxPaid: record.maxPaid } : {}), ...(input.freeOnly !== undefined ? { freeOnly: input.freeOnly } : {}) }, signal, delivered);
+        stream: value.stream !== false, ...(record.maxPaid !== undefined ? { maxPaid: record.maxPaid } : {}), ...(input.freeOnly !== undefined ? { freeOnly: input.freeOnly } : {}), ...(input.runId ? { runId: input.runId } : {}) }, signal, delivered);
       const answer = this.verify(response.completion, input, record.id);
       // Persist the verified answer before displaying it. The service has already
       // recorded this one usage charge and retains an encrypted recovery copy.

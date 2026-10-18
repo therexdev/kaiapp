@@ -48,3 +48,19 @@ test("Stop during startup prevents a delayed runtime acquisition from turning sh
   await entered; await f.controller.stop(); release(); await rejected;
   assert.equal(f.counts.started, 0); assert.equal(f.controller.preference(f.c), false);
 });
+
+test("public earnings use the selected account without unlocking or changing old reward records", async t => {
+  const f = fixture(t); f.unlocked = false;
+  let value = { mode: "mainnet-pilot", mainnetPaymentsEnabled: true, observedAt: Date.now(), lastCycleCheck: null,
+    payouts: [{ account: f.c.config.owner, epoch: "20742", state: "needs_review", availability: "10000000", work: "0" },
+      { account: "another-account", epoch: "20743", state: "paid", availability: "999", work: "1" }] };
+  f.args.service.fetchImpl = async () => Response.json(value);
+  const result = await f.controller.earnings();
+  assert.deepEqual(result.payouts, [{ epoch: "20742", state: "needs_review", availability: "10000000", work: "0" }]);
+  assert.equal(result.lastCycleCheck, null); assert.equal(f.counts.started, 0);
+  value = { ...value, observedAt: Date.now() - 31000 };
+  await assert.rejects(f.controller.earnings(), /stale/);
+  value = { ...value, observedAt: Date.now(), payouts: [{ ...value.payouts[0], epoch: 20742 }] };
+  await assert.rejects(f.controller.earnings(), /verified/);
+  f.authorized = false; await assert.rejects(f.controller.earnings(), /Account changed/);
+});

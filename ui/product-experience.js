@@ -130,7 +130,16 @@
       catch (e) { $("product-recovery-purchase").textContent = e.message; }
       finally { target.disabled = false; }
     }
-    if (action === "payouts") document.querySelector('[data-koin-test="payouts"]').click();
+    if (action === "payouts") {
+      const node = $("product-provider-earnings"); node.textContent = "Checking reward history…";
+      try {
+        const result = await window.kaiKoinTestBridge.run("provider-public-earnings");
+        const koin = atoms => { const n = BigInt(atoms); return `${n / 100000000n}.${(n % 100000000n).toString().padStart(8, "0")}`; };
+        node.textContent = result.payouts.length ? result.payouts.map(p => `Day ${p.epoch} · ${koin(String(BigInt(p.availability) + BigInt(p.work)))} KOIN · ${p.state.replaceAll("_", " ")}`).join(" · ") : "No recorded payouts for this reward wallet yet.";
+        node.textContent += ` Observed ${new Date(result.observedAt).toLocaleString()}.`;
+        if (!result.lastCycleCheck || Date.now() - result.lastCycleCheck > 60000) node.textContent += " Reward processing is not freshly confirmed.";
+      } catch (e) { node.textContent = "Reward history unavailable. " + e.message; }
+    }
     if (action === "recover") { go("chat"); window.dispatchEvent(new Event("kai-network-recover")); }
     if (action === "first-back") { oldOnboarding.hidden = true; onboarding.querySelector(".product-first").scrollIntoView({ block: "start" }); }
     if (action === "setup-local") { oldOnboarding.hidden = false; oldOnboarding.scrollIntoView({ block: "start" }); }

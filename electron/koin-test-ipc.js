@@ -33,6 +33,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     progress: value => { const window = getMainWindow(); if (window && !window.isDestroyed()) window.webContents.send("koin:chat-progress", typeof value === "string" ? { text: value } : value); } });
   let creditBusy = false;
   const creditProvider = new (require("./credit-provider").CreditProvider)({ service: creditService, core });
+  const creditRunExecutor = new (require("./credit-run-executor").CreditRunExecutor)({ service: creditService, core });
   const activeRequests = new Set();
   const open = () => {
     if (disposed) throw Error("Test payments are closing");
@@ -88,11 +89,12 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     const window = getMainWindow();
     if (!trustedMainDocument(event, window, origin)) throw Error("Desktop window access denied");
     if (!isTest) return { enabled: false, mode: "test-deployment" };
-    if (typeof action !== "string" || Buffer.byteLength(JSON.stringify(input ?? null)) > (["chat-completion", "chat-estimate"].includes(action) ? 26000 : 16384)) throw Error("Invalid Test payment action");
+    if (typeof action !== "string" || Buffer.byteLength(JSON.stringify(input ?? null)) > (["chat-completion", "chat-estimate", "run-chat", "run-execute", "run-input"].includes(action) ? 28000 : 16384)) throw Error("Invalid Test payment action");
     if (action.startsWith("provider-public-")) {
       if (input !== undefined || disposed) throw Error("Provider controls take no arguments");
       if (action === "provider-public-info") return creditProvider.info();
       if (action === "provider-public-status") return creditProvider.status();
+      if (action === "provider-public-earnings") return creditProvider.earnings();
       if (action === "provider-public-stop") return creditProvider.stop();
       if (!["provider-public-start", "provider-public-download"].includes(action)) throw Error("Unknown provider action");
       if (!window.isVisible() || window.isMinimized()) throw Error("Return to the visible app to set up sharing");
@@ -104,12 +106,16 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     // migrate, rewrite, or consume old custody balances to activate USD credits.
     if (creditService.service.state === "ready") {
       if (action === "chat-info") return creditService.info(AbortSignal.timeout(10000));
+      if (action === "run-input") return creditRunExecutor.input(input);
+      if (action === "run-stop") creditRunExecutor.stop(input);
+      if (["run-list", "run-status", "run-stop"].includes(action)) return creditService.run(action, input, AbortSignal.timeout(10000));
       if (["credit-status", "chat-estimate", "network-overview"].includes(action)) return creditService.run(action, input, AbortSignal.timeout(10000));
-      if (["chat-completion", "chat-recover", "chat-ack"].includes(action)) {
+      if (["chat-completion", "chat-recover", "chat-ack", "run-open", "run-chat", "run-execute"].includes(action)) {
         if (disposed || creditBusy) throw Error("Finish or stop the current chat first");
         if (!window.isVisible() || window.isMinimized()) throw Error("Return to the visible desktop window to chat");
         creditBusy = true;
-        try { return await withChatSignal(window, signal => creditService.run(action, input, signal)); }
+        try { return await withChatSignal(window, async signal => action === "run-execute"
+          ? creditRunExecutor.execute(await creditService.context(signal), input, signal) : creditService.run(action, input, signal)); }
         finally { creditBusy = false; }
       }
     }

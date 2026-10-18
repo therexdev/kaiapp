@@ -16,6 +16,7 @@ class CreditService {
   constructor({ dataDir, account, storage, service, fetchImpl = fetch, progress = () => {}, dialog }) {
     Object.assign(this, { dataDir, account, storage, fetchImpl, progress }); this.service = manifest(service);
     this.purchases = new (require("./credit-purchases").CreditPurchases)({ dataDir, account, storage, dialog, fetchImpl });
+    this.runs = new (require("./credit-runs").CreditRuns)(this);
   }
   async context(signal) {
     if (this.service.state !== "ready") throw Error(this.service.reason);
@@ -39,7 +40,7 @@ class CreditService {
       return auth;
     } };
     const make = (cfg, dir) => new PrepaidChat({ config: cfg, file: path.join(dir, "chat.json"), storage: this.storage, access, fetchImpl: this.fetchImpl, progress: this.progress });
-    const flow = make(config, directory), recoverable = [];
+    const flow = make(config, directory), recoverable = [], contexts = [{ config, directory }];
     for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
       if (!entry.isDirectory() || !/^[a-f0-9]{64}$/.test(entry.name)) continue;
       const dir = path.join(root, entry.name), file = path.join(dir, "context.json");
@@ -47,6 +48,7 @@ class CreditService {
       const saved = JSON.parse(fs.readFileSync(file, "utf8"));
       if (saved.accountId !== auth.accountId || saved.config.schedulerUrl !== config.schedulerUrl || JSON.stringify(saved.config.deployment) !== JSON.stringify(config.deployment)) continue;
       const checked = manifest({ schema: 1, state: "ready", config: Object.fromEntries(Object.entries(saved.config).filter(([key]) => key !== "owner")) });
+      if (dir !== directory) contexts.push({ config: { ...checked.config, owner: saved.config.owner }, directory: dir });
       const candidate = make({ ...checked.config, owner: saved.config.owner }, dir), record = candidate.read();
       if (record && ["pending", "answered"].includes(record.state)) recoverable.push({ flow: candidate, record });
     }
@@ -59,18 +61,25 @@ class CreditService {
         if (record && ["pending", "answered"].includes(record.state)) recoverable.unshift({ flow: candidate, record });
       }
     }
-    return { config, flow, auth, recoverable, directory };
+    return { config, flow, auth, recoverable, directory, contexts };
   }
   async info(signal) {
     if (this.service.state !== "ready") return { enabled: true, configured: true, product: "prepaid-usd-v1", blocked: this.service.reason, activation: "unavailable", recoveryAvailable: false };
     try {
       const c = await this.context(signal);
+      let runBudgets = false;
+      try { const r = await c.flow.call("capabilities", {}, signal); runBudgets = r.capabilities?.advancedRuns === true && r.capabilities.models?.some(m => m.model === c.config.model && m.version === c.config.version && m.maxOutput >= c.config.maxOutput) === true; } catch { /* Older services keep normal Chat available. */ }
       return { enabled: true, configured: true, product: "prepaid-usd-v1", activation: "ready", blocked: "", model: c.config.model, maxOutput: c.config.maxOutput,
-        maxRequestCredits: require("../core/lib/koin-network/purchase-quote").credits(c.config.limits.perJob), recoveryAvailable: c.recoverable.length > 0 };
+        runBudgets, maxRequestCredits: require("../core/lib/koin-network/purchase-quote").credits(c.config.limits.perJob), recoveryAvailable: c.recoverable.length > 0 };
     } catch (error) { return { enabled: true, configured: true, product: "prepaid-usd-v1", activation: "signin-required", blocked: String(error.message), recoveryAvailable: false }; }
   }
   async run(action, input, signal, window) {
     const c = await this.context(signal);
+    if (action === "run-open") return this.runs.open(c, input, signal);
+    if (action === "run-chat") return this.runs.chat(c, input, signal);
+    if (action === "run-status") return this.runs.status(c, input, signal);
+    if (action === "run-stop") return this.runs.stop(c, input, signal);
+    if (action === "run-list") return { runs: this.runs.list(c) };
     if (action === "purchase-preview") return this.purchases.preview(c, input, signal);
     if (["purchase-approve", "purchase-retry"].includes(action)) return this.purchases.run(c, window, action, input, signal);
     if (action === "purchase-sync") return this.purchases.sync(c, signal);
@@ -85,7 +94,7 @@ class CreditService {
       P.digest(input); for (const r of c.recoverable) if (r.record.id === input) r.flow.acknowledge(input);
       return { state: "delivered" };
     }
-    if (action === "chat-completion") return c.flow.chat(null, input, signal);
+    if (action === "chat-completion") { if (input?.runId !== undefined) throw Error("Use the approved run for multi-step calls"); return c.flow.chat(null, input, signal); }
     throw Error("Unknown credit service operation");
   }
 }

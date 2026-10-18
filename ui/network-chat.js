@@ -29,7 +29,7 @@
     signal?.throwIfAborted(); signal?.addEventListener("abort", stop, { once: true });
     progress("Checking your network account…");
     try {
-      const result = await bridge.run("chat-completion", body);
+      const result = await (window.KaiCreditRuns ? window.KaiCreditRuns.dispatch(body) : bridge.run("chat-completion", body));
       signal?.throwIfAborted();
       const charge = result.koin?.receipt?.usage?.amount;
       const creditText = charge ? (() => { const n = BigInt(charge); return `${n / 100000n}.${(n % 100000n).toString().padStart(5, "0")}`.replace(/\.?0+$/, "") || "0"; })() : "0";
@@ -65,7 +65,7 @@
       frame({ model: "koinos-network", servedModel: value.servedModel, choices: [{ delta: { content: value.delta } }] });
     });
     signal?.addEventListener("abort", stop, { once: true });
-    bridge.run("chat-completion", body).then(result => {
+    (window.KaiCreditRuns ? window.KaiCreditRuns.dispatch(body) : bridge.run("chat-completion", body)).then(result => {
       if (finished) return;
       const output = result.choices?.[0]?.message?.content || "";
       if (!output.startsWith(prefix)) throw Error("The saved reply differs from the verified stream");
@@ -94,5 +94,20 @@
   window.KaiNetwork = { refresh, chatFetch, get info() { return info; },
     acknowledge: id => bridge.run("chat-ack", id),
     recover: () => bridge.run("chat-recover"),
-    paint() { const strip = document.getElementById("network-chat-account"); if (strip) strip.hidden = !(info.configured && document.getElementById("src-pick")?.value === "network"); } };
+    paint() {
+      const network = document.getElementById("src-pick")?.value === "network", strip = document.getElementById("network-chat-account"); if (strip) strip.hidden = !(info.configured && network);
+      const pick = document.getElementById("mode-pick");
+      const unavailable = network && (info.product !== "prepaid-usd-v1" || info.activation !== "ready" || info.runBudgets !== true || !!info.blocked);
+      for (const option of pick?.options || []) {
+        if (option.value === "chat") continue;
+        if (unavailable) { if (!option.dataset.creditDisabled) option.dataset.creditDisabled = String(option.disabled); option.disabled = true; option.title = "This network has not activated shared credit run budgets."; }
+        else if (option.dataset.creditDisabled !== undefined) { option.disabled = option.dataset.creditDisabled === "true"; delete option.dataset.creditDisabled; option.title = ""; }
+      }
+      for (const id of ["btn-pg-run", "btn-dev-run"]) {
+        const button = document.getElementById(id); if (!button) continue;
+        if (unavailable) { if (button.dataset.creditDisabled === undefined) button.dataset.creditDisabled = String(button.disabled); button.disabled = true; button.title = "Shared network run budgets are unavailable. Choose a local route."; }
+        else if (button.dataset.creditDisabled !== undefined) { button.disabled = button.dataset.creditDisabled === "true"; delete button.dataset.creditDisabled; button.title = ""; }
+      }
+      if (pick?.selectedOptions[0]?.disabled && network) { pick.value = "chat"; pick.dispatchEvent(new Event("change")); }
+    } };
 })();

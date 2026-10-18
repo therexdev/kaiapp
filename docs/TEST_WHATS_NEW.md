@@ -1,8 +1,10 @@
-## Unreleased Revision 2 implementation checkpoint
+## Revision 2 test implementation
 
-Adds verified incremental network replies with encrypted partial-reply recovery, a shared credit balance and Free only preference, and account-based USD service activation without a wallet manifest. Earlier payment journals and units are preserved. Purchase inputs no longer suggest a sample KOIN amount or fixed USD exchange rate.
+The seven-screen redesign adds recent chats and search in the sidebar, shared credits, Buy credits, guided provider setup, recovery and a secondary Network view with fresh/stale status. Back to Earn preserves sharing. Existing chats, files, workflows, settings, wallets, models and earlier balances remain in place.
 
-This is not a completed or activated redesign. The packaged USD service remains unavailable pending configuration; commercial configuration, reviewed benchmark criteria, advanced-mode billing and independent financial/earning acceptance remain release gates. Public purchases, v4 quote validation, capped sponsored settlement and guided provider renewal are implemented but not activated. The seven prototype layouts are now implemented, with recent chats in the sidebar, shared credits, explicit recovery and a secondary Network page whose status expires. Back to Earn preserves sharing. See `docs/koin-network/REVISION_2_CONTINUATION.md` for validation and release blockers.
+Network Chat supports verified streaming and encrypted partial-reply recovery. Research, Agents and Teams use an explicit total credit budget, Free only and saved intermediate results when the connected service confirms support. Provider setup includes explicit model download, saved On/Off and automatic qualification renewal when reviewed criteria are configured.
+
+**Service activation is still pending.** This build does not supply a live USD tariff, free-credit entitlement, safe purchase quote or new qualification. Missing configuration shows unavailable states. Old KOIN obligations remain separate and accessible; reward day 20742 is not reset or retried. Independent financial review, authorized fresh deployment/funding, real two-computer testing and payout observation remain outstanding. See `docs/koin-network/REVISION_2_CONTINUATION.md`.
 
 ## USD-valued credits and independently funded rewards
 

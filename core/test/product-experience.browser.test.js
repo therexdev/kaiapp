@@ -3,6 +3,7 @@ const { test } = require("node:test"), assert = require("node:assert/strict"), f
 const CHROMIUM = process.env.KAI_TEST_CHROMIUM || "/opt/pw-browsers/chromium";
 test("Revision 2 free entry, unified credits, unavailable quote, stale network and Back to Earn preserve sharing", { skip: !fs.existsSync(CHROMIUM), timeout: 90000 }, async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-product-ui-")), core = await require("../server").createCore({ dataDir: dir, port: 0, onEvent() {} });
+  core.settings.set("network.privacyMode", "local-first");
   let browser; t.after(async () => { await browser?.close(); await core.stop(); fs.rmSync(dir, { recursive: true, force: true }); });
   browser = await require("playwright-core").chromium.launch({ executablePath: CHROMIUM, args: ["--no-sandbox"] });
   const page = await browser.newPage({ viewport: { width: 1440, height: 980 } }), errors = []; page.on("pageerror", e => errors.push(e.message));
@@ -13,12 +14,13 @@ test("Revision 2 free entry, unified credits, unavailable quote, stale network a
     const purchases = [{ id: "fixture-pending", state: "pending", createdAt: Date.now() }];
     window.kaiKoinTestBridge = { onProgress: fn => { listeners.add(fn); return () => listeners.delete(fn); }, run: async (action, input) => {
       window.productCalls.push({ action, input });
-      if (action === "chat-info") return { ...common, activation: "ready", blocked: "", model: "fixture", maxOutput: 32, maxRequestCredits: "1" };
+      if (action === "chat-info") return { ...common, activation: "ready", runBudgets: window.advancedReady === true, blocked: "", model: "fixture", maxOutput: 32, maxRequestCredits: "1" };
       if (action === "credit-status") return { ...common, credits: credit(), purchases, usage: [] };
       if (action === "status") return { ...common, accessReady: true, credits: credit().purchased, creditState: credit(), purchases, usage: [], purchasePending: true, worker: { running: window.productSharing } };
       if (action === "worker-start") { window.productSharing = true; return { state: "test_worker_running" }; }
       if (action === "worker-stop") { window.productSharing = false; return { state: "test_worker_stopped" }; }
       if (action === "provider-public-info") return { state: "ready", enabled: window.productSharing, running: window.productSharing, model: { id: "fixture", label: "Fixture", installed: true, requiredRamGb: 4 }, detail: "Fixture model is installed" };
+      if (action === "provider-public-earnings") return { observedAt: Date.now(), lastCycleCheck: null, payouts: [{ epoch: "20742", state: "needs_review", availability: "10000000", work: "0" }] };
       if (action === "provider-public-start") { window.productSharing = true; return { state: "running" }; }
       if (action === "provider-public-stop") { window.productSharing = false; return { state: "offline" }; }
       if (["provider-status", "provider-public-status"].includes(action)) return { state: window.productSharing ? "online" : "offline", label: window.productSharing ? "ONLINE" : "OFFLINE", detail: "Fixture qualification and serving evidence are current", validUntil: Date.now() + 15000 };
@@ -33,7 +35,16 @@ test("Revision 2 free entry, unified credits, unavailable quote, stale network a
         const observedAt = Date.now(); return { ...common, network: { observedAt, validUntil: observedAt + 1500, state: "available", readyProviders: 1, waitingRequests: 2, completedToday: 3,
           models: [{ id: "fixture", providers: 1, available: true, freeEligible: true }], providers: [{ id: "anonymous", model: "fixture", state: "ready" }], activity: [{ at: observedAt, model: "fixture" }] } };
       }
-      if (action === "chat-completion") { for (const fn of listeners) fn({ requestId: "a".repeat(64), delta: "Free verified reply", servedModel: "fixture", creditsAtoms: "10" }); return { id: "a".repeat(64), servedModel: "fixture", choices: [{ message: { role: "assistant", content: "Free verified reply" } }], koin: { product: "prepaid-usd-v1", receipt: { usage: { amount: "10" } } } }; }
+      if (action === "run-open") { window.latestRun = { id: String(window.productCalls.length).padStart(64, "0"), mode: input.mode, maxTotal: "100000", freeOnly: input.freeOnly, state: "open", createdAt: Date.now() }; return { run: window.latestRun }; }
+      if (action === "run-list") return { runs: window.latestRun ? [window.latestRun] : [] };
+      if (action === "run-status") return { run: { ...window.latestRun, spent: "20" }, steps: [{ text: "Saved useful intermediate result", credits: "10", callId: "c".repeat(64) }] };
+      if (action === "run-stop") { window.latestRun.state = "stopped"; window.resolveCreditTeam?.(); return { run: window.latestRun }; }
+      if (action === "run-execute") {
+        for (const fn of listeners) fn({ runId: input.runId, trace: { stage: "writer", type: "model", detail: "Saved intermediate" } });
+        if (window.pauseCreditTeam) await new Promise(r => { window.resolveCreditTeam = r; });
+        return { answer: "Budgeted team result", modelCalls: 2 };
+      }
+      if (["chat-completion", "run-chat"].includes(action)) { for (const fn of listeners) fn({ requestId: "a".repeat(64), delta: "Free verified reply", servedModel: "fixture", creditsAtoms: "10" }); return { id: "a".repeat(64), servedModel: "fixture", choices: [{ message: { role: "assistant", content: "Free verified reply" } }], koin: { product: "prepaid-usd-v1", receipt: { usage: { amount: "10" } } } }; }
       if (action === "chat-ack") return { state: "delivered" };
       if (action === "stop") return {};
       throw Error("Unexpected fixture action: " + action);
@@ -74,7 +85,45 @@ test("Revision 2 free entry, unified credits, unavailable quote, stale network a
   await page.evaluate(() => window.resolveApproval());
   await page.waitForFunction(() => document.getElementById("product-quote-state").textContent.includes("Payment cancelled"));
   assert.equal(await page.locator("#product-quote-approve").isVisible(), false);
-  await page.locator('#nav [data-view="earn"]').click(); await page.locator("#product-provider-toggle").click();
+  await page.locator('#nav [data-view="chat"]').click();
+  assert.equal(await page.locator('#mode-pick option[value="agent"]').isDisabled(), true, "unsupported billing is disabled before Send");
+  await page.evaluate(async () => {
+    window.advancedReady = true; await KaiNetwork.refresh(); KaiNetwork.paint();
+    const original = KaiAgents.makeRuntime;
+    const phase = options => async (text, model) => {
+      await options.askModelOnce([{ role: "user", content: text }], model);
+      return { context: "Useful gathered context", citations: [], trace: "Intermediate result saved" };
+    };
+    KaiAgents.makeRuntime = options => ({ ...original(options), runAgent: phase(options), deepResearch: phase(options) });
+  });
+  await page.selectOption("#mode-pick", "agent"); await page.fill("#input", "Run the budgeted agent"); await page.click("#btn-send");
+  await page.locator("#credit-run-review").waitFor({ state: "visible" });
+  if (process.env.KAI_PRODUCT_QA_DIR) { fs.mkdirSync(process.env.KAI_PRODUCT_QA_DIR, { recursive: true }); await page.screenshot({ path: path.join(process.env.KAI_PRODUCT_QA_DIR, "advanced-run-budget.png") }); }
+  await page.locator('#credit-run-review button[value="cancel"]').click();
+  assert.equal(await page.evaluate(() => window.productCalls.filter(c => c.action === "run-open").length), 0);
+  assert.equal(await page.inputValue("#input"), "Run the budgeted agent");
+  await page.click("#btn-send"); await page.fill("#credit-run-budget", "1"); await page.click("#credit-run-start");
+  await page.waitForFunction(() => window.productCalls.filter(c => c.action === "run-chat").length === 2 && !document.getElementById("btn-send").disabled);
+  assert.equal(await page.evaluate(() => window.productCalls.filter(c => c.action === "run-chat").every(c => c.input.request.max_tokens === 32)), true);
+  await page.locator("#credit-run-results > summary").click(); await page.locator("#credit-run-history summary").first().click();
+  await page.waitForFunction(() => document.getElementById("credit-run-history").textContent.includes("Saved useful intermediate result"));
+  await page.selectOption("#mode-pick", "research"); await page.fill("#input", "Run budgeted research"); await page.click("#btn-send");
+  await page.fill("#credit-run-budget", "1"); await page.click("#credit-run-start");
+  await page.waitForFunction(() => window.productCalls.filter(c => c.action === "run-chat").length === 4 && !document.getElementById("btn-send").disabled);
+  await page.selectOption("#mode-pick", "team:review"); await page.fill("#input", "Run a budgeted team"); await page.click("#btn-send");
+  await page.fill("#credit-run-budget", "1"); await page.click("#credit-run-start");
+  await page.waitForFunction(() => document.getElementById("messages").textContent.includes("Budgeted team result") && !document.getElementById("btn-send").disabled);
+  assert.equal(await page.evaluate(() => window.productCalls.filter(c => c.action === "run-execute").length), 1);
+  await page.evaluate(() => { window.pauseCreditTeam = true; });
+  await page.fill("#input", "Stop a budgeted team"); await page.click("#btn-send"); await page.fill("#credit-run-budget", "1"); await page.click("#credit-run-start");
+  await page.waitForFunction(() => !!window.resolveCreditTeam); await page.click("#btn-stop");
+  await page.waitForFunction(() => !document.getElementById("btn-send").disabled);
+  assert.match(await page.locator("#messages").textContent(), /Stopped/);
+  await page.locator('#nav [data-view="earn"]').click();
+  await page.locator('[data-product-action="payouts"]').click();
+  await page.waitForFunction(() => document.getElementById("product-provider-earnings").textContent.includes("needs review"));
+  assert.match(await page.locator("#product-provider-earnings").textContent(), /20742.*0\.10000000 KOIN.*needs review/);
+ await page.locator("#product-provider-toggle").click();
   await page.waitForFunction(() => document.getElementById("product-provider-label").textContent === "ONLINE");
   await page.locator('.product-earn [data-product-view="network-overview"]').click();
   await page.waitForFunction(() => document.getElementById("product-provider-count").textContent === "1");

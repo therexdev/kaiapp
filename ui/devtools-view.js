@@ -325,6 +325,7 @@
   // ================== Playground ==================
   let pgRunId = null;
   let pgInputId = null;
+  let pgCreditRun = false;
 
   function pgBubble(name, content, cls = "pg-msg") {
     const div = document.createElement("div");
@@ -342,7 +343,7 @@
     clearError();
     const task = $("pg-task").value.trim();
     if (!task) return showError("Give the team a task first.");
-    const body = { task, model: state.alias ?? "dev-tiny" };
+    const body = { task, model: $("src-pick").value === "network" ? composedChatModel() : state.alias ?? "dev-tiny" };
     let toolNames = [];
     if ($("pg-source").value) {
       body.defId = $("pg-source").value;
@@ -369,7 +370,8 @@
     $("btn-pg-stop").hidden = false;
     KaiI18n.setText($("pg-status"), "running…");
     try {
-      const resp = await fetch("/core/agents/run", {
+      if (body.model?.startsWith("koinos-network")) { if (!await KaiCreditRuns.begin("agents")) return; pgCreditRun = true; }
+      const resp = pgCreditRun ? await KaiCreditRuns.execute("agents", body) : await fetch("/core/agents/run", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
@@ -400,6 +402,7 @@
       showError(e.message);
       $("pg-status").textContent = "";
     } finally {
+      if (pgCreditRun) await KaiCreditRuns.finish(); pgCreditRun = false;
       $("btn-pg-run").disabled = false;
       $("btn-pg-stop").hidden = true;
       $("pg-input-row").hidden = true;
@@ -413,7 +416,8 @@
     const text = $("pg-input").value;
     $("pg-input").value = "";
     $("pg-input-row").hidden = true;
-    await fetch("/core/agents/input", {
+    if (pgCreditRun) await KaiCreditRuns.input(pgInputId, text);
+    else await fetch("/core/agents/input", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ inputId: pgInputId, text }),
@@ -424,6 +428,7 @@
     if (e.key === "Enter") $("btn-pg-send").click();
   });
   $("btn-pg-stop").addEventListener("click", async () => {
+    if (pgCreditRun) { await KaiCreditRuns.stop(); return; }
     if (!pgRunId) return;
     await fetch("/core/agents/stop", {
       method: "POST",
@@ -465,6 +470,8 @@
     $("dev-spec").value = JSON.stringify(spec, null, 2);
   });
 
+  const pipelineStop = document.createElement("button"); pipelineStop.textContent = "Stop"; pipelineStop.hidden = true;
+  $("btn-dev-run").after(pipelineStop); pipelineStop.addEventListener("click", () => KaiCreditRuns.stop());
   $("btn-dev-run").addEventListener("click", async () => {
     clearError();
     const out = $("dev-team-out");
@@ -486,11 +493,16 @@
     out.textContent = "";
     $("btn-dev-run").disabled = true;
     KaiI18n.setText($("dev-run-status"), "running…");
+    const model = $("src-pick").value === "network" ? composedChatModel() : state.alias ?? "dev-tiny", creditRun = model?.startsWith("koinos-network") === true;
+    let creditRunStarted = false;
     try {
-      const resp = await fetch("/core/teams/run", {
+      if (creditRun) { if (!await KaiCreditRuns.begin("team")) return; creditRunStarted = true; }
+      pipelineStop.hidden = !creditRun;
+      const body = { spec, question, model, allowSensitive };
+      const resp = creditRun ? await KaiCreditRuns.execute("team", body) : await fetch("/core/teams/run", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ spec, question, model: state.alias ?? "dev-tiny", allowSensitive }),
+        body: JSON.stringify(body),
       });
       if (!resp.ok || !resp.body) {
         const j = await resp.json().catch(() => ({}));
@@ -507,6 +519,7 @@
     } catch (e) {
       showError(e.message);
     } finally {
+      if (creditRunStarted) await KaiCreditRuns.finish(); pipelineStop.hidden = true;
       $("btn-dev-run").disabled = false;
       $("dev-run-status").textContent = "";
     }
