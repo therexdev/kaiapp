@@ -1,3 +1,7 @@
+## Unreleased Revision 2 preparation
+
+Purchase amount validation no longer claims a sample KOIN amount buys a fixed number of USD-valued credits. This is a preparatory correction, not completion or activation of the approved redesign. The existing release below still requires the documented deployment and migration work.
+
 ## USD-valued credits and independently funded rewards
 
 Adds the separate `prepaid-usd-v1` contract product. Buy credits shows the exact KOIN payment, USD credit value, current signed rate, expiry and Master Node destination before signing. 1,000 display credits represent $1; purchased credits retain that value. The native transaction pays purchase KOIN directly to `15CM9Qr4GKREDgqnyXJ8tckPj2biERTM1T` and attributes the credits atomically.

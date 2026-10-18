@@ -280,7 +280,7 @@
       const atoms = validFormat ? BigInt(whole) * 100000000n + BigInt(part.padEnd(8, "0")) : 0n;
       if (!validFormat || atoms <= 0n || atoms > (1n << 64n) - 1n) {
         amountInput.setAttribute("aria-invalid", "true");
-        message(prepaid ? "Enter the KOIN amount to buy credits, such as 0.1 for 100 credits." : "To add funds, enter an amount greater than 0, such as 0.1 (up to 8 decimal places, without KOIN). To reserve your existing balance, send a chat message.", true);
+        message(prepaid ? "Enter a positive KOIN amount with up to 8 decimal places. Your payment review shows the exact credits at the current price." : "To add funds, enter an amount greater than 0 (up to 8 decimal places, without KOIN). To reserve your existing balance, send a chat message.", true);
         amountInput.focus(); return;
       }
       amountInput.removeAttribute("aria-invalid");
