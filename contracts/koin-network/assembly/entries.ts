@@ -26,3 +26,5 @@ export const withdraw_free: u32 = 538054530;
 export const settle_usage: u32 = 2073213911;
 export const get_charge: u32 = 1673795352;
 export const get_purchase: u32 = 242675301;
+export const settle_credit_usage: u32 = 2755140057;
+export const get_sponsored_charge: u32 = 3609367492;

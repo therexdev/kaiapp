@@ -101,6 +101,16 @@ export namespace koin {
         writer.uint32(144);
         writer.uint32(message.reward_basis);
       }
+
+      if (message.sponsor_daily_limit != 0) {
+        writer.uint32(152);
+        writer.uint64(message.sponsor_daily_limit);
+      }
+
+      if (message.sponsor_account_daily_limit != 0) {
+        writer.uint32(160);
+        writer.uint64(message.sponsor_account_daily_limit);
+      }
     }
 
     static decode(reader: Reader, length: i32): Config {
@@ -182,6 +192,14 @@ export namespace koin {
             message.reward_basis = reader.uint32();
             break;
 
+          case 19:
+            message.sponsor_daily_limit = reader.uint64();
+            break;
+
+          case 20:
+            message.sponsor_account_daily_limit = reader.uint64();
+            break;
+
           default:
             reader.skipType(tag & 7);
             break;
@@ -209,6 +227,8 @@ export namespace koin {
     effective_at: u64;
     master_node: Uint8Array | null;
     reward_basis: u32;
+    sponsor_daily_limit: u64;
+    sponsor_account_daily_limit: u64;
 
     constructor(
       chain_id: Uint8Array | null = null,
@@ -228,7 +248,9 @@ export namespace koin {
       work_cap_bps: u32 = 0,
       effective_at: u64 = 0,
       master_node: Uint8Array | null = null,
-      reward_basis: u32 = 0
+      reward_basis: u32 = 0,
+      sponsor_daily_limit: u64 = 0,
+      sponsor_account_daily_limit: u64 = 0
     ) {
       this.chain_id = chain_id;
       this.token = token;
@@ -248,6 +270,8 @@ export namespace koin {
       this.effective_at = effective_at;
       this.master_node = master_node;
       this.reward_basis = reward_basis;
+      this.sponsor_daily_limit = sponsor_daily_limit;
+      this.sponsor_account_daily_limit = sponsor_account_daily_limit;
     }
   }
 

@@ -344,8 +344,10 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     try {
       const signal = AbortSignal.any([abort.signal, AbortSignal.timeout(30000)]);
       if (legacyReady) {
-        access.authorize(readConfig(configFile).schedulerUrl, signal);
-        await payments.syncPurchases((txId, nextSignal) => flow(window).call("purchase", { txId }, nextSignal), signal);
+        try {
+          access.authorize(readConfig(configFile).schedulerUrl, signal);
+          await payments.syncPurchases((txId, nextSignal) => flow(window).call("purchase", { txId }, nextSignal), signal);
+        } catch { /* Expired older access must not prevent public-account confirmation. */ }
       }
       if (publicReady) await creditService.run("purchase-sync", undefined, signal);
     } catch { /* Existing credits and chat remain independent of RPC recovery. */ }

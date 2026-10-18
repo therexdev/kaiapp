@@ -104,6 +104,9 @@ export class Base {
   }
   validate(c: K.Config): void {
     System.require(c.reward_basis <= 1, "invalid reward basis");
+    System.require(c.sponsor_account_daily_limit <= c.sponsor_daily_limit &&
+      ((c.sponsor_account_daily_limit == 0) == (c.sponsor_daily_limit == 0)) &&
+      (c.reward_basis == 1 || c.sponsor_daily_limit == 0), "invalid sponsor ceilings");
     if (c.reward_basis == 1) {
       addr(c.master_node);
       System.require(!equal(c.master_node, c.credits) && !equal(c.master_node, c.treasury) && !equal(c.master_node, c.token), "invalid master node");

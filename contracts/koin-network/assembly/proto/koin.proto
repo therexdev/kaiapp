@@ -7,6 +7,8 @@ message Config {
  uint32 reward_bps = 12; uint32 mining_bps = 13; uint32 operations_bps = 14;
  uint32 work_cap_bps = 15; uint64 effective_at = 16;
  bytes master_node = 17; uint32 reward_basis = 18;
+ // Explicit USD-atom ceilings; zero disables sponsored work. No entitlement default.
+ uint64 sponsor_daily_limit = 19; uint64 sponsor_account_daily_limit = 20;
 }
 message Amount { uint64 value = 1; }
 message Balance { uint64 available = 1; uint64 reserved = 2; }

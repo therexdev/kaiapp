@@ -162,7 +162,7 @@ test("invocation-scoped WASM stays bounded for maximum-depth rewards and rejects
   assert.equal(paid.liabilities, "16");
   assert.ok(vm.memory.buffer.byteLength <= 1048576, "Maximum-depth claim must stay within 1 MiB");
 });
-const usdConfig = { ...config, reward_basis: 1, master_node: b64(addr(10)) };
+const usdConfig = { ...config, reward_basis: 1, master_node: b64(addr(10)), sponsor_daily_limit: "30000000", sponsor_account_daily_limit: "20000000" };
 const usdDeployment = { product: "prepaid-usd-v1", chainId: b64(chain), credits: utils.encodeBase58(addr(2)),
   masterNode: utils.encodeBase58(addr(10)), verifier: utils.encodeBase58(addr(5)) };
 const usdQuote = (overrides = {}) => USD.issue({ deployment: usdDeployment, signer: Signer.fromSeed("koin-wasm-fixture-5"),
@@ -210,6 +210,33 @@ test("USD WASM rejects forged, expired, cross-account, cross-contract and cross-
   }
   const vm = await usdVm(), args = await usdQuote(); clockUsd(vm, 86400000 + 300001);
   await assert.rejects(usdBuy(vm, args), /expired/);
+});
+test("USD WASM records free and mixed delivered usage atomically without issuing customer credits", async () => {
+  const vm = await usdVm(), args = await usdQuote(); await usdBuy(vm, args); authority(vm, addr(5));
+  const free = { id: b64(Buffer.alloc(32, 55)), charge: { id: b64(Buffer.alloc(32, 56)), receipt_hash: b64(Buffer.alloc(32, 57)),
+    policy_hash: b64(Buffer.alloc(32, 58)), provider: b64(addr(9)), amount: "10000000" } };
+  assert.equal((await run(vm, "prepaid-usd", "settle_credit_usage", free)).amount, "10000000");
+  assert.equal((await run(vm, "prepaid-usd", "get_sponsored_charge", { id: free.charge.id })).amount, "10000000");
+  const mixed = { ...free, account: args.account, amount: "3000000", charge: { ...free.charge, id: b64(Buffer.alloc(32, 59)) } };
+  await run(vm, "prepaid-usd", "settle_credit_usage", mixed);
+  assert.equal((await run(vm, "prepaid-usd", "get_sponsored_charge", { id: mixed.charge.id })).amount, "7000000");
+  calls(vm, [await amount("0")]);
+  const balance = await run(vm, "prepaid-usd", "balances", { account: args.account });
+  assert.equal(balance.prepaid.purchased, "50000000"); assert.equal(balance.prepaid.consumed, "3000000");
+  assert.equal(balance.balance.available, "47000000"); assert.equal(balance.liabilities, "0");
+  assert.equal((await run(vm, "prepaid-usd", "get_spend", { epoch: "1", account: free.charge.provider })).amount, "20000000");
+  await assert.rejects(run(vm, "prepaid-usd", "settle_credit_usage", mixed), /duplicate/);
+  await assert.rejects(run(vm, "prepaid-usd", "settle_usage", { account: args.account, charge: mixed.charge }), /duplicate/);
+  const invalid = { ...mixed, amount: "20000000", charge: { ...mixed.charge, id: b64(Buffer.alloc(32, 60)) } };
+  await assert.rejects(run(vm, "prepaid-usd", "settle_credit_usage", invalid), /invalid usage/);
+  assert.equal((await run(vm, "prepaid-usd", "get_charge", { id: invalid.charge.id })).amount, "0");
+  const overAccount = { ...free, charge: { ...free.charge, id: b64(Buffer.alloc(32, 61)), amount: "4000000" } };
+  await assert.rejects(run(vm, "prepaid-usd", "settle_credit_usage", overAccount), /sponsor ceiling/);
+  assert.equal((await run(vm, "prepaid-usd", "get_charge", { id: overAccount.charge.id })).amount, "0");
+  const overNetwork = { id: b64(Buffer.alloc(32, 62)), charge: { ...free.charge, id: b64(Buffer.alloc(32, 63)), amount: "14000000" } };
+  await assert.rejects(run(vm, "prepaid-usd", "settle_credit_usage", overNetwork), /sponsor ceiling/);
+  clockUsd(vm, 2 * 86400000); await run(vm, "prepaid-usd", "settle_credit_usage", overAccount);
+  assert.equal((await run(vm, "prepaid-usd", "get_spend", { epoch: "2", account: free.charge.provider })).amount, "4000000");
 });
 test("failed Master Node payment leaves no USD credits or used quote; conversion handles uint64 products", async () => {
   const vm = await usdVm(), args = await usdQuote(); calls(vm, [await amount("100"), Buffer.alloc(0), await amount("100")]);
