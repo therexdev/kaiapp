@@ -32,6 +32,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     storage: core.account?.safeStorage, service: require("../core/lib/koin-network/credit-service.json"),
     progress: value => { const window = getMainWindow(); if (window && !window.isDestroyed()) window.webContents.send("koin:chat-progress", typeof value === "string" ? { text: value } : value); } });
   let creditBusy = false;
+  const creditProvider = new (require("./credit-provider").CreditProvider)({ service: creditService, core });
   const activeRequests = new Set();
   const open = () => {
     if (disposed) throw Error("Test payments are closing");
@@ -88,6 +89,16 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     if (!trustedMainDocument(event, window, origin)) throw Error("Desktop window access denied");
     if (!isTest) return { enabled: false, mode: "test-deployment" };
     if (typeof action !== "string" || Buffer.byteLength(JSON.stringify(input ?? null)) > (["chat-completion", "chat-estimate"].includes(action) ? 26000 : 16384)) throw Error("Invalid Test payment action");
+    if (action.startsWith("provider-public-")) {
+      if (input !== undefined || disposed) throw Error("Provider controls take no arguments");
+      if (action === "provider-public-info") return creditProvider.info();
+      if (action === "provider-public-status") return creditProvider.status();
+      if (action === "provider-public-stop") return creditProvider.stop();
+      if (!["provider-public-start", "provider-public-download"].includes(action)) throw Error("Unknown provider action");
+      if (!window.isVisible() || window.isMinimized()) throw Error("Return to the visible app to set up sharing");
+      if (action === "provider-public-start") { workerAbort?.abort(); await worker?.stop(); workerTrack?.(); workerTrack = null; }
+      return withChatSignal(window, signal => action === "provider-public-download" ? creditProvider.download(signal) : creditProvider.start(signal));
+    }
     if (action === "stop") { stopVersion++; payments?.stop(); creditService.purchases.stop(); for (const controller of activeRequests) controller.abort(); chatAbort?.abort(); sessionAbort?.abort(); if (workerAbort && !worker?.running) workerAbort.abort(); return { state: "stopped", enabled: true, mode: fs.existsSync(configFile) ? readConfig(configFile).mode : "test-deployment" }; }
     // Account activation is independent of historical wallet manifests. Do not
     // migrate, rewrite, or consume old custody balances to activate USD credits.
@@ -353,6 +364,11 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     } catch { /* Existing credits and chat remain independent of RPC recovery. */ }
     finally { untrack(); purchaseSync = false; }
   }, 10000); purchaseTimer.unref();
-  return { isProviding: () => !!worker?.running, dispose() { disposed = true; clearInterval(purchaseTimer); payments?.stop(); creditService.purchases.stop(); for (const controller of activeRequests) controller.abort(); chatAbort?.abort(); sessionAbort?.abort(); workerAbort?.abort(); workerTrack?.(); /* In-flight signed bytes must finish staging before process exit. */ } };
+  let providerTick = false;
+  const providerTimer = setInterval(async () => {
+    if (disposed || providerTick || creditService.service.state !== "ready") return;
+    providerTick = true; try { await creditProvider.tick(); } finally { providerTick = false; }
+  }, 15000); providerTimer.unref();
+  return { isProviding: () => !!worker?.running || !!creditProvider.worker?.running, dispose() { disposed = true; clearInterval(purchaseTimer); clearInterval(providerTimer); creditProvider.dispose().catch(() => {}); payments?.stop(); creditService.purchases.stop(); for (const controller of activeRequests) controller.abort(); chatAbort?.abort(); sessionAbort?.abort(); workerAbort?.abort(); workerTrack?.(); /* In-flight signed bytes must finish staging before process exit. */ } };
 }
 module.exports = { registerTestPaymentIPC, readConfig };

@@ -1,5 +1,6 @@
 "use strict";
 const labels = { online: "ONLINE", offline: "OFFLINE", connecting: "CONNECTING", preparing: "PREPARING MODEL",
+  qualifying: "CHECKING MODEL", "qualification-failed": "MODEL CHECK REQUIRED",
   "qualification-expired": "RENEWAL REQUIRED", "review-required": "REVIEW REQUIRED", "update-required": "UPDATE REQUIRED",
   "model-required": "MODEL REQUIRED", "network-paused": "NETWORK RECONNECTING" };
 async function readProviderStatus({ config, access, signal, fetchImpl = fetch, clock = Date.now }) {

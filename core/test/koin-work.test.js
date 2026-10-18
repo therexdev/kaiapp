@@ -110,3 +110,38 @@ test("worker loop submits a bound shadow receipt without legacy earnings or chun
   assert.equal(instance.stats.jobsDone, 0); assert.equal(instance.stats.receiptsAccepted, 0);
   assert.equal(instance.stats.shadowJobsDone, 1);
 });
+test("qualification runs only on the pinned provider connection and never creates earnings receipts", async (t) => {
+  const e = await engine(t), signer = Signer.fromSeed("qualification-worker-loop"), challenge = fixtureJob();
+  challenge.quote.domain = "shadow:mainnet-pilot-" + hash("qualification-service");
+  delete challenge.quote.hash; challenge.quote.hash = hash(JSON.stringify(challenge.quote));
+  const Q = require("../lib/koin-network/qualification-protocol");
+  const target = { chainId: require("../lib/koin-network/payment-network").MAINNET_CHAIN, credits: signer.getAddress(),
+    creditsHash: "0x1220" + hash("contract"), policyHash: challenge.quote.policyHash, domain: challenge.quote.domain };
+  const job = { type: "koin-provider-qualification", target, policyHash: hash("reviewed benchmark fixture"), challenge };
+  assert.throws(() => new Worker({ qualificationTarget: target }), /explicitly configured/);
+  let instance, received; const paths = [];
+  const server = http.createServer(async (req, res) => {
+    const route = new URL(req.url, "http://fixture").pathname; paths.push(route); res.setHeader("content-type", "application/json");
+    if (route === "/worker/next-job") return res.end(JSON.stringify({ job }));
+    if (route === "/koin/provider/qualification/result") {
+      let raw = ""; for await (const part of req) raw += part; received = JSON.parse(raw);
+      return res.end(JSON.stringify({ accepted: true, qualification: { state: "qualified" } }));
+    }
+    res.writeHead(404); res.end("{}");
+  });
+  await new Promise(r => server.listen(0, "127.0.0.1", r));
+  t.after(() => new Promise(r => { server.closeAllConnections(); server.close(r); }));
+  const options = { schedulerUrl: `http://127.0.0.1:${server.address().port}`, runtime: e.runtime, models: { catalog }, fundedOnly: true,
+    wallet: { signHash: async h => Buffer.from(await signer.signHash(h)).toString("base64") },
+    onEvent: event => { if (["worker:qualification", "worker:job-failed"].includes(event.type)) instance.running = false; } };
+  instance = new Worker(options); instance.running = true; instance.token = "fixture"; await instance._run();
+  assert.match(instance.stats.lastError, /not enabled/); assert.equal(e.calls.length, 0); assert.equal(received, undefined);
+  instance = new Worker({ ...options, qualificationTarget: { ...target, policyHash: hash("different") } });
+  instance.running = true; instance.token = "fixture"; await instance._run(); assert.match(instance.stats.lastError, /target changed/);
+  assert.equal(e.calls.length, 0); paths.length = 0;
+  instance = new Worker({ ...options, qualificationTarget: target }); instance.running = true; instance.token = "fixture"; await instance._run();
+  assert.deepEqual(paths, ["/worker/next-job", "/koin/provider/qualification/result"]);
+  assert.equal(Signer.recoverAddress(Q.resultHash(job, hash(received.output)), Buffer.from(received.signature, "base64")), signer.getAddress());
+  assert.equal(instance.stats.jobsDone, 0); assert.equal(instance.stats.receiptsAccepted, 0); assert.equal(instance.stats.mainnetPilotJobsDone, undefined);
+  assert.equal(instance.stats.qualification.state, "qualified"); assert.equal(e.released(), 1);
+});

@@ -56,7 +56,7 @@
   document.querySelector(".chat-pane").insertBefore(document.querySelector(".composer-options"), document.querySelector(".chat-toolbar"));
   for (const host of [$("chat-empty"), $("chat-welcome-template").content.querySelector("#chat-empty")]) host?.querySelector(".welcome-hero")?.insertAdjacentHTML("afterbegin", emblem);
   const oldEarn = $("view-earn").firstElementChild, legacy = document.createElement("details"); legacy.id = "product-legacy-account"; legacy.innerHTML = '<summary>Payment wallet &amp; earlier account activity</summary>'; oldEarn.replaceWith(legacy); legacy.appendChild(oldEarn);
-  legacy.insertAdjacentHTML("beforebegin", `<div class="product-earn">${head("Share your AI. Earn KOIN.", "Contribute this computer’s spare AI capacity to the network.", button("network-overview", "◎ View network"))}<div class="product-two"><section class="product-panel product-provider"><div class="product-row"><span>Share AI capacity</span><button id="product-provider-toggle" role="switch" aria-checked="false" aria-label="Share AI capacity">Off</button></div><div class="product-provider-state"><span class="product-live-dot"></span><h2 id="product-provider-label">OFFLINE</h2><p id="product-provider-detail">Sharing is off. Turn it on when you’re ready.</p></div><div class="product-divider"></div><strong id="product-provider-model">Model not confirmed</strong><p class="product-fine">Only current, verified qualification counts as ready.</p></section><div><section class="product-panel"><p class="product-eyebrow">AI provider earnings</p><p id="product-provider-earnings">No verified earnings loaded.</p><p class="product-fine">Rewards remain estimates until review and chain confirmation.</p><button data-product-action="payouts">Refresh earnings</button></section><section class="product-panel"><h2>Provider setup</h2><p id="product-provider-setup">Choose an approved model, check this computer, then turn on sharing.</p><div class="product-actions">${button("models", "Choose model")}<button data-product-action="provider-setup">Continue setup</button></div></section></div></div><section class="product-panel"><h2>Readiness at a glance</h2><p id="product-provider-readiness">Model, qualification and network confirmation must all be current before this computer is shown as ONLINE.</p></section><p class="product-footer">AI earnings are KOIN. They are separate from chat credits.</p></div>`);
+  legacy.insertAdjacentHTML("beforebegin", `<div class="product-earn">${head("Share your AI. Earn KOIN.", "Contribute this computer’s spare AI capacity to the network.", button("network-overview", "◎ View network"))}<div class="product-two"><section class="product-panel product-provider"><div class="product-row"><span>Share AI capacity</span><button id="product-provider-toggle" role="switch" aria-checked="false" aria-label="Share AI capacity">Off</button></div><div class="product-provider-state"><span class="product-live-dot"></span><h2 id="product-provider-label">OFFLINE</h2><p id="product-provider-detail">Sharing is off. Turn it on when you’re ready.</p></div><div class="product-divider"></div><strong id="product-provider-model">Model not confirmed</strong><p class="product-fine">Only current, verified qualification counts as ready.</p></section><div><section class="product-panel"><p class="product-eyebrow">AI provider earnings</p><p id="product-provider-earnings">No verified earnings loaded.</p><p class="product-fine">Rewards remain estimates until review and chain confirmation.</p><button data-product-action="payouts">Refresh earnings</button></section><section class="product-panel"><h2>Provider setup</h2><p id="product-provider-setup">Choose an approved model, check this computer, then turn on sharing.</p><div class="product-actions"><button data-product-action="provider-setup">Check this computer</button><button id="product-provider-download" data-product-action="provider-download" hidden>Download approved model</button><button id="product-provider-cancel" data-product-action="provider-cancel" hidden>Cancel setup</button><button data-product-action="legacy">Reward wallet</button></div></section></div></div><section class="product-panel"><h2>Readiness at a glance</h2><p id="product-provider-readiness">Model, qualification and network confirmation must all be current before this computer is shown as ONLINE.</p></section><p class="product-footer">AI earnings are KOIN. They are separate from chat credits.</p></div>`);
   const onboarding = $("view-onboarding"), oldOnboarding = onboarding.firstElementChild;
   oldOnboarding.classList.add("product-local-setup"); oldOnboarding.hidden = true;
   oldOnboarding.insertAdjacentHTML("afterbegin", '<button data-product-action="first-back">← Back to choices</button>');
@@ -73,7 +73,9 @@
     $("product-pending-purchases").textContent = pending.length ? `${pending.length} purchase${pending.length === 1 ? " is" : "s are"} confirming. You can keep using existing credits.` : "";
     $("product-recovery-purchase").textContent = pending.length ? "Your payment is confirming. Existing credits remain available; do not create another payment to retry this one." : !usd || stale ? "Purchase status is unavailable. Refresh your account before starting or retrying a payment." : "No pending purchase in the last verified account snapshot. Refresh your account before starting another payment.";
   }
+  let publicProvider = false;
   function paintProvider() {
+    if (publicProvider) return;
     $("product-provider-label").textContent = $("koin-provider-state").textContent;
     $("product-provider-detail").textContent = $("koin-provider-detail").textContent;
     const start = document.querySelector('[data-koin-test="worker-start"]'), stop = document.querySelector('[data-koin-test="worker-stop"]'), on = !stop.hidden;
@@ -118,7 +120,10 @@
     const f = event.target.closest("[data-activity-filter]"); if (f) { filter = f.dataset.activityFilter; document.querySelectorAll("[data-activity-filter]").forEach(b => b.classList.toggle("active", b === f)); paintCredits(window.KaiCredits.get()); return; }
     const model = event.target.closest("[data-network-model]"); if (model && !model.disabled) { go("chat"); window.dispatchEvent(new CustomEvent("kai-network-use", { detail: { model: model.dataset.networkModel } })); return; }
     const action = event.target.closest("[data-product-action]")?.dataset.productAction; if (!action) return;
-    if (action === "legacy" || action === "provider-setup") { go("earn"); legacy.open = true; legacy.scrollIntoView({ block: "start" }); }
+    if (action === "legacy") { go("earn"); legacy.open = true; legacy.scrollIntoView({ block: "start" }); }
+    if (action === "provider-setup") { await refreshPublicProvider(); }
+    if (action === "provider-download") { await providerAction("download"); }
+    if (action === "provider-cancel") { await providerAction("stop"); }
     if (action === "purchase-retry") {
       const target = event.target.closest("button"); target.disabled = true;
       try { const result = await window.kaiKoinTestBridge.run("credit-purchase-retry"); $("product-recovery-purchase").textContent = result.state === "cancelled" ? "Review cancelled. Any saved transaction remains preserved." : result.state === "complete" ? "No unfinished local payment remains. Refreshing your credit account." : "The saved payment is awaiting confirmation. Existing credits remain available."; await window.KaiCredits.refresh(); }
@@ -133,10 +138,48 @@
     if (action === "start-free") { go("chat"); window.dispatchEvent(new Event("kai-network-use")); }
     if (action === "local") { go("chat"); $("src-pick").value = "local"; $("src-pick").dispatchEvent(new Event("change")); }
   });
-  $("product-provider-toggle").addEventListener("click", () => { document.querySelector(`[data-koin-test="${$("product-provider-toggle").getAttribute("aria-checked") === "true" ? "worker-stop" : "worker-start"}"]`).click(); });
+  let providerBusy = false, providerInfoPending = false, providerExpiry;
+  async function refreshPublicProvider() {
+    if (providerInfoPending || !window.kaiKoinTestBridge) return; providerInfoPending = true;
+    try {
+      const info = await window.kaiKoinTestBridge.run("provider-public-info"); publicProvider = true;
+      const on = info.enabled === true, toggle = $("product-provider-toggle");
+      toggle.textContent = on ? "On" : "Off"; toggle.setAttribute("aria-checked", String(on));
+      toggle.disabled = on ? false : providerBusy || info.state !== "ready";
+      $("product-provider-model").textContent = info.model?.label || "Model not confirmed";
+      $("product-provider-setup").textContent = info.detail + (info.model ? ` Required memory: ${info.model.requiredRamGb} GB.${!info.model.installed && Number.isFinite(info.model.bytes) ? " Download: " + (info.model.bytes / 1e9).toFixed(2) + " GB." : ""}` : "") + (info.progress ? ` ${info.progress.pct}% downloaded.` : "");
+      $("product-provider-download").hidden = info.state !== "download-required";
+      $("product-provider-download").disabled = providerBusy;
+      $("product-provider-cancel").hidden = !providerBusy;
+      let status = info.running ? await window.kaiKoinTestBridge.run("provider-public-status") : { state: "offline", label: on ? "RECONNECTING" : "OFFLINE", detail: on ? info.detail : "Sharing is off. Check setup, then turn it on." };
+      clearTimeout(providerExpiry);
+      const paint = value => {
+        $("product-provider-label").textContent = value.label; $("product-provider-label").dataset.state = value.state;
+        $("product-provider-detail").textContent = value.detail;
+        $("product-provider-readiness").textContent = value.state === "online" ? "Model ready · qualification current · fresh network confirmation" : "Readiness is not confirmed. " + value.detail;
+      };
+      paint(status);
+      if (status.state === "online") providerExpiry = setTimeout(() => paint({ state: "stale", label: "CHECKING CONNECTION", detail: "Network confirmation has expired. Refreshing eligibility…" }), Math.max(0, status.validUntil - Date.now()));
+    } catch (e) {
+      publicProvider = true; clearTimeout(providerExpiry);
+      $("product-provider-label").textContent = "CONNECTION UNCONFIRMED"; $("product-provider-label").dataset.state = "stale";
+      $("product-provider-detail").textContent = e.message; $("product-provider-setup").textContent = e.message;
+      $("product-provider-download").hidden = true;
+    } finally { providerInfoPending = false; }
+  }
+  async function providerAction(action) {
+    if (providerBusy && action !== "stop") return;
+    if (action !== "stop") providerBusy = true;
+    $("product-provider-cancel").hidden = false; $("product-provider-download").disabled = true;
+    $("product-provider-setup").textContent = action === "download" ? "Downloading the approved model. You can cancel and resume later." : action === "stop" ? "Stopping new work and cancelling active inference. Verified delivered text remains saved and metered." : "Preparing the model and connecting for qualification…";
+    try { await window.kaiKoinTestBridge.run("provider-public-" + action); }
+    catch (e) { $("product-provider-detail").textContent = e.message; }
+    finally { if (action !== "stop") providerBusy = false; await refreshPublicProvider(); }
+  }
+  $("product-provider-toggle").addEventListener("click", () => providerAction($("product-provider-toggle").getAttribute("aria-checked") === "true" ? "stop" : "start"));
   window.KaiCredits?.subscribe(paintCredits);
   new MutationObserver(paintProvider).observe($("koin-test-payments"), { subtree: true, attributes: true, childList: true, characterData: true }); paintProvider();
-  window.KaiProduct = { render(view) { if (["credits", "buy-credits", "recovery"].includes(view)) window.KaiCredits?.refresh(); if (view === "network-overview") refreshNetwork(); if (view === "earn") paintProvider(); } };
-  setInterval(() => { if (document.hidden) return; if (!$("view-network-overview").hidden) refreshNetwork(); }, 15000);
+  window.KaiProduct = { render(view) { if (["credits", "buy-credits", "recovery"].includes(view)) window.KaiCredits?.refresh(); if (view === "network-overview") refreshNetwork(); if (view === "earn") refreshPublicProvider(); } };
+  setInterval(() => { if (document.hidden) return; if (!$("view-network-overview").hidden) refreshNetwork(); if (!$("view-earn").hidden) refreshPublicProvider(); }, 15000);
   setInterval(() => { if (document.hidden) return; paintNetwork(); paintCredits(window.KaiCredits.get()); if (quote && Date.now() >= quote.expiresAt) { quote = null; $("product-quote-approve").hidden = true; $("product-quote-state").textContent = "Quote expired. Refresh before approving."; } }, 1000);
 })();

@@ -2,7 +2,7 @@
 
 Adds verified incremental network replies with encrypted partial-reply recovery, a shared credit balance and Free only preference, and account-based USD service activation without a wallet manifest. Earlier payment journals and units are preserved. Purchase inputs no longer suggest a sample KOIN amount or fixed USD exchange rate.
 
-This is not a completed or activated redesign. The packaged USD service remains unavailable pending configuration; provider renewal, sponsored settlement, advanced-mode billing and the validated purchase oracle/payment integration still need implementation. The seven prototype layouts are now implemented, with recent chats in the sidebar, shared credits, explicit recovery and a secondary Network page whose status expires. Back to Earn preserves sharing. See `docs/koin-network/REVISION_2_CONTINUATION.md` for validation and release blockers.
+This is not a completed or activated redesign. The packaged USD service remains unavailable pending configuration; commercial configuration, reviewed benchmark criteria, advanced-mode billing and independent financial/earning acceptance remain release gates. Public purchases, v4 quote validation, capped sponsored settlement and guided provider renewal are implemented but not activated. The seven prototype layouts are now implemented, with recent chats in the sidebar, shared credits, explicit recovery and a secondary Network page whose status expires. Back to Earn preserves sharing. See `docs/koin-network/REVISION_2_CONTINUATION.md` for validation and release blockers.
 
 ## USD-valued credits and independently funded rewards
 

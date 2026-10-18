@@ -42,13 +42,15 @@ class Worker {
     return crypto.createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 16);
   }
 
-  constructor({ schedulerUrl, wallet, runtime, hardware, models, producer, onEvent, fundedOnly = false, koinMainnetPilotJobs = false, koinMainnetTarget = null, koinShadowJobs = process.env.KAI_KOIN_SHADOW_JOBS === "1", koinFundedRehearsalJobs = process.env.KAI_KOIN_FUNDED_REHEARSAL_JOBS === "1" }) {
+  constructor({ schedulerUrl, wallet, runtime, hardware, models, producer, onEvent, fundedOnly = false, qualificationTarget = null, koinMainnetPilotJobs = false, koinMainnetTarget = null, koinShadowJobs = process.env.KAI_KOIN_SHADOW_JOBS === "1", koinFundedRehearsalJobs = process.env.KAI_KOIN_FUNDED_REHEARSAL_JOBS === "1" }) {
     this.schedulerUrl = String(schedulerUrl || "").replace(/\/$/, "");
     this.wallet = wallet; // WalletService (unlocked)
     this.runtime = runtime; // RuntimeManager
     this.hardware = hardware;
     this.models = models || null; // ModelManager — advertises what this machine can serve
     this.fundedOnly = fundedOnly === true;
+    this.qualificationTarget = qualificationTarget ? require("./koin-network/session-delegation").target(qualificationTarget) : null;
+    if (this.qualificationTarget && !this.fundedOnly) throw Error("Qualification requires the explicitly configured provider");
     this.koinMainnetPilotJobs = koinMainnetPilotJobs === true;
     this.koinMainnetTarget = this.koinMainnetPilotJobs ? require("./koin-network/session-delegation").target(koinMainnetTarget) : null;
     if (this.koinMainnetPilotJobs && !require("./koin-network/payment-network").protocol(this.koinMainnetTarget).paymentsEnabled) throw Error("Pinned mainnet worker target required");
@@ -327,6 +329,7 @@ class Worker {
             koinFundedRehearsalJobs: this.koinFundedRehearsalJobs ? 1 : 0,
             koinMainnetPilotJobs: this.koinMainnetPilotJobs ? 1 : 0,
             koinMeteredStreaming: this.koinMainnetPilotJobs || this.koinFundedRehearsalJobs ? 1 : 0,
+            koinQualification: this.qualificationTarget ? 1 : 0,
             ...(ramGb ? { ramGb: Math.round(ramGb) } : {}),
             ...(this.preferredModel ? { preferredModel: this.preferredModel } : {}),
           },
@@ -562,6 +565,24 @@ class Worker {
         }
       }, 25000);
       try {
+        if (job.type === "koin-provider-qualification") {
+          if (!this.qualificationTarget) throw Error("Automatic qualification is not enabled for this connection");
+          const qualification = require("./koin-network/qualification-protocol"), P = require("./koin-network/job-protocol");
+          const checked = qualification.validate(job, this.models?.catalog, this.qualificationTarget);
+          this._executing = true; this._shadowAbort = new AbortController();
+          const result = await require("./koin-network/shadow-worker").executeShadow({ job: checked.challenge, catalog: this.models?.catalog, runtime: this.runtime, signal: this._shadowAbort.signal });
+          this._shadowAbort.signal.throwIfAborted(); if (!this.running) throw Error("Provider qualification stopped");
+          const signature = await this.wallet.signHash(qualification.resultHash(checked, P.hash(result.output)));
+          this._shadowAbort.signal.throwIfAborted(); if (!this.running) throw Error("Provider qualification stopped");
+          const response = await fetch(`${this.schedulerUrl}/koin/provider/qualification/result?token=${this.token}`, { method: "POST", redirect: "error",
+            headers: { "content-type": "application/json", connection: "close" }, signal: AbortSignal.any([this._shadowAbort.signal, AbortSignal.timeout(10000)]),
+            body: JSON.stringify({ jobId: checked.challenge.id, output: result.output, signature }) });
+          const value = await require("./koin-network/shadow-worker").readJson(response, 4096);
+          if (value.accepted !== true || !["testing", "qualified", "failed"].includes(value.qualification?.state)) throw Error("Qualification result was not acknowledged");
+          this.stats.qualification = value.qualification;
+          this.onEvent({ type: "worker:qualification", qualification: value.qualification });
+          continue;
+        }
         const t0 = Date.now();
         const funded = ["koin-funded-rehearsal-chat", "koin-mainnet-pilot-chat"].includes(job.type);
         const wire = funded && require("./koin-network/payment-network").protocol(job.target);

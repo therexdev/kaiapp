@@ -18,7 +18,10 @@ test("Revision 2 free entry, unified credits, unavailable quote, stale network a
       if (action === "status") return { ...common, accessReady: true, credits: credit().purchased, creditState: credit(), purchases, usage: [], purchasePending: true, worker: { running: window.productSharing } };
       if (action === "worker-start") { window.productSharing = true; return { state: "test_worker_running" }; }
       if (action === "worker-stop") { window.productSharing = false; return { state: "test_worker_stopped" }; }
-      if (action === "provider-status") return { state: window.productSharing ? "online" : "offline", label: window.productSharing ? "ONLINE" : "OFFLINE", detail: "Fixture qualification and serving evidence are current", validUntil: Date.now() + 15000 };
+      if (action === "provider-public-info") return { state: "ready", enabled: window.productSharing, running: window.productSharing, model: { id: "fixture", label: "Fixture", installed: true, requiredRamGb: 4 }, detail: "Fixture model is installed" };
+      if (action === "provider-public-start") { window.productSharing = true; return { state: "running" }; }
+      if (action === "provider-public-stop") { window.productSharing = false; return { state: "offline" }; }
+      if (["provider-status", "provider-public-status"].includes(action)) return { state: window.productSharing ? "online" : "offline", label: window.productSharing ? "ONLINE" : "OFFLINE", detail: "Fixture qualification and serving evidence are current", validUntil: Date.now() + 15000 };
       if (action === "purchase-preview") {
         if (!window.previewFixture) throw Error("Current purchase pricing is unavailable. Existing credits are still usable.");
         await new Promise(resolve => { window.resolvePreview = resolve; });
