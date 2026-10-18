@@ -61,3 +61,11 @@ Independent purchase/sponsorship/payout-abuse review, real two-computer earning 
 ## Final local validation
 
 Final desktop run: 1,337 tests, 1,332 passed, zero failed, five skipped, 190.8 seconds (`/tmp/kai-revision2-final-desktop.log`). Backend plus cutover preparation: 385 tests passed, zero failed (`/tmp/kai-revision2-final-backend.log`), remote source `6b95d3b4e5bfccfe3477bb5f5ebb4cd56277b135`. Changed JavaScript syntax checks and whitespace checks pass. Desktop audit has zero high/critical findings and 11 moderate dependency findings; backend audit reports zero vulnerabilities. No commercial policy or live service was activated by these checks.
+
+## Internal review follow-up
+
+Test 191.1 was published and its downloaded Setup bytes, checksums, signatures and feed verified against source `b016618837df701f536e5403099794870144659d` and run https://github.com/therexdev/kaiapp/actions/runs/39106826546. Subsequent internal review reproduced a desktop registration bug when the original purchase wins over a Mana correction. The fix prefers the verified finality transaction ID and is being validated for a replacement Test release. No transaction was signed or broadcast by the regression.
+
+The matching backend follow-up also addresses durable fair purchase scheduling, account-wide self-work exclusion, settlement/epoch liveness, settlement-day sponsorship headroom and heartbeat-order fairness. These corrections do not activate the service or replace independent financial review. Unknown historical ownership/finality evidence remains review-gated, and cross-account collusion is not claimed solved.
+
+Follow-up local validation: 1,339 desktop tests, 1,334 passed, zero failed, five skipped. The targeted purchase/Mana/fairness group passed 33 tests. The backend review suite passed 398 tests on Node 22; no production changes or live transfers were performed. Replacement Test release evidence is reported separately after exact-source verification.

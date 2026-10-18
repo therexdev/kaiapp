@@ -3,8 +3,8 @@ const test = require("node:test"), assert = require("node:assert/strict"), { Eve
 const { fixture } = require("./helpers/koin-funding-recovery-fixture");
 const { TestPayments } = require("../../electron/koin-test-payments");
 function window() { return Object.assign(new EventEmitter(), { webContents: new EventEmitter(), isDestroyed: () => false, isVisible: () => true, isMinimized: () => false }); }
-async function setup(t) {
-  const f = fixture(t, { mainnet: true, maxRcPerDay: "1000000000" });
+async function setup(t, options = {}) {
+  const f = fixture(t, { mainnet: true, maxRcPerDay: "1000000000", ...options });
   f.request.maxRc = "100000000"; f.request.args.amount = "10000000";
   await f.runner().start(f.id, f.request);
   f.journal.nonceCoordinator.authorizeSubmission(f.id, { maxRcPerDay: "1000000000" });
@@ -124,4 +124,17 @@ test("a lost correction broadcast response times out and leaves confirmation che
   assert.equal(result.correction.attempts, 1);
   const checked = await c.run(window(), "check", f.id);
   assert.equal(checked.state, "signed"); assert.equal(f.calls.length, 2); assert.equal(f.signs(), 1);
+});
+
+test("restart sync registers the original finalized purchase when its Mana correction was superseded", async t => {
+  const f = await setup(t, { prepaid: true }), call = f.provider.call;
+  f.provider.call = async (method, params) => { const result = await call(method, params); await f.include(f.original, { irreversible: true }); return result; };
+  const result = await f.make().run(window(), "correct-mana", f.id);
+  assert.equal(result.funding.state, "funded"); assert.equal(result.correction.state, "superseded");
+  const correctedId = result.correction.transaction?.id || f.journal.nonceCoordinator.correction(f.id).transaction.id;
+  f.journal.close(); const journal = f.open(), restarted = f.make(journal), seen = new Set();
+  const register = async id => { seen.add(id); };
+  await restarted.syncPurchases(register, AbortSignal.timeout(5000)); await restarted.syncPurchases(register, AbortSignal.timeout(5000));
+  assert.deepEqual([...seen], [f.original.id]); assert.ok(!seen.has(correctedId));
+  assert.equal(f.calls.filter(c => c.broadcast).length, 0); assert.equal(f.signs(), 1);
 });

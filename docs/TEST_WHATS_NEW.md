@@ -1,3 +1,11 @@
+## Purchase recovery and availability fairness fixes
+
+Fixes a purchase-recovery case where an original payment finalized while a same-nonce Mana correction was being simulated. After restart, confirmation sync now registers the verified winning transaction, preserving both signed envelopes without another signature or broadcast. Expired-quote safety checks remain unchanged.
+
+Availability evidence now waits through the existing heartbeat-gap window before closing each minute, so equivalent healthy providers are not ranked by heartbeat arrival order. Catch-up is bounded and sealed history stays unchanged.
+
+The matching backend fixes confirmation/settlement queue starvation, linked-wallet self-work, closed-epoch reconciliation and midnight sponsorship capacity. Backend production services are unchanged. Live USD-credit/earning activation still requires the previously documented decisions, review, deployment/funding and real two-computer/payout acceptance.
+
 ## Revision 2 test implementation
 
 The seven-screen redesign adds recent chats and search in the sidebar, shared credits, Buy credits, guided provider setup, recovery and a secondary Network view with fresh/stale status. Back to Earn preserves sharing. Existing chats, files, workflows, settings, wallets, models and earlier balances remain in place.

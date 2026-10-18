@@ -257,7 +257,11 @@ class TestPayments {
       for (const p of this.#journal.list().filter(p => p.kind === "credits" && !["reverted", "conflicted"].includes(p.state))) {
         combined.throwIfAborted();
         const correction = this.#journal.nonceCoordinator.correction(p.id);
-        const txId = correction?.transaction?.id || p.txId;
+        // The original can win while a same-nonce Mana correction is being
+        // simulated. Its verified finality, not the presence of a correction
+        // envelope, identifies the purchase that must be registered.
+        const txId = p.finality?.state === "finalized" ? p.finality.txId
+          : correction?.state === "superseded" ? p.txId : correction?.transaction?.id || p.txId;
         if (!this.#registeredPurchases.has(txId)) { await register(txId, combined); this.#registeredPurchases.add(txId); }
         combined.throwIfAborted();
         if (p.state === "funded") continue;
