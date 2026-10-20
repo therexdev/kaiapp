@@ -148,7 +148,7 @@ test("onboarding -> download -> streaming chat -> key lockdown (real browser)", 
  * This pins the new shape so it cannot drift back: the list and the New chat
  * button are inside the Chat view, and the sidebar holds navigation only.
  */
-test("chat preserves search and conversations in the expanded app sidebar", { skip: !available, timeout: 180000 }, async () => {
+test("chat keeps search and conversations in its own history rail", { skip: !available, timeout: 180000 }, async () => {
   const { chromium } = require("playwright-core");
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-chatrail-"));
   fs.mkdirSync(path.join(dataDir, "models"), { recursive: true });
@@ -166,8 +166,8 @@ test("chat preserves search and conversations in the expanded app sidebar", { sk
     for (const sel of ["#chat-list", "#btn-new-chat", "#chat-search"]) {
       const insideView = await page.$eval(sel, (el) => Boolean(el.closest("#view-chat")));
       const insideSidebar = await page.$eval(sel, (el) => Boolean(el.closest("#sidebar")));
-      assert.strictEqual(insideView, false, `${sel} moves out of the Chat view`);
-      assert.strictEqual(insideSidebar, true, `${sel} remains available in the expanded sidebar`);
+      assert.strictEqual(insideView, true, `${sel} belongs to the Chat view`);
+      assert.strictEqual(insideSidebar, false, `${sel} stays outside the app navigation sidebar`);
     }
 
     // The rail sits BESIDE the conversation, not above it — the same two-column
