@@ -3,7 +3,7 @@ const { test } = require("node:test"), assert = require("node:assert/strict");
 const fs = require("node:fs"), os = require("node:os"), path = require("node:path");
 const CHROMIUM = process.env.KAI_TEST_CHROMIUM || "/opt/pw-browsers/chromium";
 
-test("sidebar credits do not relabel KOIN; older wallet formatting and recovery remain intact", { skip: !fs.existsSync(CHROMIUM), timeout: 60000 }, async t => {
+test("sidebar shows KOIN and VHP separately from credits and opens the current wallet", { skip: !fs.existsSync(CHROMIUM), timeout: 60000 }, async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-sidebar-"));
   const core = await require("../server").createCore({ dataDir: dir, port: 0, onEvent() {} });
   const base = "http://127.0.0.1:" + await core.start();
@@ -21,13 +21,14 @@ test("sidebar credits do not relabel KOIN; older wallet formatting and recovery 
     aliases: [{ alias: "fast", label: "Koinos Fast", status: "ready" }],
     runtime: { runtime: { running: true }, activeAlias: "fast" },
   } }));
-  let summary = { address: "earning-wallet", network: "mainnet", tokenSymbol: "KOIN", koin: "1234.56789", usd: 61.7283945, price: { stale: false } };
+  let summary = { address: "earning-wallet", network: "mainnet", tokenSymbol: "KOIN", koin: "1234.56789", vhp: "9876.54321098", usd: 61.7283945, price: { stale: false } };
   let offline = false;
   await page.route("**/core/koinos/rpc", route => route.request().postDataJSON().channel === "wallet:summary"
     ? route.fulfill({ status: offline ? 503 : 200, json: { ok: !offline, data: summary } }) : route.continue());
   await page.goto(base);
   await page.waitForFunction(() => document.getElementById("sidebar-wallet-usd").textContent === "$61.73");
   assert.equal(await page.locator("#sidebar-wallet-koin").innerText(), "1,234.56789 KOIN");
+  assert.equal(await page.locator("#sidebar-wallet-vhp").innerText(), "9,876.54321098 VHP");
   for (const size of [{ width: 1253, height: 727 }, { width: 1000, height: 620 }, { width: 680, height: 600 }]) {
     await page.setViewportSize(size);
     await page.waitForFunction(() => document.getElementById("status-text").textContent === "Model loaded");
@@ -35,7 +36,7 @@ test("sidebar credits do not relabel KOIN; older wallet formatting and recovery 
       const rect = id => { const r = document.getElementById(id).getBoundingClientRect(); return { top: r.top, bottom: r.bottom, height: r.height }; };
       return { launch: rect("launch-kai"), wallet: rect("sidebar-wallet"), model: rect("status-pane"), name: rect("status-model") };
     });
-    assert.equal(await page.locator("#sidebar-wallet").isVisible(), false);
+    assert.equal(await page.locator("#sidebar-wallet").isVisible(), true);
     assert.equal(await page.locator(".product-sidebar-credits").isVisible(), true);
     assert.equal(await page.locator("[data-credit-total]").first().textContent(), "—");
     assert.ok(layout.model.top >= layout.wallet.bottom);
@@ -52,10 +53,16 @@ test("sidebar credits do not relabel KOIN; older wallet formatting and recovery 
   assert.equal(await page.locator("#sidebar-wallet-koin").innerText(), "1,234.56789 KOIN");
   await page.evaluate(() => KaiI18n.setLanguage("de"));
   assert.equal(await page.locator("#sidebar-wallet-koin").innerText(), "1.234,56789 KOIN");
+  assert.equal(await page.locator("#sidebar-wallet-vhp").innerText(), "9.876,54321098 VHP");
   assert.equal(await page.locator("#sidebar-wallet").getAttribute("title"), "Der KOIN-Preis ist veraltet");
   offline = true; await page.evaluate(() => refreshSidebarWallet());
   assert.equal(await page.locator("#sidebar-wallet-usd").innerText(), "—");
   assert.equal(await page.locator("#sidebar-wallet-koin").innerText(), "— KOIN");
+  assert.equal(await page.locator("#sidebar-wallet-vhp").innerText(), "— VHP");
+  offline = false; summary = { address: "earning-wallet", network: "mainnet", tokenSymbol: "KOIN", koin: "184467440737.09551615", vhp: "0", usd: null, price: null };
+  await page.evaluate(() => refreshSidebarWallet());
+  assert.equal(await page.locator("#sidebar-wallet-koin").innerText(), "184.467.440.737,09551615 KOIN");
+  assert.equal(await page.locator("#sidebar-wallet-vhp").innerText(), "0 VHP");
   offline = false; summary = { address: null };
   await page.evaluate(() => refreshSidebarWallet());
   assert.equal(await page.locator("#sidebar-wallet-koin").innerText(), "Wallet einrichten");
@@ -69,8 +76,8 @@ test("sidebar credits do not relabel KOIN; older wallet formatting and recovery 
     wallet = example.wallet;
     await page.click("#nav-settings");
     await page.locator("#view-settings:not([hidden])").waitFor();
-    await page.locator('.product-sidebar-credits [data-product-view="credits"]').click();
-    await page.locator('#view-credits .product-footer [data-product-action="legacy"]').click();
+    await page.locator("#sidebar-wallet").click();
+    assert.equal(await page.locator("#product-legacy-account").evaluate(n => n.open), true);
     // Exercise the same polls that used to restore the previous page a
     // second after the click. The wallet contents must also initialize.
     await page.evaluate(async () => { await refresh(); await refreshSidebarWallet(); await refresh(); });

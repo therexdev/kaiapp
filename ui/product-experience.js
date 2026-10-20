@@ -38,10 +38,8 @@
   header.insertAdjacentHTML("afterbegin", '<button id="product-sidebar-toggle" aria-label="Toggle sidebar" aria-expanded="true">☰</button>');
   header.insertAdjacentHTML("beforeend", '<button id="product-mobile-credits" data-product-view="credits"><span data-credit-total>—</span> credits</button><button id="product-mobile-buy" data-product-view="buy-credits">Buy credits</button>');
   header.appendChild($("launch-kai")); $("launch-kai").querySelector("strong").textContent = "Open KAI";
-  const chats = $("chats-pane"); chats.classList.add("product-recent");
-  chats.insertAdjacentHTML("afterbegin", '<div class="product-row"><span class="product-eyebrow">Recent chats</span><button id="product-history-all">View all</button></div>');
-  $("sidebar").insertBefore(chats, $("status-pane"));
-  $("product-history-all").addEventListener("click", () => { $("sidebar").classList.toggle("history-expanded"); $("chat-search").focus({ preventScroll: true }); });
+  // Conversations belong to Chat's own rail; the main sidebar stays navigation.
+  $("chats-pane").querySelector(".kc-rail-label").textContent = "Recent chats";
   $("product-sidebar-toggle").addEventListener("click", () => { const collapsed = document.body.classList.toggle("product-sidebar-collapsed"); $("product-sidebar-toggle").setAttribute("aria-expanded", String(!collapsed)); });
   $("sidebar").insertAdjacentHTML("afterbegin", '<button id="product-sidebar-close" aria-label="Close sidebar">×</button>');
   $("product-sidebar-close").addEventListener("click", () => $("product-sidebar-toggle").click());
@@ -54,7 +52,7 @@
   item("earn").querySelector("span").textContent = "Earn";
   $("nav-group-contribute").setAttribute("aria-expanded", "true"); $("nav-items-contribute").setAttribute("aria-hidden", "false"); $("nav-items-contribute").inert = false;
   $("nav-network").title = "Network"; $("nav-network").setAttribute("aria-label", "Network");
-  document.querySelector(".chat-pane").insertBefore(document.querySelector(".composer-options"), document.querySelector(".chat-toolbar"));
+  document.querySelector(".chat-pane").insertBefore(document.querySelector(".composer-options"), document.querySelector(".chat-toolbar").nextSibling);
   const oldEarn = $("view-earn").firstElementChild, legacy = document.createElement("details"); legacy.id = "product-legacy-account"; legacy.innerHTML = '<summary>Payment wallet &amp; earlier account activity</summary>'; oldEarn.replaceWith(legacy); legacy.appendChild(oldEarn);
   legacy.insertAdjacentHTML("beforebegin", `<div class="product-earn">${head("Share your AI. Earn KOIN.", "Contribute this computer’s spare AI capacity to the network.", button("network-overview", "◎ View network"))}<div class="product-two"><section class="product-panel product-provider"><div class="product-row"><span>Share AI capacity</span><button id="product-provider-toggle" role="switch" aria-checked="false" aria-label="Share AI capacity">Off</button></div><div class="product-provider-state"><span class="product-live-dot"></span><h2 id="product-provider-label">OFFLINE</h2><p id="product-provider-detail">Sharing is off. Turn it on when you’re ready.</p></div><div class="product-divider"></div><strong id="product-provider-model">Model not confirmed</strong><p class="product-fine">Only current, verified qualification counts as ready.</p></section><div><section class="product-panel"><p class="product-eyebrow">AI provider earnings</p><p id="product-provider-earnings">No verified earnings loaded.</p><p class="product-fine">Rewards remain estimates until review and chain confirmation.</p><button data-product-action="payouts">Refresh earnings</button></section><section class="product-panel"><h2>Provider setup</h2><p id="product-provider-setup">Choose an approved model, check this computer, then turn on sharing.</p><div class="product-actions"><button data-product-action="provider-setup">Check this computer</button><button id="product-provider-download" data-product-action="provider-download" hidden>Download approved model</button><button id="product-provider-cancel" data-product-action="provider-cancel" hidden>Cancel setup</button><button data-product-action="legacy">Reward wallet</button></div></section></div></div><section class="product-panel"><h2>Readiness at a glance</h2><p id="product-provider-readiness">Model, qualification and network confirmation must all be current before this computer is shown as ONLINE.</p></section><p class="product-footer">AI earnings are KOIN. They are separate from chat credits.</p></div>`);
   const onboarding = $("view-onboarding"), oldOnboarding = onboarding.firstElementChild;
@@ -247,11 +245,7 @@
     const f = event.target.closest("[data-activity-filter]"); if (f) { filter = f.dataset.activityFilter; document.querySelectorAll("[data-activity-filter]").forEach(b => b.classList.toggle("active", b === f)); paintCredits(window.KaiCredits.get()); return; }
     const model = event.target.closest("[data-network-model]"); if (model && !model.disabled) { go("chat"); window.dispatchEvent(new CustomEvent("kai-network-use", { detail: { model: model.dataset.networkModel } })); return; }
     const action = event.target.closest("[data-product-action]")?.dataset.productAction; if (!action) return;
-    if (action === "payment-wallet") {
-      go("earn"); legacy.open = true; await renderEarn();
-      const target = !$("earn-setup").hidden ? $("earn-setup") : !$("earn-unlock").hidden ? $("earn-unlock") : $("wallet-address");
-      target.scrollIntoView({ block: "center" }); (target.matches("input") ? target : target.querySelector("input,button"))?.focus({ preventScroll: true });
-    }
+    if (action === "payment-wallet") await openPaymentWallet();
     if (action === "legacy") { go("earn"); legacy.open = true; legacy.scrollIntoView({ block: "start" }); }
     if (action === "provider-setup") { await refreshPublicProvider(); }
     if (action === "provider-download") { await providerAction("download"); }

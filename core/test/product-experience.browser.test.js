@@ -63,7 +63,7 @@ test("Revision 2 free entry, unified credits, unavailable quote, stale network a
   await page.fill("#input", "Use the free account without a payment wallet"); await page.locator("#btn-send").click();
   await page.waitForFunction(() => document.getElementById("messages").textContent.includes("Free verified reply") && !document.getElementById("btn-send").disabled);
   assert.equal(await page.evaluate(() => window.productCalls.some(c => /purchase-approve|reserve|release|import|access/.test(c.action))), false);
-  assert.equal(await page.locator("#sidebar #chat-search").isVisible(), true);
+  assert.equal(await page.locator("#view-chat #chat-search").isVisible(), true);
   await page.locator('.product-sidebar-credits [data-product-view="credits"]').click();
   await page.waitForFunction(() => document.querySelector('#view-credits [data-credit-total]').textContent === "250");
   assert.equal(await page.locator('.product-sidebar-credits [data-credit-total]').textContent(), "250");

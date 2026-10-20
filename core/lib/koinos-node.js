@@ -171,18 +171,20 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
   handle("wallet:revealWif", ({ password }) => wallet.revealWif(password));
   handle("wallet:remove", ({ password, confirm }) => wallet.remove({ password, confirm }));
 
-  // The sidebar values the earning wallet, never the external producer or
-  // its VHP. This read needs neither an unlocked signer nor a running node.
+  // The sidebar reads this app's wallet, never the external producer's funds.
+  // USD values liquid KOIN only; VHP remains a separate native balance.
+  // This read needs neither an unlocked signer nor a running node.
   handle("wallet:summary", async () => {
     const address = wallet.address || null;
     const net = chain.network();
-    const out = { address, network: net.id, tokenSymbol: net.tokenSymbol, koin: null, usd: null, price: null };
+    const out = { address, network: net.id, tokenSymbol: net.tokenSymbol, koin: null, vhp: null, usd: null, price: null };
     if (!address) return out;
     if (net.id === "mainnet") priceCache.snapshot(); // warm the shared quote without blocking balances
     const balances = await chain.balances(address);
     if (wallet.address !== address || chain.network().id !== net.id) throw new Error("Wallet or network changed; retry the balance.");
     if (balances.error || !/^\d+$/.test(String(balances.koin ?? ""))) throw new Error("Wallet balance unavailable.");
     out.koin = formatAmount(balances.koin, { grouping: false });
+    if (/^\d+$/.test(String(balances.vhp ?? ""))) out.vhp = formatAmount(balances.vhp, { grouping: false });
     out.price = net.id === "mainnet" ? priceCache.snapshot() : null;
     const price = out.price;
     if (price && !price.stale && Number.isFinite(price.usdPerKoin) && price.usdPerKoin > 0) {

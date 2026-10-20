@@ -1795,17 +1795,25 @@ function paintSidebarWallet(summary) {
   const card = $("sidebar-wallet");
   const dollars = $("sidebar-wallet-usd");
   const amount = $("sidebar-wallet-koin");
+  const vhp = $("sidebar-wallet-vhp");
   const locale = document.documentElement.lang || "en";
+  const tokenAmount = value => {
+    if (typeof value !== "string" || !/^(0|[1-9]\d*)(\.\d{1,8})?$/.test(value)) return null;
+    const [whole, fraction = ""] = value.split(".");
+    const trimmed = fraction.replace(/0+$/, ""), decimal = new Intl.NumberFormat(locale).formatToParts(1.1).find(part => part.type === "decimal").value;
+    return BigInt(whole).toLocaleString(locale) + (trimmed ? decimal + trimmed : "");
+  };
   const usd = summary?.usd;
   dollars.textContent = Number.isFinite(usd) && usd >= 0
     ? (usd > 0 && usd < 0.01 ? "<" : "") + new Intl.NumberFormat(locale, { style: "currency", currency: "USD", currencyDisplay: "narrowSymbol" }).format(usd > 0 && usd < 0.01 ? 0.01 : usd)
     : "—";
-  const koin = summary?.koin;
-  if (koin != null && /^\d+(\.\d+)?$/.test(koin)) {
-    amount.textContent = `${new Intl.NumberFormat(locale, { maximumFractionDigits: 8 }).format(koin)} ${summary.tokenSymbol || "KOIN"}`;
+  const koin = tokenAmount(summary?.koin);
+  if (koin !== null) {
+    amount.textContent = `${koin} ${summary.tokenSymbol || "KOIN"}`;
   } else {
     KaiI18n.setText(amount, summary && !summary.address ? "Set up wallet" : "— KOIN");
   }
+  vhp.textContent = `${tokenAmount(summary?.vhp) ?? "—"} VHP`;
   let note = "Open wallet";
   if (!summary) note = "Wallet balance unavailable";
   else if (!summary.address) note = "Set up wallet";
@@ -1814,7 +1822,7 @@ function paintSidebarWallet(summary) {
   else if (usd == null) note = "KOIN price unavailable";
   else note = "Estimated wallet value in USD";
   card.title = KaiI18n.t(note);
-  card.setAttribute("aria-label", `${card.title}: ${dollars.textContent}, ${amount.textContent}`);
+  card.setAttribute("aria-label", `${card.title}: ${dollars.textContent}, ${amount.textContent}, ${vhp.textContent}`);
 }
 async function refreshSidebarWallet() {
   clearTimeout(sidebarWalletTimer);
@@ -1837,10 +1845,17 @@ async function refreshSidebarWallet() {
     sidebarWalletTimer = setTimeout(refreshSidebarWallet, 30000);
   }
 }
-$("sidebar-wallet").addEventListener("click", () => {
+async function openPaymentWallet() {
   activateView("earn");
+  const legacy = $("product-legacy-account"); if (legacy) legacy.open = true;
+  await renderEarn();
+  if ($("view-earn").hidden) return;
+  const target = !$("earn-setup").hidden ? $("earn-setup") : !$("earn-unlock").hidden ? $("earn-unlock") : $("wallet-address");
+  target.scrollIntoView({ block: "center" });
+  (target.matches("input") ? target : target.querySelector("input,button"))?.focus({ preventScroll: true });
   refreshSidebarWallet();
-});
+}
+$("sidebar-wallet").addEventListener("click", openPaymentWallet);
 document.addEventListener("visibilitychange", () => {
   clearTimeout(sidebarWalletTimer);
   if (!document.hidden) refreshSidebarWallet();

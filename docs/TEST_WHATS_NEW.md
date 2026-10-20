@@ -1,3 +1,10 @@
+## Restored wallet card and Chat history panel
+
+- The main sidebar shows wallet KOIN and VHP balances again, separately from AI credits. Its dollar estimate values KOIN only. Clicking the wallet card opens the wallet controls directly; unknown balances stay unknown.
+- Recent chats, search and New chat return to their own panel inside Chat. The history panel has its own scrolling and responsive open/close controls, leaving the main navigation available on other pages.
+
+Fixes publication after the shared Test release reached GitHub's 1,000-file limit. New installers use a separate release for each build; existing downloads and the app's Test update channel remain available.
+
 ## Wallet balance and clear purchase availability
 
 Buy credits now shows the payment wallet's KOIN balance, address and network independently of the AI credit balance. Refresh and Open wallet are available on the purchase screen. A failed balance read is not shown as zero, and wallet changes invalidate an earlier purchase quote.

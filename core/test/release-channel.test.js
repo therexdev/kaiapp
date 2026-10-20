@@ -8,7 +8,7 @@ const semver = require("semver");
 const yaml = require("js-yaml");
 const { channelConfig, configureDesktop, configureUpdater, TEST_FEED } = require("../lib/release-channel");
 const { prepare } = require("../../scripts/prepare-test-build");
-const { stableCompatibility, findTestRelease, purgeIncompleteAssets, uploadReleaseAssets } = require("../../scripts/publish-test-build");
+const { stableCompatibility, findTestRelease, purgeIncompleteAssets, uploadReleaseAssets, artifactTag, relocatedTestFeed } = require("../../scripts/publish-test-build");
 const { GitHubProvider } = require("electron-updater/out/providers/GitHubProvider");
 const { GenericProvider } = require("electron-updater/out/providers/GenericProvider");
 
@@ -67,16 +67,16 @@ test("Packaging Test separates installer identity and does not claim the live CL
 
 const stableFeed = yaml.dump({ version: "0.54.1", files: [{ url: "Koinos-AI-Setup-0.54.1.exe", sha512: "stable-hash", size: 123 }], path: "Koinos-AI-Setup-0.54.1.exe", sha512: "stable-hash" });
 
-test("A legacy live GitHub updater seeing test-build resolves only the original stable installer", async () => {
+for (const tag of ["test-build", "test-build-0.54.2-test.12.2"]) test(`A legacy live GitHub updater seeing ${tag} resolves only the original stable installer`, async () => {
   const compatibility = stableCompatibility(stableFeed, "v0.54.1");
   const requested = [];
   const updater = { allowPrerelease: true, currentVersion: new semver.SemVer("0.54.0"), fullChangelog: false };
   const executor = { request: async (options) => { requested.push(options.path); return compatibility; } };
   const provider = new GitHubProvider({ provider: "github", owner: "therexdev", repo: "kaiapp" }, updater, { executor, platform: "win32", isUseMultipleRangeRequest: false });
-  provider.httpRequest = async () => '<feed><entry><title>Test</title><link href="https://github.com/therexdev/kaiapp/releases/tag/test-build"/><content>Test channel</content></entry></feed>';
+  provider.httpRequest = async () => `<feed><entry><title>Test</title><link href="https://github.com/therexdev/kaiapp/releases/tag/${tag}"/><content>Test channel</content></entry></feed>`;
   const latest = await provider.getLatestVersion();
   assert.equal(latest.version, "0.54.1");
-  assert.ok(requested.every(p => p.endsWith("/test-build/latest.yml")));
+  assert.ok(requested.every(p => p.endsWith(`/${tag}/latest.yml`)));
   const [file] = provider.resolveFiles(latest);
   assert.equal(file.url.href, "https://github.com/therexdev/kaiapp/releases/download/v0.54.1/Koinos-AI-Setup-0.54.1.exe");
   assert.equal(file.info.sha512, "stable-hash");
@@ -94,6 +94,21 @@ test("Test's generic provider reads test.yml and resolves only Test binaries", a
   assert.equal(provider.resolveFiles(latest)[0].url.href, `${TEST_FEED}Koinos-AI-Test-Setup-0.54.2-test.12.2-x64.exe`);
 });
 
+test("Test's unchanged generic feed resolves new per-build artifacts with their original hashes", async () => {
+  const version = "0.54.2-test.12.2", name = `Koinos-AI-Test-Setup-${version}-x64.exe`;
+  const original = yaml.dump({ version, path: name, sha512: "test-hash", files: [{ url: name, sha512: "test-hash", size: 123 }] });
+  const redirected = relocatedTestFeed(original, version, [name]);
+  const provider = new GenericProvider({ provider: "generic", url: TEST_FEED, channel: "test" }, { channel: "test", isAddNoCacheQuery: false }, { executor: {}, platform: "win32", isUseMultipleRangeRequest: false });
+  provider.httpRequest = async url => { assert.equal(url.href, `${TEST_FEED}test.yml`); return redirected; };
+  const update = await provider.getLatestVersion(), [file] = provider.resolveFiles(update);
+  assert.equal(file.url.href, `https://github.com/therexdev/kaiapp/releases/download/${artifactTag(version)}/${name}`);
+  assert.equal(file.info.sha512, "test-hash"); assert.equal(file.info.size, 123);
+  assert.equal(semver.valid(artifactTag(version)), null);
+  assert.throws(() => relocatedTestFeed(original, "0.54.2-test.13.1", [name]), /Invalid Test/);
+  assert.throws(() => relocatedTestFeed(original, version, []), /Unsafe/);
+  assert.throws(() => relocatedTestFeed(original.replaceAll(name, "https://example.com/app.exe"), version, ["https://example.com/app.exe"]), /Unsafe/);
+});
+
 test("Compatibility feeds reject a prerelease version or untrusted asset path", () => {
   assert.throws(() => stableCompatibility(stableFeed, "v0.55.0-test.1"));
   assert.throws(() => stableCompatibility(stableFeed, "v0.55.0"), /mismatch/);
@@ -102,7 +117,7 @@ test("Compatibility feeds reject a prerelease version or untrusted asset path", 
 
 test("Release lookup requests only the rolling release and bounds its response", () => {
   const result = findTestRelease((...args) => {
-    assert.deepEqual(args, ["api", "repos/therexdev/kaiapp/releases/tags/test-build", "--jq", "{id,prerelease,draft}"]);
+    assert.deepEqual(args, ["api", "repos/therexdev/kaiapp/releases/tags/test-build", "--jq", "{id,prerelease,draft,target_commitish}"]);
     return '{"id":42,"prerelease":true,"draft":false}';
   });
   assert.deepEqual(result, { id: 42, prerelease: true, draft: false });

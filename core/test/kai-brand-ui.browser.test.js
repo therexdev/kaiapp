@@ -15,6 +15,8 @@ test("KAI workspace: artwork, welcome drafts, all navigation and narrow-window h
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-brand-ui-"));
   fs.mkdirSync(path.join(dir, "models"));
   fs.writeFileSync(path.join(dir, "models", "smollm2-135m-instruct-q8_0.gguf"), "weights");
+  const history = new (require("../lib/chats").ChatStore)(path.join(dir, "chats"));
+  for (let i = 1; i <= 30; i++) history.save({ title: `Saved conversation ${i}`, messages: [{ role: "user", content: `History fixture ${i}` }] });
   const { createCore } = require("../server");
   const core = await createCore({ dataDir: dir, port: 0, llamaBin: path.join(__dirname, "fixtures/fake-llama-server"), onEvent: () => {} });
   const base = "http://127.0.0.1:" + await core.start();
@@ -49,8 +51,18 @@ test("KAI workspace: artwork, welcome drafts, all navigation and narrow-window h
   assert.equal(await page.evaluate(() => {
     const nav = document.getElementById("nav").getBoundingClientRect(), earn = document.querySelector('[data-view="earn"]').getBoundingClientRect();
     const recent = document.getElementById("chats-pane").getBoundingClientRect(), search = document.getElementById("chat-search").getBoundingClientRect(), list = document.getElementById("chat-list").getBoundingClientRect();
-    return earn.bottom <= nav.bottom + 1 && search.bottom <= recent.bottom && list.bottom <= recent.bottom && list.height >= 40;
-  }), true, "Earn, chat search and recent results fit the normal desktop sidebar");
+    const sidebar = document.getElementById("sidebar").getBoundingClientRect(), shell = document.querySelector(".chat-shell").getBoundingClientRect();
+    return earn.bottom <= nav.bottom + 1 && recent.left >= sidebar.right && recent.bottom <= shell.bottom + 1 && search.bottom <= recent.bottom && list.bottom <= recent.bottom && list.height >= 300;
+  }), true, "Chat owns a full-height history rail beside the main navigation");
+  assert.equal(await page.locator("#sidebar #chats-pane").count(), 0);
+  assert.equal(await page.locator("#view-chat #chats-pane").count(), 1);
+  assert.equal(await page.locator("#chat-list").evaluate(node => node.scrollHeight > node.clientHeight && getComputedStyle(node).overflowY === "auto"), true, "Conversation results scroll within their own rail");
+  await page.fill("#chat-search", "History fixture 30");
+  assert.equal(await page.locator("#chat-list .chat-row").count(), 1);
+  await page.fill("#chat-search", "");
+  await page.click("#product-sidebar-toggle");
+  assert.equal(await page.locator("#chats-pane").isVisible(), true, "Collapsing app navigation does not collapse Chat's separate rail");
+  await page.click("#product-sidebar-toggle");
   // Primary navigation stays expanded; More reveals the remaining workspaces.
   for (const group of ["workspace", "contribute"]) {
     assert.equal(await page.locator("#nav-items-" + group).evaluate(el => el.inert), false);
@@ -101,6 +113,7 @@ test("KAI workspace: artwork, welcome drafts, all navigation and narrow-window h
   for (const view of ["models", "docs", "compare", "tools", "tasks", "api", "earn", "network", "settings", "code", "devtools"]) {
     await navClick(page, `[data-view="${view}"]`);
     await page.waitForSelector(`#view-${view}:not([hidden])`);
+    assert.equal(await page.locator("#chats-pane").isVisible(), false, "Recent chats appear only in Chat");
     await shot(page, view);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `${view} fits the window`);
   }
@@ -154,19 +167,30 @@ test("KAI workspace: artwork, welcome drafts, all navigation and narrow-window h
   await page.click('[data-knode="koinos-wallet"]');
   await frame.locator("#view-wallet.active").waitFor(); await shot(page, "wallet");
   await navClick(page, '[data-view="chat"]'); await page.setViewportSize({ width: 820, height: 700 });
-  await page.click("#product-history-all");
+  assert.equal(await page.locator("#chats-pane").isVisible(), false);
+  await page.click("#history-toggle");
   assert.equal(await page.locator("#chats-pane").isVisible(), true);
+  assert.equal(await page.getAttribute("#history-toggle", "aria-expanded"), "true");
+  await page.click("#history-toggle");
+  assert.equal(await page.locator("#chats-pane").isVisible(), false, "Conversations closes on a second click");
+  await page.click("#history-toggle");
+  await shot(page, "chat-history-narrow");
   await page.click("#btn-new-chat");
-  assert.equal(await page.locator("#chats-pane").isVisible(), true, "recent chats remain in the sidebar");
+  assert.equal(await page.locator("#chats-pane").isVisible(), false, "New chat returns the narrow workspace to its composer");
   await page.waitForSelector('#chat-empty .welcome-character[data-kai-mounted="ready"] svg');
   await page.click('[data-chat-prompt*="brainstorm"]'); assert.match(await page.inputValue("#input"), /brainstorm/);
   const bounds = await page.evaluate(() => {
     const pane = document.querySelector(".chat-pane").getBoundingClientRect(), composer = document.getElementById("composer").getBoundingClientRect();
     return { fits: composer.left >= pane.left && composer.right <= pane.right && composer.bottom <= innerHeight,
-      historyFits: document.getElementById("chat-search").getBoundingClientRect().bottom <= document.getElementById("chats-pane").getBoundingClientRect().bottom && document.getElementById("chat-list").getBoundingClientRect().bottom <= document.getElementById("chats-pane").getBoundingClientRect().bottom,
       unique: document.querySelectorAll("svg [id]").length === new Set([...document.querySelectorAll("svg [id]")].map(e => e.id)).size };
   });
-  assert.ok(bounds.fits, "Composer stays within the narrow workspace"); assert.ok(bounds.historyFits, "Search and recent results are not clipped in a short window"); assert.ok(bounds.unique, "New chat preserves unique SVG fragment IDs");
+  assert.ok(bounds.fits, "Composer stays within the narrow workspace"); assert.ok(bounds.unique, "New chat preserves unique SVG fragment IDs");
+  await page.click("#history-toggle");
+  assert.equal(await page.evaluate(() => {
+    const recent = document.getElementById("chats-pane").getBoundingClientRect(), search = document.getElementById("chat-search").getBoundingClientRect(), list = document.getElementById("chat-list").getBoundingClientRect();
+    return search.bottom <= recent.bottom && list.bottom <= recent.bottom && list.height > 250;
+  }), true, "Search and independently scrolling results fit the narrow conversation panel");
+  await page.click("#history-toggle");
   await shot(page, "chat-narrow");
   await page.emulateMedia({ reducedMotion: "reduce" });
   assert.equal(await page.locator("#chat-empty .kai3d-head-motion").evaluate(el => getComputedStyle(el).animationName), "none");
