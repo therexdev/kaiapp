@@ -4,9 +4,8 @@
   const credits = value => { const n = BigInt(value || "0"); return (Number(n) / 100000).toLocaleString(undefined, { maximumFractionDigits: 5 }); };
   const go = view => activateView(view), button = (view, label, primary = false) => `<button type="button" class="${primary ? "primary" : ""}" data-product-view="${view}">${label}</button>`;
   const head = (title, subtitle, action = "") => `<header class="product-head"><div><h1>${title}</h1><p>${subtitle}</p></div>${action}</header>`;
-  const emblem = '<div class="product-emblem" aria-hidden="true"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"><path d="M11 10v7M11 38V28L35 9M26 29l12 10"/></svg></div>';
+  const emblem = '<div class="product-emblem" aria-hidden="true"><img src="brand-mark.svg" alt="" /></div>';
   document.body.classList.add("product-v2");
-  document.querySelector("#sidebar .brand-mark").innerHTML = emblem.match(/<svg[\s\S]*<\/svg>/)[0];
   if (innerWidth <= 520) document.body.classList.add("product-sidebar-collapsed");
   const main = $("main");
   main.insertAdjacentHTML("beforeend", `
@@ -40,21 +39,20 @@
   const chats = $("chats-pane"); chats.classList.add("product-recent");
   chats.insertAdjacentHTML("afterbegin", '<div class="product-row"><span class="product-eyebrow">Recent chats</span><button id="product-history-all">View all</button></div>');
   $("sidebar").insertBefore(chats, $("status-pane"));
-  $("product-history-all").addEventListener("click", () => { $("sidebar").classList.toggle("history-expanded"); $("chat-search").focus(); });
+  $("product-history-all").addEventListener("click", () => { $("sidebar").classList.toggle("history-expanded"); $("chat-search").focus({ preventScroll: true }); });
   $("product-sidebar-toggle").addEventListener("click", () => { const collapsed = document.body.classList.toggle("product-sidebar-collapsed"); $("product-sidebar-toggle").setAttribute("aria-expanded", String(!collapsed)); });
   $("sidebar").insertAdjacentHTML("afterbegin", '<button id="product-sidebar-close" aria-label="Close sidebar">×</button>');
   $("product-sidebar-close").addEventListener("click", () => $("product-sidebar-toggle").click());
   const workspace = $("nav-items-workspace").firstElementChild, toolkit = $("nav-items-toolkit").firstElementChild;
   const item = name => document.querySelector(`#nav [data-view="${name}"]`);
-  for (const name of ["workflows", "agents", "docs", "compare"]) toolkit.appendChild(item(name));
-  for (const name of ["chat", "models", "brain", "connections"]) workspace.appendChild(item(name));
+  for (const name of ["chat", "code", "brain", "workflows", "agents", "docs"]) workspace.appendChild(item(name));
+  for (const name of ["models", "connections", "tools", "compare", "tasks", "api", "devtools"]) toolkit.appendChild(item(name));
   item("chat").querySelector("span").textContent = "Chat"; item("models").querySelector("span").textContent = "Models"; item("connections").querySelector("span").textContent = "Connections & tools";
   $("nav-group-toolkit").querySelector("span").textContent = "More";
   item("earn").querySelector("span").textContent = "Earn";
   $("nav-group-contribute").setAttribute("aria-expanded", "true"); $("nav-items-contribute").setAttribute("aria-hidden", "false"); $("nav-items-contribute").inert = false;
-  $("nav-network").title = "Network settings"; $("nav-network").setAttribute("aria-label", "Network settings");
+  $("nav-network").title = "Network"; $("nav-network").setAttribute("aria-label", "Network");
   document.querySelector(".chat-pane").insertBefore(document.querySelector(".composer-options"), document.querySelector(".chat-toolbar"));
-  for (const host of [$("chat-empty"), $("chat-welcome-template").content.querySelector("#chat-empty")]) host?.querySelector(".welcome-hero")?.insertAdjacentHTML("afterbegin", emblem);
   const oldEarn = $("view-earn").firstElementChild, legacy = document.createElement("details"); legacy.id = "product-legacy-account"; legacy.innerHTML = '<summary>Payment wallet &amp; earlier account activity</summary>'; oldEarn.replaceWith(legacy); legacy.appendChild(oldEarn);
   legacy.insertAdjacentHTML("beforebegin", `<div class="product-earn">${head("Share your AI. Earn KOIN.", "Contribute this computer’s spare AI capacity to the network.", button("network-overview", "◎ View network"))}<div class="product-two"><section class="product-panel product-provider"><div class="product-row"><span>Share AI capacity</span><button id="product-provider-toggle" role="switch" aria-checked="false" aria-label="Share AI capacity">Off</button></div><div class="product-provider-state"><span class="product-live-dot"></span><h2 id="product-provider-label">OFFLINE</h2><p id="product-provider-detail">Sharing is off. Turn it on when you’re ready.</p></div><div class="product-divider"></div><strong id="product-provider-model">Model not confirmed</strong><p class="product-fine">Only current, verified qualification counts as ready.</p></section><div><section class="product-panel"><p class="product-eyebrow">AI provider earnings</p><p id="product-provider-earnings">No verified earnings loaded.</p><p class="product-fine">Rewards remain estimates until review and chain confirmation.</p><button data-product-action="payouts">Refresh earnings</button></section><section class="product-panel"><h2>Provider setup</h2><p id="product-provider-setup">Choose an approved model, check this computer, then turn on sharing.</p><div class="product-actions"><button data-product-action="provider-setup">Check this computer</button><button id="product-provider-download" data-product-action="provider-download" hidden>Download approved model</button><button id="product-provider-cancel" data-product-action="provider-cancel" hidden>Cancel setup</button><button data-product-action="legacy">Reward wallet</button></div></section></div></div><section class="product-panel"><h2>Readiness at a glance</h2><p id="product-provider-readiness">Model, qualification and network confirmation must all be current before this computer is shown as ONLINE.</p></section><p class="product-footer">AI earnings are KOIN. They are separate from chat credits.</p></div>`);
   const onboarding = $("view-onboarding"), oldOnboarding = onboarding.firstElementChild;
@@ -63,12 +61,15 @@
   onboarding.insertAdjacentHTML("afterbegin", `<div class="product-first">${emblem}<h1>Start with what you want to do.</h1><p>Use the network with free credits when available, or run AI on this computer.<br>You’re in control of where your work happens.</p><div class="product-two"><section class="product-panel"><h2>Try network AI</h2><p>Get started without buying KOIN or connecting a payment wallet. A verified account keeps your daily free usage consistent across devices.</p><button class="primary" data-product-action="start-free">Start free →</button></section><section class="product-panel"><h2>Use this computer</h2><p>Run a model locally. We’ll check your computer and help you choose a good fit. No credits needed.</p><button data-product-action="setup-local">Set up local AI →</button></section></div><p id="product-first-status" role="status">Free-credit availability depends on the network’s published policy.</p><button data-product-action="signin">Your account</button></div>`);
   let filter = "all", network, networkError = "", networkPending = false, quote, quoteRevision = 0, approving = false;
   function paintCredits(state) {
-    const s = state.snapshot?.credits, usd = s?.unit === "USD-1e-8", stale = !usd || state.status !== "ready" || Date.now() - state.snapshot.receivedAt > 30000;
-    document.querySelectorAll("[data-credit-total]").forEach(node => { node.textContent = usd ? credits(s.available) : "—"; });
-    document.querySelectorAll("[data-credit-breakdown]").forEach(node => { node.textContent = usd ? `${s.free.state === "unavailable" ? "Free allowance unavailable" : credits(s.free.available) + " free"} · ${credits(s.purchased.available)} purchased${stale ? " · last known" : ""}` : "USD credit account unavailable"; });
-    document.querySelectorAll("[data-credit-freshness]").forEach(node => { node.textContent = usd ? `Checked ${new Date(state.snapshot.receivedAt).toLocaleString()}${stale ? " · reconnect to refresh" : ""}. Free credits reset ${new Date(s.free.resetAt).toLocaleString()}.` : state.error || "Sign in to check your credit account."; });
+    const display = window.KaiCreditPresentation(state), { usd, stale } = display;
+    document.querySelectorAll("[data-credit-total]").forEach(node => { node.textContent = display.total; node.title = display.status; });
+    document.querySelectorAll("[data-credit-breakdown]").forEach(node => { node.textContent = display.breakdown; });
+    document.querySelectorAll("[data-credit-status]").forEach(node => { node.textContent = node.closest(".product-sidebar-credits") ? display.compactStatus : display.status; node.title = display.status; node.hidden = !display.status; });
+    document.querySelectorAll("[data-credit-freshness]").forEach(node => { node.textContent = display.detail; });
+    document.querySelectorAll("[data-credit-refresh]").forEach(node => { node.disabled = display.refreshing; node.textContent = display.refreshing ? "Checking…" : state.status === "unavailable" ? "Retry" : "Refresh"; });
+    document.querySelectorAll("[data-credit-help]").forEach(node => { node.hidden = usd && !stale || state.status === "loading"; });
     const rows = usd ? [...state.snapshot.usage.map(u => ({ kind: "usage", title: `Chat · ${u.model}`, at: u.at, status: "Delivered", amount: "−" + credits(u.credits) })), ...state.snapshot.purchases.map(p => ({ kind: "purchase", title: "Purchased credits", at: p.confirmedAt || p.createdAt, status: p.state === "confirmed" ? "Added to balance" : p.state, amount: p.state === "confirmed" ? "+" + credits(p.credits || p.amount) : "Pending" }))].sort((a, b) => b.at - a.at).filter(r => filter === "all" || filter === r.kind) : [];
-    $("product-credit-history").innerHTML = rows.length ? rows.map(r => `<tr><td>${esc(r.title)}</td><td>${esc(new Date(r.at).toLocaleString())}</td><td>${esc(r.status)}</td><td>${esc(r.amount)}</td></tr>`).join("") : '<tr><td colspan="4">No verified activity loaded.</td></tr>';
+    $("product-credit-history").innerHTML = rows.length ? rows.map(r => `<tr><td>${esc(r.title)}</td><td>${esc(new Date(r.at).toLocaleString())}</td><td>${esc(r.status)}</td><td>${esc(r.amount)}</td></tr>`).join("") : `<tr><td colspan="4">${usd && !stale ? "No activity yet." : "No verified activity loaded."}</td></tr>`;
     const pending = state.snapshot?.purchases?.filter(p => p.state === "pending") || [];
     $("product-pending-purchases").textContent = pending.length ? `${pending.length} purchase${pending.length === 1 ? " is" : "s are"} confirming. You can keep using existing credits.` : "";
     $("product-recovery-purchase").textContent = pending.length ? "Your payment is confirming. Existing credits remain available; do not create another payment to retry this one." : !usd || stale ? "Purchase status is unavailable. Refresh your account before starting or retrying a payment." : "No pending purchase in the last verified account snapshot. Refresh your account before starting another payment.";
@@ -186,6 +187,10 @@
     finally { if (action !== "stop") providerBusy = false; await refreshPublicProvider(); }
   }
   $("product-provider-toggle").addEventListener("click", () => providerAction($("product-provider-toggle").getAttribute("aria-checked") === "true" ? "stop" : "start"));
+  for (const host of [document.querySelector(".product-sidebar-credits"), document.querySelector("#view-credits .product-panel")]) {
+    host.querySelector("[data-credit-breakdown]").insertAdjacentHTML("afterend", '<p data-credit-status role="status"></p><div class="product-credit-actions"><button type="button" class="product-text-button" data-credit-refresh>Refresh</button><button type="button" class="product-text-button" data-credit-help data-product-action="legacy" hidden>Account help</button></div>');
+  }
+  document.addEventListener("click", event => { if (event.target.closest("[data-credit-refresh]")) window.KaiCredits.refresh(); });
   window.KaiCredits?.subscribe(paintCredits);
   new MutationObserver(paintProvider).observe($("koin-test-payments"), { subtree: true, attributes: true, childList: true, characterData: true }); paintProvider();
   window.KaiProduct = { render(view) { if (["credits", "buy-credits", "recovery"].includes(view)) window.KaiCredits?.refresh(); if (view === "network-overview") refreshNetwork(); if (view === "earn") refreshPublicProvider(); } };

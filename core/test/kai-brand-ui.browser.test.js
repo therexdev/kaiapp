@@ -32,13 +32,18 @@ test("KAI workspace: artwork, welcome drafts, all navigation and narrow-window h
       minimize() {}, toggleMaximize() {}, close() {}, onMaximizeChanged() {} };
   });
   await page.goto(base);
-  await page.waitForSelector('#view-chat:not([hidden]) .product-emblem svg');
+  await page.waitForSelector('#view-chat:not([hidden]) .welcome-character[data-kai-mounted="ready"] svg');
   const texture = await page.evaluate(() => new Promise(resolve => {
     const image = new Image(); image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
     image.onerror = () => resolve(null); image.src = "assets/kai-character.png";
   }));
   assert.deepEqual(texture, { width: 1024, height: 1536 }, "The real Core serves the bundled texture");
   await shot(page, "chat-home");
+  assert.equal(await page.evaluate(() => {
+    const nav = document.getElementById("nav").getBoundingClientRect(), earn = document.querySelector('[data-view="earn"]').getBoundingClientRect();
+    const recent = document.getElementById("chats-pane").getBoundingClientRect(), search = document.getElementById("chat-search").getBoundingClientRect(), list = document.getElementById("chat-list").getBoundingClientRect();
+    return earn.bottom <= nav.bottom + 1 && search.bottom <= recent.bottom && list.bottom <= recent.bottom && list.height >= 40;
+  }), true, "Earn, chat search and recent results fit the normal desktop sidebar");
   // Primary navigation stays expanded; More reveals the remaining workspaces.
   for (const group of ["workspace", "contribute"]) {
     assert.equal(await page.locator("#nav-items-" + group).evaluate(el => el.inert), false);
@@ -46,6 +51,30 @@ test("KAI workspace: artwork, welcome drafts, all navigation and narrow-window h
   await page.focus("#nav-group-toolkit"); await page.keyboard.press("Enter");
   await page.locator('#nav-group-toolkit[aria-expanded="true"]').waitFor();
   assert.equal(await page.locator("#nav-items-toolkit").evaluate(el => el.inert), false);
+  assert.equal(await page.evaluate(() => {
+    const nav = document.getElementById("nav").getBoundingClientRect(), more = document.getElementById("nav-group-toolkit").getBoundingClientRect();
+    const tools = document.querySelector('#nav-items-toolkit [data-view="tools"]').getBoundingClientRect();
+    return more.top >= nav.top - 1 && tools.bottom <= nav.bottom + 1;
+  }), true, "Opening More reveals Models, Connections and Tools together");
+  await shot(page, "more-open");
+  await page.keyboard.press("Enter");
+  assert.equal(await page.getAttribute("#nav-group-toolkit", "aria-expanded"), "false", "More closes on a second activation");
+  assert.equal(await page.locator("#nav-items-toolkit").evaluate(el => el.inert), true);
+  await page.click("#nav-group-toolkit");
+  await page.click("#nav-group-toolkit");
+  assert.equal(await page.getAttribute("#nav-items-toolkit", "aria-hidden"), "true", "Pointer toggles match keyboard behavior");
+  assert.deepEqual(await page.locator('#nav-items-workspace [data-view]').evaluateAll(nodes => nodes.map(n => n.dataset.view)), ["chat", "code", "brain", "workflows", "agents", "docs"]);
+  for (const view of ["models", "connections", "tools"]) assert.equal(await page.locator(`#nav-items-toolkit [data-view="${view}"]`).count(), 1);
+  const chrome = await page.evaluate(() => {
+    const settings = document.getElementById("nav-settings").getBoundingClientRect(), network = document.getElementById("nav-network").getBoundingClientRect();
+    return { sideBySide: Math.abs(settings.top - network.top) < 1 && network.left >= settings.right,
+      background: getComputedStyle(document.body).backgroundColor, colorScheme: getComputedStyle(document.documentElement).colorScheme,
+      mascot: getComputedStyle(document.querySelector("#launch-kai .kai-avatar")).display,
+      logo: getComputedStyle(document.querySelector("#sidebar .brand-mark")).backgroundImage };
+  });
+  assert.equal(chrome.sideBySide, true, "Settings and Network share the lower-left row");
+  assert.equal(chrome.background, "rgb(244, 247, 253)"); assert.equal(chrome.colorScheme, "light");
+  assert.notEqual(chrome.mascot, "none"); assert.match(chrome.logo, /brand-mark\.svg/);
   await page.evaluate(() => showView("chat"));
   assert.equal(await page.getAttribute("#nav-group-workspace", "aria-expanded"), "true");
   await navClick(page, '[data-view="chat"]');
@@ -122,17 +151,28 @@ test("KAI workspace: artwork, welcome drafts, all navigation and narrow-window h
   assert.equal(await page.locator("#chats-pane").isVisible(), true);
   await page.click("#btn-new-chat");
   assert.equal(await page.locator("#chats-pane").isVisible(), true, "recent chats remain in the sidebar");
-  await page.waitForSelector('#chat-empty .product-emblem');
+  await page.waitForSelector('#chat-empty .welcome-character[data-kai-mounted="ready"] svg');
   await page.click('[data-chat-prompt*="brainstorm"]'); assert.match(await page.inputValue("#input"), /brainstorm/);
   const bounds = await page.evaluate(() => {
     const pane = document.querySelector(".chat-pane").getBoundingClientRect(), composer = document.getElementById("composer").getBoundingClientRect();
     return { fits: composer.left >= pane.left && composer.right <= pane.right && composer.bottom <= innerHeight,
+      historyFits: document.getElementById("chat-search").getBoundingClientRect().bottom <= document.getElementById("chats-pane").getBoundingClientRect().bottom && document.getElementById("chat-list").getBoundingClientRect().bottom <= document.getElementById("chats-pane").getBoundingClientRect().bottom,
       unique: document.querySelectorAll("svg [id]").length === new Set([...document.querySelectorAll("svg [id]")].map(e => e.id)).size };
   });
-  assert.ok(bounds.fits, "Composer stays within the narrow workspace"); assert.ok(bounds.unique, "New chat preserves unique SVG fragment IDs");
+  assert.ok(bounds.fits, "Composer stays within the narrow workspace"); assert.ok(bounds.historyFits, "Search and recent results are not clipped in a short window"); assert.ok(bounds.unique, "New chat preserves unique SVG fragment IDs");
   await shot(page, "chat-narrow");
   await page.emulateMedia({ reducedMotion: "reduce" });
   assert.equal(await page.locator("#chat-empty .kai3d-head-motion").evaluate(el => getComputedStyle(el).animationName), "none");
+  await page.setViewportSize({ width: 780, height: 560 });
+  await page.locator("#nav-network").scrollIntoViewIfNeeded();
+  assert.equal(await page.evaluate(() => {
+    const sidebar = document.getElementById("sidebar"), settings = document.getElementById("nav-settings").getBoundingClientRect(), network = document.getElementById("nav-network").getBoundingClientRect();
+    const composer = document.getElementById("composer").getBoundingClientRect();
+    return getComputedStyle(sidebar).overflowY === "auto" && settings.top >= 34 && network.bottom <= innerHeight && Math.abs(settings.top - network.top) < 1 && composer.bottom <= innerHeight;
+  }), true, "At the desktop minimum size, lower controls remain reachable and the composer fits");
+  await shot(page, "minimum-window");
+  await navClick(page, '[data-view="models"]');
+  await page.waitForSelector('#view-models:not([hidden])');
   assert.deepEqual(failedArt, []); assert.deepEqual(errors, []);
 });
 

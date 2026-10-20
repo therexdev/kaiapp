@@ -143,7 +143,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
         recoveryAvailable: !blocked && ["pending", "answered"].includes(recovery?.state) };
     }
     if (["chat-estimate", "credit-status", "network-overview"].includes(action)) {
-      if (!fs.existsSync(configFile)) throw Error("The credit service is not available yet");
+      if (!fs.existsSync(configFile)) throw Error(creditService.service.reason || "The credit service is not available yet");
       const config = readConfig(configFile);
       if (!isPrepaid(config.deployment)) throw Error("The earlier KOIN account is preserved for recovery. Credit service activation is pending.");
       open(); access.authorize(config.schedulerUrl);

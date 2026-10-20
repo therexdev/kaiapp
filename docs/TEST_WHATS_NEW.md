@@ -1,3 +1,11 @@
+## White KAI design, simpler menus and visible credit status
+
+- Restores the original white KAI character, blue brand mark and pearl-and-blue app theme. KAI is back on Chat, with the compact desktop KAI button kept in its new header position. Window controls, app bars, form controls and scrollbars follow the same light palette.
+- Chat appears above Koinos Code. Workflows, Agents and Documents sit in the main menu; Models and Connections & tools sit under More. More opens and closes when clicked again. Recent chats remain in the sidebar. Settings and Network sit side by side at the bottom, and Earn keeps its View network shortcut.
+- Credit status refreshes when the app opens, including an already configured USD-credit account. Loading, a verified zero balance, unavailable service and a last-known balance are distinct states, with refresh and account help available. Earlier KOIN balances retain their original units.
+
+The packaged public credit service is still awaiting activation. This update does not invent free credits, convert earlier balances, change contracts or move KOIN. An existing verified USD-credit account can display its actual balance; an unavailable account shows the reason instead of an unexplained dash.
+
 ## Purchase sync and outage recovery follow-up
 
 Purchase synchronization now checks which signed transaction actually won before registering it, avoiding a losing Mana correction consuming the last confirmation slot. Historical provider availability survives long outages and restart regardless of which provider reconnects first. These changes do not activate network credits or earning; backend deployment and acceptance gates remain pending.

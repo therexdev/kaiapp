@@ -70,7 +70,7 @@ test("sidebar credits do not relabel KOIN; older wallet formatting and recovery 
     await page.click("#nav-settings");
     await page.locator("#view-settings:not([hidden])").waitFor();
     await page.locator('.product-sidebar-credits [data-product-view="credits"]').click();
-    await page.locator('#view-credits [data-product-action="legacy"]').click();
+    await page.locator('#view-credits .product-footer [data-product-action="legacy"]').click();
     // Exercise the same polls that used to restore the previous page a
     // second after the click. The wallet contents must also initialize.
     await page.evaluate(async () => { await refresh(); await refreshSidebarWallet(); await refresh(); });

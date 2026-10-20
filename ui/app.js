@@ -534,7 +534,15 @@ function expandNavGroup(selected) {
 }
 
 for (const header of document.querySelectorAll("#nav .nav-group-label")) {
-  header.addEventListener("click", () => expandNavGroup(header));
+  header.addEventListener("click", () => {
+    const open = header.getAttribute("aria-expanded") !== "true";
+    expandNavGroup(open ? header : null);
+    if (open && document.body.classList.contains("product-v2") && header.id === "nav-group-toolkit") {
+      const nav = document.getElementById("nav"), items = document.getElementById(header.getAttribute("aria-controls"));
+      const last = [...items.querySelectorAll(".nav-item:not([hidden])")].slice(0, 3).at(-1);
+      if (last) nav.scrollTop += Math.max(0, last.getBoundingClientRect().bottom - nav.getBoundingClientRect().bottom);
+    }
+  });
 }
 
 function showView(name, { navOnly = false } = {}) {
@@ -1972,6 +1980,7 @@ function startAccountPoll() {
       accountPolling = false;
       $("account-code-row").hidden = true;
       accountMsg("Signed in.", true);
+      window.dispatchEvent(new Event("kai-credit-identity-changed"));
       renderAccount(true);
     } catch (e) {
       accountPolling = false;
@@ -2010,6 +2019,7 @@ $("btn-account-linkwallet").addEventListener("click", async () => {
     const j = await r.json();
     if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
     accountMsg("Wallet linked — it now shows on your account everywhere.", true);
+    window.dispatchEvent(new Event("kai-credit-identity-changed"));
     renderAccount(true);
   } catch (e) {
     accountMsg(e.message);

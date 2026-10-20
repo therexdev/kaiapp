@@ -102,7 +102,7 @@ async function start() {
     ...winState.get("bounds"),
     minWidth: 780,
     minHeight: 560,
-    backgroundColor: "#07090c",
+    backgroundColor: "#f4f7fd",
     autoHideMenuBar: true,
     // Frameless: the UI draws its own titlebar so the whole app reads as
     // one designed surface instead of web content in an OS frame.
