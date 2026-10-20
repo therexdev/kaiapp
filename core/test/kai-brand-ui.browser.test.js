@@ -38,6 +38,13 @@ test("KAI workspace: artwork, welcome drafts, all navigation and narrow-window h
     image.onerror = () => resolve(null); image.src = "assets/kai-character.png";
   }));
   assert.deepEqual(texture, { width: 1024, height: 1536 }, "The real Core serves the bundled texture");
+  // Measure the resting layout, including when screenshots are disabled in CI.
+  // Screenshot capture fast-forwards finite transitions; ordinary runs must
+  // explicitly await the same sidebar expansion rather than sample mid-frame.
+  await page.locator("#sidebar").evaluate(async sidebar => {
+    await Promise.all(sidebar.getAnimations({ subtree: true }).filter(animation => Number.isFinite(animation.effect?.getTiming().iterations))
+      .map(animation => animation.finished.catch(() => {})));
+  });
   await shot(page, "chat-home");
   assert.equal(await page.evaluate(() => {
     const nav = document.getElementById("nav").getBoundingClientRect(), earn = document.querySelector('[data-view="earn"]').getBoundingClientRect();
