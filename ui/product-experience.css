@@ -86,3 +86,16 @@
 /* At the desktop's minimum height, allow the whole rail to scroll so its
    controls remain reachable instead of clipping fixed regions. */
 @media(max-height:650px){.product-v2 #sidebar{overflow-y:auto}.product-v2 #nav{flex:0 0 auto;max-height:none}.product-v2 #chats-pane,.product-v2 #sidebar.history-expanded #chats-pane{flex:0 0 145px;min-height:145px;max-height:180px}.product-v2 .rail-icons,.product-v2 .local-note{flex-shrink:0}}
+
+/* Payment funding is visible even before the credit service is activated. */
+.product-purchase-wallet,.product-purchase-availability{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:18px 22px;margin:0 0 14px;border:1px solid var(--border);border-radius:14px;background:var(--bg-raised)}
+.product-purchase-wallet>div:first-child,.product-purchase-availability>div:first-child{min-width:0}
+.product-purchase-wallet strong{font-size:23px;font-weight:650}
+.product-purchase-wallet p,.product-purchase-availability p{font-size:11px;line-height:1.65;color:var(--text-dim);margin:5px 0 0;overflow-wrap:anywhere}
+.product-purchase-wallet .product-eyebrow{margin:0 0 5px}
+.product-purchase-availability{background:#eef4ff;border-color:#cddfff}
+.product-purchase-availability strong{font-size:13px}
+.product-purchase-wallet .product-actions,.product-purchase-availability .product-actions{flex-shrink:0;flex-wrap:wrap}
+.product-purchase-wallet button,.product-purchase-availability button{font-size:11px}
+.product-v2 #product-quote-refresh:disabled{background:#e6edf8;color:#667793;border-color:#d3deed;cursor:default;opacity:1}
+@media(max-width:900px){.product-purchase-wallet,.product-purchase-availability{align-items:flex-start;flex-direction:column;gap:12px;padding:17px}.product-purchase-wallet strong{font-size:21px}}

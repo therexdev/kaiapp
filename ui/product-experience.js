@@ -17,9 +17,11 @@
     </section>
     <section id="view-buy-credits" class="view product-page" hidden>
       ${head("Buy credits", "Pay with KOIN. Your credits keep their USD service value.", button("chat", "Back to Chat"))}
+      <section class="product-purchase-wallet" aria-label="Payment wallet"><div><p class="product-eyebrow">KOIN in your wallet</p><strong id="product-wallet-balance">Checking…</strong><p id="product-wallet-address">Reading this computer’s wallet.</p><p id="product-wallet-note" role="status"></p></div><div class="product-actions"><button id="product-wallet-refresh">Refresh balance</button><button data-product-action="payment-wallet">Manage wallet</button></div></section>
+      <section class="product-purchase-availability" role="status"><div><strong id="product-purchase-title">Checking purchases…</strong><p id="product-purchase-detail">Your wallet balance and your AI credits are separate.</p></div><div class="product-actions"><button id="product-purchase-check">Check again</button><button data-product-action="signin" id="product-purchase-signin" hidden>Open account</button></div></section>
       <ol class="product-steps"><li class="active">Choose credits</li><li>Approve payment</li><li>Credits added</li></ol>
       <div class="product-two"><section class="product-panel"><h2>How much would you like to add?</h2><p>1,000 credits = $1 of AI usage.</p><div class="product-packs">${[1, 5, 10].map(n => `<button data-credit-pack="${n}"><strong>$${n}</strong><small>${(n * 1000).toLocaleString()} credits</small></button>`).join("")}</div><label for="product-usd-amount">Or choose an amount</label><div class="product-input"><span>$</span><input id="product-usd-amount" inputmode="decimal" autocomplete="off" placeholder="Enter USD amount" maxlength="12" /><span>USD</span></div><p>The current exchange quote determines how much KOIN you pay. Review the exact KOIN amount before approving.</p><div class="product-divider"></div><p>✓ Pay directly with KOIN from your wallet.</p><p>✓ Free credits are used first on eligible models.</p></section>
-      <section class="product-panel product-order"><p class="product-eyebrow">You receive</p><div class="product-balance"><span id="product-pack-credits">—</span> <small>credits</small></div><div class="product-detail"><span>KOIN payment</span><strong id="product-quote-koin">Quote required</strong></div><div class="product-detail"><span>Price source</span><strong>Uniswap v4 · vKOIN/USDT</strong></div><div class="product-detail"><span>Last updated</span><strong id="product-quote-time">No verified quote</strong></div><div class="product-detail"><span>Valid until</span><strong id="product-quote-expiry">—</strong></div><p id="product-quote-state" role="status">Choose an amount to check purchasing availability. Existing credits remain usable while a purchase confirms or pricing is unavailable.</p><button id="product-quote-refresh" class="primary">Refresh exchange quote</button><button id="product-quote-approve" class="primary" hidden>Review payment</button><p class="product-fine">Nonrefundable · nontransferable · no expiry</p><div id="product-pending-purchases"></div></section></div>
+      <section class="product-panel product-order"><p class="product-eyebrow">You receive</p><div class="product-balance"><span id="product-pack-credits">—</span> <small>credits</small></div><div class="product-detail"><span>KOIN payment</span><strong id="product-quote-koin">Quote required</strong></div><div class="product-detail"><span>Price source</span><strong>Uniswap v4 · vKOIN/USDT</strong></div><div class="product-detail"><span>Last updated</span><strong id="product-quote-time">No verified quote</strong></div><div class="product-detail"><span>Valid until</span><strong id="product-quote-expiry">—</strong></div><p id="product-quote-state" role="status">Choose an amount to check purchasing availability. Existing credits remain usable while a purchase confirms or pricing is unavailable.</p><button id="product-quote-refresh" class="primary" disabled>Checking availability…</button><button id="product-quote-approve" class="primary" hidden>Review payment</button><p class="product-fine">Nonrefundable · nontransferable · no expiry</p><div id="product-pending-purchases"></div></section></div>
     </section>
     <section id="view-network-overview" class="view product-page" hidden>
       ${head("Network overview", "Available AI, the people providing it, and work being completed.", button("earn", "Back to Earn"))}
@@ -59,7 +61,7 @@
   oldOnboarding.classList.add("product-local-setup"); oldOnboarding.hidden = true;
   oldOnboarding.insertAdjacentHTML("afterbegin", '<button data-product-action="first-back">← Back to choices</button>');
   onboarding.insertAdjacentHTML("afterbegin", `<div class="product-first">${emblem}<h1>Start with what you want to do.</h1><p>Use the network with free credits when available, or run AI on this computer.<br>You’re in control of where your work happens.</p><div class="product-two"><section class="product-panel"><h2>Try network AI</h2><p>Get started without buying KOIN or connecting a payment wallet. A verified account keeps your daily free usage consistent across devices.</p><button class="primary" data-product-action="start-free">Start free →</button></section><section class="product-panel"><h2>Use this computer</h2><p>Run a model locally. We’ll check your computer and help you choose a good fit. No credits needed.</p><button data-product-action="setup-local">Set up local AI →</button></section></div><p id="product-first-status" role="status">Free-credit availability depends on the network’s published policy.</p><button data-product-action="signin">Your account</button></div>`);
-  let filter = "all", network, networkError = "", networkPending = false, quote, quoteRevision = 0, approving = false;
+  let filter = "all", network, networkError = "", networkPending = false, quote, quoteRevision = 0, approving = false, quoting = false;
   function paintCredits(state) {
     const display = window.KaiCreditPresentation(state), { usd, stale } = display;
     document.querySelectorAll("[data-credit-total]").forEach(node => { node.textContent = display.total; node.title = display.status; });
@@ -107,20 +109,149 @@
       network = n; networkError = "";
     } catch (e) { networkError = String(e.message || "Network status unavailable"); } finally { networkPending = false; paintNetwork(); }
   }
-  function pack() { quoteRevision++; quote = null; $("product-quote-approve").hidden = true; const raw = $("product-usd-amount").value.trim(); const valid = /^(0|[1-9]\d{0,5})(\.\d{1,2})?$/.test(raw) && Number(raw) > 0; $("product-pack-credits").textContent = valid ? (Number(raw) * 1000).toLocaleString() : "—"; $("product-quote-koin").textContent = "Quote required"; $("product-quote-time").textContent = "No verified quote"; $("product-quote-expiry").textContent = "—"; return valid ? raw : null; }
+  let purchaseInfo = { activation: "loading" }, purchaseWallet = null, walletError = "", walletReading = false, purchaseReading = false;
+  let walletRead, purchaseRead, purchaseGeneration = 0, quoteWalletKey = null;
+  const buyVisible = () => !document.hidden && !$("view-buy-credits").hidden;
+  const message = error => String(error?.message || error || "Connection unavailable").replace(/^Error invoking remote method '[^']+': (?:Error: )?/, "");
+  const walletKey = () => purchaseWallet?.address ? JSON.stringify([purchaseWallet.address, purchaseWallet.network]) : null;
+  const walletReady = () => !!purchaseWallet?.address && purchaseWallet.network === "mainnet" && typeof purchaseWallet.koin === "string";
+  const amountAtoms = value => { const [whole, fraction = ""] = value.split("."); return BigInt(whole) * 100000000n + BigInt(fraction.padEnd(8, "0")); };
+  function invalidateQuote(text) {
+    quoteRevision++; quote = null; quoteWalletKey = null; $("product-quote-approve").hidden = true;
+    $("product-quote-koin").textContent = "Quote required"; $("product-quote-time").textContent = "No verified quote"; $("product-quote-expiry").textContent = "—";
+    if (text) $("product-quote-state").textContent = text;
+  }
+  function paintPurchase() {
+    const wallet = purchaseWallet, state = purchaseInfo.activation;
+    let balance = walletReading && !wallet ? "Checking…" : "Balance unavailable";
+    if (wallet?.koin != null) {
+      const [whole, fraction] = wallet.koin.split("."), locale = document.documentElement.lang || "en";
+      const decimal = new Intl.NumberFormat(locale).formatToParts(1.1).find(p => p.type === "decimal").value;
+      balance = BigInt(whole).toLocaleString(locale) + (fraction ? decimal + fraction : "") + " " + wallet.tokenSymbol;
+    } else if (wallet && !wallet.address) balance = "No wallet set up";
+    $("product-wallet-balance").textContent = balance;
+    $("product-wallet-address").textContent = wallet?.address ? `${wallet.address} · ${wallet.network === "mainnet" ? "Koinos Mainnet" : wallet.network}` : wallet ? "Set up or restore your wallet to pay with KOIN." : "Wallet address unconfirmed";
+    $("product-wallet-note").textContent = walletError || (wallet?.address && wallet.network !== "mainnet" ? "Credit purchases use KOIN on Mainnet. Change the wallet network before buying." : wallet?.address ? "This is the KOIN in your wallet. It is separate from AI credits." : "");
+    $("product-wallet-refresh").disabled = walletReading;
+    $("product-purchase-check").disabled = purchaseReading;
+    $("product-purchase-signin").hidden = state !== "signin-required";
+    const labels = {
+      loading: ["Checking purchases…", "Your wallet balance and your AI credits are separate."],
+      unavailable: ["Credit purchases are not activated yet", "The credit service still needs to be activated. Having KOIN in your wallet does not enable purchases until that setup is complete."],
+      "signin-required": ["Your account needs attention before buying", purchaseInfo.blocked || "Sign in to your credit account."],
+      ready: ["Credit purchases are available", "Choose an amount, review the current KOIN quote, then approve the payment."],
+      error: ["Purchasing availability could not be checked", purchaseInfo.blocked || "Check again when your connection is available."],
+    };
+    const [title, detail] = labels[state] || labels.error;
+    $("product-purchase-title").textContent = title; $("product-purchase-detail").textContent = detail;
+    const refresh = $("product-quote-refresh");
+    refresh.disabled = state !== "ready" || !walletReady() || quoting || approving || walletReading;
+    refresh.textContent = state === "loading" ? "Checking availability…" : state === "unavailable" ? "Purchases not activated" : state === "signin-required" ? "Account setup required" : state !== "ready" ? "Purchasing unavailable" : !walletReady() ? "Payment wallet required" : quoting ? "Getting quote…" : "Get KOIN quote";
+    if (quote) {
+      const enough = walletReady() && amountAtoms(purchaseWallet.koin) >= amountAtoms(quote.koin);
+      $("product-quote-approve").disabled = approving || walletReading || !enough || state !== "ready";
+      $("product-quote-approve").textContent = enough ? "Review payment" : "Not enough KOIN";
+    }
+  }
+  async function refreshPurchaseWallet() {
+    if (walletRead) return walletRead;
+    const generation = purchaseGeneration; walletReading = true; paintPurchase();
+    walletRead = (async () => {
+      const oldKey = walletKey();
+      try {
+        const response = await fetch("/core/koinos/rpc", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ channel: "wallet:summary", payload: {} }), signal: AbortSignal.timeout(15000) });
+        const result = await response.json(), value = result.data;
+        if (!response.ok || !result.ok || !value || typeof value.network !== "string" || typeof value.tokenSymbol !== "string" ||
+            !(value.address === null || typeof value.address === "string" && value.address.length > 0) ||
+            (value.address && (typeof value.koin !== "string" || !/^(0|[1-9]\d*)(\.\d{1,8})?$/.test(value.koin)))) throw Error(result.error || "Wallet balance could not be verified. Refresh to try again.");
+        if (generation !== purchaseGeneration) return;
+        purchaseWallet = value; walletError = "";
+      } catch (error) {
+        if (generation !== purchaseGeneration) return;
+        purchaseWallet = null; walletError = message(error);
+      } finally {
+        if (generation === purchaseGeneration) {
+          walletReading = false; walletRead = null;
+          if (oldKey !== walletKey() && (oldKey !== null || quote || quoting)) invalidateQuote(purchaseInfo.activation === "ready" ? "Payment wallet changed or could not be verified. Get a fresh quote before paying." : undefined);
+          paintPurchase();
+        }
+      }
+    })();
+    return walletRead;
+  }
+  async function refreshPurchaseInfo() {
+    if (purchaseRead) return purchaseRead;
+    const generation = purchaseGeneration; purchaseReading = true; paintPurchase();
+    purchaseRead = Promise.resolve().then(() => {
+      if (!window.kaiKoinTestBridge) throw Error("Open the desktop app to buy credits.");
+      return window.kaiKoinTestBridge.run("purchase-info");
+    }).then(info => {
+      if (generation !== purchaseGeneration) return;
+      if (!["ready", "unavailable", "signin-required"].includes(info?.activation)) throw Error("Purchasing availability could not be verified.");
+      purchaseInfo = info;
+      if (info.activation !== "ready") invalidateQuote(info.activation === "unavailable" ? "Purchasing will be available when the credit service is activated." : info.blocked);
+    }).catch(error => { if (generation === purchaseGeneration) { purchaseInfo = { activation: "error", blocked: message(error) }; invalidateQuote("Purchasing availability must be verified before payment."); } })
+      .finally(() => { if (generation === purchaseGeneration) { purchaseReading = false; purchaseRead = null; paintPurchase(); } });
+    return purchaseRead;
+  }
+  const refreshPurchases = () => Promise.all([refreshPurchaseWallet(), refreshPurchaseInfo()]);
+  function pack() {
+    invalidateQuote(); const raw = $("product-usd-amount").value.trim(), valid = /^(0|[1-9]\d{0,5})(\.\d{1,2})?$/.test(raw) && Number(raw) > 0;
+    $("product-pack-credits").textContent = valid ? (Number(raw) * 1000).toLocaleString() : "—";
+    return valid ? raw : null;
+  }
+  $("product-wallet-refresh").addEventListener("click", refreshPurchaseWallet);
+  $("product-purchase-check").addEventListener("click", refreshPurchases);
   $("product-usd-amount").addEventListener("input", pack);
-  $("product-quote-refresh").addEventListener("click", async () => { const usd = pack(); if (!usd) { $("product-quote-state").textContent = "Choose a positive USD amount with up to two decimal places."; $("product-usd-amount").focus(); return; } const revision = quoteRevision; $("product-quote-refresh").disabled = true;
-    try { const r = await window.kaiKoinTestBridge?.run("purchase-preview", { usd }); if (revision !== quoteRevision) return; if (!r?.quote) throw Error("Purchases are unavailable until a validated exchange quote is available. Existing credits can still be used."); if (typeof r.quote.id !== "string" || typeof r.quote.koin !== "string" || !/^(0|[1-9]\d*)(\.\d{1,8})?$/.test(r.quote.koin) || !Number.isSafeInteger(r.quote.observedAt) || !Number.isSafeInteger(r.quote.expiresAt) || r.quote.observedAt > Date.now() + 5000 || r.quote.expiresAt <= Date.now()) throw Error("A fresh verified quote is required."); quote = r.quote; if (typeof quote.credits === "string" && /^(0|[1-9]\d*)(\.\d{1,5})?$/.test(quote.credits)) $("product-pack-credits").textContent = quote.credits; $("product-quote-koin").textContent = quote.koin + " KOIN"; $("product-quote-time").textContent = new Date(quote.observedAt).toLocaleTimeString(); $("product-quote-expiry").textContent = new Date(quote.expiresAt).toLocaleTimeString(); $("product-quote-approve").hidden = false; $("product-quote-state").textContent = "Review the exact payment in the secure desktop approval."; }
-    catch (e) { if (revision !== quoteRevision) return; $("product-quote-state").textContent = String(e.message).replace(/^Error invoking remote method '[^']+': (?:Error: )?/, ""); }
-    finally { $("product-quote-refresh").disabled = false; }
+  $("product-quote-refresh").addEventListener("click", async () => {
+    if (quoting || approving || purchaseInfo.activation !== "ready" || !walletReady()) return;
+    const usd = pack(); if (!usd) { $("product-quote-state").textContent = "Choose a positive USD amount with up to two decimal places."; $("product-usd-amount").focus(); return; }
+    const revision = quoteRevision, key = walletKey(); quoting = true; paintPurchase();
+    try {
+      const r = await window.kaiKoinTestBridge.run("purchase-preview", { usd });
+      if (revision !== quoteRevision || key !== walletKey()) return;
+      if (!r?.quote) throw Error("Purchases are unavailable until a validated exchange quote is available. Existing credits can still be used.");
+      if (typeof r.quote.id !== "string" || typeof r.quote.koin !== "string" || !/^(0|[1-9]\d*)(\.\d{1,8})?$/.test(r.quote.koin) || !Number.isSafeInteger(r.quote.observedAt) || !Number.isSafeInteger(r.quote.expiresAt) || r.quote.observedAt > Date.now() + 5000 || r.quote.expiresAt <= Date.now()) throw Error("A fresh verified quote is required.");
+      quote = r.quote; quoteWalletKey = key;
+      if (typeof quote.credits === "string" && /^(0|[1-9]\d*)(\.\d{1,5})?$/.test(quote.credits)) $("product-pack-credits").textContent = quote.credits;
+      $("product-quote-koin").textContent = quote.koin + " KOIN"; $("product-quote-time").textContent = new Date(quote.observedAt).toLocaleTimeString(); $("product-quote-expiry").textContent = new Date(quote.expiresAt).toLocaleTimeString(); $("product-quote-approve").hidden = false;
+      $("product-quote-state").textContent = amountAtoms(purchaseWallet.koin) >= amountAtoms(quote.koin) ? "Review the exact payment in the secure desktop approval." : "Your wallet balance is below this quote. Choose a smaller amount or add KOIN to your wallet.";
+    } catch (error) { if (revision === quoteRevision) $("product-quote-state").textContent = message(error); }
+    finally { quoting = false; paintPurchase(); }
   });
-  $("product-quote-approve").addEventListener("click", async () => { if (approving) return; if (!quote || Date.now() >= quote.expiresAt) return void ($("product-quote-state").textContent = "Quote expired. Refresh before approving."); approving = true; $("product-quote-approve").disabled = true; const id = quote.id; quote = null; $("product-quote-approve").hidden = true; try { const result = await window.kaiKoinTestBridge.run("purchase-approve", id); $("product-quote-state").textContent = result.state === "cancelled" ? "Payment cancelled. No new purchase was started." : "Payment confirmation is pending. Existing credits remain available."; await window.KaiCredits.refresh(); } catch(e) { $("product-quote-state").textContent = e.message; } finally { approving = false; $("product-quote-approve").disabled = false; } });
+  $("product-quote-approve").addEventListener("click", async () => {
+    if (approving || !quote || $("product-quote-approve").disabled) return;
+    approving = true; const saved = quote; paintPurchase();
+    try {
+      await refreshPurchases();
+      if (quote !== saved || quoteWalletKey !== walletKey() || purchaseInfo.activation !== "ready" || !walletReady()) return;
+      if (Date.now() >= quote.expiresAt) return invalidateQuote("Quote expired. Get a fresh quote before approving.");
+      if (amountAtoms(purchaseWallet.koin) < amountAtoms(quote.koin)) { $("product-quote-state").textContent = "Your wallet no longer has enough KOIN for this quote."; return; }
+      const id = quote.id; invalidateQuote();
+      const result = await window.kaiKoinTestBridge.run("purchase-approve", id);
+      $("product-quote-state").textContent = result.state === "cancelled" ? "Payment cancelled. No new purchase was started." : "Payment confirmation is pending. Existing credits remain available.";
+      await Promise.all([window.KaiCredits.refresh(), refreshPurchaseWallet()]);
+    } catch (error) { $("product-quote-state").textContent = message(error); }
+    finally { approving = false; paintPurchase(); }
+  });
+  for (const name of ["kai-account-signed-out", "kai-credit-identity-changed"]) window.addEventListener(name, () => {
+    purchaseGeneration++; walletRead = purchaseRead = null; walletReading = purchaseReading = false; purchaseWallet = null;
+    purchaseInfo = { activation: "loading" }; invalidateQuote("Account changed. Check your payment wallet and get a fresh quote."); paintPurchase();
+    if (buyVisible()) refreshPurchases();
+  });
+  document.addEventListener("visibilitychange", () => { if (buyVisible()) refreshPurchases(); });
+  setInterval(() => { if (buyVisible()) refreshPurchases(); }, 30000);
   document.addEventListener("click", async event => {
     const view = event.target.closest("[data-product-view]"); if (view) return go(view.dataset.productView);
     const p = event.target.closest("[data-credit-pack]"); if (p) { $("product-usd-amount").value = p.dataset.creditPack; pack(); document.querySelectorAll("[data-credit-pack]").forEach(b => b.classList.toggle("selected", b === p)); return; }
     const f = event.target.closest("[data-activity-filter]"); if (f) { filter = f.dataset.activityFilter; document.querySelectorAll("[data-activity-filter]").forEach(b => b.classList.toggle("active", b === f)); paintCredits(window.KaiCredits.get()); return; }
     const model = event.target.closest("[data-network-model]"); if (model && !model.disabled) { go("chat"); window.dispatchEvent(new CustomEvent("kai-network-use", { detail: { model: model.dataset.networkModel } })); return; }
     const action = event.target.closest("[data-product-action]")?.dataset.productAction; if (!action) return;
+    if (action === "payment-wallet") {
+      go("earn"); legacy.open = true; await renderEarn();
+      const target = !$("earn-setup").hidden ? $("earn-setup") : !$("earn-unlock").hidden ? $("earn-unlock") : $("wallet-address");
+      target.scrollIntoView({ block: "center" }); (target.matches("input") ? target : target.querySelector("input,button"))?.focus({ preventScroll: true });
+    }
     if (action === "legacy") { go("earn"); legacy.open = true; legacy.scrollIntoView({ block: "start" }); }
     if (action === "provider-setup") { await refreshPublicProvider(); }
     if (action === "provider-download") { await providerAction("download"); }
@@ -193,7 +324,7 @@
   document.addEventListener("click", event => { if (event.target.closest("[data-credit-refresh]")) window.KaiCredits.refresh(); });
   window.KaiCredits?.subscribe(paintCredits);
   new MutationObserver(paintProvider).observe($("koin-test-payments"), { subtree: true, attributes: true, childList: true, characterData: true }); paintProvider();
-  window.KaiProduct = { render(view) { if (["credits", "buy-credits", "recovery"].includes(view)) window.KaiCredits?.refresh(); if (view === "network-overview") refreshNetwork(); if (view === "earn") refreshPublicProvider(); } };
+  window.KaiProduct = { render(view) { if (["credits", "buy-credits", "recovery"].includes(view)) window.KaiCredits?.refresh(); if (view === "buy-credits") refreshPurchases(); if (view === "network-overview") refreshNetwork(); if (view === "earn") refreshPublicProvider(); } };
   setInterval(() => { if (document.hidden) return; if (!$("view-network-overview").hidden) refreshNetwork(); if (!$("view-earn").hidden) refreshPublicProvider(); }, 15000);
-  setInterval(() => { if (document.hidden) return; paintNetwork(); paintCredits(window.KaiCredits.get()); if (quote && Date.now() >= quote.expiresAt) { quote = null; $("product-quote-approve").hidden = true; $("product-quote-state").textContent = "Quote expired. Refresh before approving."; } }, 1000);
+  setInterval(() => { if (document.hidden) return; paintNetwork(); paintCredits(window.KaiCredits.get()); if (quote && Date.now() >= quote.expiresAt) { invalidateQuote("Quote expired. Get a fresh quote before approving."); } }, 1000);
 })();

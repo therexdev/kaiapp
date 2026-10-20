@@ -32,8 +32,9 @@
     const loading = state.status === "loading", usd = snapshot?.product === "prepaid-usd-v1" && s?.unit === "USD-1e-8";
     const reset = Number(s?.free?.resetAt), resetText = Number.isFinite(reset) && reset > 0 ? ` Free credits reset ${new Date(reset).toLocaleString()}.` : "";
     const status = usd ? stale ? "Showing your last verified balance. Refresh to check current credits." : "" : s ? "Your earlier balance is in Account help. It is separate from USD credits." : loading ? "Loading your free and purchased credits." : state.error || "Your credit balance could not be loaded. Try again.";
-    const compactStatus = !status ? "" : usd ? "Last verified balance. Refresh to update." : s || /earlier KOIN account/i.test(status) ? "Earlier balance: Account help."
+    const compactStatus = !status ? "" : usd ? "Last verified balance. Refresh to update." : s ? "Earlier balance: Account help."
       : loading ? "Checking your credit account…" : /not activated|activation is pending/i.test(status) ? "Credit service not activated yet."
+      : /earlier KOIN account/i.test(status) ? "Earlier balance: Account help."
       : /Open the desktop app/i.test(status) ? "Open desktop to check your credits." : /sign in/i.test(status) ? "Sign in to check your credits." : "Could not refresh. Retry or view details.";
     return {
       usd, stale, total: usd ? credits(s.available) : loading ? "…" : "—",

@@ -26,11 +26,25 @@ test("Test payment IPC rejects other documents and keeps stable builds disabled"
     ipcMain: { handle: (_name, h) => { handler = h; } } };
   const stable = registerTestPaymentIPC({ ...options, isTest: false }), event = { sender: w.webContents, senderFrame: w.webContents.mainFrame };
   assert.equal((await handler(event, "purchase", "1")).enabled, false);
+  assert.equal((await handler(event, "purchase-info")).enabled, false);
   await assert.rejects(handler({ ...event, senderFrame: { url: w.webContents.mainFrame.url } }, "status"), /access denied/); stable.dispose();
   const testBuild = registerTestPaymentIPC({ ...options, isTest: true });
   assert.equal((await handler(event, "status")).configured, false);
+  const availability = await handler(event, "purchase-info");
+  assert.equal(availability.activation, "unavailable");
+  assert.match(availability.blocked, /not activated/);
+  assert.deepEqual(fs.readdirSync(root), [], "checking availability creates no payment or wallet records");
+  // An earlier account may still be readable or require recovery. It must
+  // never make the unrelated public purchase service appear ready.
+  fs.mkdirSync(path.join(root, "koin-foundation-test"));
+  fs.writeFileSync(path.join(root, "koin-foundation-test", "deployment.json"), "earlier account fixture");
+  assert.deepEqual(await handler(event, "purchase-info"), availability);
+  await assert.rejects(handler(event, "purchase-info", {}), /takes no arguments/);
   w.webContents.mainFrame.url = "http://127.0.0.1:9000/mascot.html";
-  await assert.rejects(handler(event, "import"), /access denied/); testBuild.dispose();
+  await assert.rejects(handler(event, "import"), /access denied/);
+  await assert.rejects(handler(event, "purchase-info"), /access denied/);
+  w.webContents.mainFrame.url = "http://127.0.0.1:9000/"; testBuild.dispose();
+  await assert.rejects(handler(event, "purchase-info"), /open app/);
 });
 test("Test manifests reject mainnet, changed chain identity, arbitrary fields and imprecise amounts", t => {
   const f = setup(t), c = structuredClone(f.config); c.mode = "test-deployment";

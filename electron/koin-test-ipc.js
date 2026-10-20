@@ -90,6 +90,12 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     if (!trustedMainDocument(event, window, origin)) throw Error("Desktop window access denied");
     if (!isTest) return { enabled: false, mode: "test-deployment" };
     if (typeof action !== "string" || Buffer.byteLength(JSON.stringify(input ?? null)) > (["chat-completion", "chat-estimate", "run-chat", "run-execute", "run-input"].includes(action) ? 28000 : 16384)) throw Error("Invalid Test payment action");
+    // Purchases use the public USD service, independently of any earlier
+    // wallet deployment that still supports balance reads or recovery.
+    if (action === "purchase-info") {
+      if (input !== undefined || disposed) throw Error("Purchase availability takes no arguments and requires an open app");
+      return creditService.info(AbortSignal.timeout(10000));
+    }
     if (action.startsWith("provider-public-")) {
       if (input !== undefined || disposed) throw Error("Provider controls take no arguments");
       if (action === "provider-public-info") return creditProvider.info();

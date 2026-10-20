@@ -41,6 +41,7 @@ test("credit presentation distinguishes zero, unavailable, stale and earlier KOI
   await store.refresh();
   assert.equal(creditPresentation(store.get(), 1000).total, "—");
   assert.equal(creditPresentation(store.get(), 1000).status, "Service not activated");
+  assert.equal(creditPresentation({ status: "unavailable", snapshot: null, error: "The earlier KOIN account is preserved for recovery. Credit service activation is pending." }, 1000).compactStatus, "Credit service not activated yet.");
   const zero = value("2"); zero.credits.available = zero.credits.free.available = zero.credits.purchased.available = "0";
   store.accept(zero);
   assert.equal(creditPresentation(store.get(), 1000).total, "0");

@@ -14,6 +14,7 @@ test("Revision 2 free entry, unified credits, unavailable quote, stale network a
     const purchases = [{ id: "fixture-pending", state: "pending", createdAt: Date.now() }];
     window.kaiKoinTestBridge = { onProgress: fn => { listeners.add(fn); return () => listeners.delete(fn); }, run: async (action, input) => {
       window.productCalls.push({ action, input });
+      if (action === "purchase-info") return { ...common, activation: "ready", blocked: "" };
       if (action === "chat-info") return { ...common, activation: "ready", runBudgets: window.advancedReady === true, blocked: "", model: "fixture", maxOutput: 32, maxRequestCredits: "1" };
       if (action === "credit-status") return { ...common, credits: credit(), purchases, usage: [] };
       if (action === "status") return { ...common, accessReady: true, credits: credit().purchased, creditState: credit(), purchases, usage: [], purchasePending: true, worker: { running: window.productSharing } };
@@ -50,6 +51,8 @@ test("Revision 2 free entry, unified credits, unavailable quote, stale network a
       throw Error("Unexpected fixture action: " + action);
     } };
   });
+  await page.route("**/core/koinos/rpc", route => route.request().postDataJSON().channel === "wallet:summary"
+    ? route.fulfill({ json: { ok: true, data: { address: "fixture-owner", network: "mainnet", tokenSymbol: "KOIN", koin: "100", usd: null, price: null } } }) : route.continue());
   await page.goto(`http://127.0.0.1:${await core.start()}`);
   await page.locator('[data-product-action="setup-local"]').click();
   assert.equal(await page.locator("#btn-download").isVisible(), true);

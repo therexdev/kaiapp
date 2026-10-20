@@ -1,3 +1,9 @@
+## Wallet balance and clear purchase availability
+
+Buy credits now shows the payment wallet's KOIN balance, address and network independently of the AI credit balance. Refresh and Open wallet are available on the purchase screen. A failed balance read is not shown as zero, and wallet changes invalidate an earlier purchase quote.
+
+The purchase screen checks public service availability when opened. It explains when purchases are not activated, sign-in is required or a current exchange quote is unavailable, instead of presenting an apparently working checkout with blank fields. The public USD-credit service is still not activated; this release does not deploy contracts, set commercial pricing or transfer KOIN.
+
 ## White KAI design, simpler menus and visible credit status
 
 - Restores the original white KAI character, blue brand mark and pearl-and-blue app theme. KAI is back on Chat, with the compact desktop KAI button kept in its new header position. Window controls, app bars, form controls and scrollbars follow the same light palette.
