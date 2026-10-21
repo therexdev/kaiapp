@@ -28,17 +28,31 @@ function fixture(t) {
   for (const name of [...feedNames, ...Array.from({ length: 994 }, (_, n) => `historical-${n}.exe`)]) rolling.assets.set(name, { id: id++, name, state: "uploaded", text: "previous:" + name });
   const releases = new Map([["test-build", rolling]]), refs = new Map(), writes = [];
   const unavailable = () => { throw Object.assign(Error("GitHub resource missing"), { status: 1, stderr: "HTTP 404" }); };
-  const state = { failUpload: null };
+  const state = { failUpload: null, hideCreatedDrafts: false, creationResponse: {}, creationError: null };
   const gh = (...args) => {
     if (args[0] === "api" && args[1] === "--paginate") {
       if (args[2] === "repos/therexdev/kaiapp/releases?per_page=100") {
         const exactTag = JSON.parse(args[4].match(/select\(\.tag_name == (".*")\)/)[1]);
         const release = releases.get(exactTag);
+        if (release?.draft && state.hideCreatedDrafts && writes.some(w => w.action === "create" && w.tag === exactTag)) return "";
         return release ? JSON.stringify({ id: release.id }) : "";
       }
       const releaseId = Number(args[2].match(/releases\/(\d+)\/assets/)[1]);
       const release = [...releases.values()].find(r => r.id === releaseId);
       return [...release.assets.values()].map(({ id, name, state }) => JSON.stringify({ id, name, state })).join("\n");
+    }
+    if (args[0] === "api" && args[1] === "--method" && args[2] === "POST") {
+      assert.equal(args[3], "repos/therexdev/kaiapp/releases");
+      const request = JSON.parse(fs.readFileSync(args[args.indexOf("--input") + 1], "utf8"));
+      assert.equal(request.draft, true); assert.equal(request.prerelease, true); assert.equal(request.make_latest, "false");
+      assert.equal(request.target_commitish, commit);
+      assert.ok(request.body.includes(`Source commit: ${commit}`));
+      const release = { id: releaseId++, prerelease: true, draft: true, target_commitish: request.target_commitish, assets: new Map() };
+      writes.push({ action: "create", tag: request.tag_name });
+      releases.set(request.tag_name, release);
+      if (state.creationError) throw state.creationError;
+      const { assets, ...metadata } = release;
+      return JSON.stringify({ ...metadata, tag_name: request.tag_name, ...state.creationResponse });
     }
     if (args[0] === "api") {
       assert.notEqual(args[1], "-X", "successful historical assets must not be deleted");
@@ -64,11 +78,6 @@ function fixture(t) {
       const filename = args[args.indexOf("--pattern") + 1], destination = args[args.indexOf("--dir") + 1];
       fs.writeFileSync(path.join(destination, filename), yaml.dump({ version: "0.54.12", path: "Koinos-AI-Setup-0.54.12.exe", sha512: "live-hash", files: [{ url: "Koinos-AI-Setup-0.54.12.exe", sha512: "live-hash", size: 12 }] }));
       return "";
-    }
-    if (args[0] === "release" && args[1] === "create") {
-      assert.ok(args.includes("--draft") && args.includes("--prerelease") && args.includes("--latest=false"));
-      writes.push({ action: "create", tag: args[2] });
-      releases.set(args[2], { id: releaseId++, prerelease: true, draft: true, target_commitish: args[args.indexOf("--target") + 1], assets: new Map() }); return "";
     }
     if (args[0] === "release" && args[1] === "upload") {
       const release = releases.get(args[2]), file = args[5], name = path.basename(file);
@@ -127,13 +136,40 @@ test("failed artifact upload leaves the new release private and the old update p
   assert.equal(f.writes.filter(w => w.action === "create" && w.tag === f.tag).length, 1);
 });
 
-test("first publication reads back both newly created drafts before publishing", t => {
-  const f = fixture(t); f.releases.delete("test-build");
+test("first publication uses creation identities while new drafts are missing from release listings", t => {
+  const f = fixture(t); f.releases.delete("test-build"); f.state.hideCreatedDrafts = true;
   publish(f.dir, f);
   assert.equal(f.releases.get("test-build").draft, false);
   assert.equal(f.releases.get(f.tag).draft, false);
   assert.equal(f.releases.get("test-build").assets.size, 6);
   assert.deepEqual(f.writes.filter(w => w.action === "create").map(w => w.tag), ["test-build", f.tag]);
+});
+
+test("new artifact publication tolerates draft listing lag without duplicate creation", t => {
+  const f = fixture(t); f.state.hideCreatedDrafts = true;
+  publish(f.dir, f);
+  assert.equal(f.releases.get(f.tag).draft, false);
+  assert.equal(f.writes.filter(w => w.action === "create").length, 1);
+  assert.equal(f.rolling.assets.size, 1000);
+});
+
+test("creation responses with unexpected identity, source or visibility stop before uploads", t => {
+  for (const response of [{ id: null }, { tag_name: "other-tag" }, { target_commitish: "b".repeat(40) }, { prerelease: false }, { draft: false }]) {
+    const f = fixture(t); f.state.creationResponse = response;
+    assert.throws(() => publish(f.dir, f), /Created Test release does not match/);
+    assert.deepEqual(f.writes.map(w => w.action), ["create"]);
+    assert.equal(f.rolling.assets.get("test.yml").text, "previous:test.yml");
+  }
+});
+
+test("a lost creation response fails once and a later run reuses the saved draft", t => {
+  const f = fixture(t); f.state.creationError = Error("connection reset after creation");
+  assert.throws(() => publish(f.dir, f), /connection reset after creation/);
+  assert.deepEqual(f.writes.map(w => w.action), ["create"]);
+  assert.equal(f.releases.get(f.tag).draft, true);
+  f.state.creationError = null; publish(f.dir, f);
+  assert.equal(f.releases.get(f.tag).draft, false);
+  assert.equal(f.writes.filter(w => w.action === "create").length, 1);
 });
 
 test("an existing draft with another source is rejected before any release writes", t => {
