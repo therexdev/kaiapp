@@ -125,9 +125,39 @@ test("Release lookup requests only the rolling release and bounds its response",
 
 test("Only a confirmed missing release permits creation; authentication errors propagate", () => {
   const failure = (status) => () => { throw Object.assign(new Error("GitHub failed"), { status: 1, stderr: `gh: HTTP ${status}` }); };
-  assert.equal(findTestRelease(failure(404)), null);
+  assert.equal(findTestRelease((...args) => args[1] === "--paginate" ? "" : failure(404)()), null);
   assert.throws(() => findTestRelease(failure(403)), /GitHub failed/);
   assert.throws(() => findTestRelease(() => { throw new Error("network unavailable"); }), /network unavailable/);
+  assert.throws(() => findTestRelease((...args) => failure(args[1] === "--paginate" ? 403 : 404)()), /GitHub failed/);
+  assert.throws(() => findTestRelease(failure(404)), /GitHub failed/, "a failed listing does not confirm absence");
+});
+
+test("Draft lookup paginates exact-tag matches and reads the selected release by ID", () => {
+  const tag = "test-build-0.54.12-test.199.1", calls = [];
+  const result = findTestRelease((...args) => {
+    calls.push(args);
+    if (calls.length === 1) throw Object.assign(Error("published release missing"), { status: 1, stderr: "HTTP 404" });
+    if (calls.length === 2) {
+      assert.deepEqual(args, ["api", "--paginate", "repos/therexdev/kaiapp/releases?per_page=100", "--jq", `.[] | select(.tag_name == "${tag}") | {id}`]);
+      return '{"id":419009039}\n';
+    }
+    assert.deepEqual(args, ["api", "repos/therexdev/kaiapp/releases/419009039", "--jq", "{id,tag_name,prerelease,draft,target_commitish}"]);
+    return JSON.stringify({ id: 419009039, tag_name: tag, prerelease: true, draft: true, target_commitish: "a".repeat(40) });
+  }, tag);
+  assert.deepEqual(result, { id: 419009039, prerelease: true, draft: true, target_commitish: "a".repeat(40) });
+  assert.equal(calls.length, 3);
+});
+
+test("Draft lookup rejects ambiguous tags, changed identity, and disappearing releases", () => {
+  const gh = (listing, release) => (...args) => {
+    if (args[1].includes("/releases/tags/")) throw Object.assign(Error("not published"), { status: 1, stderr: "HTTP 404" });
+    if (args[1] === "--paginate") return listing;
+    if (release instanceof Error) throw release;
+    return JSON.stringify(release);
+  };
+  assert.throws(() => findTestRelease(gh('{"id":1}\n{"id":2}')), /Ambiguous/);
+  assert.throws(() => findTestRelease(gh('{"id":1}', { id: 1, tag_name: "another-tag" })), /tag mismatch/);
+  assert.throws(() => findTestRelease(gh('{"id":1}', Object.assign(Error("draft disappeared"), { status: 1, stderr: "HTTP 404" }))), /draft disappeared/);
 });
 
 test("Test publication removes only incomplete assets and retries one transient upload at a time", () => {

@@ -23,7 +23,7 @@ function fixture(t) {
     artifacts: windows.map(name => ({ name, sha256: hash(path.join(dir, name)) })) };
   fs.writeFileSync(path.join(dir, reportName(version)), JSON.stringify(report));
   const feedNames = ["latest.yml", "latest-linux.yml", "latest-linux-arm64.yml", "test.yml", "test-linux.yml", "test-linux-arm64.yml"];
-  let id = 10;
+  let id = 10, releaseId = 2;
   const rolling = { id: 1, prerelease: true, draft: false, target_commitish: "historical", assets: new Map() };
   for (const name of [...feedNames, ...Array.from({ length: 994 }, (_, n) => `historical-${n}.exe`)]) rolling.assets.set(name, { id: id++, name, state: "uploaded", text: "previous:" + name });
   const releases = new Map([["test-build", rolling]]), refs = new Map(), writes = [];
@@ -31,6 +31,11 @@ function fixture(t) {
   const state = { failUpload: null };
   const gh = (...args) => {
     if (args[0] === "api" && args[1] === "--paginate") {
+      if (args[2] === "repos/therexdev/kaiapp/releases?per_page=100") {
+        const exactTag = JSON.parse(args[4].match(/select\(\.tag_name == (".*")\)/)[1]);
+        const release = releases.get(exactTag);
+        return release ? JSON.stringify({ id: release.id }) : "";
+      }
       const releaseId = Number(args[2].match(/releases\/(\d+)\/assets/)[1]);
       const release = [...releases.values()].find(r => r.id === releaseId);
       return [...release.assets.values()].map(({ id, name, state }) => JSON.stringify({ id, name, state })).join("\n");
@@ -39,8 +44,17 @@ function fixture(t) {
       assert.notEqual(args[1], "-X", "successful historical assets must not be deleted");
       if (args[1].endsWith("/releases/latest")) return JSON.stringify({ tag_name: "v0.54.12", prerelease: false, draft: false, assets: feedNames.filter(n => n.startsWith("latest")).map(name => ({ name })) });
       if (args[1].includes("/releases/tags/")) {
-        const value = releases.get(args[1].split("/releases/tags/")[1]); if (!value) return unavailable();
+        const value = releases.get(args[1].split("/releases/tags/")[1]);
+        // GitHub's REST by-tag endpoint does not expose drafts, even to their creator.
+        if (!value || value.draft) return unavailable();
         const { assets, ...metadata } = value; return JSON.stringify(metadata);
+      }
+      if (/\/releases\/\d+$/.test(args[1])) {
+        const releaseId = Number(args[1].split("/").at(-1));
+        const entry = [...releases.entries()].find(([, release]) => release.id === releaseId);
+        if (!entry) return unavailable();
+        const [tag_name, { assets, ...metadata }] = entry;
+        return JSON.stringify({ ...metadata, tag_name });
       }
       if (args[1].includes("/git/ref/tags/")) {
         const sha = refs.get(args[1].split("/git/ref/tags/")[1]); return sha ? JSON.stringify({ type: "commit", sha }) : unavailable();
@@ -54,7 +68,7 @@ function fixture(t) {
     if (args[0] === "release" && args[1] === "create") {
       assert.ok(args.includes("--draft") && args.includes("--prerelease") && args.includes("--latest=false"));
       writes.push({ action: "create", tag: args[2] });
-      releases.set(args[2], { id: 2, prerelease: true, draft: true, target_commitish: args[args.indexOf("--target") + 1], assets: new Map() }); return "";
+      releases.set(args[2], { id: releaseId++, prerelease: true, draft: true, target_commitish: args[args.indexOf("--target") + 1], assets: new Map() }); return "";
     }
     if (args[0] === "release" && args[1] === "upload") {
       const release = releases.get(args[2]), file = args[5], name = path.basename(file);
@@ -107,6 +121,27 @@ test("failed artifact upload leaves the new release private and the old update p
   assert.equal(f.releases.get(f.tag).draft, true);
   assert.equal(f.rolling.assets.get("test.yml").text, "previous:test.yml");
   assert.equal(f.writes.some(w => w.tag === "test-build"), false);
+  // Retry finds the existing draft through list/get and does not create a duplicate.
+  f.state.failUpload = null; publish(f.dir, f);
+  assert.equal(f.releases.get(f.tag).draft, false);
+  assert.equal(f.writes.filter(w => w.action === "create" && w.tag === f.tag).length, 1);
+});
+
+test("first publication reads back both newly created drafts before publishing", t => {
+  const f = fixture(t); f.releases.delete("test-build");
+  publish(f.dir, f);
+  assert.equal(f.releases.get("test-build").draft, false);
+  assert.equal(f.releases.get(f.tag).draft, false);
+  assert.equal(f.releases.get("test-build").assets.size, 6);
+  assert.deepEqual(f.writes.filter(w => w.action === "create").map(w => w.tag), ["test-build", f.tag]);
+});
+
+test("an existing draft with another source is rejected before any release writes", t => {
+  const f = fixture(t);
+  f.releases.set(f.tag, { id: 2, prerelease: true, draft: true, target_commitish: "b".repeat(40), assets: new Map() });
+  assert.throws(() => publish(f.dir, f), /does not match the verified source/);
+  assert.equal(f.writes.length, 0);
+  assert.equal(f.rolling.assets.get("test.yml").text, "previous:test.yml");
 });
 
 test("source conflicts and changed verification bytes stop before any release writes", t => {

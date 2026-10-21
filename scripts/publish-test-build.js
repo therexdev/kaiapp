@@ -14,11 +14,22 @@ function findTestRelease(gh, tag = TAG) {
   try {
     return JSON.parse(gh("api", `repos/${REPO}/releases/tags/${tag}`, "--jq", "{id,prerelease,draft,target_commitish}"));
   } catch (error) {
-    // A missing first release is expected. Auth/network failures must stop
-    // publication, rather than being mistaken for permission to create one.
-    if (error.status === 1 && /HTTP 404/.test(String(error.stderr))) return null;
-    throw error;
+    // GitHub's by-tag endpoint only returns published releases. A draft can
+    // already exist, so a 404 alone is not permission to create another one.
+    if (error.status !== 1 || !/HTTP 404/.test(String(error.stderr))) throw error;
   }
+  const output = gh("api", "--paginate", `repos/${REPO}/releases?per_page=100`,
+    "--jq", `.[] | select(.tag_name == ${JSON.stringify(tag)}) | {id}`).trim();
+  const matches = output ? output.split(/\r?\n/).map(line => JSON.parse(line)) : [];
+  if (!matches.length) return null;
+  if (matches.length !== 1 || !Number.isSafeInteger(matches[0].id) || matches[0].id <= 0) throw new Error("Ambiguous Test release lookup");
+  // Read the exact release again, rather than trusting a possibly stale list.
+  // Permission/network errors (including a disappearing draft) stop publication.
+  const release = JSON.parse(gh("api", `repos/${REPO}/releases/${matches[0].id}`,
+    "--jq", "{id,tag_name,prerelease,draft,target_commitish}"));
+  if (release.id !== matches[0].id || release.tag_name !== tag) throw new Error("Test release lookup tag mismatch");
+  const { tag_name, ...metadata } = release;
+  return metadata;
 }
 
 function releaseAssets(gh, releaseId) {
