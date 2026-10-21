@@ -143,6 +143,21 @@ class RuntimeManager {
     }
   }
 
+  // Local evidence collection observes the existing process only. It must not
+  // download, reload or switch models after a stale status observation.
+  acquireCurrent(alias) {
+    this.models.resolveAlias(alias);
+    if (this._loading || this.activeAlias !== alias || !this.runtime?.status().running) throw new Error("The current model changed before the local check started");
+    this._inflight += 1;
+    let released = false;
+    return { endpoint: this.runtime.endpoint, release: () => {
+      if (released) return;
+      released = true;
+      this._inflight = Math.max(0, this._inflight - 1);
+      if (!this._inflight) for (const waiter of this._drainWaiters.splice(0)) waiter();
+    } };
+  }
+
   /** Wait until nothing is streaming, or the cap runs out — a switch must
    *  never hang forever behind an abandoned connection. */
   async _drain() {

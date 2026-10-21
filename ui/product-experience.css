@@ -122,3 +122,8 @@
 
 .product-v2 .product-two.product-single{grid-template-columns:1fr}
 .product-v2 #network-model-price{font-size:10px;color:var(--text-dim);overflow-wrap:anywhere}
+
+.product-v2 #product-provider-check h3{font-size:13px;margin:20px 0 8px}
+.product-v2 #product-provider-check progress{width:100%;height:9px;accent-color:var(--violet)}
+.product-v2 #product-provider-check .product-actions{margin-top:12px}
+.product-v2 #product-provider-check [data-check-export]{overflow-wrap:anywhere}

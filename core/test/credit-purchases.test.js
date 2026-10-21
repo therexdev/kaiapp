@@ -2,17 +2,18 @@
 const test = require("node:test"), assert = require("node:assert/strict"), fs = require("fs"), path = require("path"), { EventEmitter } = require("events"), { Signer } = require("koilib");
 const { fixture } = require("./helpers/koin-funding-recovery-fixture"), P = require("../lib/koin-network/job-protocol"), USD = require("../lib/koin-network/purchase-quote");
 const { CreditPurchases } = require("../../electron/credit-purchases");
+const Prices = require("./helpers/purchase-price-fixture");
 function setup(t) {
   const f = fixture(t, { usd: true }); let response = 1, revoked = false, signatures = 0, reviews = 0;
   const signer = Signer.fromSeed("funding-recovery-verifier"), wallet = { address: f.signer.getAddress(), signer: f.signer };
   const sign = f.signer.signTransaction.bind(f.signer); f.signer.signTransaction = async tx => { signatures++; return sign(tx); };
   f.provider.call = async (_method, { transaction }) => { f.state.submissions.push(structuredClone(transaction)); throw Error("Lost fixture response"); };
-  const config = { mode: "isolated-rehearsal", deployment: f.d, owner: wallet.address, schedulerUrl: "https://fixture.invalid/scheduler", version: 1,
+  const config = { mode: "isolated-rehearsal", deployment: f.d, owner: wallet.address, schedulerUrl: "https://fixture.invalid/scheduler", version: 1, pricingPolicyHash: Prices.pricingPolicyHash,
     maxRcPerTransaction: "10000000", maxRcPerDay: "20000000", limits: { amount: "500000000" } };
   const directory = path.join(f.dir, "credit-account-v2", P.hash("account"), P.hash(JSON.stringify(config))); fs.mkdirSync(directory, { recursive: true });
   const registrations = [], c = { config, directory, auth: { accountId: "account", sessionToken: "private-session" }, flow: { call: async (route, body) => {
     if (route === "purchase") { registrations.push(body.txId); return {}; }
-    assert.equal(route, "quote-usd"); return { args: await USD.issue({ deployment: f.d, signer, account: wallet.address, amount: USD.nativeForDollars(body.dollars, "25000000"), usdPerKoin: "25000000", version: 1, now: f.state.now }) };
+    assert.equal(route, "quote-usd"); return Prices.issue({ deployment: f.d, signer, account: wallet.address, amount: USD.nativeForDollars(body.dollars, "25000000"), usdPerKoin: "25000000", version: 1, now: f.state.now });
   } } };
   const options = { dataDir: f.dir, account: { wallet, assertCreditAuthorization: () => { if (revoked) throw Error("Signed out"); } }, storage: {
     isEncryptionAvailable: () => true, encryptString: text => Buffer.from(text), decryptString: bytes => bytes.toString() }, clock: () => f.state.now, clientFactory: () => f.client,

@@ -123,6 +123,9 @@ async function start() {
   const origin = `http://127.0.0.1:${port}`;
   const requireMain = event => { if (!trustedMainDocument(event, win, origin)) throw new Error("Desktop window access denied"); };
   protectNavigation(win.webContents, origin, url => shell.openExternal(url));
+  const providerCheck = require("./provider-check-ipc").registerProviderCheckIPC({ ipcMain, core, getMainWindow: () => win, origin,
+    appVersion: app.getVersion(), channel: release.channel, dialog, clipboard: require("electron").clipboard, downloadsDirectory: app.getPath("downloads") });
+  app.on("before-quit", () => providerCheck.dispose());
   require("../ui/locales/catalogs");
   const nativeI18n = require("../ui/i18n");
   let refreshLanguageMenu = () => {};

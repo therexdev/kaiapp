@@ -24,7 +24,7 @@ test("Buy credits shows KOIN independently, explains activation and discards cha
       if (action === "provider-public-info") return { state: "unavailable", detail: "Fixture" };
       if (action === "purchase-preview") {
         if (window.pausePurchaseQuote) await new Promise(resolve => { window.finishPurchaseQuote = resolve; });
-        return { quote: { id: "fixture-quote", koin: "2", credits: "1000", observedAt: Date.now(), expiresAt: Date.now() + 60000 } };
+        return { quote: { id: "fixture-quote", koin: "2", credits: "1000", observedAt: Date.now() - 17 * 60000, expiresAt: Date.now() + 60000, priceDetails: { usdPerKoin: "0.5", windowSeconds: 1800, referenceKind: "merchant-exchange-reference" } } };
       }
       if (action === "purchase-approve") return { state: "cancelled" };
       throw Error("Unexpected fixture action: " + action);
@@ -74,6 +74,13 @@ test("Buy credits shows KOIN independently, explains activation and discards cha
   await page.locator("#product-quote-approve").waitFor({ state: "visible" });
   assert.equal(await page.locator("#product-quote-approve").isDisabled(), true);
   assert.equal(await page.locator("#product-quote-approve").textContent(), "Not enough KOIN");
+  assert.equal(await page.locator("#product-quote-details").evaluate(n => n.open), false);
+  await page.locator("#product-quote-details summary").click();
+  assert.equal(await page.locator("#product-quote-rate").textContent(), "1 KOIN = $0.5");
+  assert.match(await page.locator("#product-quote-reference").textContent(), /vKOIN\/USDT exchange reference/);
+  assert.match(await page.locator("#product-quote-window").textContent(), /30 minutes/);
+  await page.locator("#product-quote-details summary").click();
+  assert.equal(await page.locator("#product-quote-details").evaluate(n => n.open), false);
   wallet = { ...wallet, koin: "10" }; await page.locator("#product-wallet-refresh").click();
   await page.waitForFunction(() => !document.getElementById("product-quote-approve").disabled);
   // Changing the loaded wallet during the final read must stop approval.
@@ -82,6 +89,7 @@ test("Buy credits shows KOIN independently, explains activation and discards cha
   await page.waitForFunction(() => document.getElementById("product-quote-approve").hidden);
   assert.equal(await page.evaluate(() => window.purchaseCalls.filter(c => c.action === "purchase-approve").length), 0);
   assert.match(await page.locator("#product-wallet-address").textContent(), /payment-wallet-b/);
+  assert.equal(await page.locator("#product-quote-details").isVisible(), false);
   // Also discard a quote which arrives after account identity changed.
   await page.evaluate(() => { window.pausePurchaseQuote = true; }); await page.locator("#product-quote-refresh").click();
   await page.waitForFunction(() => !!window.finishPurchaseQuote);

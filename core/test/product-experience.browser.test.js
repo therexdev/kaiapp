@@ -28,7 +28,7 @@ test("Revision 2 free entry, unified credits, unavailable quote, stale network a
       if (action === "purchase-preview") {
         if (!window.previewFixture) throw Error("Current purchase pricing is unavailable. Existing credits are still usable.");
         await new Promise(resolve => { window.resolvePreview = resolve; });
-        return { quote: { id: "fixture-quote", koin: "1", observedAt: Date.now(), expiresAt: Date.now() + 60000 } };
+        return { quote: { id: "fixture-quote", koin: "1", observedAt: Date.now(), expiresAt: Date.now() + 60000, priceDetails: { usdPerKoin: "1", windowSeconds: 1800, referenceKind: "merchant-exchange-reference" } } };
       }
       if (action === "purchase-approve") { await new Promise(resolve => { window.resolveApproval = resolve; }); return { state: "cancelled" }; }
       if (action === "network-overview") {

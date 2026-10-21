@@ -5,10 +5,18 @@ const P = require("../core/lib/koin-network/job-protocol"), D = require("../core
 const { scheduler } = require("../core/lib/koin-network/grant-chat");
 const { utils } = require("koilib");
 function configuration(value) {
-  if (!value || Object.keys(value).sort().join() !== "deployment,limits,maxOutput,maxRcPerDay,maxRcPerTransaction,mode,model,owner,policyHash,schedulerUrl,schema,version" ||
+  const fields = "deployment,limits,maxOutput,maxRcPerDay,maxRcPerTransaction,mode,model,owner,policyHash,schedulerUrl,schema,version";
+  const expected = value && Object.hasOwn(value, "pricingPolicyHash") ? (fields + ",pricingPolicyHash").split(",").sort().join() : fields;
+  if (!value || Object.keys(value).sort().join() !== expected ||
       value.schema !== 1 || !["test-deployment", "mainnet-pilot"].includes(value.mode)) throw Error("Exact public Test deployment manifest required");
   const c = structuredClone(value), client = new KoinChain(c.deployment);
   assertPaymentMode(c.mode, client); c.deployment = structuredClone(client.d);
+  // Older saved contexts remain readable for chat/payment recovery. New USD
+  // purchases separately require the explicit pricing-policy pin.
+  if (Object.hasOwn(c, "pricingPolicyHash")) {
+    if (!require("../core/lib/koin-network/product").isUsd(c.deployment)) throw Error("Pricing policy applies only to USD credit purchases");
+    P.digest(c.pricingPolicyHash);
+  }
   c.schedulerUrl = scheduler(c.schedulerUrl);
   if (!utils.isChecksumAddress(c.owner)) throw Error("Pin the Test wallet address");
   P.digest(c.policyHash); P.integer(c.version, 1); P.integer(c.maxOutput, 1, 2000000);

@@ -9,6 +9,20 @@
  */
 
 const { contextBridge, ipcRenderer } = require("electron");
+// Local fixed-suite measurements. The renderer chooses no endpoint, path,
+// model, test prompt or report contents; exports use the native main process.
+contextBridge.exposeInMainWorld("kaiProviderCheckBridge", {
+  start: () => ipcRenderer.invoke("provider:local-check", "start"),
+  status: () => ipcRenderer.invoke("provider:local-check", "status"),
+  cancel: () => ipcRenderer.invoke("provider:local-check", "cancel"),
+  copy: () => ipcRenderer.invoke("provider:local-check", "copy"),
+  save: () => ipcRenderer.invoke("provider:local-check", "save"),
+  onProgress: callback => {
+    const listener = (_event, value) => callback(value);
+    ipcRenderer.on("provider:local-check-progress", listener);
+    return () => ipcRenderer.removeListener("provider:local-check-progress", listener);
+  },
+});
 // Fixed local example only. No caller-supplied quote, transport or signing.
 contextBridge.exposeInMainWorld("kaiKoinReviewBridge", {
   preview: () => ipcRenderer.invoke("koin:preview-review"),

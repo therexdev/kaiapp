@@ -1,3 +1,10 @@
+## Check this computer from Earn
+
+- Earn now runs a local model check from **Check this computer**, with progress, cancellation, and **Copy report** / **Save report** when evidence is available. No ports, model paths, developer benchmark page, sign-in, or credits are needed.
+- The check uses the installed model and produces a local support report. Network setup can be refreshed separately with **Reload setup**; service connection errors do not overwrite the local check result.
+- Local check results do not qualify a provider or turn sharing on. The green ONLINE label still requires fresh network confirmation.
+- Buy credits shows the exchange observation time and a compact **Price details** section with the verified purchase rate. The displayed details are bound to the signed quote and the configured pricing policy. Retrying a quote preserves its purchase intent; a later purchase can use the same amount without reusing the earlier payment.
+
 ## One credit balance across approved network models
 
 - Network Chat lists each model supplied by the activated credit service, with availability and input/output credit rates. Your selected model stays selected when it goes offline; the app asks you to choose another instead of silently changing it.

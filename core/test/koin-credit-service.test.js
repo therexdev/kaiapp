@@ -41,6 +41,7 @@ test("activation discovers an earlier USD recovery record without moving or chan
   fs.writeFileSync(path.join(root, "deployment.json"), JSON.stringify(config));
   const record = { schema: 1, owner: f.auth.owner, deployment: P.hash(JSON.stringify(config)), state: "pending", id: P.hash("earlier-job"), session: P.hash("earlier-session"), requestHash: P.hash("earlier-message"), input: "encrypted-input" };
   const bytes = JSON.stringify(record), file = path.join(root, "prepaid-chat-recovery.json"); fs.writeFileSync(file, bytes);
+  f.service.service.config.pricingPolicyHash = P.hash("new-purchase-pricing-policy");
   const context = await f.service.context(); assert.equal(context.recoverable.length, 1); assert.equal(context.recoverable[0].record.id, record.id);
   assert.equal((await f.service.info()).recoveryAvailable, true); assert.equal(fs.readFileSync(file, "utf8"), bytes);
 });
