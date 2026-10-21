@@ -128,11 +128,11 @@ test("Revision 2 free entry, unified credits, unavailable quote, stale network a
   assert.match(await page.locator("#product-provider-earnings").textContent(), /20742.*0\.10000000 KOIN.*needs review/);
  await page.locator("#product-provider-toggle").click();
   await page.waitForFunction(() => document.getElementById("product-provider-label").textContent === "ONLINE");
-  await page.locator('.product-earn [data-product-view="network-overview"]').click();
+  await page.locator("#nav-network").click();
   await page.waitForFunction(() => document.getElementById("product-provider-count").textContent === "1");
   await page.waitForFunction(() => document.getElementById("product-network-time").textContent.includes("stale"));
   assert.equal(await page.locator('[data-network-model="fixture"]').isDisabled(), true);
-  await page.locator('#view-network-overview [data-product-view="earn"]').click();
+  await page.locator('#nav [data-view="earn"]').click();
   assert.equal(await page.evaluate(() => window.productSharing), true);
   assert.equal(await page.evaluate(() => window.productCalls.some(c => c.action === "worker-stop")), false);
   await page.locator("#product-provider-toggle").click(); await page.waitForFunction(() => !window.productSharing);

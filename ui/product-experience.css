@@ -99,3 +99,25 @@
 .product-purchase-wallet button,.product-purchase-availability button{font-size:11px}
 .product-v2 #product-quote-refresh:disabled{background:#e6edf8;color:#667793;border-color:#d3deed;cursor:default;opacity:1}
 @media(max-width:900px){.product-purchase-wallet,.product-purchase-availability{align-items:flex-start;flex-direction:column;gap:12px;padding:17px}.product-purchase-wallet strong{font-size:21px}}
+/* Product pages use one natural document flow and one scrollbar. A flex child
+   must not shrink the sharing panel to make room for account history. */
+.product-v2 #main{min-height:0;overflow:clip}
+.product-v2 .workspace-header{flex:0 0 auto}
+.product-v2 .product-page,.product-v2 #view-earn{display:block;flex:1 1 0;height:auto;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
+.product-v2 .product-earn{overflow:visible}
+.product-v2 .product-head,.product-v2 .product-panel,.product-v2 .product-two{flex-shrink:0}
+.product-v2 #product-legacy-account{margin:26px 0 0;padding:18px 0;border-top:1px solid var(--border)}
+.product-v2 #product-legacy-account>summary{font-size:12px;line-height:1.5}
+.product-v2 #product-legacy-account>.api-card{padding:22px 0;max-width:none;width:100%;overflow:visible}
+.product-v2 #product-wallet-controls{max-width:900px}
+.product-v2 #product-wallet-controls h2{margin:22px 0 12px}
+.product-v2 #product-wallet-controls .hint{line-height:1.6;margin:10px 0}
+.product-v2 #product-wallet-controls .form-row{margin:12px 0;flex-wrap:wrap}
+.product-v2 #product-wallet-controls input{min-width:0}
+.product-v2 #product-wallet-controls .snippet{overflow-wrap:anywhere;white-space:pre-wrap}
+.product-v2 #product-provider-readiness{margin-top:8px}
+.product-v2 #product-provider-label{font-size:clamp(25px,2.5vw,38px);overflow-wrap:anywhere}
+.product-v2 #product-provider-label[data-state="online"]{font-size:clamp(32px,3vw,46px)}
+.product-v2 #product-completed-count[data-unreported="true"]{font-size:25px;letter-spacing:-.5px}
+
+.product-v2 .product-two.product-single{grid-template-columns:1fr}

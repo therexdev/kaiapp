@@ -1,3 +1,12 @@
+## Clear Earn, Wallet and Network pages
+
+- The lower-left Network button opens Network overview directly. Earn focuses on sharing status, earnings and provider setup; its duplicate network shortcut and older reservation/payment section are removed from the normal flow.
+- Wallet management opens its own page from the sidebar balance or Buy credits. Earlier account activity remains under Account help, with its original records and balances preserved.
+- Earn, Buy credits and the other account pages use a single page scrollbar. Headings stay below the app bar, and opening a page starts at its top.
+- Public network status can load independently of credit-service activation or an earlier payment account. Online providers are distinguished from verified paid-service readiness; unavailable work/activity statistics are not shown as invented totals.
+
+Credit purchases still require the new service and contracts to be activated. The activation handoff includes a read-only server check and the remaining purchase, free-credit and two-computer acceptance steps.
+
 ## Restored wallet card and Chat history panel
 
 - The main sidebar shows wallet KOIN and VHP balances again, separately from AI credits. Its dollar estimate values KOIN only. Clicking the wallet card opens the wallet controls directly; unknown balances stay unknown.

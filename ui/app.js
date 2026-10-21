@@ -471,7 +471,7 @@ window.addEventListener("kai-network-use", async event => {
   $("src-pick").dispatchEvent(new Event("change")); activateView("chat"); $("input").focus();
   if (event.detail?.model) { await fillNetworkModelPick(); if ([...$("model-pick").options].some(o => o.value === event.detail.model)) $("model-pick").value = event.detail.model; }
 });
-window.addEventListener("kai-network-account", () => { activateView("earn"); if ($("product-legacy-account")) $("product-legacy-account").open = true; $("koin-use-tab").click(); $("koin-test-payments").scrollIntoView({ block: "start" }); });
+window.addEventListener("kai-network-account", () => { activateView("recovery"); if ($("product-legacy-account")) $("product-legacy-account").open = true; $("koin-use-tab").click(); $("koin-test-payments").scrollIntoView({ block: "start" }); });
 window.addEventListener("kai-network-recover", async () => {
   if (state.chatting) return;
   state.chatting = true; $("btn-send").disabled = true; $("network-recover").disabled = true; $("btn-stop").hidden = false;
@@ -552,7 +552,7 @@ function showView(name, { navOnly = false } = {}) {
   const phys = name.startsWith("koinos") ? "koinos" : name;
   const headings = {
     chat: ["Chat", "Your work. Your choice of AI."],
-    credits: ["Credits", ""], "buy-credits": ["Buy credits", ""], "network-overview": ["Network", ""], recovery: ["Recovery", ""],
+    credits: ["Credits", ""], "buy-credits": ["Buy credits", ""], "payment-wallet": ["Wallet", ""], "network-overview": ["Network", ""], recovery: ["Account help", ""],
     docs: ["Documents", "From a first thought to the final draft."],
     compare: ["Compare models", "One question. A few different perspectives."],
     models: ["Model library", "Find the right mind for the job."],
@@ -698,9 +698,15 @@ function renderSettings() {
 function activateView(name) {
   if (state.view === "workflows" && name !== "workflows") { if (!window.KaiWorkflows?.canLeave()) return; window.KaiWorkflows?.leave(); }
   if (name === "tasks" && window.kaiCompanionBridge) name = "workflows";
+  if (name === "network" && document.body.classList.contains("product-v2")) name = "network-overview";
   state.view = name;
   state.routed = true; // they chose this; the boot poll must stop overriding it
   showView(name);
+  // The shell never shares a scroll offset with its pages. Explicit page
+  // navigation starts at the heading; background refreshes preserve position.
+  $("main").scrollTop = 0;
+  const page = $("view-" + name);
+  if (page?.matches(".product-page, #view-earn")) page.scrollTop = 0;
   if (name.startsWith("koinos")) {
     // One entry now; the rail inside picks the screen. Re-selecting the rail's
     // current item keeps the iframe warm and the highlight honest.
@@ -710,7 +716,7 @@ function activateView(name) {
   if (name === "api") renderApi();
   if (name === "devtools") window.KaiDevTools?.render();
   if (name === "code") window.KaiCode?.render();
-  if (name === "earn") renderEarn();
+  if (["earn", "payment-wallet", "recovery"].includes(name)) renderEarn();
   if (name === "models") renderModels();
   if (name === "compare") renderCompare();
   if (name === "tasks") renderTasks();
@@ -1512,6 +1518,7 @@ async function renderEarn() {
   $("earn-setup").hidden = s.wallet.exists && !wifShowing;
   $("earn-unlock").hidden = !s.wallet.exists || s.wallet.unlocked;
   $("earn-ready").hidden = !(s.wallet.exists && s.wallet.unlocked) || wifShowing;
+  if ($("product-earlier-provider")) $("product-earlier-provider").hidden = $("earn-ready").hidden;
   if (!$("earn-unlock").hidden) {
     // Which wallet file is this? If the creation time isn't when you made
     // (or last restored) your wallet, the file is the problem, not the password.
@@ -1637,7 +1644,7 @@ async function renderEarn() {
     KaiI18n.setText($("btn-earn-toggle"), s.worker.running ? "Stop Earning" : "Start Earning");
     $("btn-earn-toggle").dataset.running = s.worker.running ? "1" : "";
   }
-  if (!$("view-earn").hidden) {
+  if (["view-earn", "view-payment-wallet", "view-recovery"].some(id => $(id) && !$(id).hidden)) {
     earnTimer = setTimeout(renderEarn, s.worker?.running ? 2000 : 5000);
   }
 }
@@ -1646,6 +1653,7 @@ function earnErr(msg) {
   $("earn-error").hidden = !msg;
   $("earn-error").textContent = msg || "";
   if (msg) $("earn-error").classList.remove("ok");
+  if ($("product-legacy-error")) { $("product-legacy-error").hidden = !msg; $("product-legacy-error").textContent = msg || ""; }
 }
 
 /** Success note in the same slot errors use — one place to look. */
@@ -1846,10 +1854,9 @@ async function refreshSidebarWallet() {
   }
 }
 async function openPaymentWallet() {
-  activateView("earn");
-  const legacy = $("product-legacy-account"); if (legacy) legacy.open = true;
+  activateView("payment-wallet");
   await renderEarn();
-  if ($("view-earn").hidden) return;
+  if ($("view-payment-wallet").hidden) return;
   const target = !$("earn-setup").hidden ? $("earn-setup") : !$("earn-unlock").hidden ? $("earn-unlock") : $("wallet-address");
   target.scrollIntoView({ block: "center" });
   (target.matches("input") ? target : target.querySelector("input,button"))?.focus({ preventScroll: true });

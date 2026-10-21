@@ -959,6 +959,13 @@ class Gateway {
       return this._json(res, 200, { ok: true, ...this._netModels.v });
     }
 
+    // Public overview is independent of credit activation, wallet unlock and
+    // historical payment records. Core owns privacy and the configured URL.
+    if (this.network && path === "/core/network/overview" && req.method === "GET") {
+      try { return this._json(res, 200, { ok: true, network: await this.network.overview() }); }
+      catch (e) { return this._json(res, 503, { ok: false, error: String(e.message) }); }
+    }
+
     // Full network status — feeds the Network tab: computers online, live
     // classes, and per-provider rows (addresses arrive pre-truncated from
     // the scheduler). Same brief cache + fail-soft shape as the picker.

@@ -1,9 +1,42 @@
 # Credit purchases: current status and activation handoff
 
-Evidence checked October 20, 2026. Desktop baseline: Test 195.1,
-`30b51d000a4946f7a857e3c1d75e4a87a95fc958`. Backend implementation:
+Backend source rechecked October 21, 2026. Desktop baseline: Test 200.1,
+`5b9ef8d9b58d2aba9cdbf893b4aaaca457864dd8`. Backend base reviewed:
 `therexdev/kai`, branch `codex/revision2-implementation`,
 `ba82f8a59b1543f54d43e2ae1071288589de1e68`.
+
+## The next operator action
+
+Run the prepared read-only report on the Vultr server after saving the reviewed
+`scripts/koin-credit-activation-preflight.py` file there:
+
+```bash
+sudo python3 kai-credit-activation-preflight.py
+```
+
+It uses Python's standard library and prints one sanitized JSON report. It checks
+the two known services, installed source commits, known runtime/bootstrap paths,
+local and HTTPS health, actual public signup capability, configured pricing/free
+policy/qualification, and counts of saved purchase, request and reward states.
+It never signs, transfers, deploys, restarts, retries or clears a payment. It does
+not read wallet keys, runtime signing keys, invitations, account databases or
+operator-secret files; no account addresses, credential values, prompts or
+transaction payloads are printed. It queries bounded private temporary copies of
+SQLite files so even SQLite shared-memory files in the live state remain untouched.
+The temporary copies are removed before it exits.
+
+Send that report back. It distinguishes an existing USD installation from the old
+pilot without asking the owner to investigate configuration files. Missing at a
+known path is not proof that no configuration exists elsewhere. Configured fields
+are not claimed valid or funded: on-chain pins, price evidence and funding require
+the next read-only checks. A busy database is reported as unavailable to inspect,
+never stopped or repaired. `--offline` skips the HTTP checks.
+
+The operator report is the only server action requested at this point. The next
+engineering deliverable is a completed activation package using the actual server
+state, followed by one review of its exact destinations, transfers and deployment.
+The owner should not have to choose polling intervals, JSON fields or RPC retry
+settings.
 
 ## What the missing balance means
 
@@ -24,6 +57,7 @@ A bounded public read of `https://payments.koinosai.com/health` returned HTTP
 `product` field. That shows the existing pilot responds; it does not establish
 `prepaid-usd-v1` activation. The current backend emits an explicit product in
 health responses, which must be checked against the deployment evidence.
+That public observation was repeated October 21 UTC; use the report for current status.
 
 Showing KOIN and an immediate explanation fixes the screen. It does not enable
 payments. Changing the manifest to `ready` without actual deployed pins would
@@ -105,6 +139,69 @@ timeouts, polling and test fixtures without sending each choice back to the
 owner. Commercial prices, actual funding and externally attested market
 evidence must remain explicit.
 
+## A concrete pilot pricing proposal
+
+These are proposed limited-pilot settings for **Koinos Fast**, not an approved
+commercial price, a cost-recovery claim or values already installed:
+
+| Setting | Proposal | Configuration amount |
+| --- | --- | --- |
+| Input usage | $0.10 per million AI tokens | `inputAtomsPerMillion: "10000000"` |
+| Output usage | $0.30 per million AI tokens | `outputAtomsPerMillion: "30000000"` |
+| Daily free allowance | 7.5 credits per verified account ($0.0075) | `accountDaily: "750000"` |
+| Network daily free budget | 300 credits ($0.30; 40 full allowances) | `networkDaily: "30000000"` |
+| Origin daily free budget | 22.5 credits ($0.0225; three full allowances) | `originDaily: "2250000"` |
+| Free concurrency | One request per account | `accountConcurrent: 1` |
+
+At the higher output tariff, 25,000 AI tokens cost 7.5 credits, so this allowance
+covers at least the historical 25,000-token daily entitlement for this model when
+network/origin budget is available. Input-heavy usage costs less. For example,
+1,000 input tokens plus 250 output tokens costs $0.000175, or **0.175 credits**.
+Conversation history is included in measured input; this is not a fixed price per
+message. Other models need separately measured and priced tariffs.
+
+The free budget is an accounting/sponsorship ceiling, not an extra $0.30 daily
+transfer from the owner. Sponsored work participates in the already bounded
+reward pool and is subject to its funding/eligibility checks. The approved 10,000
+KOIN seed remains a separate real funding transaction. Reverse-proxy requests
+currently share an origin budget unless a trusted origin adapter is configured;
+the two-computer pilot must verify this deliberately before a wider cohort.
+
+The owner can approve or change this price/free-allowance proposal as one policy.
+The Master funding allocation remains a separate commercial decision; existing
+reburn and Mana-retention settings must not be changed by assumption. Engineers
+must prepare a specific allocation from the actual Master configuration, not ask
+the owner to calculate percentages blind.
+
+## Installation issues found before handoff
+
+At backend base `ba82f8a`, public account setup intentionally creates no invitation
+file, but the installer still tries to copy `invitations.json`. The focused
+installer correction on the implementation branch makes that copy conditional
+on invitation mode. Use the exact reviewed installer revision in the activation
+package; the older base alone is insufficient for public installation.
+
+Public sign-in also needs a protected SMTP and/or Google OAuth environment for
+the new service. The existing account implementation is reused; its database and
+sessions are separate under the prepaid state directory. Reuse approved provider
+credentials through a protected service environment, with the new origin/callback
+registered as needed. Do not point the new service at the live account database or
+assume existing sessions transfer. `/auth/methods` must actually advertise a
+working account-creation method. An email/provider credential value must never be
+included in the public manifest or report.
+
+The corrected installer uses `/etc/kai-koin-prepaid/account.env`, root-owned with
+mode `0600`, generated from a protected, allowlisted JSON input. The preflight
+reports only whether that file exists and has private permissions; it never opens
+the credential file. Actual signup capability is read from `/auth/methods`.
+
+The pricing attestation must be readable by the unprivileged prepaid service;
+the unit's `ProtectHome=yes` prevents reading an attestation left under `/root`.
+Prepare a protected service-readable path and safe refresh procedure. Preserve
+the quote signature/evidence checks; do not replace an expiring attestation with a
+hardcoded 1:1 wrapped/native assumption. These installation checks are engineering
+work, not additional user-facing setup screens.
+
 ## Keep the scopes separate
 
 | Scope | Needed now |
@@ -121,6 +218,32 @@ before showing a wallet balance or quoting a purchase. Preserve the agreed
 reward plan while keeping its activation evidence separate. Earlier KOIN
 obligations remain recoverable in their original product; they are neither
 silently converted into USD credits nor a reason to hide the wallet.
+
+## Testing begins in the app
+
+The completed activation package must include free credits, paid purchases, a
+qualified provider and the public service pins together. First run the immediate
+flow: sign in → see free allowance → normal Chat; then Buy credits → one exact
+KOIN approval → confirmed balance → normal Chat → one measured debit. Repeat
+Stop, partial-answer recovery, restart, provider Off and a temporarily unavailable
+price. Price and payout failures must not freeze existing purchased credits.
+
+Paid requests cannot be assigned to a provider belonging to the same account,
+including its other linked wallets. Two computers alone do not establish genuine
+customer/provider independence. Use actual independent customer work for reward
+acceptance; never create accounts merely to bypass this exclusion. Preserve that
+rule when choosing the two-computer test participants.
+
+Provider qualification must run fresh through the guided flow. The expired
+October 16 benchmark does not renew itself, and a 7/10 historical result is not
+permission to weaken the reviewed quality threshold. Engineering should prepare
+unambiguous checks and validate latency on the actual provider computer.
+
+After the immediate buyer/provider flow works, observe **three closed reward
+days**, including the existing one-day review and successful automatic payout,
+before a limited external cohort. This is the approved Revision 2 acceptance
+target; seven telemetry days is not an additional unresolved owner decision. The
+daily observation does not delay starting functional Buy credits/Chat testing.
 
 References: [USD credit semantics](USD_CREDITS.md),
 [implementation checkpoint](REVISION_2_CONTINUATION.md), and backend

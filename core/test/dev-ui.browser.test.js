@@ -146,9 +146,9 @@ test("sidebar: switches live in Settings, and what they reveal survives a reload
     await page.waitForSelector("#view-chat:not([hidden])");
 
     // Network is an icon now, not a sidebar row.
-    assert.strictEqual(await page.$$eval('.nav-item[data-view="network"]', (e) => e.length), 0);
-    await navClick(page, '[data-view="network"]');
-    await page.waitForSelector("#view-network:not([hidden])");
+    assert.strictEqual(await page.$$eval('.nav-item[data-view="network-overview"]', (e) => e.length), 0);
+    await navClick(page, "#nav-network");
+    await page.waitForSelector("#view-network-overview:not([hidden])");
 
     // Both switches are in one findable place.
     await navClick(page, '[data-view="settings"]');

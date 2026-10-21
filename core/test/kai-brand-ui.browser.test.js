@@ -110,7 +110,7 @@ test("KAI workspace: artwork, welcome drafts, all navigation and narrow-window h
   for (const id of ["btn-dev-toggle", "btn-code-toggle"]) {
     if (await page.getAttribute("#" + id, "aria-checked") !== "true") await page.click("#" + id);
   }
-  for (const view of ["models", "docs", "compare", "tools", "tasks", "api", "earn", "network", "settings", "code", "devtools"]) {
+  for (const view of ["models", "docs", "compare", "tools", "tasks", "api", "earn", "network-overview", "settings", "code", "devtools"]) {
     await navClick(page, `[data-view="${view}"]`);
     await page.waitForSelector(`#view-${view}:not([hidden])`);
     assert.equal(await page.locator("#chats-pane").isVisible(), false, "Recent chats appear only in Chat");

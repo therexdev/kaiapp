@@ -88,6 +88,22 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
   ipcMain.handle("koin:test-payments", async (event, action, input) => {
     const window = getMainWindow();
     if (!trustedMainDocument(event, window, origin)) throw Error("Desktop window access denied");
+    if (action === "network-overview") {
+      if (input !== undefined || disposed) throw Error("Network overview takes no arguments and requires an open app");
+      // Public browsing is also available in Live. Payment APIs below retain
+      // their separate Test guard and are never enabled by this read.
+      if (!isTest) return { network: await core.gateway.network.overview(AbortSignal.timeout(10000)) };
+      // An activated credit network owns its model/qualification/receipt view.
+      // Never replace a failed read of it with an unrelated public network.
+      if (creditService.service.state === "ready") return creditService.run(action, input, AbortSignal.timeout(10000));
+      if ([usdRoot, prepaidRoot].includes(root) && fs.existsSync(configFile)) {
+        const config = readConfig(configFile);
+        if (isPrepaid(config.deployment)) { open(); access.authorize(config.schedulerUrl); return flow(window).call("network"); }
+      }
+      // Custody-only and fresh profiles can still inspect the public network
+      // without opening a payment journal or waiting for credit activation.
+      return { network: await core.gateway.network.overview(AbortSignal.timeout(10000)) };
+    }
     if (!isTest) return { enabled: false, mode: "test-deployment" };
     if (typeof action !== "string" || Buffer.byteLength(JSON.stringify(input ?? null)) > (["chat-completion", "chat-estimate", "run-chat", "run-execute", "run-input"].includes(action) ? 28000 : 16384)) throw Error("Invalid Test payment action");
     // Purchases use the public USD service, independently of any earlier
@@ -115,7 +131,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
       if (action === "run-input") return creditRunExecutor.input(input);
       if (action === "run-stop") creditRunExecutor.stop(input);
       if (["run-list", "run-status", "run-stop"].includes(action)) return creditService.run(action, input, AbortSignal.timeout(10000));
-      if (["credit-status", "chat-estimate", "network-overview"].includes(action)) return creditService.run(action, input, AbortSignal.timeout(10000));
+      if (["credit-status", "chat-estimate"].includes(action)) return creditService.run(action, input, AbortSignal.timeout(10000));
       if (["chat-completion", "chat-recover", "chat-ack", "run-open", "run-chat", "run-execute"].includes(action)) {
         if (disposed || creditBusy) throw Error("Finish or stop the current chat first");
         if (!window.isVisible() || window.isMinimized()) throw Error("Return to the visible desktop window to chat");
@@ -148,12 +164,12 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
         ...(isPrepaid(config.deployment) ? { maxRequestCredits: require("../core/lib/koin-network/purchase-quote").credits(config.limits.perJob) } : {}), blocked,
         recoveryAvailable: !blocked && ["pending", "answered"].includes(recovery?.state) };
     }
-    if (["chat-estimate", "credit-status", "network-overview"].includes(action)) {
+    if (["chat-estimate", "credit-status"].includes(action)) {
       if (!fs.existsSync(configFile)) throw Error(creditService.service.reason || "The credit service is not available yet");
       const config = readConfig(configFile);
       if (!isPrepaid(config.deployment)) throw Error("The earlier KOIN account is preserved for recovery. Credit service activation is pending.");
       open(); access.authorize(config.schedulerUrl);
-      return action === "network-overview" ? flow(window).call("network") : action === "credit-status" ? flow(window).status() : flow(window).estimate(input, AbortSignal.timeout(10000));
+      return action === "credit-status" ? flow(window).status() : flow(window).estimate(input, AbortSignal.timeout(10000));
     }
     if (action === "provider-status") {
       if (!fs.existsSync(configFile) || !worker?.running) return { state: "offline", label: "OFFLINE", detail: "Turn on to provide AI to the network." };

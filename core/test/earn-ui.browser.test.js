@@ -2,7 +2,7 @@
 const { navClick } = require("./ui-nav");
 
 /*
- * The Earn tab's wallet forms in a real Chromium: create (typed, confirmed),
+ * The dedicated wallet view's forms in a real Chromium: create (typed, confirmed),
  * backup shown, lock, unlock (typed + Enter), then restore-from-backup-code
  * and unlock again. Guards the exact field-report: "the unlock button sent
  * 0 characters" — every submit here goes through real keystrokes.
@@ -43,8 +43,8 @@ test("earn wallet UI: create -> lock -> unlock -> restore -> unlock (real browse
     const page = await browser.newPage();
     await page.goto(base);
     await page.waitForSelector("#view-chat:not([hidden])");
-    await navClick(page, '.nav-item[data-view="earn"]');
-    await page.locator("#product-legacy-account > summary").click();
+    await page.locator("#sidebar-wallet").click();
+    await page.waitForSelector("#view-payment-wallet:not([hidden])");
     await page.waitForSelector("#earn-setup:not([hidden])");
 
     // Create: typed keystrokes, both fields, mismatch first (guard works),
@@ -67,7 +67,7 @@ test("earn wallet UI: create -> lock -> unlock -> restore -> unlock (real browse
     assert.match(await page.textContent("#koin-stats"), /Not active/);
     assert.equal(await page.locator("#btn-koin-purchase").isDisabled(), true);
     assert.equal(await page.locator("#btn-koin-claim").count(), 0);
-    assert.match(await page.textContent("#earn-ready"), /Rewards will be sent automatically/);
+    assert.match(await page.textContent("#product-earlier-provider"), /Rewards will be sent automatically/);
     assert.equal(await page.locator("#earn-legacy").getAttribute("open"), null);
     assert.equal(await page.locator("#earn-deposit-amt").count(), 0);
     assert.equal(await page.locator("#wallet-send-pass").isVisible(), true);
@@ -137,8 +137,8 @@ test("wallet card: receive address shown, sends demand a password and a second c
     const page = await browser.newPage();
     await page.goto(base);
     await page.waitForSelector("#view-chat:not([hidden])");
-    await navClick(page, '.nav-item[data-view="earn"]');
-    await page.locator("#product-legacy-account > summary").click();
+    await page.locator("#sidebar-wallet").click();
+    await page.waitForSelector("#view-payment-wallet:not([hidden])");
     await page.waitForSelector("#earn-ready:not([hidden])");
 
     // Receive: the card carries this wallet's real address.

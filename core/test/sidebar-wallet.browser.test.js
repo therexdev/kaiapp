@@ -77,11 +77,11 @@ test("sidebar shows KOIN and VHP separately from credits and opens the current w
     await page.click("#nav-settings");
     await page.locator("#view-settings:not([hidden])").waitFor();
     await page.locator("#sidebar-wallet").click();
-    assert.equal(await page.locator("#product-legacy-account").evaluate(n => n.open), true);
+    assert.equal(await page.locator("#product-legacy-account").isVisible(), false);
     // Exercise the same polls that used to restore the previous page a
     // second after the click. The wallet contents must also initialize.
     await page.evaluate(async () => { await refresh(); await refreshSidebarWallet(); await refresh(); });
-    assert.equal(await page.locator("#view-earn").isVisible(), true, "wallet navigation survives background refreshes");
+    assert.equal(await page.locator("#view-payment-wallet").isVisible(), true, "wallet navigation survives background refreshes");
     await page.locator(example.control).waitFor({ state: "visible", timeout: 5000 });
     if (wallet.unlocked) assert.equal(await page.inputValue("#wallet-address"), wallet.address);
   }

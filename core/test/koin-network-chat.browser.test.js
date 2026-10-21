@@ -1,6 +1,5 @@
 "use strict";
 const { test } = require("node:test"), assert = require("node:assert/strict"), fs = require("fs"), os = require("os"), path = require("path");
-const { navClick } = require("./ui-nav");
 const CHROMIUM = process.env.KAI_TEST_CHROMIUM || "/opt/pw-browsers/chromium";
 test("earlier KOIN account remains in explicit recovery; provider ONLINE expires without renewed qualification", { skip: !fs.existsSync(CHROMIUM), timeout: 60000 }, async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-network-ui-"));
@@ -36,8 +35,8 @@ test("earlier KOIN account remains in explicit recovery; provider ONLINE expires
       throw Error("Unexpected action " + action);
     } };
   });
-  await page.goto(base); await navClick(page, '.nav-item[data-view="earn"]');
-  await page.locator("#product-legacy-account > summary").click();
+  await page.goto(base); await page.locator('.product-sidebar-credits [data-product-view="credits"]').click();
+  await page.locator('#view-credits .product-footer [data-product-action="legacy"]').click();
   await page.waitForFunction(() => document.getElementById("koin-available").textContent.includes("0.10000000"));
   assert.equal(await page.locator('.product-sidebar-credits [data-credit-total]').textContent(), "—", "old KOIN is never relabelled USD credits");
   for (const value of ["", "0", "-0.1", "0.1 KOIN", "0.123456789", "1e-1"]) {

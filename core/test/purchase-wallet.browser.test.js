@@ -53,7 +53,7 @@ test("Buy credits shows KOIN independently, explains activation and discards cha
     await page.locator("#view-buy-credits").evaluate(n => { n.scrollTop = 0; });
     await page.screenshot({ animations: "disabled", path: path.join(process.env.KAI_PRODUCT_QA_DIR, "buy-wallet-unavailable.png") });
   }
-  await page.locator('[data-product-action="payment-wallet"]').click();
+  await page.locator('#view-buy-credits [data-product-action="payment-wallet"]').click();
   await page.locator("#wallet-address").waitFor({ state: "visible" });
   assert.equal(await page.inputValue("#wallet-address"), "payment-wallet-a");
   assert.equal(await page.locator("#wallet-address").evaluate(n => document.activeElement === n), true);

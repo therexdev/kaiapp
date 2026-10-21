@@ -1,6 +1,6 @@
 "use strict";
 const { test } = require("node:test"), assert = require("node:assert/strict"), fs = require("fs"), os = require("os"), path = require("path");
-const { navClick } = require("./ui-nav"), CHROMIUM = process.env.KAI_TEST_CHROMIUM || "/opt/pw-browsers/chromium";
+const CHROMIUM = process.env.KAI_TEST_CHROMIUM || "/opt/pw-browsers/chromium";
 for (const product of ["prepaid-v1", "prepaid-usd-v1"]) test(product + " customer uses Buy credits and normal Chat; provider has ONLINE and Off", { skip: !fs.existsSync(CHROMIUM), timeout: 60000 }, async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-prepaid-ui-")), core = await require("../server").createCore({ dataDir: dir, port: 0, onEvent() {} });
   let browser; t.after(async () => { await browser?.close(); await core.stop(); fs.rmSync(dir, { recursive: true, force: true }); });
@@ -33,8 +33,8 @@ for (const product of ["prepaid-v1", "prepaid-usd-v1"]) test(product + " custome
       throw Error("Unexpected action " + action);
     } };
   }, product);
-  await page.goto(`http://127.0.0.1:${await core.start()}`); await navClick(page, '.nav-item[data-view="earn"]');
-  await page.locator("#product-legacy-account > summary").click();
+  await page.goto(`http://127.0.0.1:${await core.start()}`); await page.locator('.product-sidebar-credits [data-product-view="credits"]').click();
+  await page.locator('#view-credits .product-footer [data-product-action="legacy"]').click();
   await page.fill("#koin-test-amount", "0.1"); await page.locator('[data-koin-test="purchase"]').click();
   await page.waitForFunction(() => !document.querySelector('[data-koin-test="purchase"]').disabled);
   await page.locator('[data-koin-test="purchase-retry"]').click();
@@ -71,7 +71,7 @@ for (const product of ["prepaid-v1", "prepaid-usd-v1"]) test(product + " custome
   assert.equal(actions.filter(a => a === "purchase").length, 1); assert.ok(!actions.some(a => /reserve|session|release|refund/.test(a)));
   const qa = process.env.KAI_PREPAID_QA_DIR;
   if (qa) { fs.mkdirSync(qa, { recursive: true }); await page.screenshot({ path: path.join(qa, "prepaid-chat.png") }); }
-  await navClick(page, '.nav-item[data-view="earn"]'); assert.equal(await page.locator("#koin-advanced").isVisible(), false);
+  await page.locator('.product-sidebar-credits [data-product-view="credits"]').click(); await page.locator('#view-credits .product-footer [data-product-action="legacy"]').click(); assert.equal(await page.locator("#koin-advanced").isVisible(), false);
   assert.equal(await page.locator('[data-koin-test="refund"]').isVisible(), false);
   await page.locator("#koin-earn-tab").click(); await page.locator('[data-koin-test="worker-start"]').click();
   await page.waitForFunction(() => document.getElementById("koin-provider-state").textContent === "ONLINE");

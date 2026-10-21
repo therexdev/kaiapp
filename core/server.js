@@ -366,6 +366,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     }),
     shadowAuthorization: signal => account.shadowAuthorization(koinShadowConsumerUrl, signal),
     trackShadowRequest: controller => { shadowRequests.add(controller); return () => shadowRequests.delete(controller); },
+    overview: signal => require("./lib/network-overview").readPublicNetworkOverview({ network, signal }),
     // §23: network requests are signed by the earning account — identity and
     // metering in one. Null when there's no unlocked wallet to sign with.
     signConsume: async (messages) => {

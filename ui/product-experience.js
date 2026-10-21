@@ -24,14 +24,18 @@
       <section class="product-panel product-order"><p class="product-eyebrow">You receive</p><div class="product-balance"><span id="product-pack-credits">—</span> <small>credits</small></div><div class="product-detail"><span>KOIN payment</span><strong id="product-quote-koin">Quote required</strong></div><div class="product-detail"><span>Price source</span><strong>Uniswap v4 · vKOIN/USDT</strong></div><div class="product-detail"><span>Last updated</span><strong id="product-quote-time">No verified quote</strong></div><div class="product-detail"><span>Valid until</span><strong id="product-quote-expiry">—</strong></div><p id="product-quote-state" role="status">Choose an amount to check purchasing availability. Existing credits remain usable while a purchase confirms or pricing is unavailable.</p><button id="product-quote-refresh" class="primary" disabled>Checking availability…</button><button id="product-quote-approve" class="primary" hidden>Review payment</button><p class="product-fine">Nonrefundable · nontransferable · no expiry</p><div id="product-pending-purchases"></div></section></div>
     </section>
     <section id="view-network-overview" class="view product-page" hidden>
-      ${head("Network overview", "Available AI, the people providing it, and work being completed.", button("earn", "Back to Earn"))}
-      <section class="product-network-status"><div><h2 id="product-network-state">Checking network status</h2><p id="product-network-time">No verified observation yet.</p></div><div><strong id="product-model-count">—</strong><small>models available</small></div><div><strong id="product-provider-count">—</strong><small>providers ready</small></div><div><strong id="product-waiting-count">—</strong><small>requests waiting</small></div></section>
-      <div class="product-two"><section class="product-panel"><h2>Models on the network</h2><div id="product-network-models"><p>Available models will appear after a verified status check.</p></div></section><section class="product-panel"><p class="product-eyebrow">Work completed today</p><div class="product-balance"><span id="product-completed-count">—</span> <small>requests</small></div><p>Requests with verified delivered replies, including saved partial replies.</p><div class="product-divider"></div><p>Provider payouts are handled separately. Your earnings are shown in Earn.</p></section></div>
-      <section class="product-panel"><h2>Computers providing AI</h2><div id="product-network-providers"><p>No current provider observations.</p></div></section><section class="product-panel"><h2>Recent activity</h2><div id="product-network-activity"><p>No verified activity loaded.</p></div></section>
+      ${head("Network overview", "Available AI and the computers providing it.")}
+      <section class="product-network-status"><div><h2 id="product-network-state">Checking network status</h2><p id="product-network-time">No verified observation yet.</p></div><div><strong id="product-model-count">—</strong><small>models available</small></div><div><strong id="product-provider-count">—</strong><small id="product-provider-count-label">providers ready</small></div><div><strong id="product-waiting-count">—</strong><small id="product-waiting-count-label">requests waiting</small></div></section>
+      <div class="product-two" id="product-network-model-grid"><section class="product-panel"><h2>Models on the network</h2><div id="product-network-models"><p>Available models will appear after a verified status check.</p></div></section><section class="product-panel" id="product-network-completed"><p class="product-eyebrow">Work completed today</p><div class="product-balance"><span id="product-completed-count">—</span> <small id="product-completed-unit">requests</small></div><p id="product-completed-note">Requests with verified delivered replies, including saved partial replies.</p><div class="product-divider"></div><p>Provider payouts are handled separately. Your earnings are shown in Earn.</p></section></div>
+      <section class="product-panel"><h2>Computers providing AI</h2><div id="product-network-providers"><p>No current provider observations.</p></div></section><section class="product-panel" id="product-network-recent"><h2>Recent activity</h2><div id="product-network-activity"><p>No verified activity loaded.</p></div></section>
     </section>
     <section id="view-recovery" class="view product-page" hidden>
-      ${head("Clear answers when something stops.", "Credits, purchases, Chat and provider payouts each keep their own status.")}
+      ${head("Account help", "Check a purchase, recover a reply, or review earlier account activity.")}
       <div class="product-two"><section class="product-panel"><h2>Purchase confirmation</h2><p id="product-recovery-purchase">Check the purchase record before retrying. Existing credits remain available.</p><div class="product-actions">${button("chat", "Keep chatting", true)}${button("buy-credits", "View purchase")}<button data-product-action="purchase-retry">Review saved payment</button></div></section><section class="product-panel"><h2>Interrupted reply</h2><p>Recover the original request and its verified usage. Received text is preserved. A request with no usable answer is not charged.</p><button data-product-action="recover">Recover saved reply</button><p id="product-recovery-state" role="status"></p></section><section class="product-panel"><h2>Model unavailable</h2><p>Choose another network model or use this computer. Your model and spending preference will not change automatically.</p><div class="product-actions">${button("network-overview", "Choose a model")}<button data-product-action="local">Use local AI</button></div></section><section class="product-panel"><h2>Provider payout</h2><p id="product-recovery-payout">Check your verified earnings and payout status. A pending payout does not block Chat or sharing.</p>${button("earn", "View earnings")}</section></div><p class="product-footer">Older pilot balance or transaction? <button data-product-action="legacy">Get account help</button></p>
+    </section>
+    <section id="view-payment-wallet" class="view product-page" hidden>
+      ${head("Your wallet", "Manage the KOIN and VHP held in your wallet.", button("buy-credits", "Buy credits"))}
+      <section id="product-wallet-controls" class="product-panel"><p class="product-fine">Your wallet balance is separate from AI credits. Wallet actions use the same local wallet and approval controls.</p></section>
     </section>`);
   $("sidebar").querySelector(".brand").insertAdjacentHTML("afterend", `<section class="product-sidebar-credits"><p class="product-eyebrow">Available to use</p><strong><span data-credit-total>—</span> <small>credits</small></strong><p data-credit-breakdown>Credit account unavailable</p>${button("buy-credits", "+ Buy credits", true)}<button class="product-text-button" data-product-view="credits">Balance &amp; activity ↗</button></section>`);
   const header = main.querySelector(".workspace-header");
@@ -51,10 +55,26 @@
   $("nav-group-toolkit").querySelector("span").textContent = "More";
   item("earn").querySelector("span").textContent = "Earn";
   $("nav-group-contribute").setAttribute("aria-expanded", "true"); $("nav-items-contribute").setAttribute("aria-hidden", "false"); $("nav-items-contribute").inert = false;
-  $("nav-network").title = "Network"; $("nav-network").setAttribute("aria-label", "Network");
+  $("nav-network").dataset.view = "network-overview"; $("nav-network").title = "Network"; $("nav-network").setAttribute("aria-label", "Network");
   document.querySelector(".chat-pane").insertBefore(document.querySelector(".composer-options"), document.querySelector(".chat-toolbar").nextSibling);
-  const oldEarn = $("view-earn").firstElementChild, legacy = document.createElement("details"); legacy.id = "product-legacy-account"; legacy.innerHTML = '<summary>Payment wallet &amp; earlier account activity</summary>'; oldEarn.replaceWith(legacy); legacy.appendChild(oldEarn);
-  legacy.insertAdjacentHTML("beforebegin", `<div class="product-earn">${head("Share your AI. Earn KOIN.", "Contribute this computer’s spare AI capacity to the network.", button("network-overview", "◎ View network"))}<div class="product-two"><section class="product-panel product-provider"><div class="product-row"><span>Share AI capacity</span><button id="product-provider-toggle" role="switch" aria-checked="false" aria-label="Share AI capacity">Off</button></div><div class="product-provider-state"><span class="product-live-dot"></span><h2 id="product-provider-label">OFFLINE</h2><p id="product-provider-detail">Sharing is off. Turn it on when you’re ready.</p></div><div class="product-divider"></div><strong id="product-provider-model">Model not confirmed</strong><p class="product-fine">Only current, verified qualification counts as ready.</p></section><div><section class="product-panel"><p class="product-eyebrow">AI provider earnings</p><p id="product-provider-earnings">No verified earnings loaded.</p><p class="product-fine">Rewards remain estimates until review and chain confirmation.</p><button data-product-action="payouts">Refresh earnings</button></section><section class="product-panel"><h2>Provider setup</h2><p id="product-provider-setup">Choose an approved model, check this computer, then turn on sharing.</p><div class="product-actions"><button data-product-action="provider-setup">Check this computer</button><button id="product-provider-download" data-product-action="provider-download" hidden>Download approved model</button><button id="product-provider-cancel" data-product-action="provider-cancel" hidden>Cancel setup</button><button data-product-action="legacy">Reward wallet</button></div></section></div></div><section class="product-panel"><h2>Readiness at a glance</h2><p id="product-provider-readiness">Model, qualification and network confirmation must all be current before this computer is shown as ONLINE.</p></section><p class="product-footer">AI earnings are KOIN. They are separate from chat credits.</p></div>`);
+  const oldEarn = $("view-earn").firstElementChild, legacy = document.createElement("details");
+  legacy.id = "product-legacy-account";
+  legacy.innerHTML = '<summary>Earlier KOIN account &amp; transaction recovery</summary>';
+  $("view-recovery").appendChild(legacy); legacy.appendChild(oldEarn);
+  oldEarn.querySelector("h1").textContent = "Earlier account activity";
+  oldEarn.querySelector(".lede").textContent = "Historical balances, reservations and recovery tools. These are separate from the current credit purchase flow.";
+  // Keep the original wallet controls and their event handlers, but give them
+  // a dedicated destination so managing KOIN never opens the old payment UI.
+  const walletReadyPanel = $("earn-ready"), walletStart = $("btn-earn-lock").closest("p");
+  const oldProvider = document.createElement("div"); oldProvider.id = "product-earlier-provider";
+  walletReadyPanel.before(oldProvider);
+  for (const node of [...walletReadyPanel.childNodes]) { if (node === walletStart) break; oldProvider.appendChild(node); }
+  const walletControls = $("product-wallet-controls");
+  for (const id of ["earn-setup", "earn-unlock", "earn-ready", "earn-error"]) walletControls.appendChild($(id));
+  $("earn-setup").querySelector("h2").textContent = "Create your wallet";
+  $("earn-unlock").querySelector("h2").textContent = "Unlock your wallet";
+  oldEarn.insertAdjacentHTML("beforeend", '<p id="product-legacy-error" class="error" role="status" hidden></p>');
+  $("view-earn").insertAdjacentHTML("afterbegin", `<div class="product-earn">${head("Share your AI. Earn KOIN.", "Contribute this computer’s spare AI capacity to the network.")}<div class="product-two"><section class="product-panel product-provider"><div class="product-row"><span>Share AI capacity</span><button id="product-provider-toggle" role="switch" aria-checked="false" aria-label="Share AI capacity">Off</button></div><div class="product-provider-state"><span class="product-live-dot"></span><h2 id="product-provider-label">OFFLINE</h2><p id="product-provider-detail">Sharing is off. Turn it on when you’re ready.</p></div><div class="product-divider"></div><strong id="product-provider-model">Model not confirmed</strong><p id="product-provider-readiness" class="product-fine">Waiting for current model and network confirmation.</p></section><div><section class="product-panel"><p class="product-eyebrow">AI provider earnings</p><p id="product-provider-earnings">No verified earnings loaded.</p><p class="product-fine">KOIN rewards are separate from chat credits.</p><button data-product-action="payouts">Refresh earnings</button></section><section class="product-panel"><h2>Provider setup</h2><p id="product-provider-setup">Choose an approved model, check this computer, then turn on sharing.</p><div class="product-actions"><button data-product-action="provider-setup">Check this computer</button><button id="product-provider-download" data-product-action="provider-download" hidden>Download approved model</button><button id="product-provider-cancel" data-product-action="provider-cancel" hidden>Cancel setup</button><button data-product-action="payment-wallet">Reward wallet</button></div></section></div></div></div>`);
   const onboarding = $("view-onboarding"), oldOnboarding = onboarding.firstElementChild;
   oldOnboarding.classList.add("product-local-setup"); oldOnboarding.hidden = true;
   oldOnboarding.insertAdjacentHTML("afterbegin", '<button data-product-action="first-back">← Back to choices</button>');
@@ -88,24 +108,44 @@
   }
   function paintNetwork() {
     const fresh = network && !networkError && Date.now() < network.validUntil && network.observedAt <= Date.now() + 5000;
+    const publicStatus = network?.source === "public-scheduler";
     $("product-network-state").textContent = fresh ? network.state === "available" ? "AI network status" : "Network paused" : "Network status unavailable";
     $("product-network-time").textContent = network ? `Observed ${new Date(network.observedAt).toLocaleString()} · ${fresh ? "checks every 15 seconds" : "stale — reconnect to refresh"}` : networkError || "No verified observation yet.";
-    for (const [id, value] of [["product-model-count", network?.models.filter(m => m.available).length], ["product-provider-count", network?.readyProviders], ["product-waiting-count", network?.waitingRequests], ["product-completed-count", network?.completedToday]]) $(id).textContent = fresh ? value : "—";
+    $("product-provider-count-label").textContent = publicStatus ? "providers online" : "providers ready";
+    $("product-waiting-count-label").textContent = publicStatus ? "jobs waiting" : "requests waiting";
+    for (const [id, value] of [["product-model-count", network?.models.filter(m => m.available).length], ["product-provider-count", publicStatus ? network?.providersOnline : network?.readyProviders], ["product-waiting-count", network?.waitingRequests]]) $(id).textContent = fresh ? value : "—";
+    const unreported = network?.completedToday === null;
+    $("product-network-completed").hidden = unreported;
+    $("product-network-model-grid").classList.toggle("product-single", unreported);
+    $("product-network-recent").hidden = network?.activityAvailable === false;
+    $("product-completed-count").textContent = fresh ? unreported ? "Not reported" : network.completedToday : "—";
+    $("product-completed-count").dataset.unreported = String(unreported);
+    $("product-completed-unit").hidden = unreported;
+    $("product-completed-note").textContent = unreported ? "This network endpoint reports availability and queues, but does not publish completed requests." : "Requests with verified delivered replies, including saved partial replies.";
     if (!network) return;
-    $("product-network-models").innerHTML = network.models.map(m => `<div class="product-model-row"><div><strong>${esc(m.id)}</strong><p>${m.freeEligible ? "Free credits eligible" : "Purchased credits"}</p></div><div><p>${fresh && m.available ? `${m.providers} providers ready` : "Availability unconfirmed"}</p><button data-network-model="${esc(m.id)}" ${fresh && m.available ? "" : "disabled"}>Use model</button></div></div>`).join("");
+    $("product-network-models").innerHTML = network.models.map(m => `<div class="product-model-row"><div><strong>${esc(m.id)}</strong>${m.freeEligible === null ? "" : `<p>${m.freeEligible ? "Free credits eligible" : "Purchased credits"}</p>`}</div><div><p>${fresh && m.available ? `${m.providers} providers ${publicStatus ? "online" : "ready"}` : "Availability unconfirmed"}</p>${publicStatus ? "" : `<button data-network-model="${esc(m.id)}" ${fresh && m.available && m.selectable !== false ? "" : "disabled"}>Use model</button>`}</div></div>`).join("") || "<p>No models are currently reported.</p>";
     $("product-network-providers").innerHTML = network.providers.length ? network.providers.map(p => `<div class="product-detail"><span>Provider ${esc(p.id)} · ${esc(p.model)}</span><span>${fresh ? esc(p.state.replaceAll("-", " ")) : "Last seen — status stale"}</span></div>`).join("") : "<p>No recently observed providers.</p>";
-    $("product-network-activity").innerHTML = network.activity.length ? network.activity.map(a => `<div class="product-detail"><span>Reply delivered · ${esc(a.model)}</span><time>${esc(new Date(a.at).toLocaleTimeString())}</time></div>`).join("") : "<p>No verified replies recorded today.</p>";
+    $("product-network-activity").innerHTML = network.activityAvailable === false ? "<p>This network endpoint does not publish completed replies.</p>" : network.activity.length ? network.activity.map(a => `<div class="product-detail"><span>Reply delivered · ${esc(a.model)}</span><time>${esc(new Date(a.at).toLocaleTimeString())}</time></div>`).join("") : "<p>No verified replies recorded today.</p>";
   }
   async function refreshNetwork() {
     if (networkPending || document.hidden) return; networkPending = true;
-    try { const result = await window.kaiKoinTestBridge?.run("network-overview"); const n = result?.network;
+    try {
+      let result;
+      if (window.kaiKoinTestBridge) result = await window.kaiKoinTestBridge.run("network-overview");
+      else {
+        const response = await fetch("/core/network/overview", { signal: AbortSignal.timeout(15000) });
+        result = await response.json();
+        if (!response.ok) throw Error(result?.error || "Network status unavailable");
+      }
+      const n = result?.network, publicStatus = n?.source === "public-scheduler";
       if (!n || !Number.isSafeInteger(n.observedAt) || !Number.isSafeInteger(n.validUntil) || n.validUntil < n.observedAt || n.validUntil > n.observedAt + 15000 || !["available", "paused"].includes(n.state) ||
-          ![n.readyProviders, n.waitingRequests, n.completedToday].every(v => Number.isSafeInteger(v) && v >= 0) ||
-          !Array.isArray(n.models) || n.models.length > 256 || n.models.some(m => typeof m.id !== "string" || typeof m.available !== "boolean" || typeof m.freeEligible !== "boolean" || !Number.isSafeInteger(m.providers) || m.providers < 0) ||
+          ![publicStatus ? n.providersOnline : n.readyProviders, n.waitingRequests, ...(publicStatus && n.completedToday === null ? [] : [n.completedToday])].every(v => Number.isSafeInteger(v) && v >= 0) ||
+          (publicStatus && (n.readyProviders !== null || n.activityAvailable !== false)) ||
+          !Array.isArray(n.models) || n.models.length > 256 || n.models.some(m => typeof m.id !== "string" || typeof m.available !== "boolean" || (publicStatus ? m.freeEligible !== null || m.selectable !== false : typeof m.freeEligible !== "boolean") || !Number.isSafeInteger(m.providers) || m.providers < 0) ||
           !Array.isArray(n.providers) || n.providers.length > 256 || n.providers.some(p => typeof p.id !== "string" || typeof p.model !== "string" || typeof p.state !== "string") ||
           !Array.isArray(n.activity) || n.activity.length > 50 || n.activity.some(a => typeof a.model !== "string" || !Number.isSafeInteger(a.at))) throw Error("No verified network status available");
       network = n; networkError = "";
-    } catch (e) { networkError = String(e.message || "Network status unavailable"); } finally { networkPending = false; paintNetwork(); }
+    } catch (e) { networkError = message(e); } finally { networkPending = false; paintNetwork(); }
   }
   let purchaseInfo = { activation: "loading" }, purchaseWallet = null, walletError = "", walletReading = false, purchaseReading = false;
   let walletRead, purchaseRead, purchaseGeneration = 0, quoteWalletKey = null;
@@ -246,7 +286,7 @@
     const model = event.target.closest("[data-network-model]"); if (model && !model.disabled) { go("chat"); window.dispatchEvent(new CustomEvent("kai-network-use", { detail: { model: model.dataset.networkModel } })); return; }
     const action = event.target.closest("[data-product-action]")?.dataset.productAction; if (!action) return;
     if (action === "payment-wallet") await openPaymentWallet();
-    if (action === "legacy") { go("earn"); legacy.open = true; legacy.scrollIntoView({ block: "start" }); }
+    if (action === "legacy") { go("recovery"); legacy.open = true; $("view-recovery").scrollTop = legacy.offsetTop - $("view-recovery").offsetTop; }
     if (action === "provider-setup") { await refreshPublicProvider(); }
     if (action === "provider-download") { await providerAction("download"); }
     if (action === "provider-cancel") { await providerAction("stop"); }

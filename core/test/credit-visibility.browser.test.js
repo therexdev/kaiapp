@@ -53,6 +53,7 @@ test("credits load on open, explain inactive service, retry existing USD account
   await page.waitForFunction(() => document.querySelector(".product-sidebar-credits [data-credit-status]").textContent.includes("Earlier balance"));
   assert.equal(await total.textContent(), "—"); assert.equal(await page.locator("#koin-available").textContent(), "0.10000000");
   await page.locator(".product-sidebar-credits [data-credit-help]").click();
+  assert.equal(await page.locator("#view-recovery").isVisible(), true);
   assert.equal(await page.locator("#product-legacy-account").evaluate(node => node.open), true);
   assert.deepEqual(errors, []);
 });
