@@ -31,20 +31,25 @@ class CreditRuns {
       fetchImpl: this.service.fetchImpl, progress: value => this.service.progress(typeof value === "object" ? { ...value, runId: run.id, callId } : value) });
   }
   async open(c, input, signal) {
-    if (!input || Object.keys(input).sort().join() !== "budget,freeOnly,mode" || !["research", "agent", "team", "agents"].includes(input.mode) || typeof input.freeOnly !== "boolean") throw Error("Choose a supported mode, total run budget and paid-continuation preference");
+    if (!input || Object.keys(input).filter(k => k !== "model").sort().join() !== "budget,freeOnly,mode" || !["research", "agent", "team", "agents"].includes(input.mode) || typeof input.freeOnly !== "boolean") throw Error("Choose a supported mode, total run budget and paid-continuation preference");
+    const selected = input.model === undefined ? c.config.model : input.model;
+    if (typeof selected !== "string" || !/^[a-zA-Z0-9._-]{1,100}$/.test(selected)) throw Error("Choose an approved model for this run");
+    const catalog = await c.flow.models(signal);
+    const chosen = catalog?.models.find(m => m.model === selected);
+    if (!chosen?.available) throw Error("This network model is unavailable. Choose an available model for this run");
     const run = { schema: 1, id: crypto.randomBytes(32).toString("hex"), context: P.hash(JSON.stringify(c.config)), mode: input.mode,
-      model: c.config.model, maxTotal: creditAtoms(input.budget), freeOnly: input.freeOnly, createdAt: Date.now() };
+      model: selected, maxOutput: chosen.maxOutput, maxTotal: creditAtoms(input.budget), freeOnly: input.freeOnly, createdAt: Date.now() };
     const directory = this.directory(c, run.id); fs.mkdirSync(directory, { recursive: true, mode: 0o700 }); save(path.join(directory, "run.json"), run);
     // Persist before requesting admission so an uncertain response has an ID.
     const result = await c.flow.call("run-open", { runId: run.id, mode: run.mode, model: run.model, maxTotal: run.maxTotal, freeOnly: run.freeOnly }, signal);
-    if (result.run?.id !== run.id || result.run.maxTotal !== run.maxTotal || result.run.freeOnly !== run.freeOnly) throw Error("Run approval could not be verified");
+    if (result.run?.id !== run.id || result.run.model !== run.model || result.run.maxTotal !== run.maxTotal || result.run.freeOnly !== run.freeOnly) throw Error("Run approval could not be verified");
     return { run: result.run };
   }
   async chat(c, input, signal) {
     if (!input || Object.keys(input).sort().join() !== "callId,request,runId") throw Error("Exact advanced model call required");
     const run = this.read(c, input.runId), flow = this.flow(c, run, input.callId);
     if (input.request?.model !== "koinos-network" && input.request?.model !== "koinos-network:" + run.model) throw Error("Run model changed");
-    const request = { ...input.request, runId: run.id, freeOnly: run.freeOnly };
+    const request = { ...input.request, model: "koinos-network:" + run.model, runId: run.id, freeOnly: run.freeOnly };
     const result = await flow.chat(null, request, signal);
     return result; // Keep encrypted sub-results for useful partial-run recovery.
   }
@@ -60,14 +65,14 @@ class CreditRuns {
         const saved = await flow.call("result", { requestId: record.id }, signal);
         if (saved.completion) {
           const input = JSON.parse(this.service.storage.decryptString(Buffer.from(record.input, "base64")));
-          const answer = flow.verify(saved.completion, require("./koin-chat-flow").request(input, c.config), record.id);
+          const answer = flow.verify(saved.completion, flow.input(input, record), record.id);
           record = { ...record, state: "answered", answer: this.service.storage.encryptString(JSON.stringify(answer)).toString("base64") }; flow.save(record);
         }
       }
       if (record?.state === "answered") {
         const answer = JSON.parse(this.service.storage.decryptString(Buffer.from(record.answer, "base64")));
         const input = JSON.parse(this.service.storage.decryptString(Buffer.from(record.input, "base64")));
-        const checked = flow.verify(answer, require("./koin-chat-flow").request(input, c.config), record.id);
+        const checked = flow.verify(answer, flow.input(input, record), record.id);
         steps.push({ callId, id: checked.id, text: checked.choices[0].message.content, credits: checked.koin.receipt.usage.amount });
       }
     }

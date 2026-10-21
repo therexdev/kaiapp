@@ -32,6 +32,21 @@ function findTestRelease(gh, tag = TAG) {
   return metadata;
 }
 
+function createTestRelease(gh, { tag, commit, title, body, requestFile }) {
+  fs.writeFileSync(requestFile, JSON.stringify({ tag_name: tag, target_commitish: commit,
+    name: title, body, draft: true, prerelease: true, make_latest: "false" }));
+  // Newly created drafts can be absent from GitHub's release listing briefly.
+  // Use the creation response's identity instead of rediscovering it by tag.
+  const release = JSON.parse(gh("api", "--method", "POST", `repos/${REPO}/releases`,
+    "--input", requestFile, "--jq", "{id,tag_name,prerelease,draft,target_commitish}"));
+  if (!Number.isSafeInteger(release.id) || release.id <= 0 || release.tag_name !== tag ||
+      release.prerelease !== true || release.draft !== true || release.target_commitish !== commit) {
+    throw new Error("Created Test release does not match its requested identity and verified source");
+  }
+  const { tag_name, ...metadata } = release;
+  return metadata;
+}
+
 function releaseAssets(gh, releaseId) {
   const output = gh("api", "--paginate", `repos/${REPO}/releases/${releaseId}/assets?per_page=100`,
     "--jq", ".[] | {id,name,state}").trim();
@@ -166,10 +181,8 @@ function publish(dir, { env = process.env, gh = (...args) => execFileSync("gh", 
     fs.writeFileSync(body, `## Koinos AI Test ${version}\n\n[Download the Windows test installer](https://github.com/${REPO}/releases/download/${buildTag}/${setup})\n\n${whatsNew}\n\nUses your existing live Koinos AI chats, settings, wallet, models and node-data location. Test updates stay on this channel; other users stay on Live. Local API: port 41100.\n\nBefore switching, choose **Quit Koinos AI** from the running app’s tray menu (closing the window may only hide it), then install and open Test. Only one version can open the shared profile at a time. The saved wallet session and earning preference are reused; unlock your existing wallet if prompted and check node/earning status after the restart. Test backs up configuration and encrypted wallet/session files before first opening the profile for each version. Your existing live network and node database remain in use. Older isolated Test profiles are left untouched.\n\nSource commit: ${env.GITHUB_SHA}\nBuild: https://github.com/${REPO}/actions/runs/${env.GITHUB_RUN_ID}\n\nThe rolling tag identifies this download channel. [This build’s artifacts and verification reports](https://github.com/${REPO}/releases/tag/${buildTag}) identify its exact source and files. Earlier download URLs remain available; each new build has its own artifact release. The latest*.yml files are compatibility pointers to live ${latest.tag_name}, never test installers.\n`);
     let existing = findTestRelease(gh);
     if (!existing) {
-      gh("release", "create", TAG, "--repo", REPO, "--target", env.GITHUB_SHA,
-        "--draft", "--prerelease", "--latest=false", "--title", "Koinos AI Test", "--notes-file", body);
-      existing = findTestRelease(gh);
-      if (!existing) throw new Error("Created Test release could not be read back");
+      existing = createTestRelease(gh, { tag: TAG, commit: env.GITHUB_SHA, title: "Koinos AI Test",
+        body: fs.readFileSync(body, "utf8"), requestFile: path.join(temp, "create-rolling.json") });
     } else if (!existing.prerelease) {
       throw new Error("test-build must remain a prerelease");
     }
@@ -178,9 +191,8 @@ function publish(dir, { env = process.env, gh = (...args) => execFileSync("gh", 
     let artifacts = findTestRelease(gh, buildTag);
     if (!artifacts) {
       assertArtifactTarget(gh, buildTag, env.GITHUB_SHA, { draft: true });
-      gh("release", "create", buildTag, "--repo", REPO, "--target", env.GITHUB_SHA,
-        "--draft", "--prerelease", "--latest=false", "--title", `Koinos AI Test ${version} artifacts`, "--notes-file", body);
-      artifacts = findTestRelease(gh, buildTag);
+      artifacts = createTestRelease(gh, { tag: buildTag, commit: env.GITHUB_SHA, title: `Koinos AI Test ${version} artifacts`,
+        body: fs.readFileSync(body, "utf8"), requestFile: path.join(temp, "create-artifacts.json") });
     }
     if (!artifacts || !artifacts.prerelease || artifacts.target_commitish !== env.GITHUB_SHA) throw new Error("Test artifact release does not match the verified source");
     assertArtifactTarget(gh, buildTag, env.GITHUB_SHA, { draft: artifacts.draft });

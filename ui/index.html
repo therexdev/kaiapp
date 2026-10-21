@@ -178,6 +178,7 @@
           <div><strong>Koinos Network</strong><span id="network-chat-balance">Balance loading…</span></div>
           <div class="network-chat-funding"><label for="network-koin-amount">Amount to add (KOIN)</label><input id="network-koin-amount" inputmode="decimal" placeholder="Enter KOIN amount" maxlength="22" autocomplete="off" aria-describedby="network-chat-help network-chat-status" /><button id="network-add-koin" class="primary small">Add KOIN</button><button id="network-retry-purchase" class="small" hidden>Retry purchase</button><button id="network-account" class="small">Account</button></div>
           <button id="network-recover" class="small" hidden>Recover last reply</button>
+          <p id="network-model-price" hidden></p>
           <p id="network-chat-help">Send uses your existing balance and asks you to approve a reservation when needed. Add KOIN deposits more from your wallet.</p>
           <p id="network-chat-reservation" role="status" hidden></p>
           <p id="network-chat-status" role="status" aria-live="polite"></p>
@@ -195,7 +196,7 @@
             <option value="team:review">Write &amp; review team</option>
           </select>
           <select id="src-pick" title="Choose this machine, Koinos Network, or a private desktop provider"></select>
-          <select id="model-pick" title="Which model answers"></select>
+          <select id="model-pick" title="Which model answers" aria-describedby="network-model-price"></select>
           <select id="persona-pick" title="How the AI should answer">
             <option value="">Default style</option>
             <option value="concise">Concise</option>

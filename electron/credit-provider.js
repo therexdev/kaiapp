@@ -21,17 +21,28 @@ class CreditProvider {
     this.core.account.assertCreditAuthorization(c.auth, c.config.schedulerUrl);
     if (this.core.account.wallet.address !== c.config.owner || !this.core.account.wallet.status().unlocked) throw Error("Unlock the linked reward wallet in Account to continue provider setup");
   }
-  model(c) {
-    const alias = this.core.models.catalog.aliases[c.config.model], pkg = alias && this.core.models.catalog.packages[alias.package];
-    if (!alias || alias.custom || !pkg || !/^[a-f0-9]{64}$/.test(pkg.sha256 || "") || this.core.models.quarantineOf(alias.package)) throw Error("The approved provider model is unavailable in this app");
-    const installed = this.core.models.packageStatus(alias.package).status === "ready";
-    const ramGb = this.core.hardware?.ramBytes / 1e9;
-    if (!Number.isFinite(ramGb) || !Number.isFinite(alias.minRamGb) || ramGb < alias.minRamGb) throw Error("This computer does not meet the approved model's memory requirement");
-    return { id: c.config.model, package: alias.package, label: alias.label || c.config.model, bytes: pkg.sizeBytes, requiredRamGb: alias.minRamGb, installed };
+  async model(c, signal) {
+    // The buyer's committed catalog also defines which local packages may earn.
+    // A model need not already have a remote provider to become a new provider.
+    const catalog = await c.flow.models(signal), tariffs = catalog?.tariffs;
+    if (!Array.isArray(tariffs) || !tariffs.length || tariffs.length > 64) throw Error("The approved provider model catalog is unavailable");
+    const ramGb = this.core.hardware?.ramBytes / 1e9, candidates = [];
+    for (const tariff of tariffs) {
+      const alias = this.core.models.catalog.aliases[tariff.model], pkg = alias && this.core.models.catalog.packages[alias.package];
+      if (!alias || alias.custom || alias.dev || !pkg || pkg.custom || !/^[a-f0-9]{64}$/.test(pkg.sha256 || "") || pkg.sha256 !== tariff.modelHash || this.core.models.quarantineOf(alias.package)) continue;
+      if (!Number.isFinite(ramGb) || !Number.isFinite(alias.minRamGb) || ramGb < alias.minRamGb) continue;
+      candidates.push({ id: tariff.model, package: alias.package, label: alias.label || tariff.model, bytes: pkg.sizeBytes, requiredRamGb: alias.minRamGb,
+        installed: this.core.models.packageStatus(alias.package).status === "ready" });
+    }
+    c.providerModels = tariffs.map(t => t.model);
+    const active = this.core.runtime.status?.().activeAlias;
+    const selected = candidates.find(m => m.installed && m.id === active) || candidates.find(m => m.installed && m.id === c.config.model) || candidates.find(m => m.installed) || candidates.find(m => m.id === c.config.model);
+    if (!selected) throw Error("No approved provider model is installed for this computer. Install a supported model from Models before sharing");
+    return selected;
   }
   async info() {
     try {
-      const c = await this.service.context(AbortSignal.timeout(10000)), model = this.model(c), enabled = this.preference(c);
+      const signal = AbortSignal.timeout(10000), c = await this.service.context(signal), model = await this.model(c, signal), enabled = this.preference(c);
       this.preferenceContext = c;
       let blocked = ""; try { this.guard(c); } catch (e) { blocked = e.message; }
       const progress = this.downloading ? this.core.models.downloadProgress() : null;
@@ -45,7 +56,7 @@ class CreditProvider {
     this.downloadAbort = new AbortController(); signal = AbortSignal.any([signal, this.downloadAbort.signal]);
     const stop = () => { if (this.downloading) this.core.models.cancelDownload(); };
     try {
-      const c = await this.service.context(signal); this.guard(c, signal); const model = this.model(c);
+      const c = await this.service.context(signal); this.guard(c, signal); const model = await this.model(c, signal); this.guard(c, signal);
       if (!model.installed) {
         if (this.core.models.downloadProgress()) throw Error("Finish the current model download first");
         this.downloading = true; signal.addEventListener("abort", stop, { once: true }); signal.throwIfAborted();
@@ -60,7 +71,7 @@ class CreditProvider {
     this.busy = true; const generation = this.generation;
     const current = () => { signal.throwIfAborted(); if (generation !== this.generation) throw Error("Provider startup cancelled"); };
     try {
-      const c = await this.service.context(signal); current(); this.guard(c, signal); const model = this.model(c);
+      const c = await this.service.context(signal); current(); this.guard(c, signal); const model = await this.model(c, signal); current(); this.guard(c, signal);
       if (!model.installed) throw Error("Download the approved model before turning on sharing");
       if (resume && !this.preference(c)) return { state: "offline" };
       this.context = c; if (!resume) this.preference(c, true); this.error = "";
@@ -76,7 +87,7 @@ class CreditProvider {
         fundedOnly: true, qualificationTarget: target, koinShadowJobs: false, koinFundedRehearsalJobs: cfg.mode === "test-deployment", koinMainnetPilotJobs: cfg.mode === "mainnet-pilot", koinMainnetTarget: target });
       this.abort.signal.addEventListener("abort", () => { this.worker?.stop().catch(() => {}); }, { once: true });
       const combined = AbortSignal.any([signal, this.abort.signal]);
-      const hold = await this.core.runtime.acquireFor(cfg.model); hold.release(); current(); this.guard(c, combined);
+      const hold = await this.core.runtime.acquireFor(model.id); hold.release(); current(); this.guard(c, combined);
       await this.worker.start(); current(); this.guard(c, combined); return { state: "running" };
     } catch (e) { this.error = String(e.message); await this.stop(false); throw e; }
     finally { this.busy = false; }
@@ -91,7 +102,7 @@ class CreditProvider {
     if (!this.worker?.running || !this.context) return { state: "offline", label: "OFFLINE", detail: this.error || "Sharing is off. Turn it on to connect and check model quality." };
     const c = this.context; this.guard(c);
     if (this.worker.status().backoff) return { state: "paused", label: "PAUSED", detail: this.worker.status().backoffReason || "This computer is busy." };
-    return this.readStatus({ config: c.config, access: { authorize: pin => { this.core.account.assertCreditAuthorization(c.auth, pin); return c.auth; } }, fetchImpl: this.service.fetchImpl, signal: AbortSignal.timeout(10000) });
+    return this.readStatus({ config: c.config, approvedModels: c.providerModels, access: { authorize: pin => { this.core.account.assertCreditAuthorization(c.auth, pin); return c.auth; } }, fetchImpl: this.service.fetchImpl, signal: AbortSignal.timeout(10000) });
   }
   async earnings() {
     const c = await this.service.context(AbortSignal.timeout(10000));

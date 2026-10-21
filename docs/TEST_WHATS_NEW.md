@@ -1,3 +1,12 @@
+## One credit balance across approved network models
+
+- Network Chat lists each model supplied by the activated credit service, with availability and input/output credit rates. Your selected model stays selected when it goes offline; the app asks you to choose another instead of silently changing it.
+- All model prices are checked against the service policy packaged with the app. Each reply is verified against the selected model's exact rate and limits, with one shared credit balance and free credits used first where eligible.
+- Research, Agents and Teams keep the selected model and total budget for the entire run. Saved replies retain their approved price information and can be recovered after restart even when current model availability cannot be read.
+- Sharing uses an installed approved model, preferring the one already loaded. Provider status checks each model and shows ONLINE when at least one is freshly ready; a failed or offline model cannot make the others appear ready.
+
+The approved commercial plan covers all 15 public catalog models. Live use still requires the separate credit service, exact per-model metering and fresh provider qualification; this desktop update alone does not activate purchases or qualify models.
+
 ## Clear Earn, Wallet and Network pages
 
 - The lower-left Network button opens Network overview directly. Earn focuses on sharing status, earnings and provider setup; its duplicate network shortcut and older reservation/payment section are removed from the normal flow.

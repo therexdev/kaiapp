@@ -1,28 +1,59 @@
 "use strict";
 (() => {
   const bridge = window.kaiKoinTestBridge;
-  let info = { configured: false }, pending;
+  let info = { configured: false }, pending, availabilityTimer;
   const progress = text => { const node = document.getElementById("network-chat-status"); if (node) node.textContent = text; };
   const amount = value => { const n = BigInt(value); return `${n / 100000000n}.${(n % 100000000n).toString().padStart(8, "0")}`; };
+  const alias = value => String(value || "").replace(/^koinos-network:/, "");
+  function selectedModel(value = document.getElementById("model-pick")?.value) {
+    return Array.isArray(info.models) ? info.models.find(m => m.model === alias(value)) : null;
+  }
+  function availabilityFresh() {
+    return !info.blocked && (info.modelAvailabilityUntil === undefined || Number.isSafeInteger(info.modelAvailabilityUntil) && info.modelAvailabilityUntil > Date.now());
+  }
+  function paintPrice() {
+    const node = document.getElementById("network-model-price"); if (!node) return;
+    const visible = info.product === "prepaid-usd-v1" && Array.isArray(info.models) && document.getElementById("src-pick")?.value === "network";
+    node.hidden = !visible;
+    if (!visible) return;
+    if (info.blocked) { node.textContent = info.blocked; return; }
+    const model = selectedModel();
+    node.textContent = model ? `${model.label || model.model} · ${!availabilityFresh() ? "Checking availability" : model.available ? "Available" : "Unavailable"} · ${model.inputCreditsPerMillion} input / ${model.outputCreditsPerMillion} output credits per million tokens`
+      : "This selected model is unavailable. Choose another network model.";
+  }
   async function refresh() {
     if (!bridge) return info;
     if (!pending) pending = bridge.run("chat-info").then(value => {
       if (!value || typeof value.enabled !== "boolean") throw Error("Network configuration unavailable");
+      const wasFresh = availabilityFresh(), changed = JSON.stringify(info.models) !== JSON.stringify(value.models);
       info = value;
+      clearTimeout(availabilityTimer);
+      if (Number.isSafeInteger(value.modelAvailabilityUntil) && value.modelAvailabilityUntil > Date.now()) {
+        availabilityTimer = setTimeout(() => { paintPrice(); window.dispatchEvent(new Event("kai-network-models-changed")); }, value.modelAvailabilityUntil - Date.now());
+      }
       const freePreference = document.getElementById("network-free-preference");
       if (freePreference) freePreference.hidden = value.product !== "prepaid-usd-v1";
       if (value.activation === "ready") window.KaiCredits?.refresh();
       const help = document.getElementById("network-chat-help");
       if (help && value.maxRequestCredits) help.textContent = `Up to ${value.maxRequestCredits} credits per message. Free credits are used first; purchased credits may cover the rest. Turn on Free only to prevent paid continuation.`;
       const recover = document.getElementById("network-recover"); if (recover) recover.hidden = !info.recoveryAvailable;
+      paintPrice();
+      if (changed || wasFresh !== availabilityFresh()) window.dispatchEvent(new Event("kai-network-models-changed"));
       return info;
-    }).catch(error => { info = { ...info, configured: true, blocked: "Network configuration unavailable. Refresh your network account." }; throw error; }).finally(() => { pending = null; });
+    }).catch(error => {
+      clearTimeout(availabilityTimer); info = { ...info, configured: true, blocked: "Network configuration unavailable. Refresh your network account." };
+      paintPrice(); window.dispatchEvent(new Event("kai-network-models-changed")); throw error;
+    }).finally(() => { pending = null; });
     return pending;
   }
   async function chatFetch(body, init) {
     const current = await refresh();
     if (!current.configured) throw Error("Connect your network account before using paid chat");
     if (current.blocked) throw Error(current.blocked);
+    if (current.product === "prepaid-usd-v1" && Array.isArray(current.models)) {
+      const model = selectedModel(body.model);
+      if (!model?.available) throw Error("This network model is unavailable. Choose an available model; your credits have not been charged.");
+    }
     if (current.product === "prepaid-usd-v1") body = { ...body, freeOnly: document.getElementById("network-free-only")?.checked === true };
     if (body.stream !== false && ["prepaid-v1", "prepaid-usd-v1"].includes(current.product)) return streamFetch(body, init);
     const signal = init.signal, stop = () => { bridge.run("stop").catch(() => {}); };
@@ -91,10 +122,13 @@
   });
   document.getElementById("network-account")?.addEventListener("click", () => window.dispatchEvent(new Event("kai-network-account")));
   document.getElementById("network-recover")?.addEventListener("click", () => window.dispatchEvent(new Event("kai-network-recover")));
-  window.KaiNetwork = { refresh, chatFetch, get info() { return info; },
+  document.getElementById("model-pick")?.addEventListener("change", paintPrice);
+  document.getElementById("model-pick")?.addEventListener("focus", () => { if (document.getElementById("src-pick")?.value === "network") refresh().catch(() => {}); });
+  window.KaiNetwork = { refresh, chatFetch, selectedModel, paintPrice, availabilityFresh, get info() { return info; },
     acknowledge: id => bridge.run("chat-ack", id),
     recover: () => bridge.run("chat-recover"),
     paint() {
+      paintPrice();
       const network = document.getElementById("src-pick")?.value === "network", strip = document.getElementById("network-chat-account"); if (strip) strip.hidden = !(info.configured && network);
       const pick = document.getElementById("mode-pick");
       const unavailable = network && (info.product !== "prepaid-usd-v1" || info.activation !== "ready" || info.runBudgets !== true || !!info.blocked);

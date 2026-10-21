@@ -21,7 +21,7 @@ class CreditRunExecutor {
     const chatFn = async ({ messages, maxTokens }) => {
       guard();
       const result = await this.service.runs.chat(c, { runId: run.id, callId: crypto.randomBytes(32).toString("hex"),
-        request: { model: "koinos-network:" + run.model, messages, max_tokens: Math.min(maxTokens, c.config.maxOutput), stream: false } }, signal);
+        request: { model: "koinos-network:" + run.model, messages, max_tokens: Math.min(maxTokens, run.maxOutput || c.config.maxOutput), stream: false } }, signal);
       guard(); return result.choices[0].message.content;
     };
     const onTrace = trace => {

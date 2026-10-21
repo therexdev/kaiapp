@@ -6,7 +6,8 @@ function fixture(t) {
   const owner = require("koilib").Signer.fromSeed("provider-setup-fixture").getAddress();
   const config = { owner, mode: "mainnet-pilot", schedulerUrl: "https://fixture.invalid/scheduler", policyHash: P.hash("policy"), model: "fixture",
     deployment: { chainId: require("../lib/koin-network/payment-network").MAINNET_CHAIN, credits: owner, creditsHash: "0x1220" + P.hash("contract") } };
-  const c = { directory, config, auth: { sessionToken: "fixture-session" } };
+  const tariffs = [{ model: "fixture", modelHash: P.hash("model") }];
+  const c = { directory, config, auth: { sessionToken: "fixture-session" }, flow: { models: async () => ({ tariffs }) } };
   let installed = false, authorized = true, unlocked = true, started = 0, stopped = 0, downloads = 0, releases = 0, options;
   const core = { account: { wallet: { address: owner, status: () => ({ unlocked }) }, assertCreditAuthorization: () => { if (!authorized) throw Error("Account changed"); },
     safeStorage: { isEncryptionAvailable: () => true, encryptString: s => Buffer.from(s), decryptString: b => b.toString() } },
@@ -18,7 +19,7 @@ function fixture(t) {
   const args = { service, core, createWorker: o => { options = o; return { running: false, status: () => ({}), async start() { started++; this.running = true; }, async stop() { stopped++; this.running = false; } }; },
     readStatus: async () => ({ state: "qualifying", label: "CHECKING MODEL", detail: "Fixture checking" }) };
   const controller = new CreditProvider(args); t.after(() => controller.dispose());
-  return { controller, args, core, c, set installed(v) { installed = v; }, set authorized(v) { authorized = v; }, set unlocked(v) { unlocked = v; }, get counts() { return { started, stopped, downloads, releases }; }, get options() { return options; } };
+  return { controller, args, core, c, tariffs, set installed(v) { installed = v; }, set authorized(v) { authorized = v; }, set unlocked(v) { unlocked = v; }, get counts() { return { started, stopped, downloads, releases }; }, get options() { return options; } };
 }
 test("guided setup requires explicit download, saves On for restart, renews on a pinned worker, and Off survives restart", async t => {
   const f = fixture(t), p = f.controller, signal = AbortSignal.timeout(5000);
@@ -63,4 +64,43 @@ test("public earnings use the selected account without unlocking or changing old
   value = { ...value, observedAt: Date.now(), payouts: [{ ...value.payouts[0], epoch: 20742 }] };
   await assert.rejects(f.controller.earnings(), /verified/);
   f.authorized = false; await assert.rejects(f.controller.earnings(), /Account changed/);
+});
+
+test("provider startup uses an installed approved model when the configured default is absent", async t => {
+  const f = fixture(t), modelHash = P.hash("large model");
+  f.tariffs.push({ model: "large", modelHash });
+  f.core.models.catalog.aliases.large = { package: "large-package", minRamGb: 4 };
+  f.core.models.catalog.packages["large-package"] = { sha256: modelHash, sizeBytes: 2000 };
+  f.core.models.packageStatus = name => ({ status: name === "large-package" ? "ready" : "absent" });
+  let prepared; f.core.runtime.acquireFor = async model => { prepared = model; return { release() {} }; };
+  const info = await f.controller.info(); assert.equal(info.state, "ready"); assert.equal(info.model.id, "large");
+  await f.controller.start(AbortSignal.timeout(5000)); assert.equal(prepared, "large"); assert.equal(f.counts.downloads, 0);
+  assert.deepEqual(f.c.providerModels, ["fixture", "large"]);
+});
+test("provider setup preserves the active approved model and rejects changed, private or unsuitable packages", async t => {
+  const f = fixture(t), modelHash = P.hash("large model"); f.installed = true;
+  f.tariffs.push({ model: "large", modelHash });
+  f.core.models.catalog.aliases.large = { package: "large-package", minRamGb: 4 };
+  f.core.models.catalog.packages["large-package"] = { sha256: modelHash, sizeBytes: 2000 };
+  f.core.runtime.status = () => ({ activeAlias: "large" });
+  assert.equal((await f.controller.info()).model.id, "large");
+  f.core.models.catalog.packages["large-package"].sha256 = P.hash("replacement");
+  assert.equal((await f.controller.info()).model.id, "fixture");
+  f.core.models.catalog.packages["large-package"].sha256 = modelHash;
+  f.core.models.catalog.aliases.large.custom = true;
+  assert.equal((await f.controller.info()).model.id, "fixture");
+  f.core.models.catalog.aliases.large.custom = false; f.core.models.catalog.aliases.large.dev = true;
+  assert.equal((await f.controller.info()).model.id, "fixture");
+  f.core.models.catalog.aliases.large.dev = false; f.core.models.catalog.aliases.large.minRamGb = 99;
+  assert.equal((await f.controller.info()).model.id, "fixture");
+  f.tariffs.splice(0, 1); assert.equal((await f.controller.info()).state, "unavailable");
+  assert.equal(f.counts.downloads, 0); assert.equal(f.counts.started, 0);
+});
+test("Stop during a catalog read cannot re-enable the saved provider preference", async t => {
+  const f = fixture(t); f.installed = true;
+  let entered, release; const reading = new Promise(resolve => { entered = resolve; });
+  f.c.flow.models = async () => { entered(); await new Promise(resolve => { release = resolve; }); return { tariffs: f.tariffs }; };
+  const pending = f.controller.start(AbortSignal.timeout(5000)), rejected = assert.rejects(pending, /cancelled|abort/i);
+  await reading; await f.controller.stop(); release(); await rejected;
+  assert.equal(f.controller.preference(f.c), false); assert.equal(f.counts.started, 0);
 });

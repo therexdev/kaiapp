@@ -14,12 +14,14 @@
     opening = true;
     try {
       const info = await window.KaiNetwork.refresh(); if (info.product !== "prepaid-usd-v1" || info.activation !== "ready" || info.runBudgets !== true || info.blocked) throw Error(info.blocked || "Advanced network modes are unavailable for this account");
+      const selected = window.KaiNetwork.selectedModel();
+      if (Array.isArray(info.models) && !selected?.available) throw Error("Choose an available network model before starting this run.");
       document.getElementById("credit-run-error").textContent = "";
       document.getElementById("credit-run-free-only").checked = document.getElementById("network-free-only").checked;
       const accepted = await new Promise(resolve => { dialog.addEventListener("close", () => resolve(dialog.returnValue === "start"), { once: true }); dialog.showModal(); });
       if (!accepted) return false;
       const budget = document.getElementById("credit-run-budget").value.trim(), freeOnly = document.getElementById("credit-run-free-only").checked;
-      const result = await bridge.run("run-open", { mode, budget, freeOnly });
+      const result = await bridge.run("run-open", { mode, budget, freeOnly, ...(selected ? { model: selected.model } : {}) });
       if (!/^[a-f0-9]{64}$/.test(result.run?.id || "")) throw Error("Run approval unavailable");
       active = result.run; return true;
     } finally { opening = false; }
@@ -31,7 +33,8 @@
   });
   async function dispatch(request) {
     if (!active) return bridge.run("chat-completion", request);
-    return bridge.run("run-chat", { runId: active.id, callId: random(), request: { ...request, max_tokens: Math.min(request.max_tokens || window.KaiNetwork.info.maxOutput, window.KaiNetwork.info.maxOutput) } });
+    const maxOutput = window.KaiNetwork.info.models?.find(m => m.model === active.model)?.maxOutput || window.KaiNetwork.info.maxOutput;
+    return bridge.run("run-chat", { runId: active.id, callId: random(), request: { ...request, max_tokens: Math.min(request.max_tokens || maxOutput, maxOutput) } });
   }
   function execute(kind, body, init = {}) {
     if (!active) throw Error("Approve a total run budget first"); const id = active.id, encoder = new TextEncoder();

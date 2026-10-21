@@ -367,7 +367,7 @@ async function updateModelPick(aliases) {
     if (!networkEligible && netBlockedWhy) {
       // Visible but not selectable — the network exists; here's how to get it.
       const o = document.createElement("option");
-      o.disabled = true;
+      o.value = "network"; o.disabled = true;
       KaiI18n.setText(o, KaiI18n.message`Koinos Network — ${netBlockedWhy}`);
       src.appendChild(o);
     }
@@ -377,7 +377,9 @@ async function updateModelPick(aliases) {
   // pickable keeps the flat shape Compare/Tasks/Docs already use.
   const want = [
     ...state.localModels.map((m) => ({ v: m.v, label: "Local · " + m.label })),
-    ...(networkEligible ? [{ v: "koinos-network", label: "Koinos Network · Auto" }] : []),
+    ...(networkEligible ? (window.KaiNetwork?.info.product === "prepaid-usd-v1" && Array.isArray(KaiNetwork.info.models)
+      ? KaiNetwork.info.models.filter(m => m.available).map(m => ({ v: "koinos-network:" + m.model, label: "Network · " + (m.label || m.model) }))
+      : [{ v: "koinos-network", label: "Koinos Network · Auto" }]) : []),
   ];
   pickable = want;
   window.KaiNetwork?.paint();
@@ -421,6 +423,22 @@ async function updateModelPick(aliases) {
 async function fillNetworkModelPick() {
   const pick = $("model-pick");
   if (window.KaiNetwork?.info.configured) {
+    const current = KaiNetwork.info;
+    if (current.product === "prepaid-usd-v1" && Array.isArray(current.models)) {
+      const previous = pick.dataset.sig?.startsWith("paid-catalog:") ? pick.value : localStorage.getItem("kai-credit-model");
+      const selected = previous || "koinos-network:" + current.model;
+      const options = current.models.map(m => ({ value: "koinos-network:" + m.model, label: m.label || state.aliasLabels?.[m.model] || m.model, available: m.available === true && KaiNetwork.availabilityFresh() }));
+      // A disappearing/offline choice remains explicit; never substitute Fast.
+      if (selected && !options.some(o => o.value === selected)) options.push({ value: selected, label: selected.replace(/^koinos-network:/, ""), available: false });
+      const sig = "paid-catalog:" + JSON.stringify(options);
+      if (pick.dataset.sig !== sig) {
+        pick.replaceChildren(...options.map(m => { const o = document.createElement("option"); o.value = m.value; o.textContent = m.label + (m.available ? "" : " · Unavailable"); o.disabled = !m.available; return o; }));
+        pick.value = selected;
+        pick.dataset.sig = sig;
+      }
+      KaiNetwork.paintPrice();
+      return;
+    }
     const model = KaiNetwork.info.model;
     pick.replaceChildren();
     if (model) { const option = document.createElement("option"); option.value = model; option.textContent = model + (["prepaid-v1", "prepaid-usd-v1"].includes(KaiNetwork.info.product) ? " · credits" : " · KOIN"); pick.appendChild(option); }
@@ -459,6 +477,7 @@ function updateProviderNote() {
   }
 }
 window.addEventListener("kai-providers-changed", () => { $("model-pick").dataset.sig = ""; refresh(); });
+window.addEventListener("kai-network-models-changed", () => { if ($("src-pick").value === "network") fillNetworkModelPick(); });
 window.addEventListener("kai-network-use", async event => {
   await updateModelPick((await coreGet("/core/models")).aliases);
   if (KaiNetwork.info.blocked) {
@@ -469,7 +488,7 @@ window.addEventListener("kai-network-use", async event => {
   }
   $("src-pick").value = "network"; $("mode-pick").value = "chat";
   $("src-pick").dispatchEvent(new Event("change")); activateView("chat"); $("input").focus();
-  if (event.detail?.model) { await fillNetworkModelPick(); if ([...$("model-pick").options].some(o => o.value === event.detail.model)) $("model-pick").value = event.detail.model; }
+  if (event.detail?.model) { await fillNetworkModelPick(); const wanted = KaiNetwork.info.product === "prepaid-usd-v1" && Array.isArray(KaiNetwork.info.models) ? "koinos-network:" + event.detail.model.replace(/^koinos-network:/, "") : event.detail.model; if ([...$("model-pick").options].some(o => o.value === wanted)) { $("model-pick").value = wanted; $("model-pick").dispatchEvent(new Event("change")); } }
 });
 window.addEventListener("kai-network-account", () => { activateView("recovery"); if ($("product-legacy-account")) $("product-legacy-account").open = true; $("koin-use-tab").click(); $("koin-test-payments").scrollIntoView({ block: "start" }); });
 window.addEventListener("kai-network-recover", async () => {
@@ -496,7 +515,10 @@ window.addEventListener("kai-provider-use", async event => {
   await updateModelPick((await coreGet("/core/models")).aliases);
   $("src-pick").value = event.detail; $("src-pick").dispatchEvent(new Event("change")); activateView("chat");
 });
-$("model-pick").addEventListener("change", () => { if (["openai", "anthropic"].includes($("src-pick").value)) KaiProviders.write("kai-chat-model-" + $("src-pick").value, $("model-pick").value); });
+$("model-pick").addEventListener("change", () => {
+  if (["openai", "anthropic"].includes($("src-pick").value)) KaiProviders.write("kai-chat-model-" + $("src-pick").value, $("model-pick").value);
+  if ($("src-pick").value === "network" && $("model-pick").value.startsWith("koinos-network:")) localStorage.setItem("kai-credit-model", $("model-pick").value);
+});
 $("src-pick").addEventListener("change", () => {
   KaiProviders.write("kai-chat-source", $("src-pick").value);
   $("model-pick").dataset.sig = ""; // force refill for the new source
@@ -508,6 +530,7 @@ function composedChatModel() {
   if (["openai", "anthropic"].includes($("src-pick").value)) return $("model-pick").value.startsWith("desktop:" + $("src-pick").value + ":") ? $("model-pick").value : "";
   if ($("src-pick").value === "network") {
     const m = $("model-pick").value;
+    if (window.KaiNetwork?.info.product === "prepaid-usd-v1" && Array.isArray(KaiNetwork.info.models)) return m.startsWith("koinos-network:") ? m : "";
     return m === "auto" || !m ? "koinos-network" : `koinos-network:${m}`;
   }
   return $("model-pick").value || state.alias;

@@ -121,3 +121,4 @@
 .product-v2 #product-completed-count[data-unreported="true"]{font-size:25px;letter-spacing:-.5px}
 
 .product-v2 .product-two.product-single{grid-template-columns:1fr}
+.product-v2 #network-model-price{font-size:10px;color:var(--text-dim);overflow-wrap:anywhere}

@@ -3,11 +3,12 @@ const { isPrepaid, isUsd } = require("../core/lib/koin-network/product");
 const crypto = require("crypto"), P = require("../core/lib/koin-network/job-protocol");
 const { ChatFlow, request } = require("./koin-chat-flow"), { fundedResultHash } = require("../core/lib/koin-network/funded-protocol");
 const { testDomain } = require("../core/lib/koin-network/payment-mode"), { protocol } = require("../core/lib/koin-network/payment-network");
+const Models = require("./credit-models");
 const price = (t, input, output) => String((BigInt(input) * BigInt(t.inputAtomsPerMillion) + BigInt(output) * BigInt(t.outputAtomsPerMillion) + 999999n) / 1000000n);
 // Only the private main-process IPC owns credentials and these requests.
 class PrepaidChat extends ChatFlow {
   constructor(options) {
-    super(options); this.access = options.access; this.fetch = options.fetchImpl || fetch;
+    super(options); this.clock = options.clock || Date.now; this.access = options.access; this.fetch = options.fetchImpl || fetch;
     const d = this.config.deployment;
     if (!isPrepaid(d)) throw Error("Prepaid account required");
     this.product = d.product;
@@ -49,6 +50,30 @@ class PrepaidChat extends ChatFlow {
     if (!response.ok || value.ok !== true) throw Error(value.error || "The network is unavailable. Please try again.");
     return value;
   }
+  input(value, record) {
+    if (record?.tariffs) this.approvedTariffs = Models.tariffs(record.tariffs, this.config.policyHash);
+    return request(value, this.config, this.approvedTariffs);
+  }
+  async models(signal) {
+    if (!isUsd(this.product)) return null;
+    const response = await this.call("models", {}, signal);
+    this.modelCatalog = Models.catalog(response.catalog, this.config, this.clock());
+    this.approvedTariffs = this.modelCatalog.tariffs;
+    return structuredClone(this.modelCatalog);
+  }
+  available(model) {
+    if (!isUsd(this.product)) return;
+    if (!this.modelCatalog || this.modelCatalog.validUntil <= this.clock() || !this.modelCatalog.models.some(m => m.model === model && m.available))
+      throw Error("This network model is unavailable. Choose an available model or try again shortly");
+  }
+  async recover(window, signal) {
+    const record = this.read();
+    if (!record || !["pending", "answered"].includes(record.state) || !record.input) throw Error("No interrupted chat to recover");
+    if (!this.storage?.isEncryptionAvailable?.()) throw Error("Unlock secure storage to recover this chat");
+    const value = JSON.parse(this.storage.decryptString(Buffer.from(record.input, "base64")));
+    if (P.hash(JSON.stringify(this.input(value, record))) !== record.requestHash) throw Error("Saved request changed");
+    return { completion: await this.chat(window, value, signal), messages: value.messages };
+  }
   verify(result, input, id) {
     const k = result?.koin, q = k?.quote, r = k?.receipt, output = result?.choices?.[0]?.message?.content;
     if (result?.id !== id || k?.product !== this.product || JSON.stringify(k.target) !== JSON.stringify(this.target) ||
@@ -56,9 +81,11 @@ class PrepaidChat extends ChatFlow {
         k.session !== P.hash("prepaid-account:" + this.config.owner) || r.quoteHash !== q?.hash || r.outputHash !== P.hash(output || "") ||
         k.receiptHash !== P.hash(JSON.stringify(r))) throw Error("The network answer could not be verified. Retry this message to recover its saved answer.");
     P.validateQuote(q);
+    const approved = this.approvedTariffs?.find(t => t.model === input.model);
+    const tariffMatches = approved ? JSON.stringify(approved) === JSON.stringify(q.tariff)
+      : q.tariff.version === this.config.version && P.hash(JSON.stringify(["KAI-KOIN-SHADOW-TARIFFS-V1", q.tariff])) === this.target.policyHash;
     if (q.domain !== this.target.domain || q.policyHash !== this.target.policyHash || q.tariff.model !== input.model ||
-        q.tariff.version !== this.config.version || q.requestHash !== P.hash(JSON.stringify(input.messages)) || q.maxOutput !== input.maxOutput ||
-        P.hash(JSON.stringify(["KAI-KOIN-SHADOW-TARIFFS-V1", q.tariff])) !== this.target.policyHash ||
+        !tariffMatches || q.requestHash !== P.hash(JSON.stringify(input.messages)) || q.maxOutput !== input.maxOutput ||
         r.usage.inputTokens !== q.inputTokens || !Number.isSafeInteger(r.usage.outputTokens) || r.usage.outputTokens < 1 || r.usage.outputTokens > q.maxOutput ||
         r.usage.amount !== price(q.tariff, r.usage.inputTokens, r.usage.outputTokens) || BigInt(r.usage.amount) > BigInt(q.maxCharge)) throw Error("The answer differs from the approved credit price");
     const job = { id, session: k.session, attempt: r.attempt, quote: q };
@@ -69,8 +96,9 @@ class PrepaidChat extends ChatFlow {
       koin: { product: this.product, state: k.state, target: this.target, session: k.session, quote: q, receipt: r, receiptHash: k.receiptHash } };
   }
   async status() { return this.call("status"); }
-  async estimate(value, signal) {
-    const input = request(value, this.config);
+  async estimate(value, signal, catalogReady = false) {
+    if (isUsd(this.product) && !catalogReady) await this.models(signal);
+    const input = this.input(value); this.available(input.model);
     const result = await this.call("estimate", { model: input.model, messages: input.messages, max_tokens: input.maxOutput, freeOnly: input.freeOnly === true, ...(input.runId ? { runId: input.runId } : {}) }, signal);
     const e = result.estimate;
     if (!e || e.model !== input.model || e.unit !== (isUsd(this.product) ? "USD-1e-8" : "legacy-KOIN-1e-8") || typeof e.allowed !== "boolean" ||
@@ -81,8 +109,16 @@ class PrepaidChat extends ChatFlow {
   async chat(window, value, signal) {
     signal.throwIfAborted();
     if (!this.storage?.isEncryptionAvailable?.()) throw Error("Unlock secure storage to chat");
-    const input = request(value, this.config), requestHash = P.hash(JSON.stringify(input));
-    let record = this.read();
+    let record = this.read(), input, requestHash;
+    // A saved response remains verifiable even when the provider is offline or
+    // the current catalog cannot be fetched. Its exact policy is pinned here.
+    try { input = this.input(value, record); requestHash = P.hash(JSON.stringify(input)); } catch (error) { if (record?.tariffs) throw error; }
+    const recovering = record && ["pending", "answered"].includes(record.state) && record.requestHash === requestHash;
+    if (!recovering) {
+      if (isUsd(this.product)) await this.models(signal);
+      input = this.input(value); requestHash = P.hash(JSON.stringify(input));
+      this.available(input.model);
+    }
     if (record && ["pending", "answered"].includes(record.state) && record.requestHash !== requestHash) {
       // A different prompt may proceed. Cancelling an old request cannot undo a
       // charge, and its bounded hold also expires if the cancellation is lost.
@@ -107,12 +143,15 @@ class PrepaidChat extends ChatFlow {
       await this.call("cancel", { requestId: record.id }, signal); record = null;
     }
     if (!record || record.state !== "pending") {
-      const estimate = await this.estimate(value, signal);
+      // A completed recovery lookup may now require a fresh request. Refresh
+      // availability before admitting it, preserving the selected model.
+      if (isUsd(this.product) && (!this.modelCatalog || this.modelCatalog.validUntil <= this.clock())) await this.models(signal);
+      const estimate = await this.estimate(value, signal, true);
       if (!estimate.allowed) throw Error(input.freeOnly ? "Free only is on. This request exceeds your available free credits." : "Not enough credits for this request. Buy credits or choose a local model.");
       const credits = require("../core/lib/koin-network/purchase-quote").credits;
       this.progress(`Maximum ${credits(estimate.maxCharge)} credits · free first (${credits(estimate.maxFree)}) · up to ${credits(estimate.maxPaid)} purchased credits`);
       record = { schema: 1, owner: this.config.owner, deployment: P.hash(JSON.stringify(this.config)), id: crypto.randomBytes(32).toString("hex"),
-        session: P.hash("prepaid-account:" + this.config.owner), requestHash, state: "pending", maxPaid: estimate.maxPaid, costEstimate: estimate, input: this.storage.encryptString(JSON.stringify(value)).toString("base64") };
+        session: P.hash("prepaid-account:" + this.config.owner), requestHash, state: "pending", ...(this.approvedTariffs ? { tariffs: this.approvedTariffs } : {}), maxPaid: estimate.maxPaid, costEstimate: estimate, input: this.storage.encryptString(JSON.stringify(value)).toString("base64") };
       this.save(record);
     }
     this.progress(record.costEstimate ? `Generating your answer · maximum ${require("../core/lib/koin-network/purchase-quote").credits(record.costEstimate.maxCharge)} credits · up to ${require("../core/lib/koin-network/purchase-quote").credits(record.maxPaid)} purchased credits after free credits` : "Generating your answer…");
