@@ -1,3 +1,12 @@
+## Correct local model checks
+
+- Corrects the Qwen-family token references to preserve the same Unicode characters as the native model engine. The earlier reference normalized accented text and could stop a correctly installed Koinos Fast model with a tokenizer mismatch.
+- Corrects Mistral 7B's whitespace handling and verifies all 15 models' reference strings and test prompts against the native engine before packaging them.
+- An already-loading local model can finish before the check continues. Stopped engines, failed loads and a running engine with an unidentified model now have distinct messages and safe report details; installed model count is reported separately.
+- An incomplete tokenizer check no longer labels the engine unstable. Windows and Linux packages retain identical evidence-pack bytes and hashes.
+
+The check still verifies exact token IDs before measuring answers. These corrections do not grant provider qualification or activate credit purchases.
+
 ## Check this computer from Earn
 
 - Earn now runs a local model check from **Check this computer**, with progress, cancellation, and **Copy report** / **Save report** when evidence is available. No ports, model paths, developer benchmark page, sign-in, or credits are needed.

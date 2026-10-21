@@ -1,0 +1,2 @@
+# Preserve the exact evidence-pack bytes in Windows and Unix installers.
+core/provider-check/candidates.json text eol=lf

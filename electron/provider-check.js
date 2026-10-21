@@ -1,11 +1,15 @@
 "use strict";
 const fs = require("node:fs"), path = require("node:path"), crypto = require("node:crypto");
+const { setTimeout: delay } = require("node:timers/promises");
 const MAX_PACK = 2000000, MAX_REPORT = 4000000, MAX_RESPONSE = 1500000, MAX_MODEL = 32 * 1024 ** 3;
 const hash = value => crypto.createHash("sha256").update(value).digest("hex");
 const digest = value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 const fail = code => Object.assign(new Error(code), { code });
 const TEXT = {
-  model_not_running: "Open Chat and send a message using an installed local model, then check this computer again.",
+  model_not_running: "This check could not see an active local engine. In Chat, send a message with an installed local model and wait for its reply before checking again.",
+  model_loading: "The local model is still loading. Let loading finish before checking again.",
+  model_load_failed: "The local model could not finish loading. Open Chat to see the model's loading error.",
+  model_identity_unavailable: "The local engine is running, but the app could not identify its active model. This state has been kept in the report for review.",
   model_not_prepared: "This model does not have a prepared local check yet. The report records that limitation.",
   model_not_approved: "Choose an approved public local model in Chat before checking this computer.",
   model_busy: "This computer is answering a request. Let it finish, then check again.",
@@ -69,6 +73,19 @@ function hardware(h = {}) {
     gpus: (Array.isArray(h.gpus) ? h.gpus.slice(0, 8) : []).map(g => ({ vendor: safeText(g.vendor, 32), name: safeText(g.name), vramMb: natural(g.vramMb) })) };
 }
 function wallet(core) { const address = core.account?.wallet?.address; return typeof address === "string" && /^[1-9A-HJ-NP-Za-km-z]{25,50}$/.test(address) ? address : null; }
+function localState(core, pack, snapshot) {
+  // Keep the distinction between installed, selected and actually running
+  // models in evidence. Never export custom aliases, paths or engine errors.
+  const approved = new Set(pack.models.filter(m => {
+    const a = core.models.catalog.aliases[m.model], p = a && core.models.catalog.packages[a.package];
+    return a && !a.custom && !a.dev && p && !p.custom && a.package === m.package && p.sha256 === m.modelHash && !core.models.quarantineOf(a.package);
+  }).map(m => m.model));
+  let installedApprovedModels = null;
+  try { if (typeof core.models.aliases === "function") installedApprovedModels = core.models.aliases().filter(a => approved.has(a.alias) && a.status === "ready").length; } catch {}
+  return { loading: !!snapshot.loading, activeModel: approved.has(snapshot.activeAlias) ? snapshot.activeAlias : null,
+    running: !!snapshot.runtime?.running, engine: snapshot.runtime ? ["llamacpp", "ollama"].includes(snapshot.runtime.kind) ? snapshot.runtime.kind : "other" : null,
+    lastLoadFailed: !!snapshot.lastLoadError, installedApprovedModels };
+}
 async function hashModel(file, expected, signal, progress = () => {}) {
   let handle;
   try {
@@ -128,7 +145,24 @@ class LocalProviderCheck {
       report.source = { backendCommit: pack.source.backendCommit, packSha256: loaded.sha256 };
       for (const key of ["suiteSha256", "catalogSha256", "indexSha256", "generatorSha256", "tokenizerSourceSha256"]) if (digest(pack.source[key])) report.source[key] = pack.source[key];
       signal.throwIfAborted(); snapshot = this.core.runtime.status();
-      if (snapshot.loading || !snapshot.activeAlias || !snapshot.runtime?.running) throw fail("model_not_running");
+      report.localState = { initial: localState(this.core, pack, snapshot), current: null, waitedForLoad: false };
+      // A click during an existing warm start or Chat load must not instantly
+      // become "model not running". Observe that load without ensuring,
+      // downloading, switching, or cancelling the underlying runtime.
+      if (snapshot.loading) {
+        report.localState.waitedForLoad = true;
+        this.update({ stage: "Waiting for local model", detail: "The app is already loading a local model. This check will continue when it is ready." });
+        const deadline = AbortSignal.timeout(120000);
+        while (snapshot.loading) {
+          if (deadline.aborted) throw fail("model_loading");
+          await delay(250, undefined, { signal });
+          snapshot = this.core.runtime.status();
+          report.localState.current = localState(this.core, pack, snapshot);
+        }
+      }
+      report.localState.current = localState(this.core, pack, snapshot);
+      if (!snapshot.runtime?.running) throw fail(snapshot.lastLoadError ? "model_load_failed" : "model_not_running");
+      if (!snapshot.activeAlias) throw fail("model_identity_unavailable");
       const alias = this.core.models.catalog.aliases[snapshot.activeAlias], pkg = alias && this.core.models.catalog.packages[alias.package];
       if (!alias || alias.custom || alias.dev || !pkg || pkg.custom || !digest(pkg.sha256) || this.core.models.quarantineOf(alias.package)) throw fail("model_not_approved");
       const m = pack.models.find(x => x.model === snapshot.activeAlias && x.package === alias.package && x.modelHash === pkg.sha256);
@@ -149,7 +183,10 @@ class LocalProviderCheck {
       guard(); timer = setTimeout(() => this.controller.abort(fail("timeout")), 10 * 60 * 1000);
       report.model = { id: m.model, label: safeText(alias.label || m.model), package: m.package, modelHash: m.modelHash, tokenizerHash: m.tokenizerHash,
         configHash: m.configHash, templateHash: m.templateHash, manifestSha256: m.manifestSha256, referenceAt: m.at };
-      report.runtime = { kind: "llamacpp", pid: snapshot.runtime.pid, identity: "managed-process-observed", stable: false };
+      // Null means the full observation did not finish; only an observed
+      // runtime change proves instability, and only a completed check proves
+      // the process remained the same throughout this measurement.
+      report.runtime = { kind: "llamacpp", pid: snapshot.runtime.pid, identity: "managed-process-observed", stable: null };
       this.update({ model: { id: m.model, label: report.model.label }, total: 1 + m.vectors.length + m.cases.length, stage: "Checking model file", detail: "Verifying the installed model against its exact approved package." });
       let lastPercent = -1;
       report.modelFile = await hashModel(file, m.modelHash, signal, (bytes, total) => { const p = Math.floor(bytes * 100 / total); if (p !== lastPercent) { lastPercent = p; this.update({ detail: `Verifying model file: ${p}%.` }); } });
@@ -191,8 +228,11 @@ class LocalProviderCheck {
       this.update({ state: "complete", stage: "Local check complete", detail: `Measured ${this.current.passed} of 12 exact answers. Copy or save the report for review; this does not turn the provider ONLINE.` });
     } catch (error) {
       const code = signal.aborted ? signal.reason?.code === "timeout" ? "timeout" : "cancelled" : Object.hasOwn(TEXT, error.code) ? error.code : "runtime_request_failed";
+      if (code === "runtime_changed" && report.runtime) report.runtime.stable = false;
       report.outcome = { state: completed ? "incomplete" : "unavailable", code };
-      this.update({ state: report.outcome.state, stage: code === "cancelled" ? "Check cancelled" : "Check incomplete", detail: TEXT[code] });
+      const installed = report.localState?.current?.installedApprovedModels;
+      const detail = code === "model_not_running" && installed > 0 ? `${installed} approved local model${installed === 1 ? " is" : "s are"} installed. ${TEXT[code]}` : TEXT[code];
+      this.update({ state: report.outcome.state, stage: code === "cancelled" ? "Check cancelled" : "Check incomplete", detail });
     } finally {
       clearTimeout(timer); hold?.release(); report.completedAt = this.clock();
       try { this.reportText(); } catch {

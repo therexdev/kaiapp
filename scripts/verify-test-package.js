@@ -45,6 +45,10 @@ for (const archive of archives) {
       throw error;
     }
   }
+  // Reference hashes must describe identical evidence on every platform.
+  const candidateBytes = asar.extractFile(file, path.normalize("core/provider-check/candidates.json"));
+  assert.equal(candidateBytes.includes(13), false, "Provider evidence must retain LF bytes on Windows");
+  assert.deepEqual(candidateBytes, fs.readFileSync("core/provider-check/candidates.json"), "Packaged provider evidence differs from reviewed source");
   if (process.platform === "win32") assert.ok(fs.statSync(path.join(path.dirname(file), "bin/kai-windows-voice.exe")).size > 0, "Missing bundled fast Windows voice helper");
   if (process.platform === "win32") assert.ok(fs.statSync(path.join(path.dirname(file), "bin/kai-computer.exe")).size > 0, "Missing private desktop control helper");
   for (const asset of ["ort.node.min.js", "ort.wasm.min.js", "ort-wasm-simd-threaded.mjs", "ort-wasm-simd-threaded.wasm"]) {

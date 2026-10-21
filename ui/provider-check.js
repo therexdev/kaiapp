@@ -13,7 +13,7 @@
   }
   function create({ root, bridge }) {
     const $ = name => root.querySelector("[data-check-" + name + "]");
-    let value = { state: "idle", stage: "", detail: "Check the model installed on this computer. No account or credits needed.", completed: 0, total: 0, passed: null, reportAvailable: false, model: null };
+    let value = { state: "idle", stage: "", detail: "Check the model currently running locally. No account or credits needed.", completed: 0, total: 0, passed: null, reportAvailable: false, model: null };
     let starting = false, cancelling = false, exporting = false, pendingRead = false, revision = 0, operation = 0, disposed = false;
     const available = !!bridge && ["start", "status", "cancel", "copy", "save", "onProgress"].every(key => typeof bridge[key] === "function");
     function paint() {

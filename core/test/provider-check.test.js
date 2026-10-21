@@ -46,7 +46,8 @@ test("one local check verifies current bytes and runtime tokens, measures all12 
 });
 test("private, unavailable, busy or unsupported runtimes never start inference, downloads or payment actions", async t => {
   for (const [mutate, code] of [
-    [f => { f.state.activeAlias = null; }, "model_not_running"],
+    [f => { f.state.runtime = null; }, "model_not_running"],
+    [f => { f.state.activeAlias = null; }, "model_identity_unavailable"],
     [f => { f.core.models.catalog.aliases[f.m.model].custom = true; }, "model_not_approved"],
     [f => { f.core.models.catalog.aliases[f.m.model].dev = true; }, "model_not_approved"],
     [f => { f.pack.models = []; }, "model_not_prepared"],
@@ -57,18 +58,60 @@ test("private, unavailable, busy or unsupported runtimes never start inference, 
     assert.equal(JSON.parse(f.check.reportText()).outcome.code, code); assert.equal(f.counts.acquired, 0); assert.equal(f.counts.requests.length, 0);
   }
 });
+test("installed models and a stopped engine remain distinct in the report without exposing private model names or errors", async t => {
+  const f = fixture(t);
+  for (let i = 2; i <= 4; i++) {
+    const m = { ...f.m, model: `fixture-${i}`, package: `fixture-${i}@1` };
+    f.pack.models.push(m); f.core.models.catalog.aliases[m.model] = { package: m.package }; f.core.models.catalog.packages[m.package] = { sha256: m.modelHash };
+  }
+  f.core.models.aliases = () => [...f.pack.models.map(m => ({ alias: m.model, status: "ready" })), { alias: "PRIVATE_IMPORTED_MODEL", status: "ready", custom: true }];
+  f.state.activeAlias = null; f.state.runtime = null;
+  const status = await complete(f.check), report = JSON.parse(f.check.reportText());
+  assert.equal(report.outcome.code, "model_not_running");
+  assert.deepEqual(report.localState.current, { loading: false, activeModel: null, running: false, engine: null, lastLoadFailed: false, installedApprovedModels: 4 });
+  assert.match(status.detail, /4 approved local models are installed/);
+  assert.equal(f.check.reportText().includes("PRIVATE_IMPORTED_MODEL"), false);
+  assert.equal(f.counts.requests.length, 0); assert.equal(f.counts.acquired, 0);
+});
+test("an already-started local load is observed before checking, with no new load, download or request retry", async t => {
+  const f = fixture(t), ready = structuredClone(f.state);
+  f.state.loading = true; f.state.activeAlias = null; f.state.runtime = null;
+  f.check.start();
+  assert.equal(f.check.status().stage, "Waiting for local model"); assert.equal(f.counts.acquired, 0); assert.equal(f.counts.requests.length, 0);
+  Object.assign(f.state, ready);
+  await f.check.task;
+  const report = JSON.parse(f.check.reportText());
+  assert.equal(report.outcome.state, "complete"); assert.equal(report.localState.waitedForLoad, true);
+  assert.equal(report.localState.initial.loading, true); assert.equal(report.localState.initial.running, false);
+  assert.equal(report.localState.current.loading, false); assert.equal(report.localState.current.running, true);
+  assert.equal(f.counts.acquired, 1); assert.equal(f.counts.released, 1);
+  assert.equal(f.counts.requests.filter(x => x.route === "/completion").length, 12);
+});
+test("waiting for an existing load can be cancelled without stopping it and a failed load is reported honestly", async t => {
+  const f = fixture(t); f.state.loading = true; f.state.activeAlias = null; f.state.runtime = null;
+  f.check.start(); f.check.cancel(); await f.check.task;
+  assert.equal(JSON.parse(f.check.reportText()).outcome.code, "cancelled");
+  assert.equal(f.state.loading, true); assert.equal(f.counts.stopped, 0); assert.equal(f.counts.acquired, 0); assert.equal(f.counts.requests.length, 0);
+  const g = fixture(t); g.state.loading = true; g.state.activeAlias = null; g.state.runtime = null;
+  g.check.start(); g.state.loading = false; g.state.lastLoadError = { message: "PRIVATE_LOCAL_PATH_OR_ENGINE_ERROR" }; await g.check.task;
+  const report = JSON.parse(g.check.reportText());
+  assert.equal(report.outcome.code, "model_load_failed"); assert.equal(report.localState.current.lastLoadFailed, true);
+  assert.equal(g.check.reportText().includes("PRIVATE_LOCAL_PATH_OR_ENGINE_ERROR"), false);
+  assert.equal(g.counts.requests.length, 0); assert.equal(g.counts.acquired, 0); assert.equal(g.counts.stopped, 0);
+});
 test("wrong current model bytes and mismatched runtime token IDs stop before quality inference", async t => {
   const f = fixture(t); fs.writeFileSync(f.file, "not the approved bytes"); await complete(f.check);
   assert.equal(JSON.parse(f.check.reportText()).outcome.code, "model_hash_mismatch"); assert.equal(f.counts.requests.length, 0); assert.equal(f.counts.released, 1);
   const g = fixture(t); g.response = async () => Response.json({ tokens: [999, 999] }); await complete(g.check);
   const report = JSON.parse(g.check.reportText()); assert.equal(report.outcome.code, "tokenizer_mismatch"); assert.equal(report.calibration.vectors[0].passed, false);
+  assert.equal(report.runtime.stable, null, "an incomplete tokenizer check is not evidence of runtime instability");
   assert.equal(report.measurement.results.length, 0); assert.equal(g.counts.requests.length, 1); assert.equal(g.counts.released, 1);
 });
 test("process and public wallet changes invalidate a run without stopping the runtime or retrying", async t => {
   for (const kind of ["pid", "wallet"]) {
     const f = fixture(t); f.response = async () => { if (kind === "pid") f.state.runtime.pid++; else f.core.account.wallet.address = null; return Response.json({ tokens: [] }); };
     await complete(f.check); const report = JSON.parse(f.check.reportText());
-    assert.equal(report.outcome.code, kind === "pid" ? "runtime_changed" : "wallet_changed"); assert.equal(report.runtime.stable, false);
+    assert.equal(report.outcome.code, kind === "pid" ? "runtime_changed" : "wallet_changed"); assert.equal(report.runtime.stable, kind === "pid" ? false : null);
     assert.equal(f.counts.requests.length, 1); assert.equal(f.counts.released, 1); assert.equal(f.counts.stopped, 0);
   }
 });
