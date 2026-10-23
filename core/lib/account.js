@@ -29,8 +29,14 @@ const path = require("path");
 const POLL_MIN_MS = 2000;
 
 class AccountService {
-  constructor({ dataDir, settings, wallet, safeStorage = null, onEvent = () => {} }) {
-    this.file = path.join(dataDir, "account.cfg");
+  constructor({ dataDir, settings, wallet, safeStorage = null, onEvent = () => {}, accountOrigin = null }) {
+    if (accountOrigin !== null) {
+      const url = new URL(accountOrigin);
+      if (url.protocol !== "https:" || url.origin !== accountOrigin) throw Error("Account origin must be a canonical HTTPS origin");
+    }
+    Object.defineProperty(this, "accountOrigin", { value: accountOrigin });
+    // A new service must never inherit or overwrite the website's bearer.
+    this.file = path.join(dataDir, accountOrigin ? `credit-account-${crypto.createHash("sha256").update(accountOrigin).digest("hex")}.cfg` : "account.cfg");
     this.settings = settings;
     this.wallet = wallet;
     this.safeStorage = safeStorage;
@@ -42,6 +48,7 @@ class AccountService {
   /** koinosai.com, derived from the scheduler URL so a self-hosted network
    *  automatically gets its own account server. */
   origin() {
+    if (this.accountOrigin) return this.accountOrigin;
     const DEFAULT = "https://koinosai.com/scheduler";
     const sched = String(this.settings.get("earn.schedulerUrl", process.env.KAI_SCHEDULER_URL || DEFAULT));
     try {
@@ -99,6 +106,7 @@ class AccountService {
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
+      ...(this.accountOrigin ? { redirect: "error", signal: AbortSignal.timeout(10000) } : {}),
     });
     const j = await r.json().catch(() => ({}));
     return { status: r.status, ...j };

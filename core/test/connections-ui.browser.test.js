@@ -59,7 +59,7 @@ test("Connections readiness: managed sign-in, delayed enablement, refresh errors
  await page.addScriptTag({ path: path.resolve(__dirname, "../../ui/connection-catalog.js") });
  await page.addScriptTag({ path: path.resolve(__dirname, "../../ui/connections.js") });
  const render = async (section = "explore") => { await page.evaluate(async section => {
-  window.navigated = []; window.activateView = view => window.navigated.push(view);
+  window.navigated = []; window.activateView = view => window.navigated.push(view); window.accountScopes = []; window.selectAccountScope = website => window.accountScopes.push(website);
   const host = document.createElement("div"); document.getElementById("connections").replaceChildren(host);
   window.KaiConnections.render(host, { section, state: await window.connectionManage("status"), manage: window.connectionManage, navigate: next => window.navigated.push(next) });
  }, section); if (section === "explore") { await page.getByLabel("Search apps", {exact:true}).fill("github"); await page.locator('[data-cn="app"][data-value="github"]').waitFor(); } };
@@ -76,6 +76,7 @@ test("Connections readiness: managed sign-in, delayed enablement, refresh errors
  if (qa) { fs.mkdirSync(qa, { recursive: true }); await page.screenshot({ path: path.join(qa, "connections-signin-720.png"), animations: "disabled" }); }
  await dialog().getByRole("button", { name: "Sign in to KAI", exact: true }).click();
  assert.deepEqual(await page.evaluate(() => window.navigated), ["settings"]);
+ assert.deepEqual(await page.evaluate(() => window.accountScopes), [true], "Connections opens the website account, not the credit service");
 
  token = "session-a"; hub.composio.managed = { available: false };
  let release; statusGate = new Promise(resolve => { release = resolve; });

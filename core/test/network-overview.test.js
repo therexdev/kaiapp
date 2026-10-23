@@ -67,7 +67,11 @@ test("native and browser overview read the configured public scheduler with inac
   const window = Object.assign(new EventEmitter(), { webContents: new EventEmitter(), isDestroyed: () => false, isVisible: () => true, isMinimized: () => false });
   window.webContents.mainFrame = { url: "http://127.0.0.1:9000/" };
   let handle;
+  const manifestPath = require.resolve("../lib/koin-network/credit-service.json"), original = require(manifestPath);
+  try {
+    require.cache[manifestPath].exports = { schema: 1, state: "unavailable", reason: "Activation pending in this fixture" };
   registration = require("../../electron/koin-test-ipc").registerTestPaymentIPC({ core, dataDir: root, isTest: true, dialog: {}, origin: "http://127.0.0.1:9000", getMainWindow: () => window, ipcMain: { handle: (_name, fn) => { handle = fn; } } });
+  } finally { require.cache[manifestPath].exports = original; }
   const event = { sender: window.webContents, senderFrame: window.webContents.mainFrame };
   await assert.rejects(handle(event, "network-overview"), /Local-Only/); assert.equal(hits, 0);
   core.settings.set("network.privacyMode", "local-first");

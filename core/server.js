@@ -32,7 +32,7 @@ const VERSION = require("./package.json").version;
 // self-hosters; the Earn tab field overrides per machine.
 const DEFAULT_SCHEDULER_URL = process.env.KAI_SCHEDULER_URL || "https://koinosai.com/scheduler";
 
-async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = {}) {
+async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent, creditAccountOrigin = null } = {}) {
   const release = channelConfig();
   dataDir = dataDir || process.env.KAI_CORE_DATA || path.join(os.homedir(), release.homeDirName);
   // Every event also lands in <dataDir>/core.log so packaged-app failures
@@ -482,6 +482,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
   // moves no value, same trust class as receipt signing.
   const { AccountService } = require("./lib/account");
   const account = new AccountService({ dataDir, settings, wallet, safeStorage, onEvent: events });
+  const creditAccount = creditAccountOrigin ? new AccountService({ dataDir, settings, wallet, safeStorage, onEvent: events, accountOrigin: creditAccountOrigin }) : null;
   // AI Teams (task #58): the runner lives in Core so headless API users and
   // the Pi get teams without a window. Completions loop back through the
   // gateway's own chat lane, so teams inherit EVERY routing rule — local
@@ -607,6 +608,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
     koinosNode: koinosNodeSvc,
     teams,
     account,
+    creditAccount,
     dev,
     bench,
     agents,
@@ -655,6 +657,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent } = 
   return {
     settings,
     account,
+    creditAccount,
     speech,
     turn,
     state,

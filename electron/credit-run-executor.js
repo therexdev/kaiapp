@@ -15,7 +15,7 @@ class CreditRunExecutor {
     if ((input.kind === "agents" || body.spec !== undefined) && !this.core.gateway.dev?.status().enabled) throw Error("Custom agent definitions require Developer tools");
     const abort = new AbortController(), signal = AbortSignal.any([outerSignal, abort.signal]);
     const state = { abort, runner: null, localId: null }; this.active.set(run.id, state);
-    const guard = () => { signal.throwIfAborted(); this.core.account.assertCreditAuthorization(c.auth, c.config.schedulerUrl); };
+    const guard = () => { signal.throwIfAborted(); this.service.account.assertCreditAuthorization(c.auth, c.config.schedulerUrl); };
     const registry = this.core.gateway.tools;
     const tools = registry && { list: () => registry.list(), call: async (...args) => { guard(); const value = await registry.call(...args); guard(); return value; } };
     const chatFn = async ({ messages, maxTokens }) => {

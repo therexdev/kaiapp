@@ -2,11 +2,11 @@
 const test = require("node:test"), assert = require("node:assert/strict"), P = require("../lib/koin-network/job-protocol"), { CreditRunExecutor } = require("../../electron/credit-run-executor");
 function setup(mode, responses) {
   const calls = [], traces = [], id = P.hash("run"), c = { config: { schedulerUrl: "https://fixture.invalid/scheduler", maxOutput: 32 }, auth: {} };
-  const service = { runs: { read: () => ({ id, mode, model: "fixture" }), chat: async (_c, input, signal) => {
+  const service = { account: { assertCreditAuthorization() {} }, runs: { read: () => ({ id, mode, model: "fixture" }), chat: async (_c, input, signal) => {
     signal.throwIfAborted(); calls.push(input); const text = responses.shift(); if (text instanceof Error) throw text; if (text === undefined) throw Error("Unexpected model call");
     return { choices: [{ message: { content: text } }] };
   } }, progress: value => traces.push(value) };
-  const core = { account: { assertCreditAuthorization() {} }, gateway: { dev: { status: () => ({ enabled: true }) }, tools: { list: () => [], call() { throw Error("No tool permission"); } } } };
+  const core = { account: { assertCreditAuthorization() { throw Error("Legacy website authorization must not be used"); } }, gateway: { dev: { status: () => ({ enabled: true }) }, tools: { list: () => [], call() { throw Error("No tool permission"); } } } };
   return { calls, traces, id, c, service, core, executor: new CreditRunExecutor({ service, core }) };
 }
 test("team planning and review use only metered subcalls with the approved output ceiling", async () => {

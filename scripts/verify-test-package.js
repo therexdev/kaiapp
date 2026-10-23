@@ -49,6 +49,9 @@ for (const archive of archives) {
   const candidateBytes = asar.extractFile(file, path.normalize("core/provider-check/candidates.json"));
   assert.equal(candidateBytes.includes(13), false, "Provider evidence must retain LF bytes on Windows");
   assert.deepEqual(candidateBytes, fs.readFileSync("core/provider-check/candidates.json"), "Packaged provider evidence differs from reviewed source");
+  const creditService = JSON.parse(asar.extractFile(file, path.normalize("core/lib/koin-network/credit-service.json")));
+  assert.deepEqual(creditService, require("../core/lib/koin-network/credit-service.json"), "Packaged credit deployment differs from reviewed source");
+  require("../electron/credit-service").manifest(creditService);
   if (process.platform === "win32") assert.ok(fs.statSync(path.join(path.dirname(file), "bin/kai-windows-voice.exe")).size > 0, "Missing bundled fast Windows voice helper");
   if (process.platform === "win32") assert.ok(fs.statSync(path.join(path.dirname(file), "bin/kai-computer.exe")).size > 0, "Missing private desktop control helper");
   for (const asset of ["ort.node.min.js", "ort.wasm.min.js", "ort-wasm-simd-threaded.mjs", "ort-wasm-simd-threaded.wasm"]) {

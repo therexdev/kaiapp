@@ -101,7 +101,7 @@ function hasImageParts(messages) {
 }
 
 class Gateway {
-  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, staticAssets, earn, network, feedback, chats, docs, voice, speech, turn, tools, memory, mcp, nodeRuntime, email, calendar, koinos, koinosNode, teams, account, dev, bench, agents, code, onEvent }) {
+  constructor({ host = "127.0.0.1", port = 41100, runtime, models, keys, coreInfo, uiDir, staticAssets, earn, network, feedback, chats, docs, voice, speech, turn, tools, memory, mcp, nodeRuntime, email, calendar, koinos, koinosNode, teams, account, creditAccount, dev, bench, agents, code, onEvent }) {
     this.tools = tools || null; // unified tool registry (agents/MCP/memory/…)
     this.memory = memory || null; // cross-chat memory store
     this.mcp = mcp || null; // MCP server manager
@@ -112,6 +112,7 @@ class Gateway {
     this.koinosNode = koinosNode || null; // the full node stack: Docker, setup, onramp, swaps
     this.teams = teams || null; // AI Teams runner (task #58) — role pipelines, Core-side
     this.account = account || null; // Koinos AI account client (task #49) — device link + wallet attach
+    this.creditAccount = creditAccount || null;
     this.dev = dev || null; // developer-tools switch (task #61) — gates custom specs + bench
     this.bench = bench || null; // objective model benchmark (task #61)
     this.agents = agents || null; // multi-agent group chats (task #64) — runner + saved defs
@@ -1059,38 +1060,41 @@ class Gateway {
 
     // ---- Koinos AI account (task #49): device link + wallet attach ----
     // All egress: refused in Local-Only before the client is touched.
-    if (this.account && path.startsWith("/core/account")) {
+    if (this.account && /^\/core\/(account|website-account)(?:\/|$)/.test(path)) {
+      const website = path.startsWith("/core/website-account");
+      const account = website ? this.account : this.creditAccount || this.account;
+      const accountPath = website ? path.replace("/core/website-account", "/core/account") : path;
       if (this._blockedByPrivacy(res, "Your Koinos AI account")) return;
       try {
-        if (path === "/core/account" && req.method === "GET") {
-          return this._json(res, 200, { ok: true, ...(await this.account.status()) });
+        if (accountPath === "/core/account" && req.method === "GET") {
+          return this._json(res, 200, { ok: true, ...(await account.status()), scope: account === this.creditAccount ? "credits" : "website", separateCreditAccount: !!this.creditAccount });
         }
-        if (path === "/core/account/link/start" && req.method === "POST") {
-          return this._json(res, 200, { ok: true, ...(await this.account.linkStart()) });
+        if (accountPath === "/core/account/link/start" && req.method === "POST") {
+          return this._json(res, 200, { ok: true, ...(await account.linkStart()) });
         }
-        if (path === "/core/account/link/poll" && req.method === "POST") {
-          return this._json(res, 200, { ok: true, ...(await this.account.linkPoll()) });
+        if (accountPath === "/core/account/link/poll" && req.method === "POST") {
+          return this._json(res, 200, { ok: true, ...(await account.linkPoll()) });
         }
-        if (path === "/core/account/logout" && req.method === "POST") {
-          await this.account.signOut();
+        if (accountPath === "/core/account/logout" && req.method === "POST") {
+          await account.signOut();
           return this._json(res, 200, { ok: true });
         }
-        if (path === "/core/account/wallet" && req.method === "POST") {
-          return this._json(res, 200, { ok: true, account: await this.account.linkWallet() });
+        if (accountPath === "/core/account/wallet" && req.method === "POST") {
+          return this._json(res, 200, { ok: true, account: await account.linkWallet() });
         }
-        if (path === "/core/account/wallet/unlink" && req.method === "POST") {
+        if (accountPath === "/core/account/wallet/unlink" && req.method === "POST") {
           const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
-          return this._json(res, 200, { ok: true, account: await this.account.unlinkWallet(body.address) });
+          return this._json(res, 200, { ok: true, account: await account.unlinkWallet(body.address) });
         }
         // Spend grants: only this machine can create one (the wallet key
         // signs it here); revoking needs nothing but the session.
-        if (path === "/core/account/grant" && req.method === "POST") {
+        if (account !== this.creditAccount && accountPath === "/core/account/grant" && req.method === "POST") {
           const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
-          return this._json(res, 200, { ok: true, ...(await this.account.grantSpend(body)) });
+          return this._json(res, 200, { ok: true, ...(await account.grantSpend(body)) });
         }
-        if (path === "/core/account/grant/revoke" && req.method === "POST") {
+        if (account !== this.creditAccount && accountPath === "/core/account/grant/revoke" && req.method === "POST") {
           const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
-          return this._json(res, 200, { ok: true, account: await this.account.revokeGrant(body.id) });
+          return this._json(res, 200, { ok: true, account: await account.revokeGrant(body.id) });
         }
       } catch (e) {
         return this._json(res, 400, { ok: false, error: String(e.message) });

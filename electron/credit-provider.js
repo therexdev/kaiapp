@@ -18,7 +18,7 @@ class CreditProvider {
   }
   guard(c, signal) {
     signal?.throwIfAborted(); if (this.closed) throw Error("Provider is closing");
-    this.core.account.assertCreditAuthorization(c.auth, c.config.schedulerUrl);
+    this.service.account.assertCreditAuthorization(c.auth, c.config.schedulerUrl);
     if (this.core.account.wallet.address !== c.config.owner || !this.core.account.wallet.status().unlocked) throw Error("Unlock the linked reward wallet in Account to continue provider setup");
   }
   async model(c, signal) {
@@ -77,7 +77,7 @@ class CreditProvider {
       this.context = c; if (!resume) this.preference(c, true); this.error = "";
       // The host lease coordinates the existing wallet; it creates no credential.
       const access = require("./credit-purchase-access"), id = access.installation({ dataDir: this.service.dataDir, directory: c.directory, config: c.config, storage: this.core.account.safeStorage });
-      await access.claimHost({ c, account: this.core.account, wallet: this.core.account.wallet, installation: id, fetchImpl: this.service.fetchImpl, signal }); current(); this.guard(c, signal);
+      await access.claimHost({ c, account: this.service.account, wallet: this.core.account.wallet, installation: id, fetchImpl: this.service.fetchImpl, signal }); current(); this.guard(c, signal);
       await this.core.gateway.earn?.stop?.({ userIntent: true });
       current();
       const cfg = c.config, target = { chainId: cfg.deployment.chainId, credits: cfg.deployment.credits, creditsHash: cfg.deployment.creditsHash,
@@ -102,12 +102,12 @@ class CreditProvider {
     if (!this.worker?.running || !this.context) return { state: "offline", label: "OFFLINE", detail: this.error || "Sharing is off. Turn it on to connect and check model quality." };
     const c = this.context; this.guard(c);
     if (this.worker.status().backoff) return { state: "paused", label: "PAUSED", detail: this.worker.status().backoffReason || "This computer is busy." };
-    return this.readStatus({ config: c.config, approvedModels: c.providerModels, access: { authorize: pin => { this.core.account.assertCreditAuthorization(c.auth, pin); return c.auth; } }, fetchImpl: this.service.fetchImpl, signal: AbortSignal.timeout(10000) });
+    return this.readStatus({ config: c.config, approvedModels: c.providerModels, access: { authorize: pin => { this.service.account.assertCreditAuthorization(c.auth, pin); return c.auth; } }, fetchImpl: this.service.fetchImpl, signal: AbortSignal.timeout(10000) });
   }
   async earnings() {
     const c = await this.service.context(AbortSignal.timeout(10000));
     const value = await require("./koin-provider-status").readProviderAccount({ config: c.config,
-      access: { authorize: pin => { this.core.account.assertCreditAuthorization(c.auth, pin); return c.auth; } }, fetchImpl: this.service.fetchImpl, signal: AbortSignal.timeout(10000) });
+      access: { authorize: pin => { this.service.account.assertCreditAuthorization(c.auth, pin); return c.auth; } }, fetchImpl: this.service.fetchImpl, signal: AbortSignal.timeout(10000) });
     if (!Number.isSafeInteger(value.observedAt) || Math.abs(Date.now() - value.observedAt) > 30000 || !Array.isArray(value.payouts) || value.payouts.length > 4096) throw Error("Reward history observation is unavailable or stale");
     const payouts = value.payouts.filter(p => p.account === c.config.owner).slice(0, 64).map(p => {
       if (typeof p.epoch !== "string" || !/^(0|[1-9]\d{0,9})$/.test(p.epoch) || typeof p.state !== "string" || !/^[a-z_]{1,40}$/.test(p.state) ||

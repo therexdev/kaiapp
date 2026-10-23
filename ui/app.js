@@ -481,7 +481,7 @@ window.addEventListener("kai-network-models-changed", () => { if ($("src-pick").
 window.addEventListener("kai-network-use", async event => {
   await updateModelPick((await coreGet("/core/models")).aliases);
   if (KaiNetwork.info.blocked) {
-    if (KaiNetwork.info.activation === "signin-required") { activateView("settings"); $("btn-account-signin").scrollIntoView({ block: "center" }); }
+    if (KaiNetwork.info.activation === "signin-required") { void selectAccountScope(false); activateView("settings"); $("btn-account-signin").scrollIntoView({ block: "center" }); }
     else if (KaiNetwork.info.product === "prepaid-usd-v1") { activateView("credits"); }
     else activateView("earn");
     return;
@@ -1934,6 +1934,22 @@ $("btn-wallet-balances").addEventListener("click", async () => {
  * Local-Only privacy mode with words. */
 let accountFetchedAt = 0;
 let accountPolling = false;
+let websiteAccount = false;
+let accountEpoch = 0;
+const accountPath = suffix => (websiteAccount ? "/core/website-account" : "/core/account") + suffix;
+function selectAccountScope(website) {
+  websiteAccount = !!website;
+  accountEpoch++;
+  accountPolling = false;
+  accountFetchedAt = 0;
+  accountGrantId = null;
+  for (const id of ["account-code-row", "account-web", "account-signedin", "account-signedout"]) $(id).hidden = true;
+  for (const id of ["btn-account-signin", "btn-account-linkwallet", "btn-account-signout"]) $(id).disabled = false;
+  accountMsg("");
+  return renderAccount(true);
+}
+window.selectAccountScope = selectAccountScope;
+$("btn-account-scope").addEventListener("click", () => selectAccountScope(!websiteAccount));
 // The grant this window may revoke: this machine's wallet, resolved server-
 // side in account.status(). Held here so the revoke button never has to guess
 // which of several grants it means.
@@ -1949,18 +1965,28 @@ function accountMsg(text, ok) {
 async function renderAccount(force) {
   if (!force && Date.now() - accountFetchedAt < 30000) return; // egress — don't ride the 2s earn timer
   accountFetchedAt = Date.now();
+  const epoch = accountEpoch;
   const so = $("account-signedout");
   const si = $("account-signedin");
   let j = {};
   try {
-    const r = await fetch("/core/account");
+    const r = await fetch(accountPath(""));
     j = await r.json();
+    if (epoch !== accountEpoch) return;
     if (!r.ok || !j.ok) throw new Error(j.localOnly ? "Privacy is set to Local-Only — accounts need network access (Local API → Network & privacy)." : j.error || `HTTP ${r.status}`);
   } catch (e) {
+    if (epoch !== accountEpoch) return;
     so.hidden = true;
     si.hidden = true;
     return accountMsg(e.message);
   }
+  $("account-heading").textContent = j.scope === "credits" ? "AI credit account" : "Koinos AI account";
+  $("account-hint").textContent = j.scope === "credits"
+    ? "Sign in at credits.koinosai.com to buy AI credits and share models. Approve the app's short code in your browser. This service has its own account; your website and Connections sign-in stays saved separately."
+    : "Sign in to your website account for Connections and web access. Approve the app's short code in your browser, then link this wallet if needed.";
+  $("btn-account-scope").hidden = !j.separateCreditAccount;
+  $("btn-account-scope").textContent = websiteAccount ? "Open AI credit account" : "Website account and Connections";
+  $("account-web").hidden = true;
   /*
    * Three different things used to look identical here: signed out, session
    * rejected, and the account server simply unreachable. The last one is the
@@ -1997,7 +2023,7 @@ async function renderAccount(force) {
     ];
     $("account-stats").innerHTML = rows.map(([k, v]) => KaiI18n.html`<span class="k">${k}</span><span>${esc(v)}</span>`).join("");
     $("btn-account-linkwallet").hidden = Boolean(j.thisWalletLinked);
-    renderWebAccess(j);
+    if (j.scope !== "credits") renderWebAccess(j);
   } else {
     si.hidden = true;
     so.hidden = false;
@@ -2013,10 +2039,13 @@ async function renderAccount(force) {
 function startAccountPoll() {
   if (accountPolling) return;
   accountPolling = true;
+  const epoch = accountEpoch, pollPath = accountPath("/link/poll");
   const tick = async () => {
+    if (epoch !== accountEpoch) return;
     try {
-      const r = await fetch("/core/account/link/poll", { method: "POST" });
+      const r = await fetch(pollPath, { method: "POST" });
       const j = await r.json();
+      if (epoch !== accountEpoch) return;
       if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
       if (j.pending) {
         setTimeout(tick, 3000);
@@ -2025,9 +2054,10 @@ function startAccountPoll() {
       accountPolling = false;
       $("account-code-row").hidden = true;
       accountMsg("Signed in.", true);
-      window.dispatchEvent(new Event("kai-credit-identity-changed"));
+      if (!websiteAccount) window.dispatchEvent(new Event("kai-credit-identity-changed"));
       renderAccount(true);
     } catch (e) {
+      if (epoch !== accountEpoch) return;
       accountPolling = false;
       $("account-code-row").hidden = true;
       accountMsg(e.message);
@@ -2038,47 +2068,57 @@ function startAccountPoll() {
 }
 
 $("btn-account-signin").addEventListener("click", async () => {
+  const epoch = accountEpoch;
   const btn = $("btn-account-signin");
   btn.disabled = true;
   accountMsg("");
   try {
-    const r = await fetch("/core/account/link/start", { method: "POST" });
+    const r = await fetch(accountPath("/link/start"), { method: "POST" });
     const j = await r.json();
+    if (epoch !== accountEpoch) return;
     if (!r.ok || !j.ok) throw new Error(j.localOnly ? "Privacy is set to Local-Only — switch it in Local API → Network & privacy first." : j.error || `HTTP ${r.status}`);
     $("account-code-row").hidden = false;
     $("account-code").textContent = j.userCode;
     KaiI18n.setText($("account-poll-status"), "Waiting for approval… this updates by itself.");
     startAccountPoll();
   } catch (e) {
+    if (epoch !== accountEpoch) return;
     accountMsg(e.message);
     btn.disabled = false;
   }
 });
 
 $("btn-account-linkwallet").addEventListener("click", async () => {
+  const epoch = accountEpoch;
   const btn = $("btn-account-linkwallet");
   btn.disabled = true;
   accountMsg("");
   try {
-    const r = await fetch("/core/account/wallet", { method: "POST" });
+    const r = await fetch(accountPath("/wallet"), { method: "POST" });
     const j = await r.json();
+    if (epoch !== accountEpoch) return;
     if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
     accountMsg("Wallet linked — it now shows on your account everywhere.", true);
-    window.dispatchEvent(new Event("kai-credit-identity-changed"));
+    if (!websiteAccount) window.dispatchEvent(new Event("kai-credit-identity-changed"));
     renderAccount(true);
   } catch (e) {
+    if (epoch !== accountEpoch) return;
     accountMsg(e.message);
   } finally {
-    btn.disabled = false;
+    if (epoch === accountEpoch) btn.disabled = false;
   }
 });
 
 $("btn-account-signout").addEventListener("click", async () => {
+  const epoch = accountEpoch;
   try {
-    await fetch("/core/account/logout", { method: "POST" });
-  } catch { /* signing out locally regardless */ }
+    const r = await fetch(accountPath("/logout"), { method: "POST" });
+    const j = await r.json();
+    if (!r.ok || !j.ok) throw Error(j.error || "Sign-out failed");
+  } catch (e) { if (epoch === accountEpoch) accountMsg(e.message); return; }
+  if (epoch !== accountEpoch) return;
   $("btn-account-signin").disabled = false;
-  window.dispatchEvent(new Event("kai-account-signed-out"));
+  if (!websiteAccount) window.dispatchEvent(new Event("kai-account-signed-out"));
   accountMsg("Signed out on this device.", true);
   renderAccount(true);
 });
@@ -2127,7 +2167,7 @@ $("btn-account-grant").addEventListener("click", async () => {
   btn.disabled = true;
   accountMsg("");
   try {
-    const r = await fetch("/core/account/grant", {
+    const r = await fetch(accountPath("/grant"), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ maxUsd, days }),
@@ -2149,7 +2189,7 @@ $("btn-account-grant-revoke").addEventListener("click", async () => {
   if (!confirm("End web access now? The website stops being able to spend immediately. Anything already spent stays spent.")) return;
   btn.disabled = true;
   try {
-    const r = await fetch("/core/account/grant/revoke", {
+    const r = await fetch(accountPath("/grant/revoke"), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ id: accountGrantId }),

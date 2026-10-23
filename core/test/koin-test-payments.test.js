@@ -28,7 +28,12 @@ test("Test payment IPC rejects other documents and keeps stable builds disabled"
   assert.equal((await handler(event, "purchase", "1")).enabled, false);
   assert.equal((await handler(event, "purchase-info")).enabled, false);
   await assert.rejects(handler({ ...event, senderFrame: { url: w.webContents.mainFrame.url } }, "status"), /access denied/); stable.dispose();
-  const testBuild = registerTestPaymentIPC({ ...options, isTest: true });
+  const manifestPath = require.resolve("../lib/koin-network/credit-service.json"), original = require(manifestPath);
+  let testBuild;
+  try {
+    require.cache[manifestPath].exports = { schema: 1, state: "unavailable", reason: "Credit service is not activated in this fixture" };
+    testBuild = registerTestPaymentIPC({ ...options, isTest: true });
+  } finally { require.cache[manifestPath].exports = original; }
   assert.equal((await handler(event, "status")).configured, false);
   const availability = await handler(event, "purchase-info");
   assert.equal(availability.activation, "unavailable");

@@ -15,7 +15,8 @@ function fixture(t) {
       quarantineOf: () => null, packageStatus: () => ({ status: installed ? "ready" : "absent" }), downloadProgress: () => null,
       ensurePackage: async () => { downloads++; installed = true; }, cancelDownload() {} },
     hardware: { ramBytes: 8e9 }, runtime: { acquireFor: async () => ({ release() { releases++; } }) }, gateway: { earn: { stop: async () => {} }, network: { trackShadowRequest: () => () => {} } } };
-  const service = { dataDir: directory, context: async () => { if (!authorized) throw Error("Account changed"); return c; }, fetchImpl: async (_url, init) => Response.json({ mode: config.mode, owner, chainId: config.deployment.chainId, installation: JSON.parse(init.body).installation, granted: true }) };
+  const service = { account: core.account, dataDir: directory, context: async () => { if (!authorized) throw Error("Account changed"); return c; }, fetchImpl: async (_url, init) => Response.json({ mode: config.mode, owner, chainId: config.deployment.chainId, installation: JSON.parse(init.body).installation, granted: true }) };
+  core.account = { ...core.account, assertCreditAuthorization() { throw Error("Legacy website authorization must not be used"); } };
   const args = { service, core, createWorker: o => { options = o; return { running: false, status: () => ({}), async start() { started++; this.running = true; }, async stop() { stopped++; this.running = false; } }; },
     readStatus: async () => ({ state: "qualifying", label: "CHECKING MODEL", detail: "Fixture checking" }) };
   const controller = new CreditProvider(args); t.after(() => controller.dispose());

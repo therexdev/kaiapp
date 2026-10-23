@@ -171,7 +171,7 @@
     }
     async function action(name, value) {
       if (["setup", "explore", "connected"].includes(name)) return navigate(name);
-      if (name === "signin") { await window.activateView("settings"); void window.renderAccount?.(true); document.getElementById("account-heading")?.scrollIntoView({ block: "center" }); return; }
+      if (name === "signin") { await window.activateView("settings"); if (window.selectAccountScope) void window.selectAccountScope(true); else void window.renderAccount?.(true); document.getElementById("account-heading")?.scrollIntoView({ block: "center" }); return; }
       if (name === "privacy") return window.activateView("api");
       if (name === "close") { drawer = null; clearTimeout(timer); host.querySelector(".cn-modal-host").innerHTML = ""; focusBeforeDrawer?.focus(); return; }
       if (name === "category") { category = value; draw(); return catalog(); }

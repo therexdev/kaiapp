@@ -1,3 +1,10 @@
+## Connect to the deployed AI credit service
+
+- Test now includes the verified mainnet USD credit contracts and connects to credits.koinosai.com without importing a deployment file or private invitation.
+- Settings opens **AI credit account** for the new service. Sign in / create account, approve the device code in your browser, and link your wallet. Buy credits, Chat and Earn use that same credit session.
+- **Website account and Connections** opens your existing website account separately. Its saved login, wallet, older balances and payment recovery records remain in place.
+- Purchases still require a fresh verified quote and your wallet approval. Sharing needs successful model qualification and fresh network confirmation before it can show ONLINE.
+
 ## Correct local model checks
 
 - Corrects the Qwen-family token references to preserve the same Unicode characters as the native model engine. The earlier reference normalized accented text and could stop a correctly installed Koinos Fast model with a tokenizer mismatch.

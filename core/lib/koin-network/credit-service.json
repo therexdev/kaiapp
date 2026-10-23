@@ -1,5 +1,44 @@
 {
   "schema": 1,
-  "state": "unavailable",
-  "reason": "The upgraded credit service is not activated yet. Your existing account data and earlier balances are preserved. Local AI is available."
+  "state": "ready",
+  "config": {
+    "schema": 1,
+    "mode": "mainnet-pilot",
+    "deployment": {
+      "schema": 1,
+      "network": "mainnet",
+      "chainId": "EiBZK_GGVP0H_fXVAM3j6EAuz3-B-l3ejxRSewi7qIBfSA==",
+      "decimals": 8,
+      "rpc": [
+        "https://api.koinosai.com",
+        "https://api.koinos.io"
+      ],
+      "token": "19GYjDBVXU7keLbYvMLazsGQn3GTWHjHkK",
+      "admin": "1EZFE7yY9waCFR454BkKmxbehQLUvEDDpK",
+      "credits": "18QmSHrMszxmYPaDB1jxzY35vYDcG6aomN",
+      "rewards": "19G5nydrp3YTqG5jfVGjdonbLEnAW3xN5K",
+      "verifier": "1HdgLvVRbvrwnF547sbEbmSu5USTu7Gy1K",
+      "mining": "1G4L15H3TWKUzzg9i3CV5w97exuvQ6vNVz",
+      "operations": "1PVLC9iF1rZ1zxEQDLJiniXL973GPateK8",
+      "tokenHash": "0x1220eb38ea471cf855ff4d336e51bf47df8cfc8a0a9ae49193b0d7e103b890d464d6",
+      "creditsHash": "0x1220e87d504fa312b8a5c6d3a45f31d191cbc2577d3fa91c6d5750d0f2a80c7ea24d",
+      "rewardsHash": "0x1220883bcdfb87cfdf1ad4529468bc890db194c077e4ea0523d948c24bb572524a9e",
+      "product": "prepaid-usd-v1",
+      "masterNode": "15CM9Qr4GKREDgqnyXJ8tckPj2biERTM1T"
+    },
+    "schedulerUrl": "https://credits.koinosai.com/scheduler",
+    "policyHash": "9a4d812014a210d0d9fa083c479c0c0d82341ece2bde33b596ea8bb3826b9089",
+    "version": 1,
+    "model": "koinos-fast",
+    "maxOutput": 256,
+    "pricingPolicyHash": "6ecca4a2c9054e772479b598e858a2ccd54281f8bc35125e7f7935f29f2aa179",
+    "maxRcPerTransaction": "100000000",
+    "maxRcPerDay": "500000000",
+    "limits": {
+      "amount": "10000000000",
+      "perJob": "1000000",
+      "maxJobs": 10,
+      "durationMs": 3600000
+    }
+  }
 }

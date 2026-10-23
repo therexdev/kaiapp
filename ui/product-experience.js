@@ -318,7 +318,7 @@
     if (action === "recover") { go("chat"); window.dispatchEvent(new Event("kai-network-recover")); }
     if (action === "first-back") { oldOnboarding.hidden = true; onboarding.querySelector(".product-first").scrollIntoView({ block: "start" }); }
     if (action === "setup-local") { oldOnboarding.hidden = false; oldOnboarding.scrollIntoView({ block: "start" }); }
-    if (action === "signin") { go("settings"); $("btn-account-signin").scrollIntoView({ block: "center" }); }
+    if (action === "signin") { void window.selectAccountScope?.(false); go("settings"); $("btn-account-signin").scrollIntoView({ block: "center" }); }
     if (action === "start-free") { go("chat"); window.dispatchEvent(new Event("kai-network-use")); }
     if (action === "local") { go("chat"); $("src-pick").value = "local"; $("src-pick").dispatchEvent(new Event("change")); }
   });
