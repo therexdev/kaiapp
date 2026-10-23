@@ -9,6 +9,16 @@ const fs = require("fs");
 const nodePath = require("path");
 const { searchWeb, fetchPage } = require("./websearch");
 const { parseGroundSpec, ground, injectReference, lastUserQuestion } = require("./grounding");
+const {
+  CONTEXT_TIERS,
+  LEGACY_MAX_TOKENS,
+  NETWORK_MAX_OUTPUT_TOKENS,
+  estimateTokensLegacy,
+  estimateTokensV1,
+  isPositiveSafeInt,
+  tierFor,
+  v1Messages,
+} = require("./context-terms");
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -70,34 +80,23 @@ function citationHeader(g) {
   }
 }
 
-/** Rough prompt-size estimate (~4 chars/token + per-message overhead).
- *  Deliberately cheap — it gates routing, it does not bill anything.
- *  Multimodal content-parts: text parts count by chars; each image counts a
- *  flat ~800 tokens (typical projector budget), NOT its base64 length —
- *  String()-ing an array would both miscount and crash the gate. */
-function estimateMessageTokens(messages) {
-  if (!Array.isArray(messages)) return 0;
-  let chars = 0;
-  let n = 0;
-  let images = 0;
-  for (const m of messages) {
-    n += 1;
-    const c = m?.content;
-    if (Array.isArray(c)) {
-      for (const part of c) {
-        if (part?.type === "image_url") images += 1;
-        else chars += String(part?.text ?? "").length;
-      }
-    } else {
-      chars += String(c ?? "").length;
-    }
-  }
-  return Math.ceil(chars / 4) + n * 4 + images * 800;
-}
+/** Rough prompt-size estimate — the legacy estimator, now shared with the
+ *  scheduler through context-terms.js so both sides gate identically. */
+const estimateMessageTokens = estimateTokensLegacy;
 
 /** True when any message carries an image content part. */
 function hasImageParts(messages) {
   return Array.isArray(messages) && messages.some((m) => Array.isArray(m?.content) && m.content.some((p) => p?.type === "image_url"));
+}
+
+/** §13 v1 worst-case pricing: a published USD-per-million-tokens price as
+ *  an exact µ$-per-M safe integer, or null when it is missing, non-numeric,
+ *  non-finite, negative or too large to price exactly (fail closed). The
+ *  legacy estimates in _networkRates keep their own lenient conversion. */
+function publishedMicroPerM(usdPerM) {
+  if (typeof usdPerM !== "number" || !Number.isFinite(usdPerM) || usdPerM < 0) return null;
+  const micro = Math.round(usdPerM * 1e6);
+  return Number.isSafeInteger(micro) ? micro : null;
 }
 
 class Gateway {
@@ -999,6 +998,22 @@ class Gateway {
       }
     }
 
+    // Network context opt-in (docs/NETWORK_CONTEXT_PROTOCOL.md §4): Core API
+    // only, behind the same /core/* same-site and core-token gates as the
+    // network config above. Configuring never loads a model by itself.
+    if (path === "/core/runtime/context" && (req.method === "GET" || req.method === "POST")) {
+      if (typeof this.runtime?.contextStatus !== "function") {
+        return this._json(res, 404, { ok: false, error: "This Core does not support model context settings" });
+      }
+      if (req.method === "GET") return this._json(res, 200, { ok: true, ...this.runtime.contextStatus() });
+      try {
+        const body = JSON.parse((await this._readBody(req)).toString("utf8") || "{}");
+        return this._json(res, 200, { ok: true, ...(await this.runtime.configureContext(body)) });
+      } catch (e) {
+        return this._json(res, 400, { ok: false, error: String(e.message) });
+      }
+    }
+
     // ----- earn control plane (M2 §5.7) -----
     if (this.earn && path.startsWith("/core/earn")) {
       try {
@@ -1659,6 +1674,13 @@ class Gateway {
     if (body.kai_private_desktop !== undefined) {
       delete body.kai_private_desktop; raw = Buffer.from(JSON.stringify(body));
     }
+    // Network output above 512 tokens is an explicit caller opt-in (§13),
+    // never inferred from max_tokens alone: existing callers send 900 and
+    // must keep the legacy lane. Stripped like the flag above.
+    const extendedOutput = body.kai_extended_output === true;
+    if (body.kai_extended_output !== undefined) {
+      delete body.kai_extended_output; raw = Buffer.from(JSON.stringify(body));
+    }
     if (privateDesktop && /^koinos-network(?:$|:)/.test(alias)) return this._json(res, 403, { error: {
       message: "Desktop observations require a local model or private desktop API connection.", type: "desktop_only",
     } });
@@ -1741,7 +1763,7 @@ class Gateway {
           error: { message: "Network models can't see images yet — pick a local vision model for this chat", type: "invalid_request_error" },
         });
       }
-      return this._chatNetwork(body, req, res);
+      return this._chatNetwork(body, req, res, { extended: extendedOutput });
     }
 
     // Images only reach a model that can actually see them: the package must
@@ -1775,16 +1797,24 @@ class Gateway {
       /* not a local alias — ensure() decides */
     }
     /*
+     * Network context opt-in: an alias configured for a larger window plans
+     * with it before the hold and must PROVE it after the hold (below);
+     * every other alias keeps the catalog contextSize and never probes.
+     */
+    const plannedCtx = localCtx ? Math.max(localCtx, this.runtime.plannedContext?.(alias) || 0) : null;
+    /*
      * Grounding runs HERE — after the model's context is known, before the
      * size check below. That order matters: the reference block is budgeted
      * against the context the model actually has, so grounding can never be
      * the reason a prompt no longer fits. Roughly 3.5 chars per token, minus
-     * the answer's headroom and what the caller already sent.
+     * the answer's headroom and what the caller already sent. "Actually has"
+     * means verified this session, else the catalog value.
      */
     let groundOut = null;
     if (groundSpec) {
       const spent = estimateMessageTokens(body.messages);
-      const freeTok = (localCtx || 4096) - CTX_HEADROOM_TOKENS - spent;
+      const groundCtx = Math.max(localCtx || 4096, this.runtime.advertisedContext?.(alias)?.contextTokens || 0);
+      const freeTok = groundCtx - CTX_HEADROOM_TOKENS - spent;
       groundOut = await ground(groundSpec, lastUserQuestion(body.messages), {
         budgetChars: Math.max(0, Math.floor(freeTok * 3.5)),
         ...(this.groundIo || {}),
@@ -1800,27 +1830,31 @@ class Gateway {
     }
 
     const estTok = estimateMessageTokens(body.messages);
-    if (localCtx && estTok > localCtx - CTX_HEADROOM_TOKENS) {
+    // A prompt too big for the local window: overflow on today's legacy
+    // terms when the network class fits it, otherwise refuse. Automatic
+    // overflow never negotiates larger signed terms (§13).
+    const overflowOrRefuse = async (ctxTokens) => {
       const net = this.network ? this.network.status() : null;
       // A grounded request never overflows to the network: the whole promise
       // is that the fetched material and the question stay on this machine.
       const canNetwork = !privateDesktop && !groundSpec && net && net.privacyMode !== "local-only" && net.schedulerUrl;
       const netCtx = canNetwork ? (await this._networkRates(net.schedulerUrl)).ctxTokens : 0;
       if (canNetwork && estTok <= netCtx - CTX_HEADROOM_TOKENS) {
-        const reason = `prompt ~${estTok} tokens exceeds the ${localCtx}-token local context`;
+        const reason = `prompt ~${estTok} tokens exceeds the ${ctxTokens}-token local context`;
         this.onEvent({ type: "gateway:overflow", from: alias, reason });
-        return this._chatNetwork(body, req, res, { overflowFrom: alias, localError: reason });
+        return this._chatNetwork(body, req, res, { overflowFrom: alias, localError: reason, extended: extendedOutput });
       }
       return this._json(res, 400, {
         error: {
           message:
-            `Prompt is ~${estTok} tokens — larger than the local model's ${localCtx}-token context` +
+            `Prompt is ~${estTok} tokens — larger than the local model's ${ctxTokens}-token context` +
             (canNetwork ? ` and the network's ${netCtx}-token class` : "") +
             ". Shorten the prompt or start a new chat.",
           type: "invalid_request_error",
         },
       });
-    }
+    };
+    if (localCtx && estTok > plannedCtx - CTX_HEADROOM_TOKENS) return overflowOrRefuse(plannedCtx);
 
     let endpoint;
     // Hold the engine for the life of this response: without the hold, a
@@ -1843,9 +1877,26 @@ class Gateway {
       const net = this.network ? this.network.status() : null;
       if (!privateDesktop && !groundSpec && net && net.privacyMode !== "local-only" && net.schedulerUrl) {
         this.onEvent({ type: "gateway:overflow", from: alias, reason: String(e.message) });
-        return this._chatNetwork(body, req, res, { overflowFrom: alias, localError: String(e.message) });
+        // An explicit extended-output request is refused on overflow rather
+        // than silently served at the legacy cap (§13).
+        return this._chatNetwork(body, req, res, { overflowFrom: alias, localError: String(e.message), extended: extendedOutput });
       }
       return this._json(res, 400, { error: { message: String(e.message), type: "invalid_request_error" } });
+    }
+    // Phase two: a prompt beyond the catalog window runs only on an engine
+    // that proves the larger window right now (§5 per-request probe).
+    if (localCtx && estTok > localCtx - CTX_HEADROOM_TOKENS) {
+      let live = null;
+      try {
+        live = await this.runtime.verifiedContextFor?.(alias);
+      } catch {
+        live = null;
+      }
+      const liveCtx = Math.max(localCtx, live?.contextTokens || 0);
+      if (estTok > liveCtx - CTX_HEADROOM_TOKENS) {
+        releaseHold();
+        return overflowOrRefuse(liveCtx);
+      }
     }
     // Some runtimes (Ollama) serve the model under their own registered name
     // — rewrite the body so callers keep using the Koinos alias.
@@ -1880,12 +1931,17 @@ class Gateway {
    * request overflowed here after a capability miss (opts.overflowFrom).
    * The privacy gate has already passed in the caller; this method owns
    * the spending checks (§8 budget, §23 signed identity) and the relay.
+   *
+   * Network context protocol 1 (§13): `extended` is the caller's explicit
+   * opt-in for output above 512 tokens. Larger signed terms (v1) are used
+   * only for explicit koinos-network requests — never on overflow — and a
+   * v1 request is never retried smaller or on the legacy lane.
    */
-  async _chatNetwork(body, req, res, { overflowFrom, localError } = {}) {
+  async _chatNetwork(body, req, res, { overflowFrom, localError, extended = false } = {}) {
     // On overflow, errors must say both truths: local couldn't serve, and
     // why the network fallback stopped — otherwise the user sees only half
     // the story and the fix (unlock wallet, raise budget) stays hidden.
-    const fail = (status, message, type) => {
+    const fail = (status, message, type, code) => {
       // The local reason can carry an engine stderr tail — keep the chat
       // error readable; the full text lives in the status pane and log.
       const local = String(localError || "").length > 260 ? `${String(localError).slice(0, 260)}…` : localError;
@@ -1895,6 +1951,7 @@ class Gateway {
             ? `Local model "${overflowFrom}" is unavailable (${local}) and network fallback failed: ${message}`
             : message,
           type,
+          ...(code ? { code } : {}),
         },
       });
     };
@@ -1913,12 +1970,31 @@ class Gateway {
     if (this.koinFundedConsume || this.network.status().koinRehearsal) {
       return this._chatKoinRehearsal(body, req, res, { schedulerUrl, netModel, fail });
     }
+    // max_tokens is checked before anything is signed or sent: a bad value
+    // must never become a signed, billable term.
+    const mt = body.max_tokens ?? null;
+    if (mt !== null && !isPositiveSafeInt(mt)) {
+      return fail(400, "max_tokens must be a whole number of at least 1", "invalid_request_error", "invalid_max_tokens");
+    }
     // §7 context: refuse an oversized prompt BEFORE buying tokens — the
     // provider would fail on it and the failure would still be billed.
-    const netCtx = (await this._networkRates(schedulerUrl, netModel)).ctxTokens;
-    const estTok = estimateMessageTokens(body.messages);
-    if (estTok > netCtx - CTX_HEADROOM_TOKENS) {
-      return fail(400, `Prompt is ~${estTok} tokens — larger than the network's ${netCtx}-token class. Shorten the prompt.`, "invalid_request_error");
+    const rates = await this._networkRates(schedulerUrl, netModel);
+    const terms = this._networkTerms({
+      messages: body.messages,
+      mt,
+      extended,
+      overflow: !!overflowFrom,
+      rates,
+      proto: await this._networkContext(schedulerUrl),
+    });
+    if (terms.error) return fail(400, terms.error, "invalid_request_error", terms.code);
+    const v1 = terms.lane === "v1";
+    // §13 unsigned-switch rule: selfHost is outside the v1 signed tuple, so
+    // on the v1 lane any value but absent/false is refused HERE — nothing
+    // signed, nothing sent, nothing charged. It is never dropped in favour
+    // of a paid public request. The legacy lane is unchanged.
+    if (v1 && body.selfHost !== undefined && body.selfHost !== false) {
+      return fail(400, "selfHost is not available on longer or extended-output network requests — drop it or send false", "invalid_request_error", "invalid_terms");
     }
     // §8 budgets: a key whose monthly network budget is spent stops HERE,
     // before any tokens are bought. Local inference is never gated.
@@ -1926,108 +2002,199 @@ class Gateway {
     if (meterKey && this.keys.budgetRemainingMicro(meterKey.id) <= 0) {
       return fail(429, "This API key's monthly network budget is exhausted. Raise the budget in the Local API tab or wait for next month.", "insufficient_quota");
     }
+    // §13 v1 worst case: a metered key must cover the most these signed
+    // terms can bill — prompt at its byte cap or window, whichever is
+    // smaller, plus max_tokens. A named class is priced at its own published
+    // rates; "auto" at the HIGHEST published input and output rates in the
+    // table, because the scheduler may serve any class (the first/Fast-class
+    // estimate _networkRates gives the legacy lane would let auto authorise
+    // far more than the budget). A missing or malformed price, or a worst
+    // case too large to compute exactly, refuses HERE — nothing signed or
+    // sent. A key with no budget has nothing to cover (as before). Legacy
+    // keeps the zero gate above.
+    if (v1 && meterKey && Number.isFinite(this.keys.budgetRemainingMicro(meterKey.id))) {
+      const ctxTier = tierFor(estimateTokensV1(terms.messages) + terms.maxTokens) ?? CONTEXT_TIERS[CONTEXT_TIERS.length - 1];
+      const promptBound = Math.min(24 + Buffer.byteLength(JSON.stringify(terms.messages), "utf8"), ctxTier);
+      const worstRates = await this._v1WorstRates(schedulerUrl, netModel);
+      const worstNum = worstRates && promptBound * worstRates.inMicroPerM + terms.maxTokens * worstRates.outMicroPerM;
+      if (!worstRates || !Number.isSafeInteger(worstNum)) {
+        return fail(
+          429,
+          "The network's published prices for this request are unavailable or invalid, so its worst-case cost can't be checked against this API key's monthly network budget — nothing was sent. Try again later.",
+          "insufficient_quota",
+          "pricing_unavailable"
+        );
+      }
+      const worstMicro = Math.ceil(worstNum / 1e6);
+      if (this.keys.budgetRemainingMicro(meterKey.id) < worstMicro) {
+        return fail(
+          429,
+          `This request could cost up to $${(worstMicro / 1e6).toFixed(4)} (max_tokens ${terms.maxTokens}), more than this API key's remaining monthly network budget — lower max_tokens, shorten the request, or raise the budget in the Local API tab.`,
+          "insufficient_quota",
+          "worst_case_unaffordable"
+        );
+      }
+    }
     // §23: sign the request with the earning account — the network meters
     // per-address, so anonymous requests would be someone else's bill.
-    const ident = this.network.signConsume ? await this.network.signConsume(body.messages) : null;
+    // v1 signs the billable terms too (model, max_tokens), so a captured
+    // request cannot be replayed on other terms.
+    const ident = v1
+      ? this.network.signConsumeV1
+        ? await this.network.signConsumeV1({ messages: terms.messages, model: netModel, max_tokens: terms.maxTokens })
+        : null
+      : this.network.signConsume
+        ? await this.network.signConsume(body.messages)
+        : null;
     if (!ident) {
       return fail(400, "Koinos Network requests are signed by your earning account — create or unlock it in the Earn tab first", "invalid_request_error");
     }
-    let upstream;
-    try {
-      upstream = await fetch(`${schedulerUrl.replace(/\/$/, "")}/consume/chat/completions`, {
-        method: "POST",
-        // Fresh TCP: an idle-dropped pooled connection must never eat a
-        // paid network request (see worker.js — same field finding).
-        headers: { "content-type": "application/json", connection: "close" },
-        body: JSON.stringify({ messages: body.messages, model: netModel, stream: !!body.stream, ...ident }),
-        signal: AbortSignal.timeout(190000), // streamed big-class answers run minutes
-      });
-    } catch (e) {
-      return fail(502, `Network request failed: ${e.message}`, "server_error");
+    // Legacy lane: today's body; a caller's max_tokens rides along and the
+    // scheduler serves it at <= 512.
+    const payload = v1
+      ? { messages: terms.messages, model: netModel, max_tokens: terms.maxTokens, stream: !!body.stream, ...ident }
+      : { messages: body.messages, model: netModel, stream: !!body.stream, ...(mt !== null ? { max_tokens: mt } : {}), ...ident };
+    /*
+     * §13 caller-disconnect cancellation (v1 lane): a caller that goes away
+     * (a local Stop, a closed tab) closes the scheduler stream too, so the
+     * scheduler drops the job — no result, no charge — and the worker's next
+     * chunk gets the 404 that aborts its engine and releases its hold.
+     * Registered BEFORE the fetch so a disconnect while waiting is not
+     * missed; nothing is written once the caller is gone. The legacy lane
+     * keeps today's behaviour.
+     */
+    const cancel = v1 ? new AbortController() : null;
+    const callerGone = () => cancel.abort(new Error("the caller disconnected"));
+    const gone = () => res.destroyed || res.writableEnded || !!cancel?.signal.aborted;
+    if (cancel) {
+      res.on("close", callerGone);
+      if (res.destroyed) callerGone();
     }
-    // Live network stream: relay scheduler SSE frames as OpenAI-style
-    // chunks so the UI paints words as the provider generates them.
-    if (body.stream && (upstream.headers.get("content-type") || "").includes("text/event-stream") && upstream.ok) {
-      res.writeHead(200, { "content-type": "text/event-stream" });
-      let servedModel = null;
-      let finalUsage = null;
-      let buf = "";
-      const decoder = new TextDecoder();
-      const emit = (payload) => res.write(`data: ${JSON.stringify(payload)}\n\n`);
-      for await (const chunk of upstream.body) {
-        buf += decoder.decode(chunk, { stream: true });
-        let idx;
-        while ((idx = buf.indexOf("\n\n")) >= 0) {
-          const frame = buf.slice(0, idx);
-          buf = buf.slice(idx + 2);
-          for (const line of frame.split("\n")) {
-            if (!line.startsWith("data: ")) continue;
-            const data = line.slice(6).trim();
-            if (data === "[DONE]") continue;
-            let f;
-            try {
-              f = JSON.parse(data);
-            } catch {
-              continue;
-            }
-            if (f.model && !servedModel) servedModel = f.model;
-            if (f.servedModel) servedModel = f.servedModel;
-            if (f.delta) {
-              emit({ object: "chat.completion.chunk", model: "koinos-network", servedModel, choices: [{ index: 0, delta: { content: f.delta } }] });
-            }
-            if (f.error) {
-              emit({ object: "chat.completion.chunk", model: "koinos-network", choices: [{ index: 0, delta: { content: `\n[network: ${f.error}]` } }] });
-            }
-            if (f.done) finalUsage = f.usage || null;
-          }
-        }
+    try {
+      let upstream;
+      try {
+        upstream = await fetch(`${schedulerUrl.replace(/\/$/, "")}/consume/chat/completions`, {
+          method: "POST",
+          // Fresh TCP: an idle-dropped pooled connection must never eat a
+          // paid network request (see worker.js — same field finding).
+          headers: { "content-type": "application/json", connection: "close" },
+          body: JSON.stringify(payload),
+          // Streamed big-class answers run minutes.
+          signal: cancel ? AbortSignal.any([cancel.signal, AbortSignal.timeout(190000)]) : AbortSignal.timeout(190000),
+        });
+      } catch (e) {
+        if (cancel && gone()) return;
+        return fail(502, `Network request failed: ${e.message}`, "server_error");
       }
-      if (meterKey && finalUsage) {
-        const rates = await this._networkRates(schedulerUrl, servedModel || netModel);
-        const inTok = Number(finalUsage.prompt_tokens || 0);
-        const outTok = Number(finalUsage.completion_tokens || 0);
+      if (cancel && gone()) return;
+      // Live network stream: relay scheduler SSE frames as OpenAI-style
+      // chunks so the UI paints words as the provider generates them.
+      if (body.stream && (upstream.headers.get("content-type") || "").includes("text/event-stream") && upstream.ok) {
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        let servedModel = null;
+        let finalUsage = null;
+        let buf = "";
+        const decoder = new TextDecoder();
+        const emit = (payload) => (cancel && gone() ? false : res.write(`data: ${JSON.stringify(payload)}\n\n`));
+        try {
+          for await (const chunk of upstream.body) {
+            if (cancel && gone()) break; // the caller left: stop relaying
+            buf += decoder.decode(chunk, { stream: true });
+            let idx;
+            while ((idx = buf.indexOf("\n\n")) >= 0) {
+              const frame = buf.slice(0, idx);
+              buf = buf.slice(idx + 2);
+              for (const line of frame.split("\n")) {
+                if (!line.startsWith("data: ")) continue;
+                const data = line.slice(6).trim();
+                if (data === "[DONE]") continue;
+                let f;
+                try {
+                  f = JSON.parse(data);
+                } catch {
+                  continue;
+                }
+                if (f.model && !servedModel) servedModel = f.model;
+                if (f.servedModel) servedModel = f.servedModel;
+                if (f.delta) {
+                  emit({ object: "chat.completion.chunk", model: "koinos-network", servedModel, choices: [{ index: 0, delta: { content: f.delta } }] });
+                }
+                if (f.error) {
+                  emit({ object: "chat.completion.chunk", model: "koinos-network", choices: [{ index: 0, delta: { content: `\n[network: ${f.error}]` } }] });
+                }
+                if (f.done) finalUsage = f.usage || null;
+              }
+            }
+          }
+        } catch (e) {
+          // Legacy: unchanged. v1: nothing more for a caller who left; the
+          // deadline mid-stream ends the stream with its reason.
+          if (!cancel) throw e;
+          if (gone()) return;
+          emit({ object: "chat.completion.chunk", model: "koinos-network", choices: [{ index: 0, delta: { content: `\n[network: ${String(e?.message || e)}]` } }] });
+          res.write("data: [DONE]\n\n");
+          return res.end();
+        }
+        if (cancel && gone()) return;
+        if (meterKey && finalUsage) {
+          const rates = await this._networkRates(schedulerUrl, servedModel || netModel);
+          const inTok = Number(finalUsage.prompt_tokens || 0);
+          const outTok = Number(finalUsage.completion_tokens || 0);
+          this.keys.recordUsage(meterKey.id, {
+            inTok,
+            outTok,
+            costMicro: Math.ceil((inTok * rates.inMicroPerM + outTok * rates.outMicroPerM) / 1e6),
+          });
+        }
+        emit({ object: "chat.completion.chunk", model: "koinos-network", servedModel, choices: [{ index: 0, delta: {} }] });
+        res.write("data: [DONE]\n\n");
+        return res.end();
+      }
+      const j = await upstream.json().catch(() => null);
+      if (cancel && gone()) return;
+      // Scheduler-side failures ("no providers online") go through fail() too —
+      // relaying them raw dropped the local half of the story on overflow
+      // (field finding: users saw only 'no providers serving "koinos-fast"'
+      // when the actual trigger was their local model failing to load).
+      // A failed v1 request is final: a 503 charged nothing, and a smaller or
+      // legacy retry would silently answer a different request than the one
+      // the caller asked for. A 401 may mean stale /pricing — drop the cache.
+      if (!upstream.ok || !j) {
+        if (v1 && upstream.status === 401) this._rates = null;
+        return fail(
+          upstream.status || 502,
+          j?.error?.message || "bad upstream reply",
+          j?.error?.type || "server_error",
+          typeof j?.error?.code === "string" ? j.error.code : undefined
+        );
+      }
+      if (meterKey && j.usage) {
+        // Estimated at published network rates regardless of any free
+        // allowance — the budget is the developer's conservative guardrail.
+        const rates = await this._networkRates(schedulerUrl, j.servedModel || netModel);
+        const inTok = Number(j.usage.prompt_tokens || 0);
+        const outTok = Number(j.usage.completion_tokens || 0);
         this.keys.recordUsage(meterKey.id, {
           inTok,
           outTok,
           costMicro: Math.ceil((inTok * rates.inMicroPerM + outTok * rates.outMicroPerM) / 1e6),
         });
       }
-      emit({ object: "chat.completion.chunk", model: "koinos-network", servedModel, choices: [{ index: 0, delta: {} }] });
-      res.write("data: [DONE]\n\n");
-      return res.end();
+      // §29 transparency: the response's model field always says
+      // "koinos-network" (the scheduler sets it; the stream shim matches), so
+      // a client can always tell an overflowed answer left the machine.
+      if (body.stream) {
+        // SSE shim so streaming clients (the app UI) work unchanged.
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        const content = j.choices?.[0]?.message?.content ?? "";
+        res.write(`data: ${JSON.stringify({ object: "chat.completion.chunk", model: "koinos-network", servedModel: j.servedModel || null, choices: [{ index: 0, delta: { content } }] })}\n\n`);
+        res.write("data: [DONE]\n\n");
+        return res.end();
+      }
+      return this._json(res, 200, j);
+    } finally {
+      if (cancel) res.removeListener("close", callerGone);
     }
-    const j = await upstream.json().catch(() => null);
-    // Scheduler-side failures ("no providers online") go through fail() too —
-    // relaying them raw dropped the local half of the story on overflow
-    // (field finding: users saw only 'no providers serving "koinos-fast"'
-    // when the actual trigger was their local model failing to load).
-    if (!upstream.ok || !j) {
-      return fail(upstream.status || 502, j?.error?.message || "bad upstream reply", j?.error?.type || "server_error");
-    }
-    if (meterKey && j.usage) {
-      // Estimated at published network rates regardless of any free
-      // allowance — the budget is the developer's conservative guardrail.
-      const rates = await this._networkRates(schedulerUrl, j.servedModel || netModel);
-      const inTok = Number(j.usage.prompt_tokens || 0);
-      const outTok = Number(j.usage.completion_tokens || 0);
-      this.keys.recordUsage(meterKey.id, {
-        inTok,
-        outTok,
-        costMicro: Math.ceil((inTok * rates.inMicroPerM + outTok * rates.outMicroPerM) / 1e6),
-      });
-    }
-    // §29 transparency: the response's model field always says
-    // "koinos-network" (the scheduler sets it; the stream shim matches), so
-    // a client can always tell an overflowed answer left the machine.
-    if (body.stream) {
-      // SSE shim so streaming clients (the app UI) work unchanged.
-      res.writeHead(200, { "content-type": "text/event-stream" });
-      const content = j.choices?.[0]?.message?.content ?? "";
-      res.write(`data: ${JSON.stringify({ object: "chat.completion.chunk", model: "koinos-network", servedModel: j.servedModel || null, choices: [{ index: 0, delta: { content } }] })}\n\n`);
-      res.write("data: [DONE]\n\n");
-      return res.end();
-    }
-    return this._json(res, 200, j);
   }
 
   async _chatKoinRehearsal(body, req, res, { schedulerUrl, netModel, fail }) {
@@ -2069,26 +2236,35 @@ class Gateway {
     }
   }
 
-  /** Published network token rates + class context, cached for an hour;
-   *  safe defaults. */
-  async _networkRates(schedulerUrl, model) {
+  /** The scheduler's /pricing, cached for an hour per URL. */
+  async _pricing(schedulerUrl) {
     // Keyed by URL: switching schedulers must not serve the old one's rates.
-    // The full per-class table is cached; the caller picks a class ("auto"
-    // and unknown classes estimate at the first/Fast class).
     if (!(this._rates && this._rates.url === schedulerUrl && Date.now() - this._rates.at < 3600000)) {
       let models = null;
+      let context = null;
       try {
         const r = await fetch(`${schedulerUrl.replace(/\/$/, "")}/pricing`, { headers: { connection: "close" }, signal: AbortSignal.timeout(4000) });
         const j = await r.json();
         if (j?.models) models = j.models;
+        if (j?.context) context = j.context;
       } catch {
         /* defaults hold */
       }
-      this._rates = { url: schedulerUrl, at: Date.now(), models };
+      this._rates = { url: schedulerUrl, at: Date.now(), models, context };
     }
+    return this._rates;
+  }
+
+  /** Published network token rates + class context, cached for an hour;
+   *  safe defaults. The full per-class table is cached; the caller picks a
+   *  class ("auto" and unknown classes estimate at the first/Fast class).
+   *  maxCtxTokens is the EXACT class's signed-context ceiling (auto: the
+   *  largest in the table; unknown class: null — legacy terms only). */
+  async _networkRates(schedulerUrl, model) {
+    const table = (await this._pricing(schedulerUrl)).models;
     let v = { inMicroPerM: 100000, outMicroPerM: 400000, ctxTokens: 4096 }; // Koinos Fast defaults
-    const table = this._rates.models;
-    const m = table && ((model && table[model]) || Object.values(table)[0]);
+    const own = (k) => !!table && typeof table === "object" && typeof k === "string" && Object.hasOwn(table, k);
+    const m = table && ((own(model) && table[model]) || Object.values(table)[0]);
     if (m?.usdPerMInputTokens != null) {
       v = {
         inMicroPerM: Math.round(m.usdPerMInputTokens * 1e6),
@@ -2096,7 +2272,111 @@ class Gateway {
         ctxTokens: Number(m.ctxTokens) || 4096,
       };
     }
+    // Bounded negotiation (§13): a class window counts only as a safe
+    // positive integer and never above the largest contract tier — a
+    // malformed or oversized /pricing can't widen what this client signs.
+    const ceil = (e) =>
+      Number.isSafeInteger(e?.maxCtxTokens) && e.maxCtxTokens > 0 ? Math.min(e.maxCtxTokens, CONTEXT_TIERS[CONTEXT_TIERS.length - 1]) : null;
+    let maxCtxTokens = null;
+    if (model === "auto" && table && typeof table === "object") {
+      for (const e of Object.values(table)) if (ceil(e) && ceil(e) > (maxCtxTokens || 0)) maxCtxTokens = ceil(e);
+    } else if (own(model)) {
+      maxCtxTokens = ceil(table[model]);
+    }
+    v.maxCtxTokens = maxCtxTokens;
     return v;
+  }
+
+  /** §13 v1 worst-case rates for a metered API key, from the cached
+   *  /pricing table: a named class at its OWN published prices (own-property
+   *  lookup); "auto" at the MAXIMUM published input and the MAXIMUM published
+   *  output price over every class in the table, since the scheduler may
+   *  serve any of them. Null — the caller refuses, nothing signed — when the
+   *  table or class is missing or ANY relevant price is missing, non-numeric,
+   *  non-finite, negative or unrepresentable (for "auto", a bad price on any
+   *  class). _networkRates and the legacy estimates are unchanged. */
+  async _v1WorstRates(schedulerUrl, model) {
+    const table = (await this._pricing(schedulerUrl)).models;
+    if (!table || typeof table !== "object" || typeof model !== "string") return null;
+    const entries = model === "auto" ? Object.keys(table).map((k) => table[k]) : Object.hasOwn(table, model) ? [table[model]] : [];
+    if (!entries.length) return null;
+    let inMicroPerM = 0;
+    let outMicroPerM = 0;
+    for (const e of entries) {
+      const inM = publishedMicroPerM(e?.usdPerMInputTokens);
+      const outM = publishedMicroPerM(e?.usdPerMOutputTokens);
+      if (inM === null || outM === null) return null;
+      inMicroPerM = Math.max(inMicroPerM, inM);
+      outMicroPerM = Math.max(outMicroPerM, outM);
+    }
+    return { inMicroPerM, outMicroPerM };
+  }
+
+  /** The /pricing `context` block when the scheduler speaks protocol 1,
+   *  else null (an older scheduler: legacy terms only). Bounded locally:
+   *  only tiers this client knows count (none left = no protocol), and the
+   *  output ceiling counts only as an integer in [512, 4096] — anything else
+   *  is 512, so extended output is refused here rather than over-signed. */
+  async _networkContext(schedulerUrl) {
+    const c = (await this._pricing(schedulerUrl)).context;
+    if (!c || typeof c !== "object" || c.protocol !== 1 || !Array.isArray(c.tiers)) return null;
+    const tiers = c.tiers.filter((t) => CONTEXT_TIERS.includes(t));
+    if (!tiers.length) return null;
+    const out = c.maxOutputTokens;
+    return {
+      protocol: 1,
+      maxTier: Math.max(...tiers),
+      maxOutputTokens: Number.isSafeInteger(out) && out >= LEGACY_MAX_TOKENS && out <= NETWORK_MAX_OUTPUT_TOKENS ? out : LEGACY_MAX_TOKENS,
+    };
+  }
+
+  /**
+   * §13 lane selection. Returns {lane: "legacy"}, {lane: "v1", maxTokens,
+   * messages}, or {error, code} for a local 400 (nothing signed or sent).
+   * Larger OUTPUT needs the explicit opt-in; a longer PROMPT on an explicit
+   * network request may negotiate signed larger context automatically.
+   */
+  _networkTerms({ messages, mt, extended, overflow, rates, proto }) {
+    const legacyEst = estimateTokensLegacy(messages);
+    const legacyOk = legacyEst <= rates.ctxTokens - CTX_HEADROOM_TOKENS;
+    const v1able = !overflow && !!proto && !!rates.maxCtxTokens;
+    const limit = v1able ? Math.min(rates.maxCtxTokens, proto.maxTier) : 0;
+    const v1Terms = (out) => {
+      const mapped = v1Messages(messages);
+      if (!mapped) {
+        return {
+          error:
+            "Longer or extended-output network requests carry plain text system/user/assistant turns only " +
+            "(no images, tool turns or extra message/part fields)",
+          code: "invalid_terms",
+        };
+      }
+      const est = estimateTokensV1(mapped);
+      if (est + out > limit) {
+        return {
+          error: `Prompt is ~${est} tokens — too long for the network's ${limit}-token context with room for a ${out}-token answer. Shorten it or start a new chat.`,
+          code: "context_length_exceeded",
+        };
+      }
+      return { lane: "v1", maxTokens: out, messages: mapped };
+    };
+    if (!extended || (mt ?? 0) <= LEGACY_MAX_TOKENS) {
+      if (legacyOk) return { lane: "legacy" };
+      if (v1able) return v1Terms(Math.min(mt ?? LEGACY_MAX_TOKENS, LEGACY_MAX_TOKENS));
+      return { error: `Prompt is ~${legacyEst} tokens — larger than the network's ${rates.ctxTokens}-token class. Shorten the prompt.` };
+    }
+    if (!v1able) {
+      return {
+        error: overflow
+          ? "Extended output (kai_extended_output) is only available when you pick a Koinos Network model directly"
+          : "This network does not offer extended output for this model — drop kai_extended_output or ask for 512 tokens or fewer",
+        code: "extended_output_unavailable",
+      };
+    }
+    if (mt > proto.maxOutputTokens) {
+      return { error: `max_tokens ${mt} is above the network's ${proto.maxOutputTokens}-token output limit`, code: "invalid_max_tokens" };
+    }
+    return v1Terms(mt);
   }
 
   /** Fan a Koinos node event out to every open /core/koinos/events stream. */
@@ -2264,4 +2544,4 @@ class Gateway {
   }
 }
 
-module.exports = { Gateway, estimateMessageTokens, hasImageParts };
+module.exports = { Gateway, estimateMessageTokens, estimateTokensV1, hasImageParts };

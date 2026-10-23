@@ -7,8 +7,19 @@
  * runtime and starts the requested one.
  */
 
+const {
+  CONTEXT_PROTOCOL,
+  OPT_IN_TIERS,
+  LEGACY_CONTEXT_TOKENS,
+  LEGACY_MAX_TOKENS,
+  sanitizeContextSettings,
+  validateModelContext,
+} = require("./context-terms");
+
+const LEGACY_CAP = Object.freeze({ contextTokens: LEGACY_CONTEXT_TOKENS, maxOutputTokens: LEGACY_MAX_TOKENS });
+
 class RuntimeManager {
-  constructor({ models, makeRuntime, hardware, provisioner, makeFallback, preferFallback, onEvent, state }) {
+  constructor({ models, makeRuntime, hardware, provisioner, makeFallback, preferFallback, onEvent, state, contextSettings }) {
     this.models = models; // ModelManager
     this.makeRuntime = makeRuntime; // (binPath|null) => runtime adapter instance
     this.hardware = hardware; // detection snapshot (may be null in tests)
@@ -28,6 +39,22 @@ class RuntimeManager {
     this._inflight = 0; // generations currently streaming from the active runtime
     this._drainWaiters = []; // switches parked until the count reaches zero
     this.drainMaxMs = 120000; // a switch never waits longer than this on a stream
+    /*
+     * Network context opt-in (docs/NETWORK_CONTEXT_PROTOCOL.md §4/§5). Absent
+     * settings mean everything runs exactly as before: legacy launch, legacy
+     * advertisement. A larger window is used only after the live engine
+     * proved it; a start that fails is remembered for the session so a
+     * broken tier can never become a reload loop.
+     */
+    this.contextSettings =
+      contextSettings && typeof contextSettings.get === "function" && typeof contextSettings.set === "function" ? contextSettings : null;
+    this._ctxFailed = new Set(); // "alias@N" whose opt-in start threw this session
+    this._verified = new Map(); // alias -> tier N proved this session
+    this._loadedCtx = null; // tier the active engine was launched with (null = legacy)
+    this._activeVerified = false; // ...and whether that engine proved it
+    this._ctxListeners = new Set();
+    this.ctxExitWaitMs = 10000; // opt-in child must release device memory first
+    this.ctxProbeBackoffMs = 250; // /props retry spacing (3 attempts)
   }
 
   /** Name the active runtime serves the model under (null = passthrough). */
@@ -86,7 +113,7 @@ class RuntimeManager {
       if (this.activeAlias === alias && this.runtime?.status().running) this.stop();
       throw e;
     }
-    if (this.activeAlias === alias && this.runtime?.status().running) {
+    if (this._serving(alias)) {
       return this.runtime.endpoint;
     }
     // Single-flight: concurrent requests for the same alias share the load.
@@ -98,7 +125,7 @@ class RuntimeManager {
       await this._loading.promise.catch(() => {});
     }
     if (this._loading) return this._loading.promise;
-    if (this.activeAlias === alias && this.runtime?.status().running) {
+    if (this._serving(alias)) {
       return this.runtime.endpoint;
     }
 
@@ -124,7 +151,7 @@ class RuntimeManager {
       // ensure() awaited — but a switch may have won the race in between.
       // The check-and-increment below is synchronous, so once it passes,
       // _load()'s drain sees this hold.
-      if (this.activeAlias === alias && this.runtime?.status().running) {
+      if (this._serving(alias)) {
         this._inflight += 1;
         let done = false;
         return {
@@ -174,11 +201,245 @@ class RuntimeManager {
     });
   }
 
+  // ----- network context opt-in -----
+
+  /** Validated `runtime.modelContext` map; {} when not configured. */
+  contextPlan() {
+    if (!this.contextSettings) return {};
+    let raw = null;
+    try {
+      raw = this.contextSettings.get();
+    } catch {
+      raw = null;
+    }
+    return sanitizeContextSettings(this.models?.catalog, raw);
+  }
+
+  /** Tier `alias` should launch with, or null for legacy (also once its
+   *  configured tier failed to start this session). */
+  _desiredCtx(alias, plan = this.contextPlan()) {
+    const e = Object.hasOwn(plan, alias) ? plan[alias] : null;
+    if (!e || this._ctxFailed.has(`${alias}@${e.contextTokens}`)) return null;
+    return e.contextTokens;
+  }
+
+  /** The one predicate ensure() and acquireFor() share: this alias is up
+   *  AND was launched with the context it should have now. */
+  _serving(alias) {
+    return this.activeAlias === alias && !!this.runtime?.status().running && this._loadedCtx === this._desiredCtx(alias);
+  }
+
+  /** Public form of _serving for the worker: false means the next
+   *  acquireFor(alias) loads or reloads the engine (incl. a same-alias
+   *  reload at a different context), so a lease should get warming grace. */
+  isServing(alias) {
+    return this._serving(alias);
+  }
+
+  /** What the worker may advertise for `alias`: the configured terms when
+   *  that tier was verified this session, else null (legacy 4096/512). */
+  advertisedContext(alias) {
+    const plan = this.contextPlan();
+    const e = Object.hasOwn(plan, alias) ? plan[alias] : null;
+    if (!e || this._ctxFailed.has(`${alias}@${e.contextTokens}`) || this._verified.get(alias) !== e.contextTokens) return null;
+    return { contextTokens: e.contextTokens, maxOutputTokens: e.maxOutputTokens };
+  }
+
+  /** Pre-hold planning window for local requests: the tier a load would
+   *  use, unless the engine already loaded at it failed verification. */
+  plannedContext(alias) {
+    const want = this._desiredCtx(alias);
+    if (!want) return null;
+    if (this.activeAlias === alias && this._loadedCtx === want && !this._activeVerified) return null;
+    return want;
+  }
+
+  /**
+   * Per-request verification (§5), called with a hold on `alias`: re-probe
+   * the live engine and return {contextTokens, maxOutputTokens} it proves
+   * now, or null. A failed probe marks the alias unverified (re-advertised
+   * as legacy) — the caller refuses rather than truncating. READ-ONLY and
+   * bounded: llama.cpp GET /props, Ollama GET /api/ps. It never warms up or
+   * loads anything (the one warm-up belongs to the initial opt-in load), so
+   * an Ollama runner that was unloaded fails closed with no implicit reload.
+   */
+  async verifiedContextFor(alias) {
+    const rt = this.runtime;
+    const tier = this._loadedCtx;
+    if (this.activeAlias !== alias || !tier || !this._activeVerified || !rt?.status().running) return null;
+    const ok = await this._probeTier(rt, tier, { warm: false });
+    if (rt !== this.runtime || this.activeAlias !== alias || this._loadedCtx !== tier) return null;
+    if (!ok) {
+      this._activeVerified = false;
+      this._setVerified(alias, null);
+      this.onEvent({ type: "runtime:context", alias, contextTokens: tier, verified: false, reason: "live probe failed" });
+      return null;
+    }
+    const e = this.contextPlan()[alias];
+    return { contextTokens: tier, maxOutputTokens: e?.contextTokens === tier ? e.maxOutputTokens : LEGACY_MAX_TOKENS };
+  }
+
+  /** Subscribe to advertisement changes; returns the unsubscribe. */
+  onContextChange(fn) {
+    this._ctxListeners.add(fn);
+    return () => this._ctxListeners.delete(fn);
+  }
+
+  _notifyContext() {
+    for (const fn of [...this._ctxListeners]) {
+      try {
+        fn();
+      } catch {
+        /* a listener never breaks a load */
+      }
+    }
+  }
+
+  /** Record the verified tier (or null); listeners hear only real changes. */
+  _setVerified(alias, tier) {
+    const prev = this._verified.get(alias) ?? null;
+    const next = tier || null;
+    if (next) this._verified.set(alias, next);
+    else this._verified.delete(alias);
+    if (prev !== next) this._notifyContext();
+  }
+
+  /**
+   * Does `rt` give ONE request at least `tier` tokens right now? llama.cpp:
+   * GET /props, up to 3 attempts with a short backoff, n_ctx >= tier and a
+   * single slot. Ollama: /api/ps, preceded by a bounded warm-up only when
+   * `warm` (the initial opt-in load). Bounded; any doubt is false.
+   */
+  async _probeTier(rt, tier, { warm = false } = {}) {
+    try {
+      if (rt.status().kind === "ollama") {
+        return typeof rt.verifyContext === "function" ? (await rt.verifyContext(tier, { warm })) === true : false;
+      }
+      if (typeof rt.probeContext !== "function") return false;
+      for (let i = 0; i < 3; i++) {
+        if (i) await new Promise((r) => setTimeout(r, this.ctxProbeBackoffMs * i));
+        const p = await rt.probeContext().catch(() => null);
+        if (p) return Number.isSafeInteger(p.nCtx) && p.nCtx >= tier && (p.totalSlots == null || p.totalSlots === 1);
+      }
+    } catch {
+      /* fall through: unverified */
+    }
+    return false;
+  }
+
+  /** GET /core/runtime/context: per-alias opt-in, verification, advertised. */
+  contextStatus() {
+    const plan = this.contextPlan();
+    const catalog = this.models?.catalog || {};
+    const packages = catalog.packages || {};
+    const models = [];
+    for (const [alias, a] of Object.entries(catalog.aliases || {})) {
+      if (a?.dev || alias.startsWith("dev-")) continue;
+      const pkg = Object.hasOwn(packages, a?.package) ? packages[a.package] : null;
+      const max = Number.isSafeInteger(pkg?.maxContextTokens) ? pkg.maxContextTokens : LEGACY_CONTEXT_TOKENS;
+      const e = Object.hasOwn(plan, alias) ? plan[alias] : null;
+      const adv = this.advertisedContext(alias);
+      models.push({
+        alias,
+        maxContextTokens: max,
+        tiers: OPT_IN_TIERS.filter((t) => t <= max),
+        contextTokens: e ? e.contextTokens : LEGACY_CONTEXT_TOKENS,
+        maxOutputTokens: e ? e.maxOutputTokens : LEGACY_MAX_TOKENS,
+        // --parallel 1: an opted-in alias serves one request at a time.
+        ...(e ? { parallel: 1 } : {}),
+        failed: !!e && this._ctxFailed.has(`${alias}@${e.contextTokens}`),
+        verified: !!adv,
+        advertised: adv || { ...LEGACY_CAP },
+      });
+    }
+    return {
+      protocol: CONTEXT_PROTOCOL,
+      configurable: !!this.contextSettings,
+      models,
+      active: this.activeAlias
+        ? { alias: this.activeAlias, contextTokens: this._loadedCtx || LEGACY_CONTEXT_TOKENS, verified: !!this._loadedCtx && this._activeVerified }
+        : null,
+    };
+  }
+
+  /**
+   * POST /core/runtime/context: set or clear one alias's opt-in. Validates
+   * against the catalog, persists, and clears the alias's session-failed
+   * and verified markers. Never loads a model: a running engine already at
+   * the new tier is re-read in place (no warm-up); anything else changes on
+   * the next real demand through the ordinary drain/hold path.
+   */
+  async configureContext(body) {
+    if (!this.contextSettings) throw new Error("Model context settings are not available in this Core");
+    const b = body && typeof body === "object" && !Array.isArray(body) ? body : {};
+    const alias = String(b.alias ?? "");
+    const catalog = this.models?.catalog;
+    let entry = null;
+    if (b.contextTokens == null || b.contextTokens === LEGACY_CONTEXT_TOKENS) {
+      if (!alias || !Object.hasOwn(catalog?.aliases || {}, alias)) throw new Error(`Unknown model "${alias}"`);
+    } else {
+      entry = validateModelContext(catalog, alias, { contextTokens: b.contextTokens, maxOutputTokens: b.maxOutputTokens });
+    }
+    const next = { ...this.contextPlan() };
+    if (entry) next[alias] = entry;
+    else delete next[alias];
+    this.contextSettings.set(next);
+    for (const k of [...this._ctxFailed]) if (k.startsWith(`${alias}@`)) this._ctxFailed.delete(k);
+    this._verified.delete(alias);
+    const rt = this.runtime;
+    if (entry && this.activeAlias === alias && this._loadedCtx === entry.contextTokens && rt?.status().running) {
+      const ok = await this._probeTier(rt, entry.contextTokens, { warm: false });
+      if (rt === this.runtime && this.activeAlias === alias && this._loadedCtx === entry.contextTokens) {
+        this._activeVerified = ok;
+        if (ok) this._verified.set(alias, entry.contextTokens);
+        this.onEvent({ type: "runtime:context", alias, contextTokens: entry.contextTokens, verified: ok });
+      }
+    }
+    this.onEvent({
+      type: "runtime:context-configured",
+      alias,
+      contextTokens: entry ? entry.contextTokens : LEGACY_CONTEXT_TOKENS,
+      maxOutputTokens: entry ? entry.maxOutputTokens : LEGACY_MAX_TOKENS,
+    });
+    this._notifyContext();
+    return this.contextStatus();
+  }
+
   async _load(alias) {
     const resolved = this.models.resolveAlias(alias);
     const modelPath = await this.models.ensurePackage(resolved.packageId);
     const kind = resolved.runtime || "llamacpp";
     const wantGpu = !!this.hardware?.capabilities?.cudaEligible;
+    // The tier this load tries first (null = legacy), and what it achieved.
+    let wantCtx = this._desiredCtx(alias);
+    let ctxOutcome = { ctx: null, verified: false };
+    const markCtxFailed = (n) => {
+      this._ctxFailed.add(`${alias}@${n}`);
+      this._setVerified(alias, null);
+      wantCtx = null; // every later attempt in this load is plain legacy
+    };
+    const emitCtxFallback = (n, e, via) =>
+      this.onEvent({ type: "runtime:context-fallback", alias, contextTokens: n, via, reason: String(e?.message || e).slice(0, 300) });
+    // Ollama registration: legacy name and bodies exactly as before; an
+    // opt-in gets its own model name with num_ctx pinned, verified via the
+    // loaded runner. A create that throws falls back to legacy once.
+    const startOllama = async (rt) => {
+      const legacyName = `koinos-${alias}`.toLowerCase().replace(/[^a-z0-9._-]/g, "-");
+      if (wantCtx) {
+        const n = wantCtx;
+        try {
+          await rt.start({ modelPath, sha256: resolved.sha256, modelName: `${legacyName}-ctx${n}`, contextTokens: n });
+          ctxOutcome = { ctx: n, verified: await this._probeTier(rt, n, { warm: true }) };
+          return;
+        } catch (e) {
+          if (this._stopped) throw e;
+          markCtxFailed(n);
+          emitCtxFallback(n, e, "ollama");
+        }
+      }
+      await rt.start({ modelPath, sha256: resolved.sha256, modelName: legacyName });
+      ctxOutcome = { ctx: null, verified: false };
+    };
 
     // Fast switch on a llama-dead machine: the fallback daemon hosts every
     // model — register the next one with it and serve. Without this, EVERY
@@ -189,14 +450,14 @@ class RuntimeManager {
       const rt = this.runtime;
       try {
         this.onEvent({ type: "runtime:fast-switch", from: this.activeAlias, to: alias, via: "ollama" });
-        const modelName = `koinos-${alias}`.toLowerCase().replace(/[^a-z0-9._-]/g, "-");
-        await rt.start({ modelPath, sha256: resolved.sha256, modelName });
+        await startOllama(rt);
         if (this._stopped) {
           this.stop();
           throw new Error("Core is stopping");
         }
         this.activeAlias = alias;
         this.lastLoadError = null;
+        this._adoptCtx(alias, ctxOutcome);
         return rt.endpoint;
       } catch (e) {
         if (this._stopped) throw e;
@@ -215,6 +476,8 @@ class RuntimeManager {
       this.runtime.stop();
       this.runtime = null;
       this.activeAlias = null;
+      this._loadedCtx = null;
+      this._activeVerified = false;
     }
 
     // Escalation ladder (§5: never strand the user): CUDA/Vulkan/Metal when
@@ -283,14 +546,50 @@ class RuntimeManager {
         await testHard(binPath, cap);
         this._testedBins.add(binPath);
       }
-      const runtime = this.makeRuntime(binPath);
-      await runtime.start({
+      const legacyOpts = {
         modelPath,
         contextSize: resolved.contextSize || 4096,
         gpuLayers,
         sizeBytes: resolved.sizeBytes || 0,
         extraArgs: mmprojPath ? ["--mmproj", mmprojPath] : [],
-      });
+      };
+      if (wantCtx) {
+        // Opt-in: same rung, same binary, one slot so the whole window
+        // belongs to one request; then prove it from /props.
+        const n = wantCtx;
+        const optIn = this.makeRuntime(binPath);
+        try {
+          await optIn.start({ ...legacyOpts, contextSize: n, parallel: 1 });
+          ctxOutcome = { ctx: n, verified: await this._probeTier(optIn, n) };
+          return optIn;
+        } catch (e) {
+          // Never a verdict on the build: the opt-in asked for more memory
+          // than a legacy launch. Wait for the child to let go of device
+          // memory, then retry once at legacy on this same rung.
+          try {
+            optIn.stop();
+          } catch {
+            /* already gone */
+          }
+          markCtxFailed(n);
+          if (typeof optIn.waitForExit === "function") await optIn.waitForExit(this.ctxExitWaitMs);
+          emitCtxFallback(n, e, "llamacpp");
+          const legacy = this.makeRuntime(binPath);
+          try {
+            await legacy.start(legacyOpts);
+          } catch (e2) {
+            // Memory may still be settling after the opt-in: this failure
+            // falls through the ladder but records nothing about the build.
+            e2.afterOptIn = true;
+            throw e2;
+          }
+          ctxOutcome = { ctx: null, verified: false };
+          return legacy;
+        }
+      }
+      const runtime = this.makeRuntime(binPath);
+      await runtime.start(legacyOpts);
+      ctxOutcome = { ctx: null, verified: false };
       return runtime;
     };
 
@@ -304,6 +603,7 @@ class RuntimeManager {
       if (this.hardware?.capabilities?.metalEligible) caps.push("metal");
       caps.push("cpu");
       const rungErrors = [];
+      let classify = ""; // rung errors allowed to classify this machine
       const badBuilds = this.state?.get("badBuilds", {}) || {};
       for (let i = 0; i < caps.length; i++) {
         const cap = caps[i];
@@ -317,12 +617,18 @@ class RuntimeManager {
           const badReason = typeof bad === "string" ? bad : bad?.reason; // pre-0.22.1 entries were plain strings
           const badVersion = typeof bad === "string" ? null : bad?.appVersion;
           if (badReason && badVersion === (this.appVersion || null)) {
-            rungErrors.push(`[${cap}] skipped — crashed on this machine before (${badReason})`);
+            const skipped = `[${cap}] skipped — crashed on this machine before (${badReason})`;
+            rungErrors.push(skipped);
+            // A remembered self-test crash classifies this machine exactly as
+            // it did before the opt-in work (an afterOptIn failure never
+            // writes badBuilds, so this cannot be one).
+            classify += ` ${skipped}`;
             continue;
           }
           return await boot(binPath, cap === "cpu" ? 0 : 999, cap);
         } catch (e) {
           rungErrors.push(`[${cap}] ${String(e.message)}`);
+          if (!e.afterOptIn) classify += ` ${String(e.message)}`;
           // Two machine-stable signatures are worth remembering: a crashed
           // self-test, and a HARD crash at real startup (Windows access
           // violations arrive as 32212xxxxx exit codes; POSIX as SIGSEGV/
@@ -332,7 +638,7 @@ class RuntimeManager {
           // "exited during startup" without those codes stays retryable —
           // port conflicts and OOM are transient.
           const hardCrash = /exit code 32212\d+|SIGSEGV|SIGILL/i.test(String(e.message));
-          if (this.state && (hardCrash || /self-test failed/i.test(String(e.message))) && cap !== "cpu") {
+          if (!e.afterOptIn && this.state && (hardCrash || /self-test failed/i.test(String(e.message))) && cap !== "cpu") {
             const bad = this.state.get("badBuilds", {});
             try {
               bad[await this.provisioner.ensure(kind, { cap })] = {
@@ -349,15 +655,16 @@ class RuntimeManager {
       }
       // Every rung's reason survives — reporting only the last one hid
       // the GPU failure that started the slide (field finding).
-      throw new Error(rungErrors.join(" · "));
+      const err = new Error(rungErrors.join(" · "));
+      err.classify = classify;
+      throw err;
     };
 
     const bootFallback = async (why) => {
       const fb = this.makeFallback ? await this.makeFallback() : null;
       if (!fb) return null;
       if (why) this.onEvent({ type: "runtime:fallback", from: "llamacpp", to: fb.status().kind, reason: why });
-      const modelName = `koinos-${alias}`.toLowerCase().replace(/[^a-z0-9._-]/g, "-");
-      await fb.start({ modelPath, sha256: resolved.sha256, modelName });
+      await startOllama(fb);
       return fb;
     };
 
@@ -374,7 +681,8 @@ class RuntimeManager {
           // session-stable fact: stop paying the ladder on every switch and
           // go straight to the fallback from here on. Transient failures
           // (a download blip) don't set it — the ladder retries next load.
-          if (/self-test failed/i.test(String(e.message))) this._llamaDead = true;
+          // A failure right after a context opt-in classifies nothing.
+          if (!e.afterOptIn && /self-test failed/i.test(String(e.classify ?? e.message))) this._llamaDead = true;
           runtime = await bootFallback(String(e.message));
           if (!runtime) throw e;
         }
@@ -387,6 +695,7 @@ class RuntimeManager {
 
     this.runtime = runtime;
     this.activeAlias = alias;
+    this._adoptCtx(alias, ctxOutcome);
     // stop() may have run while this load was in flight (quick app quit
     // during the warm start): the child it never saw must not outlive us.
     if (this._stopped) {
@@ -396,11 +705,22 @@ class RuntimeManager {
     return runtime.endpoint;
   }
 
+  /** Record what the engine just loaded for `alias` proved (§5). */
+  _adoptCtx(alias, outcome) {
+    this._loadedCtx = outcome.ctx || null;
+    this._activeVerified = !!(outcome.ctx && outcome.verified);
+    if (!outcome.ctx) return;
+    this._setVerified(alias, this._activeVerified ? outcome.ctx : null);
+    this.onEvent({ type: "runtime:context", alias, contextTokens: outcome.ctx, verified: this._activeVerified });
+  }
+
   stop() {
     this._stopped = true;
     if (this.runtime) this.runtime.stop();
     this.runtime = null;
     this.activeAlias = null;
+    this._loadedCtx = null;
+    this._activeVerified = false;
   }
 }
 

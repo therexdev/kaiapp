@@ -126,6 +126,9 @@ class ModelManager {
         sizeBytes: pkg.sizeBytes ?? null,
         license: pkg.license ?? null,
         minRamGb: a.minRamGb ?? null,
+        // The package's published window (network context protocol 1) — an
+        // upper bound for the owner's opt-in, never the default context.
+        maxContextTokens: pkg.maxContextTokens ?? null,
         status: q ? "quarantined" : this.packageStatus(a.package).status,
         // Vision-capable packages (mmproj projector rides along) — the chat
         // UI gates image attachments on this flag.

@@ -105,6 +105,7 @@
       "sha256": "6c1a2b41161032677be168d354123594c0e6e67d2b9227c84f296ad037c728ff",
       "sizeBytes": 2019377696,
       "contextSize": 4096,
+      "maxContextTokens": 131072,
       "license": "llama3.2",
       "creator": "Meta (quantized by bartowski)",
       "runtime": "llamacpp"
@@ -115,6 +116,7 @@
       "sha256": "65b8fcd92af6b4fefa935c625d1ac27ea29dcb6ee14589c55a8f115ceaaa1423",
       "sizeBytes": 4683074240,
       "contextSize": 4096,
+      "maxContextTokens": 32768,
       "license": "apache-2.0",
       "creator": "Qwen team, Alibaba Cloud (quantized by bartowski)",
       "runtime": "llamacpp"
@@ -125,6 +127,7 @@
       "sha256": "1adf0b11065d8ad2e8123ea110d1ec956dab4ab038eab665614adba04b6c3370",
       "sizeBytes": 986048768,
       "contextSize": 4096,
+      "maxContextTokens": 32768,
       "license": "apache-2.0",
       "creator": "Qwen team, Alibaba Cloud (quantized by bartowski)",
       "runtime": "llamacpp"
@@ -135,6 +138,7 @@
       "sha256": "5a1395716f7913741cc51d98581b9b1228d80987a9f7d3664106742eb06bba83",
       "sizeBytes": 144811360,
       "contextSize": 4096,
+      "maxContextTokens": 8192,
       "license": "apache-2.0",
       "creator": "HuggingFaceTB (quantized by bartowski)",
       "runtime": "llamacpp"
@@ -147,6 +151,7 @@
       "license": "gemma",
       "creator": "Google DeepMind (quantized by bartowski)",
       "contextSize": 4096,
+      "maxContextTokens": 131072,
       "runtime": "llamacpp",
       "mmproj": {
         "filename": "gemma-3-4b-it-mmproj-model-f16.gguf",
@@ -164,6 +169,7 @@
       "license": "apache-2.0",
       "creator": "Mistral AI (quantized by bartowski)",
       "contextSize": 4096,
+      "maxContextTokens": 32768,
       "runtime": "llamacpp"
     },
     "qwen2.5-coder-7b-instruct-q4_k_m@1": {
@@ -174,6 +180,7 @@
       "license": "apache-2.0",
       "creator": "Qwen team, Alibaba Cloud (quantized by bartowski)",
       "contextSize": 4096,
+      "maxContextTokens": 32768,
       "runtime": "llamacpp"
     },
     "meta-llama-3.1-8b-instruct-q4_k_m@1": {
@@ -184,6 +191,7 @@
       "license": "llama3.1",
       "creator": "Meta (quantized by bartowski)",
       "contextSize": 4096,
+      "maxContextTokens": 131072,
       "runtime": "llamacpp"
     },
     "google_gemma-3-12b-it-q4_k_m@1": {
@@ -194,6 +202,7 @@
       "license": "gemma",
       "creator": "Google DeepMind (quantized by bartowski)",
       "contextSize": 4096,
+      "maxContextTokens": 131072,
       "runtime": "llamacpp"
     },
     "qwen2.5-14b-instruct-q4_k_m@1": {
@@ -204,6 +213,7 @@
       "license": "apache-2.0",
       "creator": "Qwen team, Alibaba Cloud (quantized by bartowski)",
       "contextSize": 4096,
+      "maxContextTokens": 32768,
       "runtime": "llamacpp"
     },
     "phi-4-q4_k_m@1": {
@@ -214,6 +224,7 @@
       "license": "mit",
       "creator": "Microsoft (quantized by bartowski)",
       "contextSize": 4096,
+      "maxContextTokens": 16384,
       "runtime": "llamacpp"
     },
     "mistral-small-24b-instruct-2501-q4_k_m@1": {
@@ -224,6 +235,7 @@
       "license": "apache-2.0",
       "creator": "Mistral AI (quantized by bartowski)",
       "contextSize": 4096,
+      "maxContextTokens": 32768,
       "runtime": "llamacpp"
     },
     "google_gemma-3-27b-it-q4_k_m@1": {
@@ -234,6 +246,7 @@
       "license": "gemma",
       "creator": "Google DeepMind (quantized by bartowski)",
       "contextSize": 4096,
+      "maxContextTokens": 131072,
       "runtime": "llamacpp"
     },
     "qwen2.5-32b-instruct-q4_k_m@1": {
@@ -244,6 +257,7 @@
       "license": "apache-2.0",
       "creator": "Qwen team, Alibaba Cloud (quantized by bartowski)",
       "contextSize": 4096,
+      "maxContextTokens": 32768,
       "runtime": "llamacpp"
     },
     "qwen2.5-coder-32b-instruct-q4_k_m@1": {
@@ -254,6 +268,7 @@
       "license": "apache-2.0",
       "creator": "Qwen team, Alibaba Cloud (quantized by bartowski)",
       "contextSize": 4096,
+      "maxContextTokens": 32768,
       "runtime": "llamacpp"
     },
     "deepseek-r1-distill-qwen-32b-q4_k_m@1": {
@@ -264,6 +279,7 @@
       "license": "mit",
       "creator": "DeepSeek (quantized by bartowski)",
       "contextSize": 4096,
+      "maxContextTokens": 131072,
       "runtime": "llamacpp"
     }
   }

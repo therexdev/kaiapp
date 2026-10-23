@@ -14,6 +14,28 @@ const fs = require("fs");
  * hardware where Ollama demonstrably worked), or forced via KAI_RUNTIME=ollama.
  */
 
+const WARMUP_TIMEOUT_MS = 120000;
+const PS_TIMEOUT_MS = 5000;
+
+/** num_ctx from an /api/show reply's `parameters` text, or null. A
+ *  configuration precheck only — it says what the model was created with,
+ *  not what the loaded runner actually gives one request. */
+function parseNumCtx(show) {
+  const m = /(?:^|\n)\s*num_ctx\s+(\d+)\s*(?:\n|$)/.exec(String(show?.parameters ?? ""));
+  const n = m ? Number(m[1]) : NaN;
+  return Number.isSafeInteger(n) ? n : null;
+}
+
+/** The loaded runner's context_length for `model` from an /api/ps reply
+ *  (matched on name or model, with or without ":latest"), or null. */
+function psContextLength(ps, model) {
+  const bare = (s) => String(s ?? "").replace(/:latest$/, "");
+  const want = bare(model);
+  if (!want || !Array.isArray(ps?.models)) return null;
+  const hit = ps.models.find((m) => m && (bare(m.name) === want || bare(m.model) === want));
+  return hit && Number.isSafeInteger(hit.context_length) ? hit.context_length : null;
+}
+
 class OllamaRuntime {
   constructor({ host = "127.0.0.1", port = 11434, onEvent } = {}) {
     this.host = host;
@@ -138,13 +160,24 @@ class OllamaRuntime {
   /**
    * Ensure our verified GGUF is registered in Ollama under `modelName`,
    * then treat Ollama as the serving endpoint.
+   *
+   * `contextTokens` (network context opt-in) registers a separate model
+   * whose parameters pin num_ctx; without it every request and body is
+   * exactly the legacy one.
    */
-  async start({ modelPath, sha256, modelName }) {
+  async start({ modelPath, sha256, modelName, contextTokens }) {
     const name = modelName || "koinos-model";
     const digest = `sha256:${String(sha256).toLowerCase()}`;
+    const ctx = Number.isSafeInteger(contextTokens) && contextTokens > 0 ? contextTokens : null;
 
     const shown = await this._api("/api/show", { model: name }, { timeoutMs: 5000 }).catch(() => null);
-    if (!shown?.ok) {
+    let register = !shown?.ok;
+    if (!register && ctx) {
+      // Configuration precheck: a model created with another num_ctx is
+      // recreated once. Never verification — see verifyContext().
+      register = parseNumCtx(await shown.json().catch(() => null)) !== ctx;
+    }
+    if (register) {
       // Upload the verified artifact as a blob (idempotent server-side),
       // then create the model from that exact digest.
       this.onEvent({ type: "runtime:ollama-import", model: name });
@@ -162,10 +195,13 @@ class OllamaRuntime {
       if (!blob.ok && blob.status !== 201) {
         throw new Error(`Ollama rejected the model blob: HTTP ${blob.status}`);
       }
-      let created = await this._api("/api/create", { model: name, files: { "model.gguf": digest } });
+      let created = await this._api(
+        "/api/create",
+        ctx ? { model: name, files: { "model.gguf": digest }, parameters: { num_ctx: ctx } } : { model: name, files: { "model.gguf": digest } }
+      );
       if (!created.ok) {
         // Older Ollama versions take a Modelfile that references the path.
-        created = await this._api("/api/create", { name, modelfile: `FROM ${modelPath}` });
+        created = await this._api("/api/create", { name, modelfile: ctx ? `FROM ${modelPath}\nPARAMETER num_ctx ${ctx}` : `FROM ${modelPath}` });
       }
       if (!created.ok) {
         throw new Error(`Ollama could not create the model: HTTP ${created.status} ${await created.text().catch(() => "")}`);
@@ -179,6 +215,40 @@ class OllamaRuntime {
     return { endpoint: this.endpoint };
   }
 
+  /** GET /api/ps: context_length of the loaded runner serving our model,
+   *  or null (not loaded, field missing, timeout). */
+  async probeContext({ timeoutMs = PS_TIMEOUT_MS } = {}) {
+    if (!this.model) return null;
+    try {
+      const r = await fetch(`${this.endpoint}/api/ps`, { signal: AbortSignal.timeout(timeoutMs) });
+      if (!r.ok) return null;
+      return psContextLength(await r.json(), this.model);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Verified iff, after a bounded local warm-up that loads the runner,
+   * /api/ps reports a per-request context_length >= n. Fails closed: a
+   * missing entry, a missing or smaller length, or any timeout is false.
+   * `warm: false` only reads /api/ps and never loads anything.
+   */
+  async verifyContext(n, { warm = true, warmupMs = WARMUP_TIMEOUT_MS } = {}) {
+    if (!this.model || !Number.isSafeInteger(n)) return false;
+    if (warm) {
+      try {
+        const w = await this._api("/api/generate", { model: this.model, prompt: "", stream: false }, { timeoutMs: warmupMs });
+        await w.text().catch(() => "");
+        if (!w.ok) return false;
+      } catch {
+        return false;
+      }
+    }
+    const len = await this.probeContext();
+    return Number.isSafeInteger(len) && len >= n;
+  }
+
   stop() {
     // We never own the Ollama daemon — just detach.
     this.running = false;
@@ -186,4 +256,4 @@ class OllamaRuntime {
   }
 }
 
-module.exports = { OllamaRuntime };
+module.exports = { OllamaRuntime, parseNumCtx, psContextLength };

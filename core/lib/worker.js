@@ -2,6 +2,9 @@
 
 const crypto = require("crypto");
 const { presenceHash } = require("./koin-network/presence");
+const { CONTEXT_PROTOCOL, LEGACY_CONTEXT_TOKENS, LEGACY_MAX_TOKENS, normalizeJobTerms } = require("./context-terms");
+
+const LEGACY_CAP = Object.freeze({ contextTokens: LEGACY_CONTEXT_TOKENS, maxOutputTokens: LEGACY_MAX_TOKENS });
 
 /*
  * Earn worker (M2 step 3, §5.7): started by the Earn toggle. Connects
@@ -82,6 +85,9 @@ class Worker {
      */
     this._backoff = false;
     this.backoffReason = null;
+    this._ctxDirty = false; // context changed while a registration was in flight
+    this._ctxUnsub = null;
+    this._jobAbort = null; // {jobId, controller} for the running non-legacy job
   }
 
   /**
@@ -273,6 +279,17 @@ class Worker {
         const resident = this.runtime?.activeAlias;
         this.preferredModel = ready.includes(resident) ? resident : (ready[0] || null);
       }
+      /*
+       * Network context protocol 1 (§6): one entry per advertised class —
+       * the verified opt-in terms, else legacy 4096/512. Only what the live
+       * engine proved this session is ever claimed; the scheduler sanitizes
+       * it again and routes larger jobs only to machines that say so.
+       */
+      const contextModels = {};
+      for (const alias of ready) {
+        const a = this.runtime?.advertisedContext?.(alias);
+        contextModels[alias] = a ? { contextTokens: a.contextTokens, maxOutputTokens: a.maxOutputTokens } : { ...LEGACY_CAP };
+      }
       // Every downloaded model is too big for this machine: say so instead
       // of silently earning nothing (the empty advertisement is correct —
       // this machine has nothing it can serve the network comfortably).
@@ -334,6 +351,7 @@ class Worker {
             ...(this.preferredModel ? { preferredModel: this.preferredModel } : {}),
           },
           models: ready,
+          context: { protocol: CONTEXT_PROTOCOL, models: contextModels },
           // §7.4 anti-Sybil signal #3 (SHADOW): many wallets on one device —
           // or one device image cloned across a fleet — collide here.
           fingerprint: Worker.fingerprint(this.hardware),
@@ -352,8 +370,25 @@ class Worker {
       this._pollAbort?.abort();
     })().finally(() => {
       this._registerGate = null;
+      // A context change landed mid-registration: send the fresh truth once.
+      if (this._ctxDirty) {
+        this._ctxDirty = false;
+        if (this.running && !this._backoff) this._register().catch(() => {});
+      }
     });
     return this._registerGate;
+  }
+
+  /** The runtime's advertisable context changed (verified, failed, or
+   *  reconfigured): re-register, single-flight with a dirty flag. Backoff
+   *  re-registers on its own when it clears. */
+  _contextChanged() {
+    if (!this.running || this._backoff) return;
+    if (this._registerGate) {
+      this._ctxDirty = true;
+      return;
+    }
+    this._register().catch(() => {}); // watchdog retries on failure
   }
 
   async start() {
@@ -363,6 +398,7 @@ class Worker {
 
     await this._register();
     this.running = true;
+    this._ctxUnsub = this.runtime?.onContextChange?.(() => this._contextChanged()) || null;
     this._koinSession = crypto.randomBytes(16).toString("hex");
     this._koinSequence = 0;
     this._koinPresence().catch(() => {});
@@ -463,6 +499,8 @@ class Worker {
 
   async stop() {
     this.running = false;
+    this._ctxUnsub?.();
+    this._ctxUnsub = null;
     this._shadowAbort?.abort();
     clearInterval(this._koinTimer);
     this._koinAbort?.abort();
@@ -604,7 +642,9 @@ class Worker {
             method: "POST",
             headers: { "content-type": "application/json", connection: "close" },
             body: JSON.stringify({ jobId: job.id, delta: chunk }),
-          }).catch(() => {});
+          })
+            .then((r) => this._chunkAnswered(job.id, r))
+            .catch(() => {});
         };
         this._executing = true;
         let sequence = 0;
@@ -664,6 +704,36 @@ class Worker {
     }
   }
 
+  /**
+   * §11 cancellation for non-legacy jobs: the scheduler answers a chunk with
+   * 404 {ok:false} once it forgot the job (consumer gone, lease moved), so
+   * the engine stops generating for nobody. A 401 or a network error is not
+   * that signal. Legacy jobs keep today's fire-and-forget chunks.
+   */
+  _chunkAnswered(jobId, r) {
+    const a = this._jobAbort;
+    if (!a || a.jobId !== jobId || r.status !== 404) return;
+    r.json()
+      .then((j) => {
+        if (j && j.ok === false && this._jobAbort === a) a.controller.abort(new Error("the scheduler no longer holds this job"));
+      })
+      .catch(() => {});
+  }
+
+  /** Refuse a job's terms before any inference: say so, re-advertise. */
+  _refuseTerms(job, terms, reason) {
+    this.onEvent({
+      type: "worker:terms-refused",
+      jobId: job.id,
+      model: job.model,
+      contextTokens: terms.contextTokens,
+      maxTokens: terms.maxTokens,
+      reason,
+    });
+    this._contextChanged();
+    throw new Error(`Refused job terms (${terms.contextTokens} context / ${terms.maxTokens} output): ${reason}`);
+  }
+
   /** §31: only approved profiles execute — anything else is refused. */
   async _execute(job, onDelta, onPrefix) {
     if (this.fundedOnly && !["koin-funded-rehearsal-chat", "koin-mainnet-pilot-chat"].includes(job.type)) throw Error("This Test worker accepts only funded Test requests");
@@ -678,13 +748,27 @@ class Worker {
     if (job.type !== "inference-eval" && job.type !== "chat") {
       throw new Error(`Unapproved job type: ${job.type}`);
     }
+    // §11: legacy terms (or an old scheduler sending none) run today's path.
+    // Larger terms must match what this machine advertised BEFORE any model
+    // load, and what the live engine proves AFTER the hold.
+    const terms = normalizeJobTerms(job);
+    const extended = job.type === "chat" && !terms.legacy;
+    if (extended) {
+      const adv = this.runtime.advertisedContext?.(job.model) || LEGACY_CAP;
+      if (terms.contextTokens > adv.contextTokens || terms.maxTokens > adv.maxOutputTokens) {
+        this._refuseTerms(job, terms, "larger than this machine advertises");
+      }
+    }
     // Cold engine swap ahead: acquiring a NON-resident model blocks through
     // the whole load (A40 field report: 166s cold for a 32B vs a 60s eval
     // lease — 8 timeout strikes with zero failed challenges). Tell the
     // scheduler BEFORE we go quiet so the lease gets a one-time warming
     // grace instead of blaming honest hardware. Fire-and-forget: an old
     // scheduler 404s and everything behaves exactly as before.
-    if (this.runtime.activeAlias !== undefined && this.runtime.activeAlias !== job.model) {
+    // A resident alias that must reload at a different context (§11) is
+    // the same cold load, so it is announced too.
+    const switching = this.runtime.activeAlias !== undefined && this.runtime.activeAlias !== job.model;
+    if (switching || this.runtime.isServing?.(job.model) === false) {
       this.onEvent({ type: "worker:model-warming", jobId: job.id, model: job.model });
       fetch(`${this.schedulerUrl}/worker/warming?token=${this.token}`, {
         method: "POST",
@@ -698,14 +782,26 @@ class Worker {
       ? await this.runtime.acquireFor(job.model)
       : { endpoint: await this.runtime.ensure(job.model), release: () => {} };
     try {
-      return await this._executeOn(hold.endpoint, job, onDelta);
+      let signal = null;
+      if (extended) {
+        const live = this.runtime.verifiedContextFor ? await this.runtime.verifiedContextFor(job.model) : null;
+        if (!live || live.contextTokens < terms.contextTokens || terms.maxTokens > live.maxOutputTokens) {
+          this._refuseTerms(job, terms, "the engine did not prove that window just now");
+        }
+        const controller = new AbortController();
+        this._jobAbort = { jobId: job.id, controller };
+        signal = controller.signal;
+      }
+      return await this._executeOn(hold.endpoint, job, onDelta, { maxTokens: terms.maxTokens, signal });
     } finally {
+      if (this._jobAbort?.jobId === job.id) this._jobAbort = null;
       hold.release();
     }
   }
 
-  async _executeOn(endpoint, job, onDelta) {
+  async _executeOn(endpoint, job, onDelta, { maxTokens = LEGACY_MAX_TOKENS, signal = null } = {}) {
     const served = this.runtime.servedModelName?.() ?? job.model;
+    const maxOut = job.type === "chat" ? maxTokens : 128;
     // chat = a relayed consumer request (§46.5); eval = protocol-funded (§16).
     const messages = job.type === "chat" && Array.isArray(job.messages)
       ? job.messages
@@ -716,15 +812,18 @@ class Worker {
       body: JSON.stringify({
         model: served,
         temperature: job.type === "chat" ? 0.7 : 0,
-        max_tokens: job.type === "chat" ? 512 : 128,
+        max_tokens: maxOut,
         messages,
         // Stream from the engine so deltas can flow to the consumer live;
         // usage arrives in the final chunk (llama.cpp and Ollama both send
         // it) with a character-estimate fallback.
         stream: true,
       }),
+      ...(signal ? { signal } : {}),
     });
     if (!r.ok) throw new Error(`inference failed: HTTP ${r.status}`);
+    // Never report more output than the terms allowed (§10).
+    const capOut = (n) => (job.type === "chat" ? Math.min(n, maxOut) : n);
     // Engines that ignore stream:true answer plain JSON — take it whole.
     if (!(r.headers.get("content-type") || "").includes("text/event-stream")) {
       const j = await r.json();
@@ -734,7 +833,7 @@ class Worker {
         output: whole,
         usage: {
           prompt_tokens: Number(j.usage?.prompt_tokens ?? 0),
-          completion_tokens: Number(j.usage?.completion_tokens ?? 0),
+          completion_tokens: capOut(Number(j.usage?.completion_tokens ?? 0)),
         },
       };
     }
@@ -772,7 +871,7 @@ class Worker {
       output,
       usage: {
         prompt_tokens: Number(usage?.prompt_tokens ?? Math.ceil(JSON.stringify(messages).length / 4)),
-        completion_tokens: Number(usage?.completion_tokens ?? Math.ceil(output.length / 4)),
+        completion_tokens: capOut(Number(usage?.completion_tokens ?? Math.ceil(output.length / 4))),
       },
     };
   }
