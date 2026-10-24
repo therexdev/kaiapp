@@ -3,12 +3,13 @@ const test = require("node:test"), assert = require("node:assert/strict"), fs = 
 const { fixture } = require("./helpers/koin-funding-recovery-fixture"), P = require("../lib/koin-network/job-protocol"), USD = require("../lib/koin-network/purchase-quote");
 const { CreditPurchases } = require("../../electron/credit-purchases");
 const Prices = require("./helpers/purchase-price-fixture");
-function setup(t) {
-  const f = fixture(t, { usd: true }); let response = 1, revoked = false, signatures = 0, reviews = 0;
+function setup(t, { mainnet = false } = {}) {
+  const f = fixture(t, { usd: true, mainnet }); let response = 1, revoked = false, signatures = 0, reviews = 0;
   const signer = Signer.fromSeed("funding-recovery-verifier"), wallet = { address: f.signer.getAddress(), signer: f.signer };
   const sign = f.signer.signTransaction.bind(f.signer); f.signer.signTransaction = async tx => { signatures++; return sign(tx); };
   f.provider.call = async (_method, { transaction }) => { f.state.submissions.push(structuredClone(transaction)); throw Error("Lost fixture response"); };
-  const config = { mode: "isolated-rehearsal", deployment: f.d, owner: wallet.address, schedulerUrl: "https://fixture.invalid/scheduler", version: 1, pricingPolicyHash: Prices.pricingPolicyHash,
+  f.provider.getAccountRc = async () => "14938227003";
+  const config = { mode: mainnet ? "mainnet-pilot" : "isolated-rehearsal", deployment: f.d, owner: wallet.address, schedulerUrl: "https://fixture.invalid/scheduler", version: 1, pricingPolicyHash: Prices.pricingPolicyHash,
     maxRcPerTransaction: "10000000", maxRcPerDay: "20000000", limits: { amount: "500000000" } };
   const directory = path.join(f.dir, "credit-account-v2", P.hash("account"), P.hash(JSON.stringify(config))); fs.mkdirSync(directory, { recursive: true });
   const registrations = [], c = { config, directory, auth: { accountId: "account", sessionToken: "private-session" }, flow: { call: async (route, body) => {
@@ -48,4 +49,40 @@ test("public payment cancellation and account revocation never sign", async t =>
   const next = await f.controller.preview(f.c, { usd: "1" }, signal); f.revoke();
   await assert.rejects(f.controller.run(f.c, f.window, "purchase-approve", next.quote.id, signal), /Signed out/);
   assert.equal(f.counts().signatures, 0); assert.equal(f.state.submissions.length, 0);
+});
+
+test("purchase failures identify the stopped stage without exposing errors or signing", async t => {
+  for (const scenario of ["rpc", "unknown", "dialog", "reserve"]) {
+    const f = setup(t, { mainnet: true }), signal = new AbortController().signal;
+    const prepare = f.client.prepare.bind(f.client); let calls = 0;
+    const privateError = Object.assign(Error("private-session raw-price-signature C:\\private\\wallet.json"),
+      scenario === "rpc" ? { code: "koin_rpc_unavailable" } : {});
+    if (scenario === "dialog") f.options.dialog.showMessageBox = async () => { throw privateError; };
+    else f.client.prepare = async (...args) => {
+      if (scenario !== "reserve" || ++calls === 2) throw privateError;
+      return prepare(...args);
+    };
+    const first = await f.controller.preview(f.c, { usd: "1" }, signal);
+    const expected = scenario === "rpc" ? "prepare/rpc-unavailable" : `${scenario === "unknown" ? "prepare" : scenario}/unavailable`;
+    await assert.rejects(f.controller.run(f.c, f.window, "purchase-approve", first.quote.id, signal), error => {
+      assert.ok(error.message.includes(expected), error.message);
+      assert.equal(/private-session|raw-price-signature|wallet\.json/.test(error.message), false);
+      assert.ok(error.message.includes(scenario === "rpc" ? "fresh quote" : "before trying another purchase"));
+      return true;
+    });
+    assert.equal(f.counts().signatures, 0); assert.equal(f.state.submissions.length, 0);
+    await assert.rejects(f.controller.run(f.c, f.window, "purchase-approve", first.quote.id, signal), /Refresh/);
+  }
+});
+
+test("a failed preparation can use a fresh quote without reusing the consumed approval", async t => {
+  const f = setup(t), signal = new AbortController().signal, prepare = f.client.prepare.bind(f.client);
+  f.client.prepare = async () => { throw Object.assign(Error("unavailable"), { code: "koin_rpc_unavailable" }); };
+  const first = await f.controller.preview(f.c, { usd: "1" }, signal);
+  await assert.rejects(f.controller.run(f.c, f.window, "purchase-approve", first.quote.id, signal), /prepare\/rpc-unavailable/);
+  f.client.prepare = prepare;
+  const next = await f.controller.preview(f.c, { usd: "1" }, signal);
+  const result = await f.controller.run(f.c, f.window, "purchase-approve", next.quote.id, signal);
+  assert.equal(result.state, "pending"); assert.equal(f.counts().signatures, 1);
+  assert.equal(f.state.submissions.length, 1); assert.equal(f.counts().reviews, 1);
 });

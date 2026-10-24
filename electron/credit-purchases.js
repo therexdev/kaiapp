@@ -4,6 +4,7 @@ const USD = require("../core/lib/koin-network/purchase-quote");
 const { CreditPurchaseQuotes } = require("./credit-purchase-quotes");
 const { guardOtherJournals, purchaseDirectory } = require("./credit-purchase-journals");
 const Access = require("./credit-purchase-access");
+const { purchaseFailureMessage } = require("./koin-funding-failure");
 class CreditPurchases {
   constructor({ dataDir, account, storage, dialog, fetchImpl = fetch, clock = Date.now, clientFactory = d => new (require("../core/lib/koin-network/chain").KoinChain)(d) }) {
     Object.assign(this, { dataDir, account, storage, dialog, fetchImpl, clientFactory, clock }); this.quotes = new CreditPurchaseQuotes({ clock }); this.active = null;
@@ -41,7 +42,7 @@ class CreditPurchases {
     return this.use(c, signal, async (payments, setApproved) => {
       setApproved(args);
       const result = await payments.run(window, args ? "purchase" : "purchase-retry", args ? USD.dollars(args.amount) : undefined, signal);
-      if (!result.deposit && !["cancelled", "complete"].includes(result.status)) throw Error("Payment could not be started. Refresh the quote before trying again; existing credits remain usable.");
+      if (!result.deposit && !["cancelled", "complete"].includes(result.status)) throw Error(purchaseFailureMessage(result.failure, !args));
       // If confirmation registration is interrupted, the durable original
       // transaction is registered again on the next read-only synchronization.
       if (result.deposit?.txId) try { await c.flow.call("purchase", { txId: result.deposit.txId }, signal); } catch {}

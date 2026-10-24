@@ -1,3 +1,9 @@
+## Identify blocked credit purchases
+
+- Buy credits reports which payment check stopped, with a safe reference for support. Network outages, quote expiry, changed approval and saved-payment conflicts no longer all say to refresh the quote.
+- Unknown failures ask for the displayed message before another purchase. Recovery continues to use the original payment; raw RPC responses, signatures and local paths are not displayed.
+- This update improves purchase diagnostics. It does not confirm that a previously failed purchase has succeeded; Balance & activity still requires verified payment confirmation.
+
 ## Responsive provider setup
 
 - Reload setup now shows when it is checking and when the check finishes. A lost response times out and allows another check instead of leaving Reload silently stuck.

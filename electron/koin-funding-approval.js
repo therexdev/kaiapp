@@ -9,6 +9,7 @@ const { hash, digest, integer } = require("../core/lib/koin-network/job-protocol
 const { FundingRecovery, FundingRecoveryRunner } = require("./koin-funding-recovery");
 const { koin } = require("./koin-review");
 const PriceQuote = require("../core/lib/koin-network/purchase-quote");
+const { fundingFailure } = require("./koin-funding-failure");
 
 function createFundingApproval({ mode, client, journal, dialog, sign, submit, clock = Date.now, timeoutMs = 5000, tr = x => x }) {
   assertPaymentMode(mode, client); const mainnet = mode === "mainnet-pilot";
@@ -44,23 +45,29 @@ function createFundingApproval({ mode, client, journal, dialog, sign, submit, cl
     window.webContents.on("did-start-navigation", navigation);
     window.webContents.on("render-process-gone", stop);
     const timer = setTimeout(stop, 180000);
-    let ownsFence = false;
+    let ownsFence = false, stage = "request";
     try {
       const request = intent(await waiting(Promise.resolve().then(getRequest)));
       if (!valid()) return result("cancelled");
+      stage = "journal";
       const saved = journal.saved(id);
       if (saved && JSON.stringify(saved.intent) !== JSON.stringify(request)) throw Error("Cannot replace the saved deposit");
       if (saved && !resume) return result("recover_existing", id);
       if (resume && (!saved || !saved.signed)) return result(saved ? "recover_signing_envelope" : "unavailable", saved ? id : null);
       if (resume && ["funded", "reverted", "conflicted"].includes(saved.state)) return result("complete", id);
+      stage = "prepare";
       const draft = resume ? saved.draft : await client.prepare(request.kind, request.method, request.args, { actor: request.actor, rcLimit: request.maxRc });
+      stage = "transaction";
       await client.verifyTransaction(draft, request);
+      stage = "deployment";
       const config = await client.verify(), policyHash = hash(JSON.stringify(config));
       if (config.paused || (resume && saved.policyHash !== policyHash)) throw Error("Funding policy changed or paused");
       if (!valid()) return result("cancelled");
       const usdPurchase = isUsd(client.d) && request.kind === "credits";
+      stage = "price";
       if (usdPurchase && !resume) await PriceQuote.verify(client.d, request.args, { now: clock(), version: config.credits.version });
       const line = (name, value) => `${tr(name)}: ${value}`;
+      stage = "dialog";
       const { response } = await waiting(dialog.showMessageBox(window, {
         type: "question", title: tr(mainnet ? "Mainnet KOIN funding — real funds" : mode === "test-deployment" ? "Test KOIN funding" : "Isolated KOIN funding rehearsal"),
         message: tr(isPrepaid(client.d) && request.kind === "credits" ? (resume ? "Retry this saved credit purchase" : "Buy AI credits with KOIN") : resume ? "Review the saved deposit for resubmission" : (mainnet ? "Approve this real KOIN deposit" : mode === "test-deployment" ? "Approve this testnet deposit" : "Approve this fixture-wallet deposit")),
@@ -79,11 +86,13 @@ function createFundingApproval({ mode, client, journal, dialog, sign, submit, cl
         buttons: [tr("Cancel"), tr(resume ? "Resume saved deposit" : (mainnet ? "Send real KOIN" : mode === "test-deployment" ? "Approve testnet deposit" : "Approve fixture deposit"))], defaultId: 0, cancelId: 0, noLink: true,
       }));
       if (response !== 1 || !valid()) return result("cancelled");
+      stage = "recheck";
       if (JSON.stringify(intent(await getRequest())) !== JSON.stringify(request) || !valid()) return result("cancelled");
       const currentConfig = await client.verify(), nextNonce = await client.provider.getNextNonce(request.actor);
       if (!valid() || JSON.stringify(config) !== JSON.stringify(currentConfig) || nextNonce !== draft.header.nonce) return result("cancelled");
       if (usdPurchase && !resume) await PriceQuote.verify(client.d, request.args, { now: clock(), version: currentConfig.credits.version });
       const approval = { txId: draft.id, policyHash, startedAt, expires, holdVersion: saved?.holdVersion };
+      stage = "reserve";
       task.id = id;
       if (resume) {
         await journal.resumeReviewed(id, approval, valid); ownsFence = true;
@@ -92,6 +101,7 @@ function createFundingApproval({ mode, client, journal, dialog, sign, submit, cl
         if (decision.action !== "prepare_funding") { task.id = null; return result("recover_existing", id); }
         ownsFence = true;
         if (!valid() || journal.status(id).held) { journal.hold(id); return result("stopped", id); }
+        stage = "sign";
         // Stage even a late signature. A timeout/Stop holds the durable envelope;
         // only another native review may submit it. A process exit leaves the
         // signing fence for exact-envelope recovery, never another signature.
@@ -107,6 +117,7 @@ function createFundingApproval({ mode, client, journal, dialog, sign, submit, cl
         } finally { clearTimeout(signingTimer); }
       }
       if (!valid() || journal.status(id).held) { journal.hold(id); return result("stopped", id); }
+      stage = "submit";
       const runner = new FundingRecoveryRunner({ mode, journal, timeoutMs, sign: () => { throw Error("Resigning is forbidden"); },
         submit: async (value, options) => {
           if (!valid() || journal.status(id).held) { journal.hold(id); throw Error("Funding stopped before transport"); }
@@ -119,9 +130,10 @@ function createFundingApproval({ mode, client, journal, dialog, sign, submit, cl
       const status = decision.action === "done" ? "complete" : decision.action === "review" ? "review_required" :
         decision.action === "wait" ? "waiting" : "await_finality";
       return { ...result(valid() ? status : "stopped", id), action: decision.action, reason: decision.reason ?? null };
-    } catch {
+    } catch (error) {
       if (ownsFence) journal.hold(id);
-      return result(valid() ? "unavailable" : ownsFence ? "stopped" : "cancelled", ownsFence ? id : null);
+      return { ...result(valid() ? "unavailable" : ownsFence ? "stopped" : "cancelled", ownsFence ? id : null),
+        failure: fundingFailure(stage, error) };
     } finally {
       clearTimeout(timer); task.abort.abort();
       for (const event of ["hide", "minimize", "closed"]) window.removeListener(event, stop);

@@ -26,7 +26,10 @@ test("Buy credits shows KOIN independently, explains activation and discards cha
         if (window.pausePurchaseQuote) await new Promise(resolve => { window.finishPurchaseQuote = resolve; });
         return { quote: { id: "fixture-quote", koin: "2", credits: "1000", observedAt: Date.now() - 17 * 60000, expiresAt: Date.now() + 60000, priceDetails: { usdPerKoin: "0.5", windowSeconds: 1800, referenceKind: "merchant-exchange-reference" } } };
       }
-      if (action === "purchase-approve") return { state: "cancelled" };
+      if (action === "purchase-approve") {
+        if (window.purchaseFailure) throw Error(window.purchaseFailure);
+        return { state: "cancelled" };
+      }
       throw Error("Unexpected fixture action: " + action);
     } };
   });
@@ -90,6 +93,22 @@ test("Buy credits shows KOIN independently, explains activation and discards cha
   assert.equal(await page.evaluate(() => window.purchaseCalls.filter(c => c.action === "purchase-approve").length), 0);
   assert.match(await page.locator("#product-wallet-address").textContent(), /payment-wallet-b/);
   assert.equal(await page.locator("#product-quote-details").isVisible(), false);
+  // A payment-stage failure remains visible across read-only refreshes and
+  // never triggers another quote, native review or send by itself.
+  const failure = require("../../electron/koin-funding-failure").purchaseFailureMessage({ stage: "prepare", code: "rpc-unavailable" });
+  await page.evaluate(value => { window.purchaseFailure = value; }, failure);
+  await page.locator("#product-quote-refresh").click();
+  await page.waitForFunction(() => !document.getElementById("product-quote-approve").disabled);
+  await page.locator("#product-quote-approve").click();
+  await page.waitForFunction(value => document.getElementById("product-quote-state").textContent === value, failure);
+  assert.equal(await page.locator("#product-quote-approve").isVisible(), false);
+  assert.equal(await page.locator("#product-quote-refresh").isDisabled(), false);
+  const quoteCount = await page.evaluate(() => window.purchaseCalls.filter(c => c.action === "purchase-preview").length);
+  await page.locator("#product-purchase-check").click();
+  await page.waitForFunction(() => !document.getElementById("product-purchase-check").disabled);
+  assert.equal(await page.locator("#product-quote-state").textContent(), failure);
+  assert.equal(await page.evaluate(() => window.purchaseCalls.filter(c => c.action === "purchase-approve").length), 1);
+  assert.equal(await page.evaluate(() => window.purchaseCalls.filter(c => c.action === "purchase-preview").length), quoteCount);
   // Also discard a quote which arrives after account identity changed.
   await page.evaluate(() => { window.pausePurchaseQuote = true; }); await page.locator("#product-quote-refresh").click();
   await page.waitForFunction(() => !!window.finishPurchaseQuote);

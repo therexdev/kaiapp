@@ -61,8 +61,28 @@ test("changed terms, nonce, pins, pause, clock and window lifecycle block approv
 test("a nonce changing during the final draft preparation cannot create a signing fence", async t => {
   const f = fixture(t), prepare = f.client.prepare.bind(f.client); let calls = 0;
   f.client.prepare = async (...args) => { if (++calls === 2) f.state.nonce = "KAI="; return prepare(...args); };
-  assert.equal((await controller(f).approve(window(), f.id, () => f.request)).status, "unavailable");
+  const result = await controller(f).approve(window(), f.id, () => f.request);
+  assert.equal(result.status, "unavailable");
+  assert.deepEqual(result.failure, { stage: "reserve", code: "review-changed" });
   assert.equal(f.journal.saved(f.id), null); assert.equal(f.state.signed, 0);
+});
+
+test("funding diagnostics allowlist categories and never turn recovery into a new purchase", () => {
+  const { fundingFailure, purchaseFailureMessage } = require("../../electron/koin-funding-failure");
+  for (const [error, code] of [
+    [Object.assign(Error("private"), { code: "koin_rpc_chain_mismatch" }), "chain-mismatch"],
+    [Object.assign(Error("private"), { code: "koin_rpc_rejected" }), "rpc-rejected"],
+    [Error("Purchase price expired. Please buy again for a fresh price."), "quote-expired"],
+    [Error("Funding is paused"), "policy-changed"],
+    [Error("Another deposit owns this wallet nonce; recover it first"), "wallet-busy"],
+    [Object.assign(Error("private"), { code: "private-code" }), "unavailable"],
+  ]) {
+    const failure = fundingFailure("prepare", error);
+    assert.deepEqual(failure, { stage: "prepare", code });
+    const message = purchaseFailureMessage(failure, true);
+    assert.match(message, /original payment/); assert.doesNotMatch(message, /fresh quote|private/);
+  }
+  assert.doesNotMatch(purchaseFailureMessage({ stage: "private-path", code: "private-code" }), /private/);
 });
 
 test("Stop returns while a native dialog is unresolved and its late response cannot approve", async t => {
@@ -171,7 +191,10 @@ test("USD approval shows fixed credits and Master destination, verifies finality
       return { response: 1 };
     } } });
     const result = await c.approve(window(),f.id,()=>f.request);
-    if (expiresDuringReview) { assert.equal(f.state.signed,0); assert.equal(f.journal.saved(f.id),null); continue; }
+    if (expiresDuringReview) {
+      assert.deepEqual(result.failure, { stage: "recheck", code: "quote-expired" });
+      assert.equal(f.state.signed,0); assert.equal(f.journal.saved(f.id),null); continue;
+    }
     assert.equal(result.status,"await_finality"); assert.equal(f.state.signed,1);
     await f.include(f.state.submissions[0], { irreversible: true }); f.state.now += 60001;
     assert.equal((await c.check(f.id)).state,"funded"); assert.equal(f.state.signed,1);
