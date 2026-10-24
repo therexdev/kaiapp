@@ -70,7 +70,10 @@ class CreditService {
       let runBudgets = false, modelCatalog, modelError = "";
       try { modelCatalog = await c.flow.models(signal); } catch (error) { modelError = String(error.message).slice(0, 220); }
       try { const r = await c.flow.call("capabilities", {}, signal); runBudgets = !!modelCatalog && r.capabilities?.advancedRuns === true && modelCatalog.models.every(t => r.capabilities.models?.some(m => m.model === t.model && m.version === t.version && m.maxOutput >= t.maxOutput)); } catch { /* Normal Chat remains independent of advanced-run support. */ }
-      return { enabled: true, configured: true, product: "prepaid-usd-v1", activation: "ready", blocked: modelError, model: c.config.model, maxOutput: c.config.maxOutput, models: modelCatalog?.models || [], modelAvailabilityUntil: modelCatalog?.validUntil || null,
+      let localPurchase;
+      try { localPurchase = await this.purchases.status(c, signal); }
+      catch { localPurchase = { state: "unavailable", detail: "Saved payment records could not be checked. Check again before starting another purchase." }; }
+      return { enabled: true, configured: true, product: "prepaid-usd-v1", activation: "ready", blocked: modelError, localPurchase, model: c.config.model, maxOutput: c.config.maxOutput, models: modelCatalog?.models || [], modelAvailabilityUntil: modelCatalog?.validUntil || null,
         runBudgets, maxRequestCredits: require("../core/lib/koin-network/purchase-quote").credits(c.config.limits.perJob), recoveryAvailable: c.recoverable.length > 0 };
     } catch (error) { return { enabled: true, configured: true, product: "prepaid-usd-v1", activation: "signin-required", blocked: String(error.message), recoveryAvailable: false }; }
   }

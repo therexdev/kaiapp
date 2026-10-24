@@ -1,3 +1,9 @@
+## Start sharing directly from Earn
+
+- Earn has its own Provider model choice. Turning sharing On loads that model and starts qualification without sending a chat. The choice and On/Off preference survive restart.
+- Existing providers can recover a previously qualified installed model from a fresh account status when upgrading from an older preference file. A saved choice is checked against current approved packages and hardware before loading; an unavailable choice requires attention instead of silently switching models.
+- Buy credits shows the saved payment's public transaction ID and available failure details. Simulation failures remain visible after restart, expired quote times are identified, and a pending local payment blocks another purchase. A pending service record is described as unconfirmed rather than implying that a broadcast succeeded.
+
 ## Identify blocked credit purchases
 
 - Buy credits reports which payment check stopped, with a safe reference for support. Network outages, quote expiry, changed approval and saved-payment conflicts no longer all say to refresh the quote.

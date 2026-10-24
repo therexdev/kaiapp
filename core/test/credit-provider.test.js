@@ -123,3 +123,58 @@ test("Stop during a catalog read cannot re-enable the saved provider preference"
   await reading; await f.controller.stop(); release(); await rejected;
   assert.equal(f.controller.preference(f.c), false); assert.equal(f.counts.started, 0);
 });
+
+function addSmart(f) {
+  const modelHash = P.hash("smart-model");
+  f.tariffs.push({ model: "smart", modelHash });
+  f.core.models.catalog.aliases.smart = { package: "smart-package", minRamGb: 4 };
+  f.core.models.catalog.packages["smart-package"] = { sha256: modelHash, sizeBytes: 2000 };
+}
+test("a cold provider recovers its qualified model, loads it without Chat and remembers it across restart", async t => {
+  const f = fixture(t); f.installed = true; addSmart(f);
+  f.core.runtime.status = () => ({ activeAlias: null });
+  f.controller.readStatus = async () => ({ model: "fixture", state: "review-required", models: [{ model: "smart", state: "connecting" }] });
+  fs.writeFileSync(path.join(f.c.directory, "provider-preference.json"), JSON.stringify({ schema: 1, enabled: true }));
+  const loaded = []; f.core.runtime.acquireFor = async id => { loaded.push(id); return { release() {} }; };
+  assert.equal((await f.controller.info()).model.id, "smart");
+  assert.equal(f.counts.started, 0); assert.deepEqual(loaded, [], "setup reads do not start inference");
+  f.controller.readStatus = async () => { throw Error("Status read temporarily unavailable after setup"); };
+  await f.controller.tick(); assert.deepEqual(loaded, ["smart"]); assert.equal(f.counts.started, 1);
+  assert.deepEqual(f.controller.savedPreference(f.c), { schema: 1, enabled: true, model: "smart" });
+  await f.controller.dispose();
+  const restarted = new CreditProvider({ ...f.args, readStatus: async () => { throw Error("Temporary status outage"); } });
+  t.after(() => restarted.dispose()); await restarted.tick();
+  assert.deepEqual(loaded, ["smart", "smart"]); assert.equal(f.counts.started, 2);
+  await restarted.stop(); await restarted.tick();
+  assert.equal(f.counts.started, 2); assert.equal(restarted.savedPreference(f.c).model, "smart");
+});
+test("Earn selects its own approved model while Off and never silently replaces a saved choice", async t => {
+  const f = fixture(t); f.installed = true; addSmart(f);
+  let installedSmart = false, prepared;
+  f.core.models.packageStatus = id => ({ status: id === "smart-package" && !installedSmart ? "absent" : "ready" });
+  f.core.runtime.status = () => ({ activeAlias: "fixture" });
+  f.core.runtime.acquireFor = async id => { prepared = id; return { release() {} }; };
+  await f.controller.selectModel("smart", AbortSignal.timeout(5000));
+  assert.equal(f.controller.preference(f.c), false); assert.equal(prepared, undefined); assert.equal(f.counts.downloads, 0);
+  assert.equal((await f.controller.info()).state, "download-required");
+  await assert.rejects(f.controller.start(AbortSignal.timeout(5000)), /Download/);
+  await assert.rejects(f.controller.selectModel({ model: "smart" }, AbortSignal.timeout(5000)), /Choose/);
+  await assert.rejects(f.controller.selectModel("private-model", AbortSignal.timeout(5000)), /approved/);
+  installedSmart = true; await f.controller.start(AbortSignal.timeout(5000)); assert.equal(prepared, "smart");
+  await assert.rejects(f.controller.selectModel("fixture", AbortSignal.timeout(5000)), /Turn sharing off/);
+  await f.controller.stop(); f.core.models.catalog.packages["smart-package"].sha256 = P.hash("unapproved-weights");
+  const info = await f.controller.info(); assert.equal(info.state, "model-required"); assert.equal(info.model, undefined);
+  assert.deepEqual(info.models.map(m => m.id), ["fixture"]);
+  await assert.rejects(f.controller.start(AbortSignal.timeout(5000)), /no longer approved/);
+  assert.equal(prepared, "smart");
+  await f.controller.selectModel("fixture", AbortSignal.timeout(5000)); assert.equal((await f.controller.info()).model.id, "fixture");
+});
+test("Stop during provider model selection leaves the earlier choice and Off intact", async t => {
+  const f = fixture(t); f.installed = true; addSmart(f);
+  await f.controller.selectModel("fixture", AbortSignal.timeout(5000));
+  let entered, release; const reading = new Promise(resolve => { entered = resolve; });
+  f.c.flow.models = async () => { entered(); await new Promise(resolve => { release = resolve; }); return { tariffs: f.tariffs }; };
+  const pending = f.controller.selectModel("smart", AbortSignal.timeout(5000)), rejected = assert.rejects(pending, /cancelled/);
+  await reading; await f.controller.stop(); release(); await rejected;
+  assert.equal(f.controller.savedPreference(f.c).model, "fixture"); assert.equal(f.controller.preference(f.c), false);
+});

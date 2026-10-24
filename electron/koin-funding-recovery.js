@@ -76,6 +76,7 @@ class FundingRecovery {
     const reviewedAt = r.reviewedAt ?? r.createdAt;
     integer(reviewedAt, r.createdAt, r.updatedAt); integer(r.expires, reviewedAt + 180000, reviewedAt + 180000);
     if (r.held !== undefined && typeof r.held !== "boolean") throw Error("Damaged funding hold");
+    if (r.submissionIssue !== undefined && r.submissionIssue !== null && !["funding_insufficient_rc", "funding_simulation_failed", "funding_submission_uncertain"].includes(r.submissionIssue)) throw Error("Damaged funding submission issue");
     integer(r.holdVersion ?? 0);
     integer(r.attempts, 0, this.#policy.maxAttempts);
     if (r.transaction && (r.transaction.id !== r.draft.id || r.transactionHash !== hash(JSON.stringify(r.transaction)))) throw Error("Damaged funding envelope");
@@ -93,7 +94,9 @@ class FundingRecovery {
   status(id) {
     const r = this.#row(id);
     return { id, state: r.state, reason: r.reason, txId: r.draft.id, attempts: r.attempts, kind: r.intent.kind,
-      amount: r.intent.args.amount, actor: r.intent.actor, held: r.held === true, finality: structuredClone(r.finality), paymentsEnabled: this.paymentsEnabled };
+      amount: r.intent.args.amount, actor: r.intent.actor, held: r.held === true, finality: structuredClone(r.finality), paymentsEnabled: this.paymentsEnabled,
+      ...(r.submissionIssue ? { submissionIssue: r.submissionIssue } : {}),
+      ...(r.intent.args.purchase_quote ? { quoteExpiresAt: Number(r.intent.args.purchase_quote.expires_at) } : {}) };
   }
   assertClient(client) { if (client !== this.#client) throw Error("Funding review must use the journal's client"); }
   list() { return this.#db.prepare("SELECT id FROM deposits ORDER BY rowid DESC LIMIT 200").all().map(r => this.status(r.id)); }
@@ -108,6 +111,15 @@ class FundingRecovery {
       if (!this.saved(id)) return false;
       const r = this.#row(id);
       if (!terminal(r.state)) { r.held = true; r.holdVersion = integer((r.holdVersion ?? 0) + 1); this.#save(r); } return true;
+    });
+  }
+  recordSubmissionIssue(id, reason) {
+    if (reason !== null && !["funding_insufficient_rc", "funding_simulation_failed", "funding_submission_uncertain"].includes(reason)) throw Error("Unknown funding submission issue");
+    this.#tx(() => {
+      const r = this.#row(id);
+      // A delayed transport failure must not replace a confirmed outcome.
+      if (terminal(r.state)) return;
+      r.submissionIssue = reason; this.#save(r);
     });
   }
   #review(review, draft, policyHash, active) {
@@ -321,9 +333,10 @@ class FundingRecoveryRunner {
     catch (error) {
       // Report a bounded category, never raw transport data, signatures or
       // credentials. A rejection/timeout still cannot resolve the saved nonce.
-      reason = /insufficient rc|compute bandwidth limit|insufficient mana|rc limit/i.test(String(error?.message || ""))
+      reason = error?.code === "funding_simulation_failed" ? "funding_simulation_failed" : /insufficient rc|compute bandwidth limit|insufficient mana|rc limit/i.test(String(error?.message || ""))
         ? "funding_insufficient_rc" : "funding_submission_uncertain";
     }
+    this.#journal.recordSubmissionIssue(id, reason);
     return { action: "await_finality", ...this.#journal.status(id), reason };
   }
 }

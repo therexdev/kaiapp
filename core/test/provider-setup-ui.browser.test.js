@@ -16,7 +16,8 @@ test("Earn setup clicks acknowledge pending checks, show current blockers and re
       blocked: "Unlock your wallet using Reward wallet, then check setup again.",
       detail: 'Unexpected token "<", "<!DOCTYPE" is not valid JSON',
       model: { id: "koinos-smart", label: "Koinos Smart", requiredRamGb: 8, installed: true } };
-    window.kaiKoinTestBridge = { onProgress: () => () => {}, run: async action => {
+    window.providerInfo.models = [window.providerInfo.model, { id: "koinos-fast", label: "Koinos Fast", requiredRamGb: 3, installed: true }];
+    window.kaiKoinTestBridge = { onProgress: () => () => {}, run: async (action, input) => {
       window.providerCalls.push(action);
       if (action === "status") return { enabled: true, configured: false, mode: "test-deployment" };
       if (action === "chat-info") return { enabled: true, configured: false, blocked: "Fixture not activated" };
@@ -26,12 +27,16 @@ test("Earn setup clicks acknowledge pending checks, show current blockers and re
         return info;
       }
       if (action === "provider-public-start") { window.providerInfo = { ...window.providerInfo, enabled: true, running: true }; return { state: "running" }; }
+      if (action === "provider-public-model") {
+        window.providerInfo.model = window.providerInfo.models.find(m => m.id === input);
+        return { state: "model-selected", model: input };
+      }
       if (action === "provider-public-stop") { window.providerInfo = { ...window.providerInfo, enabled: false, running: false }; return { state: "offline" }; }
       if (action === "provider-public-status") return { state: "qualifying", label: "CHECKING MODEL", detail: "Waiting for fresh signed qualification." };
       throw Error("Fixture unavailable");
     } };
   });
-  await page.route("**/core/models", route => route.fulfill({ json: { aliases: [{ alias: "koinos-smart", label: "Koinos Smart", status: "ready" }], runtime: { runtime: { running: true }, activeAlias: "koinos-smart" } } }));
+  await page.route("**/core/models", route => route.fulfill({ json: { aliases: [{ alias: "koinos-smart", label: "Koinos Smart", status: "ready" }], runtime: { runtime: { running: false }, activeAlias: null } } }));
   await page.route("**/core/earn", route => route.fulfill({ json: { wallet: { exists: true, unlocked: false, address: "fixture-wallet" }, worker: { running: false } } }));
   await page.goto(`http://127.0.0.1:${await core.start()}`);
   await navClick(page, '#nav [data-view="earn"]');
@@ -76,10 +81,20 @@ test("Earn setup clicks acknowledge pending checks, show current blockers and re
   await page.evaluate(() => window.lateInfo());
   assert.match(await page.locator("#product-provider-setup").textContent(), /Ready to connect/, "late timed-out reads cannot restore an old blocker");
   assert.equal(await page.evaluate(() => window.providerCalls.some(x => x === "provider-public-start")), false);
+  const picker = page.locator("#product-provider-model-pick");
+  await picker.selectOption("koinos-fast");
+  await page.waitForFunction(() => document.getElementById("product-provider-model").textContent === "Koinos Fast");
+  await picker.selectOption("koinos-smart");
+  await page.waitForFunction(() => document.getElementById("product-provider-model").textContent === "Koinos Smart");
+  assert.equal(await page.evaluate(() => window.providerCalls.some(x => x === "provider-public-start")), false, "choosing a model keeps sharing Off");
+  if (process.env.KAI_PREPAID_QA_DIR) await page.screenshot({ path: path.join(process.env.KAI_PREPAID_QA_DIR, "provider-model-selection.png"), animations: "disabled" });
   await toggle.click(); await page.waitForFunction(() => document.getElementById("product-provider-label").textContent === "CHECKING MODEL");
   assert.equal(await toggle.textContent(), "On"); assert.equal(await toggle.isEnabled(), true);
+  assert.equal(await picker.isDisabled(), true);
   await toggle.click(); await page.waitForFunction(() => document.getElementById("product-provider-toggle").textContent === "Off");
   assert.equal(await page.evaluate(() => window.providerCalls.filter(x => x === "provider-public-start").length), 1);
   assert.equal(await page.evaluate(() => window.providerCalls.filter(x => x === "provider-public-stop").length), 1);
+  assert.equal(await picker.inputValue(), "koinos-smart"); assert.equal(await picker.isEnabled(), true);
+  assert.equal(await page.evaluate(() => window.providerCalls.some(x => ["chat-completion", "run-chat"].includes(x))), false);
   assert.deepEqual(errors, []);
 });

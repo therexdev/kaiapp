@@ -4,17 +4,24 @@ const { Worker } = require("../core/lib/worker");
 // Public account setup, scoped to this deployment and device. No custody migration.
 class CreditProvider {
   constructor({ service, core, createWorker = options => new Worker(options), readStatus = require("./koin-provider-status").readProviderStatus }) {
-    Object.assign(this, { service, core, createWorker, readStatus }); this.worker = null; this.busy = false; this.closed = false; this.error = ""; this.generation = 0;
+    Object.assign(this, { service, core, createWorker, readStatus }); this.worker = null; this.busy = false; this.closed = false; this.error = ""; this.generation = 0; this.modelHint = null;
   }
-  preference(c, enabled) {
+  savedPreference(c) {
     const file = path.join(c.directory, "provider-preference.json");
-    if (enabled === undefined) {
-      if (!fs.existsSync(file)) return false;
-      if (fs.lstatSync(file).isSymbolicLink() || fs.statSync(file).size > 1024) throw Error("Provider preference needs recovery");
-      const p = JSON.parse(fs.readFileSync(file, "utf8")); if (p.schema !== 1 || typeof p.enabled !== "boolean") throw Error("Provider preference needs recovery"); return p.enabled;
-    }
+    if (!fs.existsSync(file)) return { schema: 1, enabled: false };
+    if (fs.lstatSync(file).isSymbolicLink() || fs.statSync(file).size > 1024) throw Error("Provider preference needs recovery");
+    const p = JSON.parse(fs.readFileSync(file, "utf8"));
+    if (p.schema !== 1 || typeof p.enabled !== "boolean" || (p.model !== undefined &&
+        (typeof p.model !== "string" || !/^[a-zA-Z0-9._-]{1,100}$/.test(p.model)))) throw Error("Provider preference needs recovery");
+    return p;
+  }
+  preference(c, enabled, model) {
+    const saved = this.savedPreference(c);
+    if (enabled === undefined) return saved.enabled;
+    const file = path.join(c.directory, "provider-preference.json");
+    model ??= saved.model;
     const temp = file + ".tmp", fd = fs.openSync(temp, "w", 0o600);
-    try { fs.writeFileSync(fd, JSON.stringify({ schema: 1, enabled })); fs.fsyncSync(fd); } finally { fs.closeSync(fd); } fs.renameSync(temp, file);
+    try { fs.writeFileSync(fd, JSON.stringify({ schema: 1, enabled, ...(model ? { model } : {}) })); fs.fsyncSync(fd); } finally { fs.closeSync(fd); } fs.renameSync(temp, file);
   }
   guard(c, signal) {
     signal?.throwIfAborted(); if (this.closed) throw Error("Provider is closing");
@@ -24,7 +31,7 @@ class CreditProvider {
     if (wallet.address !== c.config.owner) throw Error("Open AI credit account in Settings and link this computer's reward wallet.");
     if (!wallet.status().unlocked) throw Error("Unlock your wallet using Reward wallet, then check setup again.");
   }
-  async model(c, signal) {
+  async models(c, signal) {
     // The buyer's committed catalog also defines which local packages may earn.
     // A model need not already have a remote provider to become a new provider.
     const catalog = await c.flow.models(signal), tariffs = catalog?.tariffs;
@@ -38,6 +45,32 @@ class CreditProvider {
         installed: this.core.models.packageStatus(alias.package).status === "ready" });
     }
     c.providerModels = tariffs.map(t => t.model);
+    if (!candidates.length) throw Error("No approved provider model is supported on this computer");
+    return candidates;
+  }
+  async model(c, signal, candidates = null) {
+    candidates ??= await this.models(c, signal);
+    const saved = this.savedPreference(c).model;
+    if (saved) {
+      const selected = candidates.find(m => m.id === saved);
+      if (!selected) throw Error("The saved provider model is no longer approved or supported. Choose another model in Earn.");
+      return selected;
+    }
+    const hinted = this.modelHint?.directory === c.directory && candidates.find(m => m.installed && m.id === this.modelHint.model);
+    if (hinted) return hinted;
+    // Older preferences did not record the provider model. A fresh authenticated
+    // readiness report can recover an already qualified model after an update.
+    // This is a selection hint only; it never grants eligibility or paints ONLINE.
+    try {
+      const status = await this.readStatus({ config: c.config, approvedModels: c.providerModels,
+        access: { authorize: pin => { this.service.account.assertCreditAuthorization(c.auth, pin); return c.auth; } },
+        fetchImpl: this.service.fetchImpl, signal: AbortSignal.any([signal, AbortSignal.timeout(3000)]) });
+      const eligible = new Set(["online", "qualifying", "preparing", "connecting", "qualification-expired", "network-paused"]);
+      for (const row of [status, ...(status.models || [])]) {
+        const selected = eligible.has(row.state) && candidates.find(m => m.installed && m.id === row.model);
+        if (selected) { this.modelHint = { directory: c.directory, model: selected.id }; return selected; }
+      }
+    } catch { signal.throwIfAborted(); }
     const active = this.core.runtime.status?.().activeAlias;
     const selected = candidates.find(m => m.installed && m.id === active) || candidates.find(m => m.installed && m.id === c.config.model) || candidates.find(m => m.installed) || candidates.find(m => m.id === c.config.model);
     if (!selected) throw Error("No approved provider model is installed for this computer. Install a supported model from Models before sharing");
@@ -45,17 +78,33 @@ class CreditProvider {
   }
   async info() {
     try {
-      const signal = AbortSignal.timeout(10000), c = await this.service.context(signal), model = await this.model(c, signal), enabled = this.preference(c);
+      const signal = AbortSignal.timeout(10000), c = await this.service.context(signal), models = await this.models(c, signal), enabled = this.preference(c);
+      let model, selectionError = "";
+      try { model = await this.model(c, signal, models); } catch (e) { selectionError = e.message; }
       this.preferenceContext = c;
       let blocked = ""; try { this.guard(c); } catch (e) { blocked = e.message; }
       const progress = this.downloading ? this.core.models.downloadProgress() : null;
       // A successful read while Off supersedes earlier connection failures.
       // Current setup requirements always take priority over a saved error.
       if (!blocked && !enabled && !this.busy) this.error = "";
-      return { state: blocked ? "wallet-required" : this.downloading ? "downloading" : !model.installed ? "download-required" : this.busy ? "starting" : "ready", blocked,
-        model, enabled, running: !!this.worker?.running, progress: progress ? { pct: progress.pct } : null,
-        detail: blocked || this.error || (!model.installed ? "Download the approved model to this computer. Sharing stays off until you turn it on." : "Ready to connect and check model quality. Qualification renews automatically while sharing is on.") };
+      return { state: blocked ? "wallet-required" : selectionError ? "model-required" : this.downloading ? "downloading" : !model.installed ? "download-required" : this.busy ? "starting" : "ready", blocked,
+        model, models, enabled, running: !!this.worker?.running, progress: progress ? { pct: progress.pct } : null,
+        detail: blocked || selectionError || this.error || (!model.installed ? "Download the approved model to this computer. Sharing stays off until you turn it on." : "Ready to connect and check model quality. Turning on sharing loads this model automatically. Qualification renews while sharing is on.") };
     } catch (e) { return { state: "unavailable", enabled: !!this.context && this.preference(this.context), running: !!this.worker?.running, detail: e.message }; }
+  }
+  async selectModel(id, signal) {
+    if (typeof id !== "string" || !/^[a-zA-Z0-9._-]{1,100}$/.test(id)) throw Error("Choose an approved provider model");
+    if (this.busy || this.closed || this.worker?.running) throw Error("Turn sharing off before changing the provider model");
+    this.busy = true; const generation = this.generation;
+    try {
+      const c = await this.service.context(signal); this.guard(c, signal);
+      const models = await this.models(c, signal); this.guard(c, signal);
+      if (generation !== this.generation) throw Error("Provider model selection cancelled");
+      if (this.preference(c)) throw Error("Turn sharing off before changing the provider model");
+      if (!models.some(m => m.id === id)) throw Error("Choose an approved provider model supported on this computer");
+      this.preference(c, false, id); this.preferenceContext = c; this.error = "";
+      return { state: "model-selected", model: id };
+    } finally { this.busy = false; }
   }
   async download(signal) {
     if (this.busy) throw Error("Provider setup is already in progress"); this.busy = true;
@@ -80,7 +129,7 @@ class CreditProvider {
       const c = await this.service.context(signal); current(); this.guard(c, signal); const model = await this.model(c, signal); current(); this.guard(c, signal);
       if (!model.installed) throw Error("Download the approved model before turning on sharing");
       if (resume && !this.preference(c)) return { state: "offline" };
-      this.context = c; if (!resume) this.preference(c, true); this.error = "";
+      this.context = c; this.preference(c, true, model.id); this.error = "";
       // The host lease coordinates the existing wallet; it creates no credential.
       const access = require("./credit-purchase-access"), id = access.installation({ dataDir: this.service.dataDir, directory: c.directory, config: c.config, storage: this.core.account.safeStorage });
       await access.claimHost({ c, account: this.service.account, wallet: this.core.account.wallet, installation: id, fetchImpl: this.service.fetchImpl, signal }); current(); this.guard(c, signal);

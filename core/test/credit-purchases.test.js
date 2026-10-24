@@ -86,3 +86,24 @@ test("a failed preparation can use a fresh quote without reusing the consumed ap
   assert.equal(result.state, "pending"); assert.equal(f.counts().signatures, 1);
   assert.equal(f.state.submissions.length, 1); assert.equal(f.counts().reviews, 1);
 });
+
+test("a saved simulation failure remains visible after restart without another signature or broadcast", async t => {
+  const f = setup(t, { mainnet: true }), signal = new AbortController().signal, calls = [];
+  f.provider.call = async (method, args) => {
+    assert.equal(method, "chain.submit_transaction"); calls.push(args.broadcast);
+    return { receipt: { id: args.transaction.id, payer: f.signer.getAddress(), rc_used: "1000", reverted: true } };
+  };
+  assert.equal(await f.controller.status(f.c, signal), null);
+  const quote = await f.controller.preview(f.c, { usd: "1" }, signal);
+  const result = await f.controller.run(f.c, f.window, "purchase-approve", quote.quote.id, signal);
+  assert.equal(result.state, "pending"); assert.deepEqual(calls, [false]); assert.equal(f.counts().signatures, 1);
+  const restarted = new CreditPurchases(f.options), status = await restarted.status(f.c, signal);
+  assert.equal(status.txId, result.purchase.txId); assert.equal(status.issue, "funding_simulation_failed");
+  assert.match(status.detail, /pre-submission check/); assert.equal(status.quoteExpired, false);
+  assert.doesNotMatch(JSON.stringify(status), /private-session|price_signature|signatures|purchase_quote/);
+  f.state.now += 300001;
+  const expired = await restarted.status(f.c, signal);
+  assert.equal(expired.quoteExpired, true); assert.match(expired.detail, /quote time has expired/);
+  assert.equal(expired.txId, status.txId); assert.deepEqual(calls, [false]); assert.equal(f.counts().signatures, 1);
+  f.revoke(); await assert.rejects(restarted.status(f.c, signal), /Signed out/);
+});

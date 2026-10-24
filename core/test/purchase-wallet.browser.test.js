@@ -16,7 +16,7 @@ test("Buy credits shows KOIN independently, explains activation and discards cha
     window.purchaseState = "unavailable"; window.purchaseCalls = [];
     window.kaiKoinTestBridge = { onProgress: () => () => {}, run: async (action, input) => {
       window.purchaseCalls.push({ action, input });
-      if (action === "purchase-info") return { activation: window.purchaseState, blocked: window.purchaseState === "signin-required" ? "Choose an online route to use network credits" : "The credit service is not activated yet" };
+      if (action === "purchase-info") return { activation: window.purchaseState, localPurchase: window.localPurchase || null, blocked: window.purchaseState === "signin-required" ? "Choose an online route to use network credits" : "The credit service is not activated yet" };
       // A legacy chat profile must never make public purchases appear ready.
       if (action === "chat-info") return { configured: true, enabled: true, product: "prepaid-v1", model: "fixture", maxOutput: 32, blocked: "" };
       if (action === "status") return { enabled: true, configured: false, mode: "test-deployment" };
@@ -109,6 +109,19 @@ test("Buy credits shows KOIN independently, explains activation and discards cha
   assert.equal(await page.locator("#product-quote-state").textContent(), failure);
   assert.equal(await page.evaluate(() => window.purchaseCalls.filter(c => c.action === "purchase-approve").length), 1);
   assert.equal(await page.evaluate(() => window.purchaseCalls.filter(c => c.action === "purchase-preview").length), quoteCount);
+  await page.evaluate(() => { window.localPurchase = { state: "pending", txId: "0x1220" + "a".repeat(64), issue: "funding_simulation_failed", detail: "The last payment attempt stopped during its pre-submission check. The saved payment needs review." }; });
+  await page.locator("#product-purchase-check").click();
+  await page.waitForFunction(() => document.getElementById("product-quote-refresh").disabled);
+  assert.match(await page.locator("#product-quote-state").textContent(), /pre-submission check/);
+  assert.doesNotMatch(await page.locator("#product-quote-state").textContent(), /fresh quote/);
+  assert.match(await page.locator("#product-local-payment").textContent(), /Transaction: 0x1220a{64}/);
+  assert.match(await page.locator("#product-local-payment").textContent(), /Reference: funding_simulation_failed/);
+  assert.equal(await page.locator("#product-quote-refresh").textContent(), "Saved payment needs attention");
+  assert.equal(await page.locator("#product-local-payment").evaluate(n => n.scrollWidth <= n.clientWidth), true);
+  if (process.env.KAI_PRODUCT_QA_DIR) await page.screenshot({ path: path.join(process.env.KAI_PRODUCT_QA_DIR, "buy-saved-payment.png"), animations: "disabled" });
+  assert.equal(await page.evaluate(() => window.purchaseCalls.filter(c => c.action === "purchase-preview").length), quoteCount);
+  await page.evaluate(() => { window.localPurchase = null; }); await page.locator("#product-purchase-check").click();
+  await page.waitForFunction(() => !document.getElementById("product-quote-refresh").disabled);
   // Also discard a quote which arrives after account identity changed.
   await page.evaluate(() => { window.pausePurchaseQuote = true; }); await page.locator("#product-quote-refresh").click();
   await page.waitForFunction(() => !!window.finishPurchaseQuote);

@@ -113,6 +113,10 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
       return creditService.info(AbortSignal.timeout(10000));
     }
     if (action.startsWith("provider-public-")) {
+      if (action === "provider-public-model") {
+        if (disposed || !window.isVisible() || window.isMinimized()) throw Error("Return to the visible app to choose a provider model");
+        return withChatSignal(window, signal => creditProvider.selectModel(input, signal));
+      }
       if (input !== undefined || disposed) throw Error("Provider controls take no arguments");
       if (action === "provider-public-info") return creditProvider.info();
       if (action === "provider-public-status") return creditProvider.status();
