@@ -23,6 +23,11 @@ async function engine(t, handler) {
     let text = ""; for await (const b of req) text += b;
     const body = JSON.parse(text); calls.push({ path: req.url, body });
     const result = handler ? await handler(req.url, body) : req.url === "/tokenize" ? { tokens: ids } : { content: "4", tokens_predicted: 999999 };
+    if (result.streamParts) {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      for (const part of result.streamParts) res.write("data: " + JSON.stringify(part) + "\n\n");
+      res.end(); return;
+    }
     res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify(result));
   });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
@@ -50,13 +55,42 @@ test("worker uses committed prompt and exact token ceiling, ignoring provider us
   assert.equal(r.output, "4"); assert.equal(r.usage.completion_tokens, 0);
   assert.deepEqual(e.calls.map((c) => c.path), ["/tokenize", "/completion"]);
   assert.equal(e.calls[0].body.add_special, false); assert.equal(e.calls[0].body.parse_special, true);
-  assert.deepEqual(e.calls[1].body, { prompt, n_predict: 17, temperature: 0, stream: false, cache_prompt: false });
+  assert.deepEqual(e.calls[1].body, { prompt: ids, n_predict: 17, temperature: 0, stream: false, cache_prompt: false });
   assert.equal(e.released(), 1);
 });
 test("token ID mismatch blocks inference even when token counts are equal", async (t) => {
   const e = await engine(t, () => ({ tokens: [10, 20, 99] }));
   await assert.rejects(executeShadow({ job: fixtureJob(), catalog, runtime: e.runtime }), /differs/);
   assert.equal(e.calls.length, 1); assert.equal(e.released(), 1);
+});
+test("a model that adds BOS receives exactly the quoted IDs for regular and streamed inference", async t => {
+  const bos = 128000, committed = [bos, 20, 30];
+  for (const stream of [false, true]) {
+    const job = fixtureJob(); job.prompt = "<|begin_of_text|>hello";
+    job.quote.promptHash = hash(job.prompt); job.quote.inputIdsHash = hash(JSON.stringify(committed));
+    if (stream) {
+      job.quote.domain = "shadow:mainnet-pilot-" + hash("token-input-fixture");
+      Object.assign(job, { type: "koin-mainnet-pilot-chat", paymentsEnabled: true, stream: true, session: hash("session"),
+        target: { chainId: require("../lib/koin-network/payment-network").MAINNET_CHAIN,
+          credits: Signer.fromSeed("token-input-fixture").getAddress(), creditsHash: "0x1220" + hash("contract"),
+          domain: job.quote.domain, policyHash: job.quote.policyHash } });
+    }
+    delete job.quote.hash; job.quote.hash = hash(JSON.stringify(job.quote));
+    let evaluated;
+    const e = await engine(t, (url, body) => {
+      if (url === "/tokenize") return { tokens: committed };
+      // Reproduce the pinned runtime's distinction: strings receive model
+      // special tokens; a numeric array is already a tokenized prompt.
+      evaluated = typeof body.prompt === "string" ? [bos, ...committed] : body.prompt;
+      return stream ? { streamParts: [{ content: "4", stop: false }, { content: "", stop: true }] } : { content: "4" };
+    });
+    const chunks = [], answer = await executeShadow({ job, catalog, runtime: e.runtime, onChunk: output => chunks.push(output) });
+    assert.deepEqual(evaluated, committed); assert.equal(evaluated.length, job.quote.inputTokens);
+    assert.equal(hash(JSON.stringify(evaluated)), job.quote.inputIdsHash);
+    assert.equal(answer.output, "4"); assert.equal(answer.usage.prompt_tokens, evaluated.length);
+    if (stream) assert.deepEqual(chunks, ["4"]);
+    assert.equal(e.released(), 1);
+  }
 });
 test("no opt-in, fallback engine and remote runtime endpoints are refused", async (t) => {
   const e = await engine(t), job = fixtureJob();

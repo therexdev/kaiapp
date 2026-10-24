@@ -1,3 +1,10 @@
+## Use the verified tokens for model checks and network work
+
+- Fixes a mismatch between tokenizer verification and inference: the app now sends the verified token IDs to llama.cpp. Sending the rendered text again could insert an extra beginning-of-text token for models such as Llama, changing the input after it had been checked.
+- Applies the same correction to local provider checks, signed qualification, and streaming/non-streaming network jobs. Reports record the exact input-token count and hash submitted for each test answer.
+- Run the local check again on the loaded model to measure results with the corrected input. Existing reports remain historical measurements; this update does not grant network qualification or change accepted answers.
+- Includes dependency security updates for Electron networking, HTTP processing, and mail parsing.
+
 ## Connect to the deployed AI credit service
 
 - Test now includes the verified mainnet USD credit contracts and connects to credits.koinosai.com without importing a deployment file or private invitation.

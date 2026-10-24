@@ -202,21 +202,24 @@ class LocalProviderCheck {
         const value = await post("/tokenize", { content: text, add_special: false, parse_special: true });
         if (!Array.isArray(value.tokens) || value.tokens.length > 100000 || value.tokens.some(x => !Number.isSafeInteger(x) || x < 0)) throw fail("runtime_response_invalid");
         const actualHash = hash(JSON.stringify(value.tokens));
-        return { count: value.tokens.length, idsHash: actualHash, passed: value.tokens.length === count && actualHash === idsHash };
+        return { ids: value.tokens, result: { count: value.tokens.length, idsHash: actualHash, passed: value.tokens.length === count && actualHash === idsHash } };
       };
       for (const v of m.vectors) {
-        const result = await tokenize(v.text, v.count, v.idsHash); report.calibration.vectors.push({ id: v.id, textHash: hash(v.text), expectedCount: v.count, expectedIdsHash: v.idsHash, ...result });
+        const { result } = await tokenize(v.text, v.count, v.idsHash); report.calibration.vectors.push({ id: v.id, textHash: hash(v.text), expectedCount: v.count, expectedIdsHash: v.idsHash, ...result });
         if (!result.passed) throw fail("tokenizer_mismatch"); this.update({ completed: ++completed });
       }
       report.calibration.complete = true;
       this.update({ stage: "Checking answers", detail: "Running 12 fixed local checks. These are candidate measurements, not network approval.", passed: 0 });
       for (const c of m.cases) {
-        const tokens = await tokenize(c.prompt, c.inputTokens, c.inputIdsHash);
+        const { ids, result: tokens } = await tokenize(c.prompt, c.inputTokens, c.inputIdsHash);
         const item = { id: c.id, promptHash: c.promptHash, referenceAt: m.at, inputTokens: c.inputTokens,
           inputIdsHash: c.inputIdsHash, tokenizer: tokens, expected: c.expected, maxOutput: c.maxOutput, passed: false };
         report.measurement.results.push(item);
         if (!tokens.passed) throw fail("tokenizer_mismatch");
-        const at = performance.now(), result = await post("/completion", { prompt: c.prompt, n_predict: c.maxOutput, temperature: 0, stream: false, cache_prompt: false });
+        // A string prompt is tokenized again with add_special=true by llama.cpp.
+        // Passing the already-verified IDs prevents a second BOS/EOS insertion.
+        item.inferenceInput = { format: "token-ids", count: ids.length, idsHash: tokens.idsHash };
+        const at = performance.now(), result = await post("/completion", { prompt: ids, n_predict: c.maxOutput, temperature: 0, stream: false, cache_prompt: false });
         const terminal = result.stop === true || [result.stopped_eos, result.stopped_word, result.stopped_limit].includes(true) || ["eos", "word", "limit"].includes(result.stop_type);
         if (typeof result.content !== "string" || Buffer.byteLength(result.content) > 65536 || result.truncated === true || result.stop === false || !terminal) throw fail("runtime_response_invalid");
         item.elapsedMs = Math.round(performance.now() - at); item.output = result.content; item.outputHash = hash(result.content);

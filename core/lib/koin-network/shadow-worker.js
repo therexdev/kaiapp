@@ -29,9 +29,10 @@ async function executeShadow({ job, catalog, runtime, signal, onChunk }) {
     if (!Array.isArray(tokenized.tokens) || tokenized.tokens.length !== q.inputTokens ||
         tokenized.tokens.some((v) => !Number.isSafeInteger(v) || v < 0) ||
         hash(JSON.stringify(tokenized.tokens)) !== q.inputIdsHash) throw Error("Local tokenizer differs from quoted tokenizer");
-    // Raw, committed prompt prevents the local server from applying a second
-    // chat template. Only text inference parameters cross this boundary.
-    const response = await post("/completion", { prompt: j.prompt, n_predict: q.maxOutput,
+    // Execute the verified IDs, not a string that llama.cpp tokenizes again
+    // with add_special=true (which can insert an extra BOS/EOS token).
+    // Only text inference parameters cross this boundary.
+    const response = await post("/completion", { prompt: tokenized.tokens, n_predict: q.maxOutput,
       temperature: 0, stream: j.stream === true, cache_prompt: false });
     let result;
     if (j.stream) {

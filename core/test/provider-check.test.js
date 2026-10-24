@@ -22,7 +22,7 @@ function fixture(t) {
       acquireCurrent: alias => { assert.equal(alias, m.model); counts.acquired++; return { endpoint: state.runtime.endpoint, release: () => { counts.released++; } }; },
       ensure: () => { throw Error("must not load a model"); }, stop: () => { counts.stopped++; throw Error("must not stop other work"); } } };
   let response = async (route, body) => route === "/tokenize" ? Response.json({ tokens: tokenMap.get(body.content) }) :
-    Response.json({ content: m.cases.find(c => c.prompt === body.prompt).expected[0], stop: true, stopped_limit: false, stopped_eos: true });
+    Response.json({ content: m.cases.find(c => c.inputIdsHash === hash(JSON.stringify(body.prompt))).expected[0], stop: true, stopped_limit: false, stopped_eos: true });
   const fetchImpl = async (url, init) => { const u = new URL(url), body = JSON.parse(init.body); assert.equal(u.origin, "http://127.0.0.1:12345"); assert.equal(init.redirect, "error");
     assert.deepEqual(Object.keys(init.headers), ["content-type"]); counts.requests.push({ route: u.pathname, body }); return response(u.pathname, body, init); };
   const check = new LocalProviderCheck({ core, appVersion: "fixture-test", pack, fetchImpl, onProgress: value => progress.push(value) }); t.after(() => check.dispose());
@@ -39,7 +39,11 @@ test("one local check verifies current bytes and runtime tokens, measures all12 
   assert.equal(f.counts.requests.filter(x => x.route === "/completion").length, 12);
   for (const request of f.counts.requests.filter(x => x.route === "/completion")) {
     assert.equal(request.body.stream, false); assert.equal(request.body.cache_prompt, false); assert.equal(request.body.temperature, 0);
-    assert.ok(f.m.cases.some(c => c.prompt === request.body.prompt));
+    assert.ok(Array.isArray(request.body.prompt));
+    const c = f.m.cases.find(c => c.inputIdsHash === hash(JSON.stringify(request.body.prompt)));
+    assert.ok(c); assert.equal(request.body.prompt.length, c.inputTokens);
+    assert.deepEqual(report.measurement.results.find(r => r.id === c.id).inferenceInput,
+      { format: "token-ids", count: c.inputTokens, idsHash: c.inputIdsHash });
   }
   for (const secret of ["PRIVATE_KEY", "PRIVATE_TOKEN", "PRIVATE_CHAT", "PRIVATE_HOST", "PRIVATE_SERIAL", f.dir, "http://127.0.0.1", f.m.cases[0].messages[0].content]) assert.equal(f.check.reportText().includes(secret), false, secret);
   assert.ok(Buffer.byteLength(f.check.reportText()) < MAX_REPORT); assert.equal(f.progress.at(-1).reportAvailable, true);

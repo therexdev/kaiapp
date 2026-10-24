@@ -33,7 +33,7 @@
   },
   "devDependencies": {
     "@ricky0123/vad-web": "0.0.29",
-    "electron": "^43.4.0",
+    "electron": "^43.8.1",
     "electron-builder": "^26.15.3",
     "js-yaml": "^4.3.2",
     "playwright-core": "^1.62.1"
@@ -152,8 +152,8 @@
     "imapflow": "^1.7.1",
     "koilib": "^9.4.0",
     "kokoro-js": "1.2.1",
-    "mailparser": "^3.9.17",
-    "nodemailer": "^10.0.16",
+    "mailparser": "3.9.43",
+    "nodemailer": "10.1.4",
     "onnxruntime-web": "1.22.0-dev.20250409-89f8206ba4",
     "quickjs-emscripten": "0.32.0",
     "sherpa-onnx-node": "1.13.7"
