@@ -42,6 +42,24 @@ test("locked wallet, account changes and device mismatch never imply Online or s
   f.unlocked = true; await p.start(AbortSignal.timeout(5000)); f.authorized = false; await p.tick(); assert.equal(p.worker.running, false); assert.equal(p.preference(f.c), true);
   f.authorized = true; f.core.hardware.ramBytes = 1e9; await p.tick(); assert.equal(p.worker.running, false); assert.equal((await p.info()).state, "unavailable");
 });
+test("current wallet requirements replace a stale connection error and a successful Off check clears it", async t => {
+  const f = fixture(t), p = f.controller; f.installed = true; f.unlocked = false;
+  p.error = 'Unexpected token "<", "<!DOCTYPE" is not valid JSON';
+  let info = await p.info();
+  assert.equal(info.state, "wallet-required");
+  assert.match(info.detail, /Unlock.*Reward wallet/); assert.doesNotMatch(info.detail, /DOCTYPE/);
+  f.unlocked = true;
+  const owner = f.c.config.owner; f.c.config.owner = "account-not-linked";
+  info = await p.info(); assert.equal(info.state, "wallet-required");
+  assert.match(info.detail, /AI credit account.*link this computer/);
+  await assert.rejects(p.start(AbortSignal.timeout(5000)), /link this computer/);
+  f.c.config.owner = owner;
+  info = await p.info(); assert.equal(info.state, "ready"); assert.match(info.detail, /Ready to connect/);
+  assert.equal(p.error, ""); assert.equal(info.enabled, false); assert.equal(info.running, false);
+  assert.equal(f.counts.started, 0); assert.equal(f.counts.downloads, 0);
+  f.c.flow.models = async () => { throw Error("Catalog is unavailable"); };
+  info = await p.info(); assert.equal(info.state, "unavailable"); assert.equal(info.detail, "Catalog is unavailable");
+});
 test("Stop during startup prevents a delayed runtime acquisition from turning sharing back on", async t => {
   const f = fixture(t); f.installed = true;
   let ready, release; const entered = new Promise(r => { ready = r; });

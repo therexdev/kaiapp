@@ -19,7 +19,10 @@ class CreditProvider {
   guard(c, signal) {
     signal?.throwIfAborted(); if (this.closed) throw Error("Provider is closing");
     this.service.account.assertCreditAuthorization(c.auth, c.config.schedulerUrl);
-    if (this.core.account.wallet.address !== c.config.owner || !this.core.account.wallet.status().unlocked) throw Error("Unlock the linked reward wallet in Account to continue provider setup");
+    const wallet = this.core.account.wallet;
+    if (!wallet.address) throw Error("Open Reward wallet to set up or unlock your existing wallet.");
+    if (wallet.address !== c.config.owner) throw Error("Open AI credit account in Settings and link this computer's reward wallet.");
+    if (!wallet.status().unlocked) throw Error("Unlock your wallet using Reward wallet, then check setup again.");
   }
   async model(c, signal) {
     // The buyer's committed catalog also defines which local packages may earn.
@@ -46,9 +49,12 @@ class CreditProvider {
       this.preferenceContext = c;
       let blocked = ""; try { this.guard(c); } catch (e) { blocked = e.message; }
       const progress = this.downloading ? this.core.models.downloadProgress() : null;
+      // A successful read while Off supersedes earlier connection failures.
+      // Current setup requirements always take priority over a saved error.
+      if (!blocked && !enabled && !this.busy) this.error = "";
       return { state: blocked ? "wallet-required" : this.downloading ? "downloading" : !model.installed ? "download-required" : this.busy ? "starting" : "ready", blocked,
         model, enabled, running: !!this.worker?.running, progress: progress ? { pct: progress.pct } : null,
-        detail: this.error || blocked || (!model.installed ? "Download the approved model to this computer. Sharing stays off until you turn it on." : "Ready to connect and check model quality. Qualification renews automatically while sharing is on.") };
+        detail: blocked || this.error || (!model.installed ? "Download the approved model to this computer. Sharing stays off until you turn it on." : "Ready to connect and check model quality. Qualification renews automatically while sharing is on.") };
     } catch (e) { return { state: "unavailable", enabled: !!this.context && this.preference(this.context), running: !!this.worker?.running, detail: e.message }; }
   }
   async download(signal) {

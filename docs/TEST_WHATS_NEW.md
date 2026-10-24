@@ -1,3 +1,9 @@
+## Responsive provider setup
+
+- Reload setup now shows when it is checking and when the check finishes. A lost response times out and allows another check instead of leaving Reload silently stuck.
+- Earn shows the current wallet or account requirement beside the sharing switch. An older connection error no longer hides the need to unlock or link the reward wallet, and successful checks while sharing is Off clear obsolete errors.
+- Open AI credit account and Reward wallet provide direct setup actions. Sharing still requires the linked unlocked wallet, an approved model and fresh network qualification before it can show ONLINE.
+
 ## Use the verified tokens for model checks and network work
 
 - Fixes a mismatch between tokenizer verification and inference: the app now sends the verified token IDs to llama.cpp. Sending the rendered text again could insert an extra beginning-of-text token for models such as Llama, changing the input after it had been checked.

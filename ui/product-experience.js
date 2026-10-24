@@ -74,7 +74,7 @@
   $("earn-setup").querySelector("h2").textContent = "Create your wallet";
   $("earn-unlock").querySelector("h2").textContent = "Unlock your wallet";
   oldEarn.insertAdjacentHTML("beforeend", '<p id="product-legacy-error" class="error" role="status" hidden></p>');
-  $("view-earn").insertAdjacentHTML("afterbegin", `<div class="product-earn">${head("Share your AI. Earn KOIN.", "Contribute this computer’s spare AI capacity to the network.")}<div class="product-two"><section class="product-panel product-provider"><div class="product-row"><span>Share AI capacity</span><button id="product-provider-toggle" role="switch" aria-checked="false" aria-label="Share AI capacity">Off</button></div><div class="product-provider-state"><span class="product-live-dot"></span><h2 id="product-provider-label">OFFLINE</h2><p id="product-provider-detail">Sharing is off. Turn it on when you’re ready.</p></div><div class="product-divider"></div><strong id="product-provider-model">Model not confirmed</strong><p id="product-provider-readiness" class="product-fine">Waiting for current model and network confirmation.</p></section><div><section class="product-panel"><p class="product-eyebrow">AI provider earnings</p><p id="product-provider-earnings">No verified earnings loaded.</p><p class="product-fine">KOIN rewards are separate from chat credits.</p><button data-product-action="payouts">Refresh earnings</button></section><section class="product-panel"><h2>Provider setup</h2><div id="product-provider-check"><h3 data-check-model>Local model check</h3><p data-check-detail role="status">Check the model currently running locally. No account or credits needed.</p><progress data-check-progress aria-label="Local model check progress" hidden></progress><p data-check-summary class="product-fine"></p><div class="product-actions"><button data-check-start data-check-action="start" class="primary">Check this computer</button><button data-check-cancel data-check-action="cancel" hidden>Cancel check</button><button data-check-copy data-check-action="copy" hidden>Copy report</button><button data-check-save data-check-action="save" hidden>Save report</button></div><p data-check-export class="product-fine" role="status"></p><p class="product-fine">Sharing becomes ONLINE after the network confirms qualification.</p></div><div class="product-divider"></div><p id="product-provider-setup">Choose an approved model, then turn on sharing.</p><div class="product-actions"><button data-product-action="provider-reload">Reload setup</button><button id="product-provider-download" data-product-action="provider-download" hidden>Download approved model</button><button id="product-provider-cancel" data-product-action="provider-cancel" hidden>Cancel setup</button><button data-product-action="payment-wallet">Reward wallet</button></div></section></div></div></div>`);
+  $("view-earn").insertAdjacentHTML("afterbegin", `<div class="product-earn">${head("Share your AI. Earn KOIN.", "Contribute this computer’s spare AI capacity to the network.")}<div class="product-two"><section class="product-panel product-provider"><div class="product-row"><span>Share AI capacity</span><button id="product-provider-toggle" aria-describedby="product-provider-readiness" disabled role="switch" aria-checked="false" aria-label="Share AI capacity">Off</button></div><div class="product-provider-state"><span class="product-live-dot"></span><h2 id="product-provider-label">OFFLINE</h2><p id="product-provider-detail">Sharing is off. Turn it on when you’re ready.</p></div><div class="product-divider"></div><strong id="product-provider-model">Model not confirmed</strong><p id="product-provider-readiness" class="product-fine">Waiting for current model and network confirmation.</p></section><div><section class="product-panel"><p class="product-eyebrow">AI provider earnings</p><p id="product-provider-earnings">No verified earnings loaded.</p><p class="product-fine">KOIN rewards are separate from chat credits.</p><button data-product-action="payouts">Refresh earnings</button></section><section class="product-panel"><h2>Provider setup</h2><div id="product-provider-check"><h3 data-check-model>Local model check</h3><p data-check-detail role="status">Check the model currently running locally. No account or credits needed.</p><progress data-check-progress aria-label="Local model check progress" hidden></progress><p data-check-summary class="product-fine"></p><div class="product-actions"><button data-check-start data-check-action="start" class="primary">Check this computer</button><button data-check-cancel data-check-action="cancel" hidden>Cancel check</button><button data-check-copy data-check-action="copy" hidden>Copy report</button><button data-check-save data-check-action="save" hidden>Save report</button></div><p data-check-export class="product-fine" role="status"></p><p class="product-fine">Sharing becomes ONLINE after the network confirms qualification.</p></div><div class="product-divider"></div><p id="product-provider-setup" role="status">Choose an approved model, then turn on sharing.</p><p id="product-provider-refresh" class="product-fine" role="status" hidden></p><div class="product-actions"><button id="product-provider-reload" data-product-action="provider-reload">Reload setup</button><button data-product-action="signin">Open AI credit account</button><button id="product-provider-download" data-product-action="provider-download" hidden>Download approved model</button><button id="product-provider-cancel" data-product-action="provider-cancel" hidden>Cancel setup</button><button data-product-action="payment-wallet">Reward wallet</button></div></section></div></div></div>`);
   const onboarding = $("view-onboarding"), oldOnboarding = onboarding.firstElementChild;
   oldOnboarding.classList.add("product-local-setup"); oldOnboarding.hidden = true;
   oldOnboarding.insertAdjacentHTML("afterbegin", '<button data-product-action="first-back">← Back to choices</button>');
@@ -296,7 +296,7 @@
     const action = event.target.closest("[data-product-action]")?.dataset.productAction; if (!action) return;
     if (action === "payment-wallet") await openPaymentWallet();
     if (action === "legacy") { go("recovery"); legacy.open = true; $("view-recovery").scrollTop = legacy.offsetTop - $("view-recovery").offsetTop; }
-    if (action === "provider-reload") { await refreshPublicProvider(); }
+    if (action === "provider-reload") { await refreshPublicProvider(true); }
     if (action === "provider-download") { await providerAction("download"); }
     if (action === "provider-cancel") { await providerAction("stop"); }
     if (action === "purchase-retry") {
@@ -323,20 +323,49 @@
     if (action === "local") { go("chat"); $("src-pick").value = "local"; $("src-pick").dispatchEvent(new Event("change")); }
   });
   const providerCheck = window.KaiProviderCheckUI.create({ root: $("product-provider-check"), bridge: window.kaiProviderCheckBridge });
-  let providerBusy = false, providerInfoPending = false, providerExpiry;
-  async function refreshPublicProvider() {
-    if (providerInfoPending || !window.kaiKoinTestBridge) return; providerInfoPending = true;
+  let providerBusy = false, providerInfoPending = false, providerExpiry, providerManualRefresh = false;
+  const providerMessage = error => {
+    const detail = String(error?.message || error || "Provider setup could not be reached.").replace(/^Error invoking remote method '[^']+': (?:Error: )?/, "");
+    return /Unexpected token.*<|<!DOCTYPE/i.test(detail)
+      ? "The credit service returned a web page instead of setup data. Check the connection, then reload setup."
+      : detail;
+  };
+  async function providerRead(action) {
+    let timer;
     try {
-      const info = await window.kaiKoinTestBridge.run("provider-public-info"); publicProvider = true;
+      // The native request has its own network deadline. Also bound the UI
+      // wait so a lost IPC reply cannot make every later Reload a silent no-op.
+      return await Promise.race([window.kaiKoinTestBridge.run(action), new Promise((_, reject) => {
+        timer = setTimeout(() => reject(Error("Setup check timed out. Click Reload setup to try again.")), 15000);
+      })]);
+    } finally { clearTimeout(timer); }
+  }
+  async function refreshPublicProvider(manual = false) {
+    const reload = $("product-provider-reload"), notice = $("product-provider-refresh");
+    if (manual) {
+      providerManualRefresh = true; notice.hidden = false; notice.textContent = "Checking account, wallet and model setup…";
+    }
+    if (providerInfoPending) return;
+    if (!window.kaiKoinTestBridge) {
+      notice.hidden = false; notice.textContent = "Open the desktop Test app to check provider setup.";
+      providerManualRefresh = false; return;
+    }
+    providerInfoPending = true; reload.textContent = "Checking setup…"; reload.setAttribute("aria-busy", "true");
+    let failed = false;
+    try {
+      const info = await providerRead("provider-public-info"); publicProvider = true;
       const on = info.enabled === true, toggle = $("product-provider-toggle");
       toggle.textContent = on ? "On" : "Off"; toggle.setAttribute("aria-checked", String(on));
       toggle.disabled = on ? false : providerBusy || info.state !== "ready";
       $("product-provider-model").textContent = info.model?.label || "Model not confirmed";
-      $("product-provider-setup").textContent = info.detail + (info.model ? ` Required memory: ${info.model.requiredRamGb} GB.${!info.model.installed && Number.isFinite(info.model.bytes) ? " Download: " + (info.model.bytes / 1e9).toFixed(2) + " GB." : ""}` : "") + (info.progress ? ` ${info.progress.pct}% downloaded.` : "");
+      $("product-provider-setup").textContent = providerMessage(info.blocked || info.detail) + (info.model ? ` Required memory: ${info.model.requiredRamGb} GB.${!info.model.installed && Number.isFinite(info.model.bytes) ? " Download: " + (info.model.bytes / 1e9).toFixed(2) + " GB." : ""}` : "") + (info.progress ? ` ${info.progress.pct}% downloaded.` : "");
       $("product-provider-download").hidden = info.state !== "download-required";
       $("product-provider-download").disabled = providerBusy;
       $("product-provider-cancel").hidden = !providerBusy;
-      let status = info.running ? await window.kaiKoinTestBridge.run("provider-public-status") : { state: "offline", label: on ? "RECONNECTING" : "OFFLINE", detail: on ? info.detail : "Sharing is off. Check setup, then turn it on." };
+      let status = info.running ? await providerRead("provider-public-status") : {
+        state: "offline", label: on ? "RECONNECTING" : info.state === "ready" ? "OFFLINE" : "SETUP REQUIRED",
+        detail: on || info.state !== "ready" ? providerMessage(info.blocked || info.detail) : "Ready to share. Turn on Share AI capacity to connect and check model quality."
+      };
       clearTimeout(providerExpiry);
       const paint = value => {
         $("product-provider-label").textContent = value.label; $("product-provider-label").dataset.state = value.state;
@@ -346,11 +375,19 @@
       paint(status);
       if (status.state === "online") providerExpiry = setTimeout(() => paint({ state: "stale", label: "CHECKING CONNECTION", detail: "Network confirmation has expired. Refreshing eligibility…" }), Math.max(0, status.validUntil - Date.now()));
     } catch (e) {
-      publicProvider = true; clearTimeout(providerExpiry);
+      failed = true; publicProvider = true; clearTimeout(providerExpiry);
+      if ($("product-provider-toggle").getAttribute("aria-checked") !== "true") $("product-provider-toggle").disabled = true;
       $("product-provider-label").textContent = "CONNECTION UNCONFIRMED"; $("product-provider-label").dataset.state = "stale";
-      $("product-provider-detail").textContent = e.message; $("product-provider-setup").textContent = e.message;
+      $("product-provider-detail").textContent = providerMessage(e); $("product-provider-setup").textContent = providerMessage(e);
       $("product-provider-download").hidden = true;
-    } finally { providerInfoPending = false; }
+    } finally {
+      providerInfoPending = false; reload.textContent = "Reload setup"; reload.removeAttribute("aria-busy");
+      if (providerManualRefresh) {
+        notice.hidden = false;
+        notice.textContent = failed ? "Setup check failed. You can retry with Reload setup." : "Setup checked at " + new Date().toLocaleTimeString() + ".";
+      }
+      providerManualRefresh = false;
+    }
   }
   async function providerAction(action) {
     if (providerBusy && action !== "stop") return;
