@@ -55,8 +55,21 @@ test("a mainnet deposit rejected by Mana simulation remains saved without broadc
   f.provider.call = async (_, { broadcast }) => { assert.equal(broadcast, false); throw Error("insufficient rc"); };
   const result = await f.controller.run(window(), "purchase", "1");
   assert.equal(result.reason, "funding_insufficient_rc");
-  assert.equal(f.state.submissions.length, 0); assert.equal(result.deposit.state, "unknown");
-  assert.ok(f.journal.nonceCoordinator.envelope(result.deposit.id));
+  assert.equal(f.state.submissions.length, 0); assert.equal(result.deposit.state, "staged");
+  assert.equal(result.deposit.attempts, 0); assert.equal(result.deposit.held, true);
+  const original = f.journal.nonceCoordinator.envelope(result.deposit.id);
+  assert.ok(original); assert.equal(f.journal.nonceCoordinator.status(result.deposit.id).state, "signed");
+  // A failed read-only simulation preserves the signature without consuming a
+  // broadcast attempt. A later native review submits those exact saved bytes.
+  f.provider.call = async (_, { transaction, broadcast }) => {
+    if (broadcast) f.state.submissions.push(structuredClone(transaction));
+    else f.state.simulations.push(structuredClone(transaction));
+    return { receipt: { id: transaction.id, payer: f.config.owner, rc_used: "1000" } };
+  };
+  const resumed = await f.controller.run(window(), "resume", result.deposit.id);
+  assert.equal(resumed.deposit.attempts, 1);
+  assert.deepEqual(f.state.submissions, [original]); assert.deepEqual(f.state.simulations, [original]);
+  assert.deepEqual(f.journal.nonceCoordinator.envelope(result.deposit.id), original);
 });
 test("cancelled mainnet funding never signs; refunds also identify real KOIN", async t => {
   const f = setup(t, 0); await f.controller.run(window(), "purchase", "1");

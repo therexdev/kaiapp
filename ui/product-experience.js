@@ -192,7 +192,7 @@
     $("product-wallet-address").textContent = wallet?.address ? `${wallet.address} · ${wallet.network === "mainnet" ? "Koinos Mainnet" : wallet.network}` : wallet ? "Set up or restore your wallet to pay with KOIN." : "Wallet address unconfirmed";
     $("product-wallet-note").textContent = walletError || (wallet?.address && wallet.network !== "mainnet" ? "Credit purchases use KOIN on Mainnet. Change the wallet network before buying." : wallet?.address ? "" : "");
     $("product-wallet-refresh").disabled = walletReading;
-    $("product-purchase-check").disabled = purchaseReading;
+    $("product-purchase-check").disabled = purchaseReading || walletReading;
     $("product-purchase-signin").hidden = state !== "signin-required";
     const labels = {
       loading: ["Checking purchases…", "Your wallet balance and your AI credits are separate."],

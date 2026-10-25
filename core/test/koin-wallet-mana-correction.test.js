@@ -91,27 +91,42 @@ test("correction signatures are exact, owner signed, immutable and never substit
   assert.deepEqual(f.n.correction(f.id).transaction, signed);
 });
 
-test("same-nonce daily Mana accounting reserves the larger cap and retains every retry", async t => {
+test("same-nonce daily Mana accounting reserves the larger pending cap and releases only verified actual cost", async t => {
   const f = await pending(t), tx = await stage(f), before = row(f).submissions;
+  const remaining = () => f.n.availableSubmissionRc(f.request.actor, policy.maxRcPerDay);
+  assert.equal(remaining(), "900000000");
   for (let attempt = 1; attempt <= 3; attempt++) {
     assert.deepEqual(f.n.authorizeCorrectionSubmission(f.id, policy), tx);
     assert.equal(f.n.status(f.id).correction.attempts, attempt);
+    // Every retry keeps the complete larger ceiling reserved for this nonce;
+    // neither the smaller original nor retries add or release headroom.
+    assert.equal(remaining(), "100000000");
     f.state.now += 1000;
   }
   assert.throws(() => f.n.authorizeCorrectionSubmission(f.id, policy), /retry limit/);
   assert.deepEqual(row(f).submissions, before);
-  await f.include(tx, { irreversible: true }); assert.equal((await f.n.reconcile(f.id)).state, "consumed_elsewhere");
-  // 9 Mana for the nonce family leaves exactly 1 Mana in this 10-Mana day.
-  const next = structuredClone(f.original); next.signatures = []; next.header.nonce = "KAI=";
+  await f.include(tx);
+  assert.equal((await f.n.reconcile(f.id)).state, "signed");
+  assert.equal(remaining(), "100000000");
+  f.state.lib = f.state.height;
+  const confirmed = await f.n.reconcile(f.id);
+  assert.equal(confirmed.state, "consumed_elsewhere"); assert.equal(confirmed.finality.actualRc, "1000");
+  assert.equal(remaining(), "999999000");
+  // The verified 1,000-RC receipt leaves room for another 9-Mana ceiling.
+  // Its pending ceiling remains reserved until its own irreversible receipt.
+  const next = structuredClone(f.original); next.signatures = []; next.header.nonce = "KAI="; next.header.rc_limit = "900000000";
   await Transaction.prepareTransaction(next); const nextId = hash("after-mana-correction");
   await f.n.reserve(nextId, "credits", next); await f.signer.signTransaction(next); await f.n.stage(nextId, next);
   assert.deepEqual(f.n.authorizeSubmission(nextId, policy), next);
+  assert.equal(remaining(), "99999000");
   await f.include(next, { irreversible: true }); await f.n.reconcile(nextId);
+  assert.equal(remaining(), "999998000");
   f.state.nonce = "KAM=";
-  const third = structuredClone(next); third.signatures = []; third.header.nonce = "KAM=";
+  const third = structuredClone(next); third.signatures = []; third.header.nonce = "KAM="; third.header.rc_limit = "999998001";
   await Transaction.prepareTransaction(third); const thirdId = hash("exhausted-mana-day");
   await f.n.reserve(thirdId, "credits", third); await f.signer.signTransaction(third); await f.n.stage(thirdId, third);
   assert.throws(() => f.n.authorizeSubmission(thirdId, policy), /Daily wallet resource budget/);
+  assert.equal(remaining(), "999998000");
 });
 
 test("a finalized or reverted correction releases only after canonical irreversible proof", async t => {

@@ -3,6 +3,7 @@ const { test } = require("node:test"), assert = require("node:assert/strict"), f
 const CHROMIUM = process.env.KAI_TEST_CHROMIUM || "/opt/pw-browsers/chromium";
 test("paid network picker preserves chosen model, shows its price and blocks unavailable capacity without fallback", { skip: !fs.existsSync(CHROMIUM), timeout: 60000 }, async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-model-picker-")), core = await require("../server").createCore({ dataDir: dir, port: 0, onEvent() {} });
+  core.settings.set("network.privacyMode", "local-first");
   let browser;
   t.after(async () => { await browser?.close(); await core.stop(); fs.rmSync(dir, { recursive: true, force: true }); });
   browser = await require("playwright-core").chromium.launch({ executablePath: CHROMIUM, args: ["--no-sandbox", "--disable-gpu"] });

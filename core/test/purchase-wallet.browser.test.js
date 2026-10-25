@@ -42,14 +42,21 @@ async function fixture(t) {
     } };
   });
   let wallet = { address: "payment-wallet-a", network: "mainnet", tokenSymbol: "KOIN", koin: "1234.56789012", usd: 9999 }, offline = false;
-  await page.route("**/core/koinos/rpc", route => route.request().postDataJSON().channel === "wallet:summary"
-    ? route.fulfill({ status: offline ? 400 : 200, json: { ok: !offline, data: wallet, error: offline ? "RPC unavailable" : undefined } }) : route.continue());
+  let pauseWallet = false, walletStarted, releaseWallet;
+  await page.route("**/core/koinos/rpc", async route => {
+    if (route.request().postDataJSON().channel !== "wallet:summary") return route.continue();
+    const response = { status: offline ? 400 : 200, json: { ok: !offline, data: structuredClone(wallet), error: offline ? "RPC unavailable" : undefined } };
+    if (pauseWallet) await new Promise(resolve => { releaseWallet = resolve; walletStarted?.(); });
+    await route.fulfill(response);
+  });
   await page.route("**/core/earn", route => route.fulfill({ json: { wallet: { exists: true, unlocked: true, address: wallet.address }, worker: { running: false } } }));
   await page.goto(`http://127.0.0.1:${await core.start()}`);
   await page.locator('.product-sidebar-credits [data-product-view="buy-credits"]').click();
   const buy = page.locator("#product-quote-refresh"), status = page.locator("#product-quote-state");
   await page.waitForFunction(() => !document.getElementById("product-quote-refresh").disabled);
   return { page, buy, status, setWallet: value => { wallet = { ...wallet, ...value }; }, setOffline: value => { offline = value; },
+    holdWallet: () => { pauseWallet = true; return new Promise(resolve => { walletStarted = resolve; }); },
+    finishWallet: () => { pauseWallet = false; releaseWallet?.(); },
     count: action => page.evaluate(name => window.purchaseCalls.filter(c => c.action === name).length, action),
     refresh: async () => { await page.locator("#product-purchase-check").click(); await page.waitForFunction(() => !document.getElementById("product-purchase-check").disabled); } };
 }
@@ -144,4 +151,21 @@ test("lost payment-status reply times out and permits a fresh read without accep
   await page.evaluate(() => { window.lateInfo = window.finishInfo; window.holdInfo = false; });
   assert.equal(await buy.textContent(), "Try again"); await buy.click(); await page.waitForFunction(() => document.getElementById("product-quote-refresh").textContent === "Buy credits");
   await page.evaluate(() => window.lateInfo()); assert.equal(await buy.textContent(), "Buy credits");
+});
+
+test("shared purchase refresh stays busy until the wallet read finishes, then reads a changed wallet afresh", options, async t => {
+  const { page, buy, setWallet, setOffline, holdWallet, finishWallet, refresh } = await fixture(t);
+  const check = page.locator("#product-purchase-check");
+  setOffline(true);
+  const started = holdWallet();
+  await check.click(); await started;
+  assert.equal(await check.isDisabled(), true, "the completed account read must not enable Check again while the wallet read is still pending");
+  setOffline(false); setWallet({ network: "harbinger", tokenSymbol: "tKOIN" });
+  finishWallet();
+  await page.waitForFunction(() => !document.getElementById("product-purchase-check").disabled);
+  assert.match(await page.locator("#product-wallet-note").textContent(), /RPC unavailable/);
+  await refresh();
+  assert.match(await page.locator("#product-wallet-note").textContent(), /Mainnet/);
+  assert.match(await page.locator("#product-wallet-balance").textContent(), /tKOIN/);
+  assert.equal(await buy.isDisabled(), true, "the new network is checked before purchases become available");
 });
