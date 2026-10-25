@@ -5,8 +5,15 @@ const { CreditPurchaseQuotes } = require("./credit-purchase-quotes");
 const { guardOtherJournals, purchaseDirectory } = require("./credit-purchase-journals");
 const Access = require("./credit-purchase-access");
 const { purchaseFailureMessage } = require("./koin-funding-failure");
+function purchaseClient(d) {
+  const { KoinChain } = require("../core/lib/koin-network/chain");
+  const { PinnedRpcProvider } = require("../core/lib/koin-network/rpc-provider");
+  // Public USD purchases do not use the legacy same-block balance snapshot.
+  // Pace their requests so repeated checks cannot flood the public RPCs.
+  return new KoinChain(d, new PinnedRpcProvider(d.rpc, d.chainId, { requestIntervalMs: 250 }));
+}
 class CreditPurchases {
-  constructor({ dataDir, account, storage, dialog, fetchImpl = fetch, clock = Date.now, clientFactory = d => new (require("../core/lib/koin-network/chain").KoinChain)(d) }) {
+  constructor({ dataDir, account, storage, dialog, fetchImpl = fetch, clock = Date.now, clientFactory = purchaseClient }) {
     Object.assign(this, { dataDir, account, storage, dialog, fetchImpl, clientFactory, clock }); this.quotes = new CreditPurchaseQuotes({ clock }); this.active = null;
   }
   stop() { this.quotes.clear(); this.active?.stop(); }
@@ -18,7 +25,7 @@ class CreditPurchases {
       if (!p) return null;
       const quoteExpired = Number.isSafeInteger(p.quoteExpiresAt) && this.clock() > p.quoteExpiresAt;
       const issue = p.cancellation ? p.cancellation.issue : p.submissionIssue || p.reason;
-      const detail = p.cancellation ? (["funding_insufficient_rc", "funding_simulation_failed"].includes(issue) ? "The cancellation stopped during its pre-submission check. Its signature is saved; use Resume cancellation to retry it." : "The zero-transfer cancellation is saved. Check confirmation; a new purchase becomes available after irreversible confirmation.") : quoteExpired ? "This payment quote expired. Use Cancel expired payment to review a zero-transfer cancellation. A new purchase stays blocked until confirmation." :
+      const detail = p.cancellation ? (["funding_insufficient_rc", "funding_simulation_failed"].includes(issue) ? "The cancellation stopped during its pre-submission check. Its signature is saved; use Resume cancellation to retry it." : p.cancellation.attempts === 0 ? "The zero-transfer cancellation is signed but has not been submitted. Use Resume cancellation to complete its network checks and send it." : "The cancellation submission is unconfirmed. Check confirmation; a new purchase becomes available after irreversible confirmation.") : quoteExpired ? "This payment quote expired. Use Cancel expired payment to review a zero-transfer cancellation. A new purchase stays blocked until confirmation." :
         issue === "funding_insufficient_rc" ? "The last payment attempt reported insufficient Mana for its transaction limit. The saved payment needs review." :
         issue === "funding_simulation_failed" ? "The last payment attempt stopped during its pre-submission check. The saved payment needs review." :
         issue === "funding_submission_uncertain" ? "The last submission response was unavailable. This payment has not been confirmed; keep its original transaction." :

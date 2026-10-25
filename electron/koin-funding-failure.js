@@ -17,11 +17,13 @@ const stages = Object.freeze({
 });
 const rpcCodes = Object.freeze({
   koin_rpc_unavailable: "rpc-unavailable", koin_rpc_rejected: "rpc-rejected",
+  koin_rpc_rate_limited: "rpc-rate-limited",
   koin_rpc_chain_mismatch: "chain-mismatch", koin_rpc_insufficient_rc: "insufficient-mana",
   koin_rpc_stopped: "stopped",
 });
 const messages = Object.freeze({
   "rpc-unavailable": "The KOIN network did not respond. Wait a moment, then get a fresh quote.",
+  "rpc-rate-limited": "The KOIN network is limiting requests. Wait a moment, then get a fresh quote.",
   "rpc-rejected": "The KOIN network rejected a required check. Share this message before trying another purchase.",
   "chain-mismatch": "The KOIN network identity did not match. Share this message before trying another purchase.",
   "insufficient-mana": "The KOIN network reported insufficient Mana. Check the wallet's available Mana before trying again.",

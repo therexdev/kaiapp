@@ -47,14 +47,16 @@ function rejection(error) {
 class PinnedRpcProvider extends Provider {
   #endpoints; #chainId; #fetch; #timeoutMs; #attemptTimeoutMs; #signals = new AsyncLocalStorage();
   #preferred = 0; #lastAccepted = 0; #generation = 0; #requestId = 0;
+  #requestIntervalMs; #nextRequest = new Map();
   // Each endpoint attempt includes a chain-id probe followed by the requested
   // operation. Allow both reads to finish on a slow node, and leave a full
   // backup attempt after a stalled primary without removing the total bound.
-  constructor(rpc, chainId, { fetchImpl = globalThis.fetch, timeoutMs = 45000, attemptTimeoutMs = 20000 } = {}) {
+  constructor(rpc, chainId, { fetchImpl = globalThis.fetch, timeoutMs = 45000, attemptTimeoutMs = 20000, requestIntervalMs = 0 } = {}) {
     if (!Array.isArray(rpc) || !rpc.length || rpc.length > 3 || new Set(rpc).size !== rpc.length ||
         typeof chainId !== "string" || !chainId || typeof fetchImpl !== "function" ||
         !Number.isSafeInteger(timeoutMs) || timeoutMs < 10 || timeoutMs > 45000 ||
-        !Number.isSafeInteger(attemptTimeoutMs) || attemptTimeoutMs < 10 || attemptTimeoutMs > timeoutMs)
+        !Number.isSafeInteger(attemptTimeoutMs) || attemptTimeoutMs < 10 || attemptTimeoutMs > timeoutMs ||
+        !Number.isSafeInteger(requestIntervalMs) || requestIntervalMs < 0 || requestIntervalMs > 1000)
       throw Error("Invalid pinned KOIN RPC settings");
     const endpoints = Object.freeze(rpc.map(value => {
       const url = new URL(value);
@@ -66,10 +68,28 @@ class PinnedRpcProvider extends Provider {
     Object.defineProperty(this, "rpcNodes", { value: endpoints, writable: false, configurable: false });
     this.#endpoints = endpoints; this.#chainId = chainId; this.#fetch = fetchImpl;
     this.#timeoutMs = timeoutMs; this.#attemptTimeoutMs = attemptTimeoutMs;
+    this.#requestIntervalMs = requestIntervalMs;
   }
   withSignal(signal, run) { return this.#signals.run(signal, run); }
   get readGeneration() { return this.#generation; }
+  async #pace(endpoint, signal) {
+    while (this.#requestIntervalMs) {
+      signal.throwIfAborted();
+      const now = Date.now(), delay = (this.#nextRequest.get(endpoint) || 0) - now;
+      if (delay <= 0) { this.#nextRequest.set(endpoint, now + this.#requestIntervalMs); return; }
+      // Reserve only when a request actually starts. Stopped reviews cannot
+      // leave future slots occupied or send anything when their timer wakes.
+      await new Promise((resolve, reject) => {
+        const done = () => { signal.removeEventListener("abort", abort); resolve(); };
+        const timer = setTimeout(done, delay);
+        const abort = () => { clearTimeout(timer); signal.removeEventListener("abort", abort); reject(stopped()); };
+        signal.addEventListener("abort", abort, { once: true });
+        if (signal.aborted) abort();
+      });
+    }
+  }
   async #request(endpoint, method, params, signal) {
+    if (this.#requestIntervalMs) await this.#pace(endpoint, signal);
     signal.throwIfAborted();
     const id = ++this.#requestId;
     let response;
@@ -82,7 +102,12 @@ class PinnedRpcProvider extends Provider {
     } catch { throw unavailable(); }
     signal.throwIfAborted();
     if (!response?.ok) {
-      if ([403, 429].includes(response?.status) || response?.status >= 500) throw unavailable();
+      if (response?.status === 429) {
+        const value = response.headers?.get?.("retry-after"), seconds = /^\d{1,4}$/.test(value || "") ? Number(value) : 1;
+        this.#nextRequest.set(endpoint, Math.max(this.#nextRequest.get(endpoint) || 0, Date.now() + Math.min(5000, Math.max(1000, seconds * 1000))));
+        throw new RpcFailure("KOIN RPC is rate-limiting requests. Wait a moment before resuming.", true, "koin_rpc_rate_limited");
+      }
+      if (response?.status === 403 || response?.status >= 500) throw unavailable();
       throw new RpcFailure("KOIN RPC refused the request.");
     }
     let json;

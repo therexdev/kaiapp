@@ -265,6 +265,9 @@ class TestPayments {
         // This is read-only recovery: no signing or background broadcast.
         if (p.state !== "funded") {
           await this.#journal.nonceCoordinator.reconcile(p.id); combined.throwIfAborted();
+          // A pending cancellation only needs nonce/receipt observation. Full
+          // purchase-policy reads cannot confirm it and needlessly hammer RPC.
+          if (p.cancellation && !terminal(this.#journal.nonceCoordinator.status(p.id).state)) continue;
           await this.#journal.advance(p.id, { allowSubmit: false }); combined.throwIfAborted();
           p = this.#journal.status(p.id);
         }
@@ -307,15 +310,15 @@ class TestPayments {
         if (existing && action === "purchase") return { status: "await_finality", deposit: existing };
         if (action === "purchase-retry") {
           if (!existing) return { status: "complete" };
-          await this.#journal.nonceCoordinator.reconcile(existing.id); guard();
-          const checked = await this.#journal.advance(existing.id, { allowSubmit: false }); guard();
-          if (checked.action === "done") return { status: "complete", deposit: this.#journal.status(existing.id) };
           const saved = this.#journal.saved(existing.id);
           if (this.#journal.nonceCoordinator.cancellation(existing.id) ||
               (isUsd(this.#client.d) && this.#clock() > Number(saved.intent.args.purchase_quote?.expires_at)))
             return await require("./koin-purchase-cancel").cancelExpiredPurchase({ id: existing.id, journal: this.#journal,
               client: this.#client, config: this.#config, window, dialog: this.#dialog, guard,
               sign: tx => this.#sign(tx), canSign: () => { if (this.#wallet.signer.getAddress() !== this.#owner()) throw Error("Unlock this payment wallet before cancellation"); }, signal: task.abort.signal, clock: this.#clock });
+          await this.#journal.nonceCoordinator.reconcile(existing.id); guard();
+          const checked = await this.#journal.advance(existing.id, { allowSubmit: false }); guard();
+          if (checked.action === "done") return { status: "complete", deposit: this.#journal.status(existing.id) };
           if (this.#journal.nonceCoordinator.correction(existing.id) || existing.submissionIssue === "funding_insufficient_rc") {
             const corrected = await this.#correctMana(window, existing.id, guard);
             const deposit = this.#journal.status(existing.id), correction = this.#journal.nonceCoordinator.correction(existing.id);

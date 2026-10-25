@@ -316,3 +316,52 @@ test("a privacy abort scopes inherited RPC reads without cancelling unrelated re
   assert.equal(calls.length, count, "No fresh RPC after privacy cancellation");
   assert.equal(await provider.getChainId(), CHAIN);
 });
+
+test("paced purchase RPC spreads concurrent probes and reads instead of bursting", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  const starts = [];
+  const { provider, calls } = fixture(() => { starts.push(Date.now()); }, { requestIntervalMs: 250 });
+  const pending = Promise.all([provider.getHeadInfo(), provider.getHeadInfo(), provider.getHeadInfo()]);
+  for (let n = 0; n < 6; n++) await advance(t, n ? 250 : 0);
+  await pending;
+  assert.equal(calls.length, 6);
+  for (let n = 1; n < starts.length; n++) assert.ok(starts[n] - starts[n - 1] >= 250);
+  assert.equal(calls.filter(c => c.body.method === "chain.get_chain_id").length, 3);
+});
+test("Stop during a paced broadcast queue prevents its POST and leaves no reserved future slot", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  const { provider, calls } = fixture(() => {}, { requestIntervalMs: 250 });
+  assert.equal(await provider.getChainId(), CHAIN);
+  const controller = new AbortController();
+  const pending = provider.call("chain.submit_transaction", { transaction: { id: "saved" }, broadcast: true }, { signal: controller.signal }).catch(e => e.code);
+  await advance(t, 0); controller.abort();
+  assert.equal(await pending, "koin_rpc_stopped");
+  const next = provider.getChainId();
+  await advance(t, 250); assert.equal(await next, CHAIN);
+  assert.equal(calls.length, 2); assert(calls.every(c => c.body.method === "chain.get_chain_id"));
+});
+test("429 responses apply a bounded cooldown without retrying broadcasts", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  const { provider, calls } = fixture((_url, body) => body.method === "chain.get_chain_id" ? undefined :
+    { ok: false, status: 429, headers: { get: () => "2" } }, { requestIntervalMs: 250 });
+  const failed = provider.getHeadInfo().catch(e => ({ code: e.code, message: e.message }));
+  await advance(t, 0); await advance(t, 250); await advance(t, 250);
+  assert.equal((await failed).code, "koin_rpc_rate_limited");
+  assert.equal(calls.length, 4);
+  const next = provider.getChainId();
+  await advance(t, 1749); assert.equal(calls.length, 4);
+  await advance(t, 1); assert.equal(await next, CHAIN);
+  const sent = provider.call("chain.submit_transaction", { transaction: { id: "saved", signatures: ["private-signature"] }, broadcast: true }).catch(e => e.code);
+  await advance(t, 250); await advance(t, 250);
+  assert.equal(await sent, "koin_rpc_rate_limited");
+  assert.equal(calls.filter(c => c.body.method === "chain.submit_transaction").length, 1);
+});
+test("request deadlines include pacing and expired queued reads never run later", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  const { provider, calls } = fixture(() => {}, { requestIntervalMs: 250, attemptTimeoutMs: 10, timeoutMs: 20 });
+  const pending = provider.getHeadInfo().catch(e => e.code);
+  await advance(t, 0); await advance(t, 10); await advance(t, 10);
+  assert.equal(await pending, "koin_rpc_unavailable");
+  assert.equal(calls.length, 2);
+  await advance(t, 1000); assert.equal(calls.length, 2);
+});

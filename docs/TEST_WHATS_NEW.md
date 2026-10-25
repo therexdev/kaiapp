@@ -1,3 +1,9 @@
+## Finish cancellation without overloading RPC
+
+- Payment recovery now spaces its RPC requests and removes repeated full purchase checks while a cancellation is pending. Background confirmation checks also avoid those duplicate reads.
+- A signed cancellation that has never been submitted says so explicitly. Network errors identify the recovery step and distinguish rate limiting from other RPC failures.
+- **Resume cancellation** continues to use the exact saved signature and nonce, with one broadcast attempt per approval and irreversible confirmation required before another purchase.
+
 ## Recover an expired credit purchase
 
 - Buy credits now has a working **Cancel expired payment** button. Its wallet review transfers **0 KOIN** and uses the old payment's nonce. New purchases become available only after the cancellation is irreversibly confirmed; if the original payment already completed, its credits are recovered instead.

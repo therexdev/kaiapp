@@ -173,6 +173,39 @@ test("lost cancellation submission resumes the exact saved envelope after restar
     return restarted.run(f.c, f.window, "purchase-approve", other.quote.id, f.signal);
   }), /Finish/);
 });
+test("pending cancellation avoids duplicate purchase checks and background polling does not reread contract policies", async t => {
+  const f = await expiredPurchase(t), verify = f.client.verify.bind(f.client); let checks = 0;
+  f.client.verify = async () => { checks++; return verify(); };
+  await f.controller.run(f.c, f.window, "purchase-retry", undefined, f.signal);
+  assert.ok(checks <= 4, `Recovery made ${checks} full policy reads`);
+  const signatures = f.counts().signatures, submissions = f.calls.length, registrations = f.registrations.length;
+  checks = 0;
+  f.provider.readContract = async () => { throw Error("Background cancellation must not read purchase policies"); };
+  await f.controller.sync(f.c, f.signal);
+  assert.equal(checks, 0); assert.equal(f.counts().signatures, signatures); assert.equal(f.calls.length, submissions);
+  assert.equal(f.registrations.length, registrations);
+  assert.equal((await f.controller.status(f.c, f.signal)).recovery, "resume-cancellation");
+});
+test("an RPC failure after cancellation signing preserves the signature and identifies the exact stopped check", async t => {
+  const f = await expiredPurchase(t), lookup = f.provider.getTransactionsById;
+  const sign = f.signer.signTransaction.bind(f.signer);
+  f.signer.signTransaction = async tx => {
+    const result = await sign(tx);
+    f.provider.getTransactionsById = async () => { throw Object.assign(Error("private-signature private-session"), { code: "koin_rpc_rate_limited" }); };
+    return result;
+  };
+  await assert.rejects(f.controller.run(f.c, f.window, "purchase-retry", undefined, f.signal), error => {
+    assert.match(error.message, /cancellation\/saved-transaction-lookup\/rate_limited/);
+    assert.doesNotMatch(error.message, /private-signature|private-session/); return true;
+  });
+  const saved = savedPayment(f).cancellation;
+  assert.ok(saved.transaction); assert.equal(saved.submissions.length, 0); assert.equal(f.calls.length, 0);
+  assert.match((await f.controller.status(f.c, f.signal)).detail, /signed but has not been submitted/);
+  f.provider.getTransactionsById = lookup;
+  await f.controller.run(f.c, f.window, "purchase-retry", undefined, f.signal);
+  assert.deepEqual(savedPayment(f).cancellation.transaction, saved.transaction);
+  assert.equal(f.counts().signatures, 2); assert.deepEqual(f.calls.map(c => c.broadcast), [false, true]);
+});
 test("cancellation needs native approval and fresh chain expiry, nonce, deployment and account", async t => {
   for (const scenario of ["decline", "chain-time", "nonce", "code", "account", "locked"]) {
     const f = await expiredPurchase(t), before = f.counts();

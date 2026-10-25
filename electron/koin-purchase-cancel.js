@@ -8,18 +8,20 @@ const { koin } = require("./koin-review");
 
 // Trusted main-process action. The renderer selects recovery, never a target,
 // amount, operation, nonce, resource limit, or signature.
-async function cancelExpiredPurchase({ id, journal, client, config, window, dialog, guard, sign, canSign, signal, clock }) {
+async function cancel({ id, journal, client, config, window, dialog, guard, sign, canSign, signal, clock }, trace) {
   const saved = journal.saved(id), nonces = journal.nonceCoordinator;
   if (!isUsd(client.d) || !saved?.signed || saved.intent.kind !== "credits" || saved.intent.method !== "purchase" ||
       saved.intent.actor !== config.owner) throw Error("A saved USD purchase owned by this wallet is required");
   const quote = await Price.verify(client.d, saved.intent.args);
   const result = status => ({ status, deposit: journal.status(id) });
-  const settled = async () => {
+  const settled = async phase => {
+    trace.phase = phase;
     await nonces.reconcile(id); guard();
+    if (!["finalized", "reverted", "consumed_elsewhere"].includes(nonces.status(id).state)) return false;
     const checked = await journal.advance(id, { allowSubmit: false }); guard();
     return checked.action === "done";
   };
-  if (await settled()) return result("complete");
+  if (await settled("initial-confirmation")) return result("complete");
   journal.hold(id);
   let cancellation = nonces.cancellation(id);
   if (cancellation && !cancellation.transaction) {
@@ -30,7 +32,8 @@ async function cancelExpiredPurchase({ id, journal, client, config, window, dial
   }
   if (!cancellation) canSign();
   const draft = cancellation?.draft || await Cancel.prepare(client.d, saved.draft);
-  const unchanged = async () => {
+  const unchanged = async phase => {
+    trace.phase = phase;
     const [policy, next, head] = await Promise.all([client.verify(), client.provider.getNextNonce(config.owner), client.provider.getHeadInfo()]);
     guard();
     const time = Number(head?.head_block_time), now = clock();
@@ -40,7 +43,7 @@ async function cancelExpiredPurchase({ id, journal, client, config, window, dial
       throw Error("The payment policy or wallet nonce changed. Check confirmation before recovery.");
     if (!Cancel.matches(client.d, saved.draft, draft)) throw Error("Cancellation transaction changed");
   };
-  await unchanged();
+  await unchanged("initial-policy");
   const answer = await dialog.showMessageBox(window, { type: "question", title: "Cancel expired credit purchase",
     message: cancellation ? "Resume this saved payment cancellation?" : "Cancel this expired payment so you can buy credits again?",
     detail: ["KOIN transferred: 0. This transaction only reads your KOIN balance and consumes the old payment's nonce.",
@@ -53,8 +56,8 @@ async function cancelExpiredPurchase({ id, journal, client, config, window, dial
       "Stop prevents further sends but cannot undo a transaction already submitted."].join("\n"),
     buttons: ["Keep pending", cancellation ? "Resume cancellation" : "Cancel expired payment"], defaultId: 0, cancelId: 0, noLink: true });
   guard(); if (answer.response !== 1) return result("cancelled");
-  if (await settled()) return result("complete");
-  await unchanged();
+  if (await settled("approved-confirmation")) return result("complete");
+  await unchanged("approved-policy");
   if (!cancellation) {
     canSign(); guard();
     const decision = await nonces.reserveCancellation(id, draft, () => { try { guard(); return true; } catch { return false; } });
@@ -66,23 +69,36 @@ async function cancelExpiredPurchase({ id, journal, client, config, window, dial
   }
   guard();
   if (!cancellation?.transaction) throw Error("Recover the saved cancellation before continuing");
+  trace.phase = "saved-transaction-lookup";
   const lookup = await client.provider.getTransactionsById([cancellation.draft.id]); guard();
   if (!lookup || typeof lookup !== "object" || Array.isArray(lookup) || lookup.error || lookup.rpc_error ||
       (lookup.transactions !== undefined && !Array.isArray(lookup.transactions)) ||
       (lookup.transactions || []).some(r => r?.transaction?.id !== cancellation.draft.id)) throw Error("Cancellation confirmation is unavailable");
-  if (lookup.transactions?.length) return result(await settled() ? "complete" : "await_finality");
+  if (lookup.transactions?.length) return result(await settled("seen-confirmation") ? "complete" : "await_finality");
+  trace.phase = "simulation";
   try { await simulateCancellation(client, cancellation.transaction, saved.draft); }
   catch (error) {
     guard(); journal.recordCancellationIssue(id, error.code === "funding_insufficient_rc" ? "funding_insufficient_rc" : "funding_simulation_failed");
+    if (rpcCodes.has(error.code)) throw error;
     return result("await_finality");
   }
-  guard(); if (await settled()) return result("complete");
-  await unchanged();
+  guard(); if (await settled("submission-confirmation")) return result("complete");
+  await unchanged("submission-policy");
   const transaction = nonces.authorizeCancellationSubmission(id, { maxRcPerDay: config.maxRcPerDay }); guard();
   let issue = null;
   try { await client.provider.call("chain.submit_transaction", { transaction, broadcast: true }, { signal }); }
   catch { issue = "funding_submission_uncertain"; }
   journal.recordCancellationIssue(id, issue);
   return result("await_finality");
+}
+const rpcCodes = new Set(["koin_rpc_unavailable", "koin_rpc_rate_limited", "koin_rpc_rejected", "koin_rpc_chain_mismatch", "koin_rpc_stopped"]);
+async function cancelExpiredPurchase(options) {
+  const trace = { phase: "saved-state" };
+  try { return await cancel(options, trace); }
+  catch (error) {
+    if (!rpcCodes.has(error?.code)) throw error;
+    const detail = error.code === "koin_rpc_rate_limited" ? "The RPC endpoint is limiting requests." : error.code === "koin_rpc_stopped" ? "The network check was stopped." : "The RPC check could not be completed.";
+    throw Error(`Cancellation stopped during ${trace.phase}. ${detail} Your saved cancellation is preserved. Reference: cancellation/${trace.phase}/${error.code.slice(9)}.`);
+  }
 }
 module.exports = { cancelExpiredPurchase };
