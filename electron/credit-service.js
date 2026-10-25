@@ -73,7 +73,9 @@ class CreditService {
       let localPurchase;
       try { localPurchase = await this.purchases.status(c, signal); }
       catch { localPurchase = { state: "unavailable", detail: "Saved payment records could not be checked. Check again before starting another purchase." }; }
-      return { enabled: true, configured: true, product: "prepaid-usd-v1", activation: "ready", blocked: modelError, localPurchase, model: c.config.model, maxOutput: c.config.maxOutput, models: modelCatalog?.models || [], modelAvailabilityUntil: modelCatalog?.validUntil || null,
+      let cancelledPurchases = [];
+      try { cancelledPurchases = await this.purchases.cancelled(c, signal); } catch { /* A failed local read never erases network purchase history. */ }
+      return { enabled: true, configured: true, product: "prepaid-usd-v1", activation: "ready", blocked: modelError, localPurchase, cancelledPurchases, model: c.config.model, maxOutput: c.config.maxOutput, models: modelCatalog?.models || [], modelAvailabilityUntil: modelCatalog?.validUntil || null,
         runBudgets, maxRequestCredits: require("../core/lib/koin-network/purchase-quote").credits(c.config.limits.perJob), recoveryAvailable: c.recoverable.length > 0 };
     } catch (error) { return { enabled: true, configured: true, product: "prepaid-usd-v1", activation: "signin-required", blocked: String(error.message), recoveryAvailable: false }; }
   }

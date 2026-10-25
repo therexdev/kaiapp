@@ -21,7 +21,7 @@
       <section class="product-purchase-availability" role="status"><div><strong id="product-purchase-title">Checking purchases…</strong><p id="product-purchase-detail">Your wallet balance and your AI credits are separate.</p></div><div class="product-actions"><button id="product-purchase-check">Check again</button><button data-product-action="signin" id="product-purchase-signin" hidden>Open account</button></div></section>
       <ol class="product-steps"><li class="active">Choose credits</li><li>Approve payment</li><li>Credits added</li></ol>
       <div class="product-two"><section class="product-panel"><h2>How much would you like to add?</h2><p>1,000 credits = $1 of AI usage.</p><div class="product-packs">${[1, 5, 10].map(n => `<button data-credit-pack="${n}"><strong>$${n}</strong><small>${(n * 1000).toLocaleString()} credits</small></button>`).join("")}</div><label for="product-usd-amount">Or choose an amount</label><div class="product-input"><span>$</span><input id="product-usd-amount" inputmode="decimal" autocomplete="off" placeholder="Enter USD amount" maxlength="12" /><span>USD</span></div><p>The current exchange quote determines how much KOIN you pay. Review the exact KOIN amount before approving.</p><div class="product-divider"></div><p>✓ Pay directly with KOIN from your wallet.</p><p>✓ Free credits are used first on eligible models.</p></section>
-      <section class="product-panel product-order"><p class="product-eyebrow">You receive</p><div class="product-balance"><span id="product-pack-credits">—</span> <small>credits</small></div><div class="product-detail"><span>KOIN payment</span><strong id="product-quote-koin">Quote required</strong></div><div class="product-detail"><span>Price source</span><strong>Uniswap v4 · vKOIN/USDT</strong></div><div class="product-detail"><span>Exchange observation</span><strong id="product-quote-time">No verified quote</strong></div><div class="product-detail"><span>Valid until</span><strong id="product-quote-expiry">—</strong></div><details id="product-quote-details" hidden><summary>Price details</summary><div class="product-detail"><span>Purchase rate</span><strong id="product-quote-rate"></strong></div><p id="product-quote-reference" class="product-fine"></p><p id="product-quote-window" class="product-fine"></p></details><p id="product-quote-state" role="status">Choose an amount to check purchasing availability. Existing credits remain usable while a purchase confirms or pricing is unavailable.</p><p id="product-local-payment" role="status" hidden></p><button id="product-quote-refresh" class="primary" disabled>Checking availability…</button><button id="product-quote-approve" class="primary" hidden>Review payment</button><p class="product-fine">Nonrefundable · nontransferable · no expiry</p><div id="product-pending-purchases"></div></section></div>
+      <section class="product-panel product-order"><p class="product-eyebrow">You receive</p><div class="product-balance"><span id="product-pack-credits">—</span> <small>credits</small></div><div class="product-detail"><span>KOIN payment</span><strong id="product-quote-koin">Quote required</strong></div><div class="product-detail"><span>Price source</span><strong>Uniswap v4 · vKOIN/USDT</strong></div><div class="product-detail"><span>Exchange observation</span><strong id="product-quote-time">No verified quote</strong></div><div class="product-detail"><span>Valid until</span><strong id="product-quote-expiry">—</strong></div><details id="product-quote-details" hidden><summary>Price details</summary><div class="product-detail"><span>Purchase rate</span><strong id="product-quote-rate"></strong></div><p id="product-quote-reference" class="product-fine"></p><p id="product-quote-window" class="product-fine"></p></details><p id="product-quote-state" role="status">Choose an amount to check purchasing availability. Existing credits remain usable while a purchase confirms or pricing is unavailable.</p><p id="product-local-payment" role="status" hidden></p><button id="product-purchase-recover" class="primary" hidden>Review saved payment</button><p id="product-payment-recovery-status" role="status" hidden></p><button id="product-quote-refresh" class="primary" disabled>Checking availability…</button><button id="product-quote-approve" class="primary" hidden>Review payment</button><p class="product-fine">Purchased credits: nonrefundable · nontransferable · no expiry</p><div id="product-pending-purchases"></div></section></div>
     </section>
     <section id="view-network-overview" class="view product-page" hidden>
       ${head("Network overview", "Available AI and the computers providing it.")}
@@ -88,9 +88,11 @@
     document.querySelectorAll("[data-credit-freshness]").forEach(node => { node.textContent = display.detail; });
     document.querySelectorAll("[data-credit-refresh]").forEach(node => { node.disabled = display.refreshing; node.textContent = display.refreshing ? "Checking…" : state.status === "unavailable" ? "Retry" : "Refresh"; });
     document.querySelectorAll("[data-credit-help]").forEach(node => { node.hidden = usd && !stale || state.status === "loading"; });
-    const rows = usd ? [...state.snapshot.usage.map(u => ({ kind: "usage", title: `Chat · ${u.model}`, at: u.at, status: "Delivered", amount: "−" + credits(u.credits) })), ...state.snapshot.purchases.map(p => ({ kind: "purchase", title: "Purchased credits", txId: /^0x1220[a-f0-9]{64}$/.test(p.id || "") ? p.id : null, at: p.confirmedAt || p.createdAt, status: p.state === "confirmed" ? "Added to balance" : p.state, amount: p.state === "confirmed" ? "+" + credits(p.credits || p.amount) : "Pending" }))].sort((a, b) => b.at - a.at).filter(r => filter === "all" || filter === r.kind) : [];
+    const cancelled = new Set((purchaseInfo.cancelledPurchases || []).map(p => p.txId));
+    const isCancelled = p => p.state !== "confirmed" && cancelled.has(p.id);
+    const rows = usd ? [...state.snapshot.usage.map(u => ({ kind: "usage", title: `Chat · ${u.model}`, at: u.at, status: "Delivered", amount: "−" + credits(u.credits) })), ...state.snapshot.purchases.map(p => ({ kind: "purchase", title: "Purchased credits", txId: /^0x1220[a-f0-9]{64}$/.test(p.id || "") ? p.id : null, at: p.confirmedAt || p.createdAt, status: isCancelled(p) ? "Cancelled · no purchase" : p.state === "confirmed" ? "Added to balance" : p.state, amount: isCancelled(p) ? "0" : p.state === "confirmed" ? "+" + credits(p.credits || p.amount) : "Pending" }))].sort((a, b) => b.at - a.at).filter(r => filter === "all" || filter === r.kind) : [];
     $("product-credit-history").innerHTML = rows.length ? rows.map(r => `<tr><td>${esc(r.title)}${r.txId ? `<small class="product-payment-transaction">Transaction: ${esc(r.txId)}</small>` : ""}</td><td>${esc(new Date(r.at).toLocaleString())}</td><td>${esc(r.status)}</td><td>${esc(r.amount)}</td></tr>`).join("") : `<tr><td colspan="4">${usd && !stale ? "No activity yet." : "No verified activity loaded."}</td></tr>`;
-    const pending = state.snapshot?.purchases?.filter(p => p.state === "pending") || [];
+    const pending = state.snapshot?.purchases?.filter(p => p.state === "pending" && !isCancelled(p)) || [];
     $("product-pending-purchases").textContent = pending.length ? `${pending.length} purchase${pending.length === 1 ? " is" : "s are"} not yet confirmed. You can keep using existing credits.` : "";
     $("product-recovery-purchase").textContent = pending.length ? "Your purchase has not been confirmed. Check the saved payment details on Buy credits before retrying." : !usd || stale ? "Purchase status is unavailable. Refresh your account before starting or retrying a payment." : "No pending purchase in the last verified account snapshot. Refresh your account before starting another payment.";
   }
@@ -165,10 +167,15 @@
     const wallet = purchaseWallet, state = purchaseInfo.activation;
     const saved = purchaseInfo.localPurchase, paymentDetail = $("product-local-payment");
     paymentDetail.hidden = !saved;
-    paymentDetail.textContent = saved ? `${/^0x1220[a-f0-9]{64}$/.test(saved.txId || "") ? "Transaction: " + saved.txId : ""}${saved.issue ? "\nReference: " + saved.issue : ""}` : "";
+    paymentDetail.textContent = saved ? `${/^0x1220[a-f0-9]{64}$/.test(saved.txId || "") ? "Transaction: " + saved.txId : ""}${/^0x1220[a-f0-9]{64}$/.test(saved.cancellation?.txId || "") ? "\nCancellation: " + saved.cancellation.txId : ""}${saved.issue ? "\nReference: " + saved.issue : ""}` : "";
     if (saved) $("product-quote-state").textContent = saved.detail || "Check the saved payment before starting another purchase.";
     else if (previousLocalPurchase) $("product-quote-state").textContent = "Saved payment check finished. See Balance & activity for the outcome.";
     previousLocalPurchase = !!saved;
+    const recover = $("product-purchase-recover");
+    recover.hidden = !saved?.recovery;
+    recover.disabled = approving || state !== "ready" || saved?.state !== "pending";
+    recover.textContent = approving ? "Reviewing saved payment…" : saved?.recovery === "cancel-expired" ? "Cancel expired payment" : saved?.recovery === "resume-cancellation" ? "Resume cancellation" : saved?.recovery === "correct-mana" ? "Review Mana limit" : "Review saved payment";
+    if (!saved) $("product-payment-recovery-status").hidden = true;
     let balance = walletReading && !wallet ? "Checking…" : "Balance unavailable";
     if (wallet?.koin != null) {
       const [whole, fraction] = wallet.koin.split("."), locale = document.documentElement.lang || "en";
@@ -188,7 +195,7 @@
       ready: ["Credit purchases are available", "Choose an amount, review the current KOIN quote, then approve the payment."],
       error: ["Purchasing availability could not be checked", purchaseInfo.blocked || "Check again when your connection is available."],
     };
-    const [title, detail] = labels[state] || labels.error;
+    const [title, detail] = saved && state === "ready" ? ["Saved payment needs attention", "Review the saved payment below. A new purchase becomes available after its recovery is confirmed."] : labels[state] || labels.error;
     $("product-purchase-title").textContent = title; $("product-purchase-detail").textContent = detail;
     const refresh = $("product-quote-refresh");
     refresh.disabled = !!saved || state !== "ready" || !walletReady() || quoting || approving || walletReading;
@@ -236,6 +243,7 @@
       if (generation !== purchaseGeneration) return;
       if (!["ready", "unavailable", "signin-required"].includes(info?.activation)) throw Error("Purchasing availability could not be verified.");
       purchaseInfo = info;
+      if (window.KaiCredits) paintCredits(window.KaiCredits.get());
       if (info.activation !== "ready") invalidateQuote(info.activation === "unavailable" ? "Purchasing will be available when the credit service is activated." : info.blocked);
     }).catch(error => { if (generation === purchaseGeneration) { purchaseInfo = { activation: "error", blocked: message(error) }; invalidateQuote("Purchasing availability must be verified before payment."); } })
       .finally(() => { if (generation === purchaseGeneration) { purchaseReading = false; purchaseRead = null; paintPurchase(); } });
@@ -249,6 +257,19 @@
   }
   $("product-wallet-refresh").addEventListener("click", refreshPurchaseWallet);
   $("product-purchase-check").addEventListener("click", refreshPurchases);
+  $("product-purchase-recover").addEventListener("click", async () => {
+    if (approving || $("product-purchase-recover").disabled || !purchaseInfo.localPurchase?.recovery) return;
+    approving = true; invalidateQuote(); paintPurchase();
+    const notice = $("product-payment-recovery-status"), generation = purchaseGeneration;
+    notice.hidden = false; notice.textContent = "Checking the saved payment and preparing its wallet review…";
+    try {
+      const result = await window.kaiKoinTestBridge.run("credit-purchase-retry");
+      if (generation !== purchaseGeneration) return;
+      notice.textContent = result.state === "cancelled" ? "Review closed. The saved payment is unchanged." : result.state === "complete" ? "Payment recovery confirmed. You can get a fresh quote." : "Recovery is saved. Check again for blockchain confirmation; this can take a few minutes.";
+      await Promise.all([window.KaiCredits.refresh(), refreshPurchases()]);
+    } catch (error) { if (generation === purchaseGeneration) { notice.hidden = false; notice.textContent = message(error); } }
+    finally { approving = false; paintPurchase(); }
+  });
   $("product-usd-amount").addEventListener("input", pack);
   $("product-quote-refresh").addEventListener("click", async () => {
     if (quoting || approving || purchaseInfo.localPurchase || purchaseInfo.activation !== "ready" || !walletReady()) return;

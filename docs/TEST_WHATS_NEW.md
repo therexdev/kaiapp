@@ -1,3 +1,11 @@
+## Recover an expired credit purchase
+
+- Buy credits now has a working **Cancel expired payment** button. Its wallet review transfers **0 KOIN** and uses the old payment's nonce. New purchases become available only after the cancellation is irreversibly confirmed; if the original payment already completed, its credits are recovered instead.
+- Original payment signatures, any Mana correction, and the cancellation stay saved across updates and restarts. **Resume cancellation** reuses the saved transaction. Check again shows its confirmation status and transaction ID.
+- If an unexpired purchase needs a higher Mana ceiling, **Review Mana limit** opens the existing separate wallet review for the same purchase and nonce, within the current daily resource limit.
+- Payment confirmation remembers a working RPC backup instead of restarting at an unavailable primary on every poll.
+- Confirmed cancellations appear as cancelled in this desktop's activity rather than continuing to count as pending purchases. Purchased-credit expiry wording now clearly refers to credits, not the short-lived price quote.
+
 ## Start sharing directly from Earn
 
 - Earn has its own Provider model choice. Turning sharing On loads that model and starts qualification without sending a chat. The choice and On/Off preference survive restart.

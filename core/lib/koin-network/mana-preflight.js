@@ -55,6 +55,25 @@ async function simulateFunding(client, transaction, request) {
     throw failure("Funding simulation verification failed. Check the network and saved transaction. No broadcast attempted.");
   }
 
+  return measure(client, tx);
+}
+
+async function simulateCancellation(client, transaction, original) {
+  const tx = structuredClone(transaction), unsigned = { ...tx, signatures: [] };
+  if (!require("./funding-cancel").matches(client.d, original, unsigned) ||
+      !Array.isArray(tx.signatures) || tx.signatures.length !== 1 ||
+      !(await Signer.recoverAddresses(tx)).includes(original.header.payer))
+    throw failure("Cancellation must be the exact signed zero-transfer transaction.");
+  const signature = tx.signatures[0];
+  if (typeof signature !== "string" || Buffer.from(signature, "base64url").length !== 65 || utils.encodeBase64url(Buffer.from(signature, "base64url")) !== signature)
+    throw failure("Canonical cancellation signature required.");
+  const canonical = await require("koilib").Transaction.prepareTransaction(structuredClone(tx));
+  if (canonical.id !== tx.id) throw failure("Cancellation commitment changed.");
+  await client.verify();
+  return measure(client, tx);
+}
+
+async function measure(client, tx) {
   const limit = amount(tx.header.rc_limit, true);
   async function available() {
     let rc;
@@ -94,4 +113,4 @@ async function simulateFunding(client, transaction, request) {
     rcLimit: tx.header.rc_limit, checkedAt: Date.now() };
 }
 
-module.exports = { simulateFunding };
+module.exports = { simulateFunding, simulateCancellation };

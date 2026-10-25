@@ -194,6 +194,7 @@ class TestPayments {
       const policy = await this.#client.verify();
       if (policy.paused || hash(JSON.stringify(policy)) !== saved.policyHash)
         throw Error("Deposit policy changed or paused; keep the saved transactions for recovery");
+      if (isUsd(this.#client.d)) await require("../core/lib/koin-network/purchase-quote").verify(this.#client.d, request.args, { now: this.#clock(), version: this.#config.version });
       if (await this.#client.provider.getNextNonce(request.actor) !== saved.draft.header.nonce)
         throw Error("The account nonce changed. Check confirmation before continuing");
       const lookup = await this.#client.provider.getTransactionsById([saved.draft.id]);
@@ -244,6 +245,7 @@ class TestPayments {
     catch { reason = "funding_submission_uncertain"; }
     return result("correction_await_finality", { reason, simulation });
   }
+  purchaseHistory() { this.#owner(); return this.#journal.list().filter(p => p.kind === "credits"); }
   pendingPurchase() {
     this.#owner();
     return this.#journal.list().find(p => p.kind === "credits" && !["funded", "reverted", "conflicted"].includes(p.state)) || null;
@@ -305,7 +307,18 @@ class TestPayments {
           await this.#journal.nonceCoordinator.reconcile(existing.id); guard();
           const checked = await this.#journal.advance(existing.id, { allowSubmit: false }); guard();
           if (checked.action === "done") return { status: "complete", deposit: this.#journal.status(existing.id) };
-          if (this.#journal.nonceCoordinator.correction(existing.id)) return await this.#correctMana(window, existing.id, guard);
+          const saved = this.#journal.saved(existing.id);
+          if (this.#journal.nonceCoordinator.cancellation(existing.id) ||
+              (isUsd(this.#client.d) && this.#clock() > Number(saved.intent.args.purchase_quote?.expires_at)))
+            return await require("./koin-purchase-cancel").cancelExpiredPurchase({ id: existing.id, journal: this.#journal,
+              client: this.#client, config: this.#config, window, dialog: this.#dialog, guard,
+              sign: tx => this.#sign(tx), canSign: () => { if (this.#wallet.signer.getAddress() !== this.#owner()) throw Error("Unlock this payment wallet before cancellation"); }, signal: task.abort.signal, clock: this.#clock });
+          if (this.#journal.nonceCoordinator.correction(existing.id) || existing.submissionIssue === "funding_insufficient_rc") {
+            const corrected = await this.#correctMana(window, existing.id, guard);
+            const deposit = this.#journal.status(existing.id), correction = this.#journal.nonceCoordinator.correction(existing.id);
+            return { status: corrected.state === "cancelled" ? "cancelled" : ["funded", "reverted", "conflicted"].includes(deposit.state) ? "complete" : "await_finality", deposit,
+              registrationTxId: deposit.finality?.txId || (correction?.transaction && correction.state !== "superseded" ? correction.transaction.id : deposit.txId) };
+          }
           return await this.#funding.resume(window, existing.id, () => this.#journal.saved(existing.id).intent);
         }
       }

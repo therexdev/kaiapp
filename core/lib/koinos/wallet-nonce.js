@@ -7,6 +7,7 @@ const { KoinChain } = require("../koin-network/chain");
 const { hash, digest, integer } = require("../koin-network/job-protocol");
 const { uint } = require("../koin-network/policy");
 const { assertPaymentMode } = require("../koin-network/payment-mode");
+const Cancel = require("../koin-network/funding-cancel");
 const { JournalSet } = require("../koin-network/journal-set");
 const terminal = state => ["finalized", "reverted", "consumed_elsewhere"].includes(state);
 const purposes = ["funding", "send", "burn", "register", "external", "sponsored", "vault", "credits"];
@@ -81,12 +82,14 @@ class WalletNonceCoordinator {
         (!r.transaction && !["signing", "consumed_elsewhere"].includes(r.state))) throw Error("Damaged wallet nonce binding");
     nonce(r.draft.header.nonce); objectId(r.draft.id); integer(r.createdAt); integer(r.updatedAt, r.createdAt);
     if (r.correction !== undefined) this.#validateCorrection(r);
+    if (r.cancellation !== undefined) this.#validateCancellation(r);
     return r;
   }
   status(id) {
     const r = this.#row(id), c = r.correction;
     return { id, owner: r.owner, payer: r.draft.header.payer, purpose: r.purpose, state: r.state,
       txId: r.transaction?.id || (r.remote ? null : r.draft.id), nonce: r.draft.header.nonce, finality: structuredClone(r.finality),
+      ...(r.cancellation ? { cancellation: { state: r.cancellation.state, txId: r.cancellation.draft.id, attempts: r.cancellation.submissions.length, finality: structuredClone(r.cancellation.finality) } } : {}),
       ...(c ? { correction: { state: c.state, txId: c.draft.id, rcLimit: c.draft.header.rc_limit,
         nonce: c.draft.header.nonce, attempts: c.submissions.length, finality: structuredClone(c.finality) } } : {}) };
   }
@@ -111,6 +114,87 @@ class WalletNonceCoordinator {
   envelope(id) { return structuredClone(this.#row(id).transaction); }
   draft(id) { return structuredClone(this.#row(id).draft); }
   correction(id) { return structuredClone(this.#row(id).correction ?? null); }
+  cancellation(id) { return structuredClone(this.#row(id).cancellation ?? null); }
+  #validateCancellation(r) {
+    const c = r.cancellation;
+    if (r.purpose !== "funding" || r.remote || !r.transaction || !c ||
+        !["signing", "signed", "finalized", "reverted", "superseded"].includes(c.state) ||
+        !Cancel.matches(this.#client.d, r.draft, c.draft) || c.draftHash !== hash(JSON.stringify(c.draft)) ||
+        !Array.isArray(c.submissions) || c.submissions.length > 3 ||
+        (!c.transaction && !["signing", "superseded"].includes(c.state)) ||
+        (c.transaction && (c.transactionHash !== hash(JSON.stringify(c.transaction)) ||
+          !isDeepStrictEqual(unsigned(c.transaction), c.draft)))) throw Error("Damaged payment cancellation");
+    integer(c.createdAt, r.createdAt); integer(c.updatedAt, c.createdAt, r.updatedAt);
+    for (const a of c.submissions) {
+      integer(a.at, c.createdAt, c.updatedAt);
+      if (a.day !== String(Math.floor(a.at / 86400000))) throw Error("Damaged cancellation attempt");
+    }
+    if (c.submissions.length && (!c.submissionPolicy || c.submissions.length > c.submissionPolicy.maxAttempts)) throw Error("Missing cancellation resource policy");
+    if (c.submissionPolicy) {
+      integer(c.submissionPolicy.maxAttempts, 1, 3); integer(c.submissionPolicy.minRetryMs, 1000, 3600000);
+      if (uint(c.submissionPolicy.maxRcPerDay) < uint(c.draft.header.rc_limit) ||
+          !isDeepStrictEqual(c.submissionPolicy, r.submissionPolicy)) throw Error("Cancellation resource policy changed");
+    }
+    if ((r.state === "signed" && !["signing", "signed"].includes(c.state)) ||
+        (["finalized", "reverted"].includes(r.state) && c.state !== "superseded") ||
+        (r.state === "consumed_elsewhere" && !["finalized", "reverted", "superseded"].includes(c.state))) throw Error("Cancellation finality changed");
+  }
+  async reserveCancellation(id, transaction, active = () => true) {
+    const draft = structuredClone(transaction); await this.#verify(draft);
+    const initial = this.#row(id);
+    if (initial.purpose !== "funding" || initial.remote || !initial.transaction ||
+        !Cancel.matches(this.#client.d, initial.draft, draft)) throw Error("Exact zero-transfer cancellation required");
+    if (await this.#client.provider.getChainId() !== this.#client.d.chainId ||
+        await this.#client.provider.getNextNonce(initial.owner) !== draft.header.nonce) throw Error("Wallet chain or nonce changed");
+    return this.#tx(() => {
+      if (!active()) throw Error("Payment cancellation stopped");
+      const r = this.#row(id);
+      if (r.cancellation) {
+        if (!isDeepStrictEqual(r.cancellation.draft, draft)) throw Error("Cannot replace saved cancellation");
+        return { action: "recover_existing", ...this.status(id) };
+      }
+      if (r.state !== "signed") throw Error("Unresolved signed payment required");
+      const now = this.#now();
+      r.cancellation = { draft, draftHash: hash(JSON.stringify(draft)), transaction: null, transactionHash: null,
+        state: "signing", createdAt: now, updatedAt: now, submissions: [], finality: null };
+      this.#save(r); return { action: "sign_original", ...this.status(id) };
+    });
+  }
+  async stageCancellation(id, transaction) {
+    const tx = structuredClone(transaction); await this.#verify(tx); this.#signatures(tx, true);
+    return this.#tx(() => {
+      const r = this.#row(id), c = r.cancellation;
+      if (!c || !isDeepStrictEqual(unsigned(tx), c.draft)) throw Error("Original cancellation envelope required");
+      if (c.transaction) {
+        if (c.transactionHash !== hash(JSON.stringify(tx))) throw Error("Cannot replace cancellation signature");
+        return this.status(id);
+      }
+      if (!["signing", "superseded"].includes(c.state)) throw Error("Missing cancellation signing fence");
+      c.transaction = tx; c.transactionHash = hash(JSON.stringify(tx));
+      if (c.state === "signing") c.state = "signed";
+      c.updatedAt = this.#now(); this.#save(r); return this.status(id);
+    });
+  }
+  authorizeCancellationSubmission(id, { maxRcPerDay, maxAttempts = 3, minRetryMs = 1000 }) {
+    const budget = uint(maxRcPerDay); integer(maxAttempts, 1, 3); integer(minRetryMs, 1000, 3600000);
+    if (!budget) throw Error("Positive wallet resource budget required");
+    return this.#tx(() => {
+      const r = this.#row(id), c = r.cancellation, now = this.#now(), day = String(Math.floor(now / 86400000));
+      if (r.state !== "signed" || c?.state !== "signed" || !c.transaction) throw Error("Unresolved signed cancellation required");
+      const policy = { maxRcPerDay, maxAttempts, minRetryMs };
+      if ((r.submissionPolicy && !isDeepStrictEqual(r.submissionPolicy, policy)) ||
+          (c.submissionPolicy && !isDeepStrictEqual(c.submissionPolicy, policy))) throw Error("Cancellation resource policy changed");
+      if (c.submissions.length >= maxAttempts || (c.submissions.length && now < c.submissions.at(-1).at + minRetryMs)) throw Error("Cancellation retry limit reached");
+      const existing = [r, r.correction, c].filter(Boolean).reduce((used, record) => {
+        const cost = (record.submissions || []).some(a => a.day === day) ? uint(record.draft.header.rc_limit) : 0n;
+        return cost > used ? cost : used;
+      }, 0n), rc = uint(c.draft.header.rc_limit);
+      if (this.#dailyUsed(r.owner, day) + (rc > existing ? rc - existing : 0n) > budget) throw Error("Daily wallet resource budget exhausted");
+      c.submissionPolicy = policy; c.submissions.push({ at: now, day }); c.updatedAt = now;
+      if (!r.submissionPolicy) r.submissionPolicy = policy;
+      this.#save(r); return structuredClone(c.transaction);
+    });
+  }
   #correctionMatches(r, draft) {
     if (r.purpose !== "funding" || r.remote || !r.transaction || r.draft.header.payee !== undefined ||
         !draft || draft.header?.payee !== undefined || !uint(draft.header?.rc_limit) ||
@@ -154,6 +238,7 @@ class WalletNonceCoordinator {
     return this.#tx(() => {
       if (!active()) throw Error("Wallet Mana correction stopped");
       const r = this.#row(id);
+      if (r.cancellation) throw Error("Use the saved cancellation; a Mana correction cannot replace it");
       if (r.correction) {
         if (!isDeepStrictEqual(r.correction.draft, unsigned(draft))) throw Error("Cannot replace the saved Mana correction");
         return { action: "recover_existing", ...this.status(id) };
@@ -188,7 +273,8 @@ class WalletNonceCoordinator {
       const other = this.#row(row.id), original = (other.submissions || []).some(a => a.day === day) ? uint(other.draft.header.rc_limit) : 0n;
       const corrected = other.correction?.submissions.some(a => a.day === day) ? uint(other.correction.draft.header.rc_limit) : 0n;
       // These envelopes use one identical owner nonce; only one can execute.
-      spent += original > corrected ? original : corrected;
+      const cancelled = other.cancellation?.submissions.some(a => a.day === day) ? uint(other.cancellation.draft.header.rc_limit) : 0n;
+      spent += [original, corrected, cancelled].reduce((a, b) => a > b ? a : b);
     }
     return spent;
   }
@@ -197,6 +283,7 @@ class WalletNonceCoordinator {
     if (!budget) throw Error("Positive wallet resource budget required");
     return this.#tx(() => {
       const r = this.#row(id), c = r.correction, now = this.#now(), day = String(Math.floor(now / 86400000));
+      if (r.cancellation) throw Error("Use the saved cancellation; the Mana correction cannot be resubmitted");
       if (r.state !== "signed" || c?.state !== "signed" || !c.transaction) throw Error("Unresolved signed Mana correction required");
       const policy = { maxRcPerDay, maxAttempts, minRetryMs };
       if ((r.submissionPolicy && !isDeepStrictEqual(r.submissionPolicy, policy)) ||
@@ -219,6 +306,7 @@ class WalletNonceCoordinator {
     return this.#tx(() => {
       const r = this.#row(id), now = this.#now(), day = String(Math.floor(now / 86400000));
       if (r.state !== "signed") throw Error("Unresolved signed envelope required");
+      if (r.cancellation) throw Error("Use the saved cancellation; the original cannot be resubmitted");
       if (r.correction) throw Error("Use the saved Mana correction; the original cannot be resubmitted");
       const policy = { maxRcPerDay, maxAttempts, minRetryMs };
       if (r.submissionPolicy && JSON.stringify(r.submissionPolicy) !== JSON.stringify(policy)) throw Error("Wallet submission policy changed");
@@ -328,15 +416,20 @@ class WalletNonceCoordinator {
     const r = this.#row(id); if (terminal(r.state) || !r.transaction) return this.status(id);
     const original = await this.#inspectFinality(r.transaction);
     const corrected = !original && r.correction?.transaction ? await this.#inspectFinality(r.correction.transaction) : null;
-    const proof = original || corrected;
+    const cancelled = !original && !corrected && r.cancellation?.transaction ? await this.#inspectFinality(r.cancellation.transaction) : null;
+    const proof = original || corrected || cancelled;
     if (!proof) return this.status(id);
     return this.#tx(() => {
       this.#fresh(proof); const current = this.#row(id);
       if (!terminal(current.state)) {
-        current.state = corrected ? "consumed_elsewhere" : proof.state; current.finality = proof.finality;
+        current.state = corrected || cancelled ? "consumed_elsewhere" : proof.state; current.finality = proof.finality;
         if (current.correction) {
           current.correction.state = corrected ? proof.state : "superseded";
           current.correction.finality = proof.finality; current.correction.updatedAt = this.#now();
+        }
+        if (current.cancellation) {
+          current.cancellation.state = cancelled ? proof.state : "superseded";
+          current.cancellation.finality = proof.finality; current.cancellation.updatedAt = this.#now();
         }
         this.#save(current);
       }
@@ -384,13 +477,14 @@ class WalletNonceCoordinator {
   async recoverOriginal(id, txId) {
     objectId(txId); const r = this.#row(id);
     if (r.remote) return this.observeRemote(id, txId);
-    const correction = txId === r.correction?.draft.id;
-    if (!correction && txId !== r.draft.id) throw Error("Original transaction ID or saved Mana correction ID required");
+    const correction = txId === r.correction?.draft.id, cancellation = txId === r.cancellation?.draft.id;
+    if (!correction && !cancellation && txId !== r.draft.id) throw Error("Original transaction ID or saved Mana correction ID required");
     const records = response(await this.#client.provider.getTransactionsById([txId])).transactions ?? [];
     if (!Array.isArray(records)) throw Error("Invalid wallet transaction lookup");
     const found = records.filter(x => x.transaction?.id === txId);
     if (found.length !== 1) throw Error("Original transaction is not uniquely available");
-    if (correction) await this.stageCorrection(id, found[0].transaction);
+    if (cancellation) await this.stageCancellation(id, found[0].transaction);
+    else if (correction) await this.stageCorrection(id, found[0].transaction);
     else await this.stage(id, found[0].transaction);
     return this.reconcile(id);
   }
@@ -416,6 +510,8 @@ class WalletNonceCoordinator {
     const repairRow = this.#row(review.id);
     if (repairRow.correction?.draft.id === current.consumingTxId && !repairRow.correction.transaction)
       throw Error("Recover the saved Mana correction envelope before recording its finality");
+    if (repairRow.cancellation?.draft.id === current.consumingTxId && !repairRow.cancellation.transaction)
+      throw Error("Recover the saved cancellation envelope before recording its finality");
     return this.#tx(() => {
       this.#fresh(current); const r = this.#row(review.id);
       if (!terminal(r.state)) {
@@ -423,6 +519,10 @@ class WalletNonceCoordinator {
         if (r.correction) {
           r.correction.state = current.consumingTxId === r.correction.draft.id ? current.consumingState : "superseded";
           r.correction.finality = current.finality; r.correction.updatedAt = this.#now();
+        }
+        if (r.cancellation) {
+          r.cancellation.state = current.consumingTxId === r.cancellation.draft.id ? current.consumingState : "superseded";
+          r.cancellation.finality = current.finality; r.cancellation.updatedAt = this.#now();
         }
         this.#save(r);
       }

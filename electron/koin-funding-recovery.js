@@ -77,6 +77,7 @@ class FundingRecovery {
     integer(reviewedAt, r.createdAt, r.updatedAt); integer(r.expires, reviewedAt + 180000, reviewedAt + 180000);
     if (r.held !== undefined && typeof r.held !== "boolean") throw Error("Damaged funding hold");
     if (r.submissionIssue !== undefined && r.submissionIssue !== null && !["funding_insufficient_rc", "funding_simulation_failed", "funding_submission_uncertain"].includes(r.submissionIssue)) throw Error("Damaged funding submission issue");
+    if (r.cancellationIssue !== undefined && r.cancellationIssue !== null && !["funding_insufficient_rc", "funding_simulation_failed", "funding_submission_uncertain"].includes(r.cancellationIssue)) throw Error("Damaged cancellation issue");
     integer(r.holdVersion ?? 0);
     integer(r.attempts, 0, this.#policy.maxAttempts);
     if (r.transaction && (r.transaction.id !== r.draft.id || r.transactionHash !== hash(JSON.stringify(r.transaction)))) throw Error("Damaged funding envelope");
@@ -95,6 +96,7 @@ class FundingRecovery {
     const r = this.#row(id);
     return { id, state: r.state, reason: r.reason, txId: r.draft.id, attempts: r.attempts, kind: r.intent.kind,
       amount: r.intent.args.amount, actor: r.intent.actor, held: r.held === true, finality: structuredClone(r.finality), paymentsEnabled: this.paymentsEnabled,
+      ...(this.#nonces.status(id).cancellation ? { cancellation: { ...this.#nonces.status(id).cancellation, ...(r.cancellationIssue ? { issue: r.cancellationIssue } : {}) } } : {}),
       ...(r.submissionIssue ? { submissionIssue: r.submissionIssue } : {}),
       ...(r.intent.args.purchase_quote ? { quoteExpiresAt: Number(r.intent.args.purchase_quote.expires_at) } : {}) };
   }
@@ -120,6 +122,15 @@ class FundingRecovery {
       // A delayed transport failure must not replace a confirmed outcome.
       if (terminal(r.state)) return;
       r.submissionIssue = reason; this.#save(r);
+    });
+  }
+  recordCancellationIssue(id, reason) {
+    if (reason !== null && !["funding_insufficient_rc", "funding_simulation_failed", "funding_submission_uncertain"].includes(reason)) throw Error("Unknown cancellation issue");
+    this.#tx(() => {
+      const r = this.#row(id);
+      if (terminal(r.state)) return;
+      if (!this.#nonces.cancellation(id)) throw Error("Saved cancellation required");
+      r.cancellationIssue = reason; this.#save(r);
     });
   }
   #review(review, draft, policyHash, active) {
@@ -216,7 +227,7 @@ class FundingRecovery {
     const correction = this.#nonces.correction(id);
     const correctedWinner = nonceState.state === "consumed_elsewhere" && correction?.transaction && ["finalized", "reverted"].includes(correction.state);
     if (nonceState.state === "consumed_elsewhere" && !correctedWinner) return this.#tx(() => {
-      const r = this.#row(id); r.state = "conflicted"; r.reason = "nonce_consumed_by_other_transaction"; r.finality = nonceState.finality;
+      const r = this.#row(id); r.state = "conflicted"; r.reason = ["finalized", "reverted"].includes(nonceState.cancellation?.state) && nonceState.cancellation.txId === nonceState.finality?.txId ? "expired_purchase_cancelled" : "nonce_consumed_by_other_transaction"; r.finality = nonceState.finality;
       this.#save(r); return { action: "done", ...this.status(id) };
     });
     // A crash between the two envelope writes can recover the first durable
@@ -243,7 +254,7 @@ class FundingRecovery {
           r.finality = finality; r.state = finality.state === "finalized" ? "funded" : "reverted"; r.reason = null; this.#save(r);
           return { action: "done", ...this.status(id) };
         }
-        if (correction || r.held || r.state === "needs_review") return { action: "review", ...this.status(id) };
+        if (correction || nonceState.cancellation || r.held || r.state === "needs_review") return { action: "review", ...this.status(id) };
         if (finality.state !== "unknown" || !allowSubmit) return { action: "wait", ...this.status(id) };
         let reason = null;
         if (hash(JSON.stringify(config)) !== r.policyHash || config.paused) reason = "funding_policy_changed";

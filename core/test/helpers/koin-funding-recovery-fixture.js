@@ -53,12 +53,12 @@ function fixture(t, options = {}) {
   };
   const id = hash("deposit-one"), journal = open();
   const sign = async d => { state.signed++; const tx = structuredClone(d.transaction); await signer.signTransaction(tx); return tx; };
-  const include = async (tx, { reverted = false, irreversible = false } = {}) => {
+  const include = async (tx, { reverted = false, irreversible = false, zeroTransfer = false } = {}) => {
     state.height++; state.nonce = "KAI=";
     state.record = { transaction: structuredClone(tx), containing_blocks: [blockId(state.height)] };
     state.block = headBlock(state.height); state.block.block.transactions = [structuredClone(tx)];
     const receipt = { id: tx.id, payer: signer.getAddress(), rc_used: "1000", reverted };
-    if (!reverted) {
+    if (!reverted && !zeroTransfer) {
       receipt.events = [{ source: d.token, name: "token.transfer_event", data: utils.encodeBase64url(await native.serialize({ from: request.actor, to: options.usd && request.kind === "credits" ? d.masterNode : d[request.kind], value: request.args.amount }, "token.transfer_event")) }];
       if (options.usd && request.kind === "credits") receipt.events.push({ source: d.credits, name: "kai.prepaid_usd_purchase", data: utils.encodeBase64url(await client.serializer.serialize(request.args.purchase_quote, "koin.PurchaseQuote")) });
       state.liquid = options.usd ? "0" : request.args.amount; state.liabilities = !options.usd && request.kind === "credits" ? request.args.amount : "0"; state.available = options.usd ? request.args.purchase_quote.credits : state.liabilities;
