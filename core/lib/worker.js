@@ -42,13 +42,18 @@ class Worker {
     return crypto.createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 16);
   }
 
-  constructor({ schedulerUrl, wallet, runtime, hardware, models, producer, onEvent, fundedOnly = false, qualificationTarget = null, koinMainnetPilotJobs = false, koinMainnetTarget = null, koinShadowJobs = process.env.KAI_KOIN_SHADOW_JOBS === "1", koinFundedRehearsalJobs = process.env.KAI_KOIN_FUNDED_REHEARSAL_JOBS === "1" }) {
+  constructor({ schedulerUrl, wallet, runtime, hardware, models, modelPins = null, idlePollMs = 45000, producer, onEvent, fundedOnly = false, qualificationTarget = null, koinMainnetPilotJobs = false, koinMainnetTarget = null, koinShadowJobs = process.env.KAI_KOIN_SHADOW_JOBS === "1", koinFundedRehearsalJobs = process.env.KAI_KOIN_FUNDED_REHEARSAL_JOBS === "1" }) {
     this.schedulerUrl = String(schedulerUrl || "").replace(/\/$/, "");
     this.wallet = wallet; // WalletService (unlocked)
     this.runtime = runtime; // RuntimeManager
     this.hardware = hardware;
     this.models = models || null; // ModelManager — advertises what this machine can serve
+    if (modelPins !== null && (typeof modelPins !== "object" || Array.isArray(modelPins) || !Object.keys(modelPins).length || Object.keys(modelPins).length > 64 ||
+        Object.entries(modelPins).some(([id, hash]) => !/^[a-zA-Z0-9._-]{1,100}$/.test(id) || !/^[a-f0-9]{64}$/.test(hash)))) throw Error("Approved provider model pins required");
+    this.modelPins = modelPins === null ? null : Object.freeze({ ...modelPins });
     this.fundedOnly = fundedOnly === true;
+    if (!Number.isInteger(idlePollMs) || idlePollMs < 5000 || idlePollMs > 45000 || (idlePollMs !== 45000 && !this.fundedOnly)) throw Error("Bounded funded provider poll interval required");
+    this.idlePollMs = idlePollMs;
     this.qualificationTarget = qualificationTarget ? require("./koin-network/session-delegation").target(qualificationTarget) : null;
     if (this.qualificationTarget && !this.fundedOnly) throw Error("Qualification requires the explicitly configured provider");
     this.koinMainnetPilotJobs = koinMainnetPilotJobs === true;
@@ -66,6 +71,7 @@ class Worker {
     this.producer = typeof producer === "function" ? producer : null;
     this.onEvent = onEvent || (() => {});
     this.running = false;
+    this._startGeneration = 0;
     this.token = null;
     // Health fields exist so "Earning" in the UI can never silently mean
     // "talking to nobody": the Earn tab renders last contact and last error.
@@ -179,7 +185,7 @@ class Worker {
     };
   }
 
-  async _register() {
+  async _register(signal) {
     // Single-flight, and the poll in the air is aborted afterward. The
     // scheduler keeps ONE token per address, so a register invalidates
     // whatever token the in-flight long-poll is carrying — without this,
@@ -188,7 +194,10 @@ class Worker {
     // aged off until the next one, in a 2–4 minute oscillation (field
     // finding — the night's actual final boss, timestamped by monitors).
     if (this._registerGate) return this._registerGate;
+    const controller = this._registerAbort = new AbortController();
+    const requestSignal = AbortSignal.any([controller.signal, AbortSignal.timeout(10000), ...(signal ? [signal] : [])]);
     this._registerGate = (async () => {
+      requestSignal.throwIfAborted();
       const address = this.wallet.address;
       // Advertise the models actually on disk so the scheduler only hands
       // this machine jobs it can serve — a job for a missing model would
@@ -231,6 +240,11 @@ class Worker {
       // was named for — while the scheduler, receiving the ROUNDED ramGb,
       // would have accepted it. One fit rule, both sides).
       const fits = (a) => capacityGb == null || !a.minRamGb || a.minRamGb <= Math.round(capacityGb);
+      const approved = (a) => {
+        if (!this.modelPins) return true;
+        const alias = this.models.catalog?.aliases?.[a.alias], pack = this.models.catalog?.packages?.[alias?.package];
+        return !!alias && !this.models.quarantineOf?.(alias.package) && this.modelPins[a.alias] === pack?.sha256 && !!this.modelPins[a.alias];
+      };
       // Per-model verdicts, kept on the worker so the UI can always answer
       // "why is my model not on the network?" with the actual rule that
       // fired (Pi field finding 2026-08-19: the machine sat online with an
@@ -238,16 +252,18 @@ class Worker {
       this.modelGate = this.models
         ? this.models.aliases().filter((a) => a.status === "ready").map((a) => ({
             alias: a.alias,
-            advertised: !a.custom && !a.dev && fits(a),
+            advertised: !a.custom && !a.dev && fits(a) && approved(a),
             // A CODE, not a substring of the prose. The "nothing fits" notice
             // below used to test reason.includes("GB RAM") — which is a rule
             // that silently stops firing the day someone rewords the message,
             // and rewording it is exactly what adding VRAM required.
-            reasonCode: a.custom ? "private" : a.dev ? "dev" : fits(a) ? null : "too-big",
+            reasonCode: a.custom ? "private" : a.dev ? "dev" : !approved(a) ? "unapproved" : fits(a) ? null : "too-big",
             reason: a.custom
               ? "private import — never advertised"
               : a.dev
                 ? "dev build — never advertised"
+                : !approved(a)
+                  ? "model is not approved for this network"
                 : fits(a)
                   ? null
                   : `needs ${a.minRamGb} GB — this machine reports ${Math.round(ramGb ?? 0)} GB RAM${vramGb ? ` and ${Math.round(vramGb)} GB VRAM` : ""}`,
@@ -314,8 +330,10 @@ class Worker {
           message: `Could not sign the registration proof for ${address}: ${e?.message || e}. Earning still works for now, but a future scheduler will require it.`,
         });
       }
+      requestSignal.throwIfAborted();
       const r = await fetch(`${this.schedulerUrl}/worker/register`, {
         method: "POST",
+        signal: requestSignal,
         headers: { "content-type": "application/json", connection: "close" },
         body: JSON.stringify({
           address,
@@ -343,6 +361,7 @@ class Worker {
         }),
       });
       const j = await r.json();
+      requestSignal.throwIfAborted();
       if (!j.ok) throw new Error(`Scheduler refused registration: ${j.error}`);
       this.token = j.token;
       this._koinAvailable = j.koinShadow === true;
@@ -352,16 +371,20 @@ class Worker {
       this._pollAbort?.abort();
     })().finally(() => {
       this._registerGate = null;
+      if (this._registerAbort === controller) this._registerAbort = null;
     });
     return this._registerGate;
   }
 
-  async start() {
+  async start(signal) {
     if (this.running) return this.status();
     if (!this.schedulerUrl) throw new Error("No scheduler URL configured (KAI_SCHEDULER_URL)");
     if (!this.wallet.address) throw new Error("Earning needs a wallet — create one first");
 
-    await this._register();
+    const generation = ++this._startGeneration;
+    await this._register(signal);
+    signal?.throwIfAborted();
+    if (generation !== this._startGeneration) throw Error("Provider startup cancelled");
     this.running = true;
     this._koinSession = crypto.randomBytes(16).toString("hex");
     this._koinSequence = 0;
@@ -462,6 +485,8 @@ class Worker {
   }
 
   async stop() {
+    this._startGeneration++;
+    this._registerAbort?.abort();
     this.running = false;
     this._shadowAbort?.abort();
     clearInterval(this._koinTimer);
@@ -506,19 +531,24 @@ class Worker {
         await new Promise((res) => setTimeout(res, 5000));
         continue;
       }
-      let job = null;
+      let job = null, idleTimer, idleExpired = false;
       try {
         this._pollAbort = new AbortController();
-        // Client timeout comfortably above the scheduler's 20s hold, so a
-        // loaded machine doesn't abort polls the server is still serving.
+        // Public prepaid jobs do not wake the older scheduler's parked legacy
+        // poll. Refresh that idle request without waiting its full twenty
+        // seconds. Once headers arrive, keep the normal body deadline so an
+        // assigned job's response is never cut short by the idle timer.
+        const idle = new AbortController();
+        if (this.idlePollMs < 45000) idleTimer = setTimeout(() => { idleExpired = true; idle.abort(); }, this.idlePollMs);
         const r = await fetch(`${this.schedulerUrl}/worker/next-job?token=${this.token}`, {
           // Fresh TCP per request: NAT/routers silently drop idle pooled
           // connections and Node's pool then serves the corpse to every
           // later request — the node "goes offline" on an awake machine
           // and never heals (field finding, the day's final boss).
           headers: { connection: "close" },
-          signal: AbortSignal.any([AbortSignal.timeout(45000), this._pollAbort.signal]),
+          signal: AbortSignal.any([AbortSignal.timeout(45000), this._pollAbort.signal, idle.signal]),
         });
+        clearTimeout(idleTimer);
         if (r.status === 200) {
           this.stats.lastPollOkAt = new Date().toISOString();
           this.stats.lastError = null;
@@ -542,10 +572,11 @@ class Worker {
         // Stop aborts the idle poll; anything else is the scheduler being
         // unreachable — back off, keep trying while enabled.
         if (!this.running) break;
+        if (idleExpired && !this._pollAbort.signal.aborted) continue;
         this.stats.lastError = "scheduler unreachable — retrying";
         await new Promise((res) => setTimeout(res, 3000));
         continue;
-      }
+      } finally { clearTimeout(idleTimer); }
       if (!job || !this.running) continue;
 
       // Heartbeat while executing: generation and model switching take

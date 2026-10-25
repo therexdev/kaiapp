@@ -131,3 +131,21 @@
 .product-v2 #product-provider-model-pick{display:block;width:100%;margin-top:8px;padding:10px 12px;border:1px solid var(--border);border-radius:10px}
 
 .product-v2 #product-local-payment{white-space:pre-wrap;overflow-wrap:anywhere}.product-v2 .product-payment-transaction{display:block;overflow-wrap:anywhere}
+
+/* Keep the purchase itself in view; balances and status are compact context. */
+.product-v2 #view-buy-credits .product-head{margin-bottom:16px}
+.product-v2 #view-buy-credits .product-purchase-wallet,.product-v2 #view-buy-credits .product-purchase-availability{padding:12px 16px;gap:12px;flex-direction:row;align-items:center}
+.product-v2 #view-buy-credits .product-purchase-wallet .product-actions,.product-v2 #view-buy-credits .product-purchase-availability .product-actions{margin:0;gap:6px;flex-shrink:1}
+.product-v2 #view-buy-credits .product-purchase-wallet strong{font-size:20px}
+.product-v2 #view-buy-credits .product-purchase-wallet .product-eyebrow{font-size:9px!important}
+.product-v2 #view-buy-credits #product-wallet-note:empty{display:none}
+.product-v2 #view-buy-credits .product-steps{display:none}
+.product-v2 #view-buy-credits .product-packs{margin:12px 0}
+.product-v2 #view-buy-credits .product-packs button{padding:12px 4px}
+.product-v2 #view-buy-credits .product-balance{font-size:38px;margin:8px 0 12px}
+.product-v2 #view-buy-credits .product-order>.primary{width:100%;margin-top:12px}
+.product-v2 #view-buy-credits .product-panel{padding:18px}
+.product-v2 #product-provider-options>summary{cursor:pointer;color:var(--text-dim);font-size:12px;padding:4px 0}
+.product-v2 #product-provider-options[open]>summary{margin-bottom:12px}
+@media(min-width:700px){.product-v2 #view-buy-credits .product-two{grid-template-columns:1fr 1fr}}
+@media(max-width:520px){.product-v2 #view-buy-credits .product-purchase-wallet,.product-v2 #view-buy-credits .product-purchase-availability{flex-wrap:wrap}}

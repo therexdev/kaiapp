@@ -35,7 +35,7 @@
       if (freePreference) freePreference.hidden = value.product !== "prepaid-usd-v1";
       if (value.activation === "ready") window.KaiCredits?.refresh();
       const help = document.getElementById("network-chat-help");
-      if (help && value.maxRequestCredits) help.textContent = `Up to ${value.maxRequestCredits} credits per message. Free credits are used first; purchased credits may cover the rest. Turn on Free only to prevent paid continuation.`;
+      if (help && value.maxRequestCredits) help.textContent = `Send a message to use your credits. Free credits are used first. Up to ${value.maxRequestCredits} credits per message.`;
       const recover = document.getElementById("network-recover"); if (recover) recover.hidden = !info.recoveryAvailable;
       paintPrice();
       if (changed || wasFresh !== availabilityFresh()) window.dispatchEvent(new Event("kai-network-models-changed"));
@@ -115,7 +115,9 @@
   const freeOnly = document.getElementById("network-free-only");
   if (freeOnly) {
     freeOnly.checked = localStorage.getItem("kai-credit-free-only") === "true";
-    freeOnly.addEventListener("change", () => localStorage.setItem("kai-credit-free-only", String(freeOnly.checked)));
+    const paintSpending = () => { const summary = document.getElementById("network-spending-summary"); if (summary) summary.textContent = freeOnly.checked ? "Spending: free credits only" : "Spending options"; };
+    paintSpending();
+    freeOnly.addEventListener("change", () => { localStorage.setItem("kai-credit-free-only", String(freeOnly.checked)); paintSpending(); });
   }
   document.getElementById("network-add-koin")?.addEventListener("click", () => {
     window.dispatchEvent(new CustomEvent("kai-network-add-koin", { detail: document.getElementById("network-koin-amount").value }));

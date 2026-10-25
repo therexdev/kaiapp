@@ -314,12 +314,13 @@ let pickable = []; // latest [{v,label}] the chat picker offers — reused by Co
 async function updateModelPick(aliases) {
   await KaiProviders.refresh().catch(() => {});
   await window.KaiNetwork?.refresh().catch(() => {});
-  let netBlockedWhy = "";
+  let netBlockedWhy = "", networkPrivacyAllowed = false;
   try {
     const n = await coreGet("/core/network");
     // Wallet state is part of eligibility: advertising "Koinos Network"
     // while the wallet is locked just defers the failure to send time.
-    networkEligible = n.privacyMode !== "local-only" && !!n.schedulerUrl && n.walletUnlocked !== false;
+    networkPrivacyAllowed = n.privacyMode !== "local-only";
+    networkEligible = networkPrivacyAllowed && !!n.schedulerUrl && n.walletUnlocked !== false;
     // Field finding (owner's Pi): with the Local-Only default, the network
     // source simply didn't EXIST in the picker and looked broken. Name the
     // reason so it's discoverable instead of invisible.
@@ -337,8 +338,8 @@ async function updateModelPick(aliases) {
     }
   } catch { networkEligible = false; }
   if (window.KaiNetwork?.info.configured) {
-    networkEligible = !KaiNetwork.info.blocked;
-    netBlockedWhy = KaiNetwork.info.blocked || "";
+    networkEligible = networkPrivacyAllowed && !KaiNetwork.info.blocked;
+    netBlockedWhy = networkPrivacyAllowed ? KaiNetwork.info.blocked || "" : "blocked by Local-Only";
   }
   const pick = $("model-pick");
   // Source + model, two boxes (field request): pick WHERE it runs, then
@@ -425,10 +426,15 @@ async function fillNetworkModelPick() {
   if (window.KaiNetwork?.info.configured) {
     const current = KaiNetwork.info;
     if (current.product === "prepaid-usd-v1" && Array.isArray(current.models)) {
-      const previous = pick.dataset.sig?.startsWith("paid-catalog:") ? pick.value : localStorage.getItem("kai-credit-model");
-      const selected = previous || "koinos-network:" + current.model;
       const options = current.models.map(m => ({ value: "koinos-network:" + m.model, label: m.label || state.aliasLabels?.[m.model] || m.model, available: m.available === true && KaiNetwork.availabilityFresh() }));
-      // A disappearing/offline choice remains explicit; never substitute Fast.
+      // Only an explicit model choice is sticky. A new customer starts with a
+      // currently available model, even when the packaged default is offline.
+      // Keep revisiting an automatic default as the first catalog arrives.
+      const previous = localStorage.getItem("kai-credit-model");
+      const automatic = pick.dataset.sig?.startsWith("paid-catalog:") ? pick.value : null;
+      const defaultModel = "koinos-network:" + current.model;
+      const selected = previous || options.find(o => o.value === defaultModel && o.available)?.value || options.find(o => o.available)?.value || automatic || defaultModel;
+      // A disappearing/offline explicit choice remains visible; never replace it.
       if (selected && !options.some(o => o.value === selected)) options.push({ value: selected, label: selected.replace(/^koinos-network:/, ""), available: false });
       const sig = "paid-catalog:" + JSON.stringify(options);
       if (pick.dataset.sig !== sig) {
@@ -480,6 +486,7 @@ window.addEventListener("kai-providers-changed", () => { $("model-pick").dataset
 window.addEventListener("kai-network-models-changed", () => { if ($("src-pick").value === "network") fillNetworkModelPick(); });
 window.addEventListener("kai-network-use", async event => {
   await updateModelPick((await coreGet("/core/models")).aliases);
+  if (!networkEligible && !KaiNetwork.info.blocked) { activateView("api"); $("privacy-pick")?.focus(); return; }
   if (KaiNetwork.info.blocked) {
     if (KaiNetwork.info.activation === "signin-required") { void selectAccountScope(false); activateView("settings"); $("btn-account-signin").scrollIntoView({ block: "center" }); }
     else if (KaiNetwork.info.product === "prepaid-usd-v1") { activateView("credits"); }

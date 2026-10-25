@@ -148,7 +148,7 @@ test("a cold provider recovers its qualified model, loads it without Chat and re
   await restarted.stop(); await restarted.tick();
   assert.equal(f.counts.started, 2); assert.equal(restarted.savedPreference(f.c).model, "smart");
 });
-test("Earn selects its own approved model while Off and never silently replaces a saved choice", async t => {
+test("Earn automatically uses installed approved capacity despite an absent or obsolete startup preference", async t => {
   const f = fixture(t); f.installed = true; addSmart(f);
   let installedSmart = false, prepared;
   f.core.models.packageStatus = id => ({ status: id === "smart-package" && !installedSmart ? "absent" : "ready" });
@@ -156,18 +156,61 @@ test("Earn selects its own approved model while Off and never silently replaces 
   f.core.runtime.acquireFor = async id => { prepared = id; return { release() {} }; };
   await f.controller.selectModel("smart", AbortSignal.timeout(5000));
   assert.equal(f.controller.preference(f.c), false); assert.equal(prepared, undefined); assert.equal(f.counts.downloads, 0);
-  assert.equal((await f.controller.info()).state, "download-required");
-  await assert.rejects(f.controller.start(AbortSignal.timeout(5000)), /Download/);
+  let info = await f.controller.info();
+  assert.equal(info.state, "ready"); assert.equal(info.model.id, "fixture"); assert.equal(info.automatic, true);
+  assert.deepEqual(info.offeredModels, ["fixture"]);
   await assert.rejects(f.controller.selectModel({ model: "smart" }, AbortSignal.timeout(5000)), /Choose/);
   await assert.rejects(f.controller.selectModel("private-model", AbortSignal.timeout(5000)), /approved/);
   installedSmart = true; await f.controller.start(AbortSignal.timeout(5000)); assert.equal(prepared, "smart");
   await assert.rejects(f.controller.selectModel("fixture", AbortSignal.timeout(5000)), /Turn sharing off/);
   await f.controller.stop(); f.core.models.catalog.packages["smart-package"].sha256 = P.hash("unapproved-weights");
-  const info = await f.controller.info(); assert.equal(info.state, "model-required"); assert.equal(info.model, undefined);
+  info = await f.controller.info(); assert.equal(info.state, "ready"); assert.equal(info.model.id, "fixture");
   assert.deepEqual(info.models.map(m => m.id), ["fixture"]);
-  await assert.rejects(f.controller.start(AbortSignal.timeout(5000)), /no longer approved/);
-  assert.equal(prepared, "smart");
+  await f.controller.start(AbortSignal.timeout(5000)); assert.equal(prepared, "fixture");
+  await f.controller.stop();
   await f.controller.selectModel("fixture", AbortSignal.timeout(5000)); assert.equal((await f.controller.info()).model.id, "fixture");
+});
+test("one-click Earn overrides a stale saved startup model with network-qualified capacity and offers every supported installed pin", async t => {
+  const f = fixture(t); f.installed = true; addSmart(f);
+  f.controller.preference(f.c, false, "fixture");
+  f.core.runtime.status = () => ({ activeAlias: "fixture" });
+  f.controller.readStatus = async () => ({ model: "fixture", state: "review-required", models: [{ model: "smart", state: "preparing" }] });
+  const loaded = []; f.core.runtime.acquireFor = async model => { loaded.push(model); return { release() {} }; };
+  const info = await f.controller.info();
+  assert.equal(info.model.id, "smart"); assert.equal(info.automatic, true); assert.deepEqual(info.offeredModels, ["fixture", "smart"]);
+  assert.deepEqual(loaded, [], "reading setup never starts a chat or inference");
+  await f.controller.start(AbortSignal.timeout(5000)); assert.deepEqual(loaded, ["smart"]);
+  assert.deepEqual(f.options.modelPins, { fixture: P.hash("model"), smart: P.hash("smart-model") });
+  assert.equal(f.counts.started, 1); assert.equal(f.counts.downloads, 0);
+});
+test("a new provider warms installed Smart before its first timed network check without selecting a model or sending Chat", async t => {
+  const f = fixture(t); f.installed = true;
+  const modelHash = P.hash("smart-default");
+  f.tariffs.push({ model: "koinos-smart", modelHash });
+  f.core.models.catalog.aliases["koinos-smart"] = { package: "smart-default", minRamGb: 8 };
+  f.core.models.catalog.packages["smart-default"] = { sha256: modelHash, sizeBytes: 4000 };
+  f.controller.readStatus = async () => ({ model: "fixture", state: "review-required", models: [{ model: "koinos-smart", state: "review-required" }] });
+  f.controller.preference(f.c, false, "fixture");
+  let loaded; f.core.runtime.acquireFor = async model => { loaded = model; return { release() {} }; };
+  await f.controller.start(AbortSignal.timeout(5000));
+  assert.equal(loaded, "koinos-smart"); assert.equal(f.options.idlePollMs, 5000);
+  assert.equal(f.counts.started, 1); assert.equal(f.counts.downloads, 0);
+  assert.deepEqual(Object.keys(f.options.modelPins), ["fixture", "koinos-smart"]);
+});
+test("provider setup and worker use the same RAM or VRAM capacity rule", async t => {
+  const f = fixture(t); f.installed = true; addSmart(f);
+  f.core.models.catalog.aliases.smart.minRamGb = 24;
+  assert.deepEqual((await f.controller.info()).offeredModels, ["fixture"]);
+  f.core.hardware.gpus = [{ vramMb: 32768 }];
+  assert.deepEqual((await f.controller.info()).offeredModels, ["fixture", "smart"]);
+});
+test("Local-Only stops provider restart before account or catalog traffic and preserves the saved intent", async t => {
+  const f = fixture(t); f.installed = true; f.controller.preference(f.c, true);
+  f.core.gateway.network.status = () => ({ privacyMode: "local-only" });
+  let requests = 0; f.args.service.context = async () => { requests++; return f.c; };
+  const info = await f.controller.info(); assert.equal(info.state, "unavailable"); assert.match(info.detail, /Local-Only/);
+  await assert.rejects(f.controller.start(AbortSignal.timeout(5000)), /Local-Only/);
+  await f.controller.tick(); assert.equal(requests, 0); assert.equal(f.counts.started, 0); assert.equal(f.controller.preference(f.c), true);
 });
 test("Stop during provider model selection leaves the earlier choice and Off intact", async t => {
   const f = fixture(t); f.installed = true; addSmart(f);

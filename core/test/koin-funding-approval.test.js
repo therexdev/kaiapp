@@ -185,7 +185,8 @@ test("USD approval shows fixed credits and Master destination, verifies finality
     f.request.args = await USD.issue({ deployment: f.d, signer: Signer.fromSeed("funding-recovery-verifier"), account: f.request.actor,
       amount: "500000000", usdPerKoin: "25000000", version: 1, now: f.state.now, ttlMs: 60000 });
     const c = controller(f, { dialog: { showMessageBox: async (_window, view) => {
-      assert.match(view.detail, /Credits received: 1250/); assert.match(view.detail, /USD credit value: \$1.25/);
+      assert.match(view.detail, /You receive: 1250 AI credits/); assert.match(view.detail, /You pay: 5.00000000 KOIN/);
+      assert.deepEqual(view.buttons, ["Cancel", "Buy credits"]); assert.doesNotMatch(view.detail, /Custody code|Transaction:|Nonce:/);
       assert.ok(view.detail.includes(f.d.masterNode)); assert.doesNotMatch(view.detail, /1 KOIN buys/);
       if (expiresDuringReview) f.state.now += 60001;
       return { response: 1 };

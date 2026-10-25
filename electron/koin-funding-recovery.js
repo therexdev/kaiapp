@@ -267,7 +267,13 @@ class FundingRecovery {
         const day = String(Math.floor(now / DAY));
         if (!r.days.includes(day)) {
           const used = this.#db.prepare("SELECT amount FROM mana WHERE day=? AND owner=?").all(day, r.intent.actor).reduce((sum, m) => sum + uint(m.amount), 0n);
-          if (used + uint(r.intent.maxRc) > uint(this.#policy.maxRcPerDay)) return { action: "wait", reason: "funding_daily_rc_budget", ...this.status(id) };
+          // USD purchases share the wallet's canonical reservation accounting.
+          // Its finalized receipts release unused ceilings; the historical
+          // funding audit table must not independently reserve them forever.
+          const available = isUsd(this.#client.d)
+            ? uint(this.#nonces.availableSubmissionRc(r.intent.actor, this.#policy.maxRcPerDay))
+            : uint(this.#policy.maxRcPerDay) - used;
+          if (uint(r.intent.maxRc) > available) return { action: "wait", reason: "funding_daily_rc_budget", ...this.status(id) };
           this.#db.prepare("INSERT INTO mana VALUES(?,?,?,?)").run(day, r.intent.actor, id, r.intent.maxRc); r.days.push(day);
         }
         r.attempts++; r.lastAttemptAt = now; r.state = "unknown"; this.#save(r);

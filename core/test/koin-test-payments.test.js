@@ -277,3 +277,101 @@ test("journal backup survives a read-only reopen, and changed host identity bloc
   const db = new DatabaseSync(f.dir + ".recovery-anchor.sqlite"); db.prepare("UPDATE ownership SET host=?").run("another-system"); db.close();
   assert.throws(() => new JournalSet(f.dir), /another host/);
 });
+
+
+test("payment IPC interrupts background confirmation before starting the user's review", async t => {
+  const fs = require("node:fs"), path = require("node:path"), os = require("node:os");
+  const { CreditService } = require("../../electron/credit-service");
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "kai-payment-priority-"));
+  let interval, reached, finish, checking = false, aborted = false, reviews = 0;
+  const started = new Promise(resolve => { reached = resolve; });
+  t.mock.method(global, "setInterval", (fn, ms) => { if (ms === 10000) interval = fn; return { unref() {} }; });
+  t.mock.method(CreditService.prototype, "run", async function (action, input, signal) {
+    if (action === "purchase-sync") {
+      checking = true; reached();
+      try { await new Promise((resolve, reject) => signal.addEventListener("abort", () => { aborted = true; setImmediate(() => reject(signal.reason)); }, { once: true })); }
+      finally { checking = false; }
+    }
+    assert.equal(action, "purchase-retry"); assert.equal(checking, false);
+    reviews++; await new Promise(resolve => { finish = resolve; }); return { state: "pending" };
+  });
+  const w = window(); w.webContents.mainFrame = { url: "http://127.0.0.1:9000/" };
+  let handler;
+  const registration = require("../../electron/koin-test-ipc").registerTestPaymentIPC({ dataDir: root, isTest: true,
+    core: { gateway: { network: { trackShadowRequest: () => () => {} } } }, dialog: {}, origin: "http://127.0.0.1:9000", getMainWindow: () => w,
+    ipcMain: { handle: (_name, h) => { handler = h; } } });
+  t.after(() => { registration.dispose(); fs.rmSync(root, { recursive: true, force: true }); });
+  const event = { sender: w.webContents, senderFrame: w.webContents.mainFrame };
+  interval(); await started;
+  const review = handler(event, "credit-purchase-retry");
+  while (!finish) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(aborted, true); interval(); assert.equal(checking, false);
+  await assert.rejects(handler(event, "credit-purchase-retry"), /open payment approval/);
+  finish(); assert.deepEqual(await review, { state: "pending" }); assert.equal(reviews, 1);
+});
+
+test("Local-Only rejects prepaid chat before account or request egress", async t => {
+  const fs = require("node:fs"), path = require("node:path"), os = require("node:os");
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "kai-local-credit-chat-"));
+  let handler, egress = 0;
+  const w = window(); w.webContents.mainFrame = { url: "http://127.0.0.1:9000/" };
+  const registration = require("../../electron/koin-test-ipc").registerTestPaymentIPC({ dataDir: root, isTest: true,
+    core: { account: { creditAuthorization: () => { egress++; throw Error("Account egress"); } }, gateway: { network: { status: () => ({ privacyMode: "local-only" }), trackShadowRequest: () => () => {} } } },
+    dialog: {}, origin: "http://127.0.0.1:9000", getMainWindow: () => w, ipcMain: { handle: (_name, h) => { handler = h; } } });
+  t.after(() => { registration.dispose(); fs.rmSync(root, { recursive: true, force: true }); });
+  const event = { sender: w.webContents, senderFrame: w.webContents.mainFrame };
+  for (const action of ["chat-estimate", "chat-completion", "chat-recover", "run-open", "run-chat", "run-execute"])
+    await assert.rejects(handler(event, action), /Local-Only/);
+  assert.equal(egress, 0);
+});
+
+test("Stop during the polling handoff cannot open a later payment review", async t => {
+  const fs = require("node:fs"), path = require("node:path"), os = require("node:os");
+  const { CreditService } = require("../../electron/credit-service");
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "kai-payment-stop-handoff-"));
+  let interval, reached, unwind, reviews = 0;
+  const checking = new Promise(resolve => { reached = resolve; });
+  t.mock.method(global, "setInterval", (fn, ms) => { if (ms === 10000) interval = fn; return { unref() {} }; });
+  t.mock.method(CreditService.prototype, "run", async function (action, input, signal) {
+    if (action === "purchase-sync") {
+      reached();
+      await new Promise((resolve, reject) => signal.addEventListener("abort", () => { unwind = () => reject(signal.reason); }, { once: true }));
+    } else { reviews++; return { state: "pending" }; }
+  });
+  const w = window(); w.webContents.mainFrame = { url: "http://127.0.0.1:9000/" };
+  let handler;
+  const registration = require("../../electron/koin-test-ipc").registerTestPaymentIPC({ dataDir: root, isTest: true,
+    core: { gateway: { network: { trackShadowRequest: () => () => {} } } }, dialog: {}, origin: "http://127.0.0.1:9000", getMainWindow: () => w,
+    ipcMain: { handle: (_name, h) => { handler = h; } } });
+  t.after(() => { registration.dispose(); fs.rmSync(root, { recursive: true, force: true }); });
+  const event = { sender: w.webContents, senderFrame: w.webContents.mainFrame };
+  interval(); await checking;
+  const pending = handler(event, "credit-purchase-retry");
+  assert.equal(typeof unwind, "function");
+  await handler(event, "purchase-stop"); unwind();
+  await assert.rejects(pending, /Payment review stopped/);
+  assert.equal(reviews, 0);
+});
+
+test("payment Stop leaves an unrelated network reply running", async t => {
+  const fs = require("node:fs"), path = require("node:path"), os = require("node:os");
+  const { CreditService } = require("../../electron/credit-service");
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "kai-payment-scoped-stop-"));
+  let chatSignal, finishChat, paymentSignal;
+  t.mock.method(CreditService.prototype, "run", async function (action, input, signal) {
+    if (action === "chat-completion") { chatSignal = signal; return new Promise(resolve => { finishChat = resolve; }); }
+    assert.equal(action, "purchase-preview"); paymentSignal = signal;
+    return new Promise((resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+  });
+  const w = window(); w.webContents.mainFrame = { url: "http://127.0.0.1:9000/" }; let handler;
+  const registration = require("../../electron/koin-test-ipc").registerTestPaymentIPC({ dataDir: root, isTest: true,
+    core: { gateway: { network: { trackShadowRequest: () => () => {} } } }, dialog: {}, origin: "http://127.0.0.1:9000", getMainWindow: () => w,
+    ipcMain: { handle: (_name, h) => { handler = h; } } });
+  t.after(() => { registration.dispose(); fs.rmSync(root, { recursive: true, force: true }); });
+  const event = { sender: w.webContents, senderFrame: w.webContents.mainFrame };
+  const chat = handler(event, "chat-completion"), purchase = handler(event, "purchase-preview", { usd: "1" });
+  await handler(event, "purchase-stop");
+  await assert.rejects(purchase, /Payment review stopped/);
+  assert.equal(paymentSignal.aborted, true); assert.equal(chatSignal.aborted, false);
+  finishChat({ text: "Reply completed" }); assert.deepEqual(await chat, { text: "Reply completed" });
+});

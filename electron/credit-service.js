@@ -63,6 +63,23 @@ class CreditService {
     }
     return { config, flow, auth, recoverable, directory, contexts };
   }
+  async purchaseState(c, signal) {
+    let localPurchase;
+    try { localPurchase = await this.purchases.status(c, signal); }
+    catch { localPurchase = { state: "unavailable", detail: "Saved payment records could not be checked. Check again before starting another purchase." }; }
+    let cancelledPurchases = [];
+    try { cancelledPurchases = await this.purchases.cancelled(c, signal); } catch { /* Preserve the network purchase history if a local read fails. */ }
+    return { localPurchase, cancelledPurchases };
+  }
+  async purchaseInfo(signal) {
+    if (this.service.state !== "ready") return { enabled: true, configured: true, product: "prepaid-usd-v1", blocked: this.service.reason, activation: "unavailable", recoveryAvailable: false };
+    try {
+      const c = await this.context(signal);
+      // Buying credits depends on this account and its saved payments. Loading
+      // provider availability or advanced-chat capabilities must not hold Buy.
+      return { enabled: true, configured: true, product: "prepaid-usd-v1", activation: "ready", blocked: "", ...await this.purchaseState(c, signal) };
+    } catch (error) { return { enabled: true, configured: true, product: "prepaid-usd-v1", activation: "signin-required", blocked: String(error.message), recoveryAvailable: false }; }
+  }
   async info(signal) {
     if (this.service.state !== "ready") return { enabled: true, configured: true, product: "prepaid-usd-v1", blocked: this.service.reason, activation: "unavailable", recoveryAvailable: false };
     try {
@@ -70,12 +87,7 @@ class CreditService {
       let runBudgets = false, modelCatalog, modelError = "";
       try { modelCatalog = await c.flow.models(signal); } catch (error) { modelError = String(error.message).slice(0, 220); }
       try { const r = await c.flow.call("capabilities", {}, signal); runBudgets = !!modelCatalog && r.capabilities?.advancedRuns === true && modelCatalog.models.every(t => r.capabilities.models?.some(m => m.model === t.model && m.version === t.version && m.maxOutput >= t.maxOutput)); } catch { /* Normal Chat remains independent of advanced-run support. */ }
-      let localPurchase;
-      try { localPurchase = await this.purchases.status(c, signal); }
-      catch { localPurchase = { state: "unavailable", detail: "Saved payment records could not be checked. Check again before starting another purchase." }; }
-      let cancelledPurchases = [];
-      try { cancelledPurchases = await this.purchases.cancelled(c, signal); } catch { /* A failed local read never erases network purchase history. */ }
-      return { enabled: true, configured: true, product: "prepaid-usd-v1", activation: "ready", blocked: modelError, localPurchase, cancelledPurchases, model: c.config.model, maxOutput: c.config.maxOutput, models: modelCatalog?.models || [], modelAvailabilityUntil: modelCatalog?.validUntil || null,
+      return { enabled: true, configured: true, product: "prepaid-usd-v1", activation: "ready", blocked: modelError, ...await this.purchaseState(c, signal), model: c.config.model, maxOutput: c.config.maxOutput, models: modelCatalog?.models || [], modelAvailabilityUntil: modelCatalog?.validUntil || null,
         runBudgets, maxRequestCredits: require("../core/lib/koin-network/purchase-quote").credits(c.config.limits.perJob), recoveryAvailable: c.recoverable.length > 0 };
     } catch (error) { return { enabled: true, configured: true, product: "prepaid-usd-v1", activation: "signin-required", blocked: String(error.message), recoveryAvailable: false }; }
   }

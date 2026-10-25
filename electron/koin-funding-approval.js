@@ -11,12 +11,13 @@ const { koin } = require("./koin-review");
 const PriceQuote = require("../core/lib/koin-network/purchase-quote");
 const { fundingFailure } = require("./koin-funding-failure");
 
-function createFundingApproval({ mode, client, journal, dialog, sign, submit, clock = Date.now, timeoutMs = 5000, tr = x => x }) {
+function createFundingApproval({ mode, client, journal, dialog, sign, submit, preflight = null, clock = Date.now, timeoutMs = 5000, tr = x => x }) {
   assertPaymentMode(mode, client); const mainnet = mode === "mainnet-pilot";
   if (!(journal instanceof FundingRecovery) || typeof dialog?.showMessageBox !== "function" ||
-      typeof sign !== "function" || typeof submit !== "function") throw Error("Explicit isolated funding approval dependencies required");
+      typeof sign !== "function" || typeof submit !== "function" || (preflight !== null && typeof preflight !== "function")) throw Error("Explicit isolated funding approval dependencies required");
   journal.assertMode(mode); journal.assertClient(client); integer(timeoutMs, 50, 30000);
   let pending = null;
+  const staging = new Set();
   const result = (status, id) => ({ status, mode, paymentsEnabled: mainnet, ...(id ? { deposit: journal.status(id) } : {}) });
   const cancel = () => {
     if (!pending) return;
@@ -69,9 +70,17 @@ function createFundingApproval({ mode, client, journal, dialog, sign, submit, cl
       const line = (name, value) => `${tr(name)}: ${value}`;
       stage = "dialog";
       const { response } = await waiting(dialog.showMessageBox(window, {
-        type: "question", title: tr(mainnet ? "Mainnet KOIN funding — real funds" : mode === "test-deployment" ? "Test KOIN funding" : "Isolated KOIN funding rehearsal"),
+        type: "question", title: tr(usdPurchase ? "Buy AI credits" : mainnet ? "Mainnet KOIN funding — real funds" : mode === "test-deployment" ? "Test KOIN funding" : "Isolated KOIN funding rehearsal"),
         message: tr(isPrepaid(client.d) && request.kind === "credits" ? (resume ? "Retry this saved credit purchase" : "Buy AI credits with KOIN") : resume ? "Review the saved deposit for resubmission" : (mainnet ? "Approve this real KOIN deposit" : mode === "test-deployment" ? "Approve this testnet deposit" : "Approve this fixture-wallet deposit")),
-        detail: [tr(mainnet ? "MAINNET: This transfers real KOIN to the displayed payment destination. A Test installer does not make these funds test tokens." : mode === "test-deployment" ? "Foundation testnet tokens only. This transfers test KOIN to the displayed payment destination." : "Isolated fixture chain only. This approval cannot enable live payments."), "",
+        detail: usdPurchase ? [
+          line("You receive", PriceQuote.credits(request.args.purchase_quote.credits) + " AI credits"),
+          line("You pay", koin(request.args.amount)), line("From wallet", request.actor),
+          line("To", client.d.masterNode), line("Network", mainnet ? "Koinos Mainnet" : mode === "test-deployment" ? "Foundation Testnet" : "Isolated test"),
+          line("Price valid until", new Date(Number(request.args.purchase_quote.expires_at)).toLocaleString()),
+          line("Maximum regenerating Mana", koin(request.maxRc).replace(" KOIN", " Mana")), "",
+          tr("Credits do not expire. They are nonrefundable and cannot be transferred. Failed chats do not consume credits."),
+          tr(resume ? "Continue the saved payment. This does not create another purchase." : "Confirm to send this exact KOIN payment and add the credits after blockchain confirmation.")
+        ].join("\n") : [tr(mainnet ? "MAINNET: This transfers real KOIN to the displayed payment destination. A Test installer does not make these funds test tokens." : mode === "test-deployment" ? "Foundation testnet tokens only. This transfers test KOIN to the displayed payment destination." : "Isolated fixture chain only. This approval cannot enable live payments."), "",
           tr(request.kind === "credits" ? (usdPurchase ? "Buy nonrefundable AI credits at a fixed USD value. 1,000 credits = $1. Credits do not expire and cannot be transferred or withdrawn. Failed chats do not consume credits. Purchase KOIN goes to the Master Node; provider rewards are funded separately." : isPrepaid(client.d) ? "Buy nonrefundable AI credits. 1 KOIN buys 1,000 credits. Credits do not expire and cannot be transferred or withdrawn. Failed chats do not consume credits. The service accounts for usage; KOIN settlement runs in the background." : "This deposit backs refundable usage credits.") : "This funds provider rewards, not a refundable customer balance."),
           ...(usdPurchase ? [line("Credits received", PriceQuote.credits(request.args.purchase_quote.credits)), line("USD credit value", "$" + PriceQuote.dollars(request.args.purchase_quote.credits)), line("Price per KOIN", "$" + PriceQuote.dollars(request.args.purchase_quote.usd_per_koin)), line("Price expires (UTC)", new Date(Number(request.args.purchase_quote.expires_at)).toISOString())] : []),
           line("Payment destination", usdPurchase ? client.d.masterNode : client.d[request.kind]),
@@ -83,7 +92,7 @@ function createFundingApproval({ mode, client, journal, dialog, sign, submit, cl
           tr("The exact approval and deposit are atomic. Success consumes the whole allowance; failure rolls both back."),
           tr(resume ? "Resume sends only the original saved signature and transaction. It does not sign again or reset retry or daily Mana limits." : "Approval permits one signature for this exact deposit and an attempt to submit it."),
           tr("Stop prevents further sends. A transaction already sent may still be included and confirmed.")].join("\n"),
-        buttons: [tr("Cancel"), tr(resume ? "Resume saved deposit" : (mainnet ? "Send real KOIN" : mode === "test-deployment" ? "Approve testnet deposit" : "Approve fixture deposit"))], defaultId: 0, cancelId: 0, noLink: true,
+        buttons: [tr("Cancel"), tr(usdPurchase ? (resume ? "Continue payment" : "Buy credits") : resume ? "Resume saved deposit" : (mainnet ? "Send real KOIN" : mode === "test-deployment" ? "Approve testnet deposit" : "Approve fixture deposit"))], defaultId: 0, cancelId: 0, noLink: true,
       }));
       if (response !== 1 || !valid()) return result("cancelled");
       stage = "recheck";
@@ -110,6 +119,10 @@ function createFundingApproval({ mode, client, journal, dialog, sign, submit, cl
           if (!valid() || journal.status(id).held) throw Error("Funding stopped before signing");
           return sign(structuredClone(decision), { signal: task.abort.signal });
         }).then(tx => journal.stage(id, tx));
+        // Stop may return before the OS signer returns. Keep ownership of this
+        // staging task so callers cannot close its journal before exact bytes
+        // have been persisted. The durable nonce fence already blocks resigning.
+        staging.add(signed); signed.then(() => staging.delete(signed), () => staging.delete(signed));
         try {
           await waiting(Promise.race([signed, new Promise((_, reject) => {
             signingTimer = setTimeout(() => { stop(); reject(Error("Funding signing timed out")); }, timeoutMs);
@@ -117,6 +130,17 @@ function createFundingApproval({ mode, client, journal, dialog, sign, submit, cl
         } finally { clearTimeout(signingTimer); }
       }
       if (!valid() || journal.status(id).held) { journal.hold(id); return result("stopped", id); }
+      if (preflight) {
+        stage = "preflight";
+        try {
+          await waiting(preflight({ transaction: journal.nonceCoordinator.envelope(id), intent: request }, { signal: task.abort.signal }));
+        } catch (error) {
+          const reason = error?.code === "funding_insufficient_rc" ? "funding_insufficient_rc" : "funding_simulation_failed";
+          journal.recordSubmissionIssue(id, reason); journal.hold(id);
+          return { ...result(valid() ? "await_finality" : "stopped", id), reason };
+        }
+        if (!valid() || journal.status(id).held) { journal.hold(id); return result("stopped", id); }
+      }
       stage = "submit";
       const runner = new FundingRecoveryRunner({ mode, journal, timeoutMs, sign: () => { throw Error("Resigning is forbidden"); },
         submit: async (value, options) => {
@@ -142,7 +166,7 @@ function createFundingApproval({ mode, client, journal, dialog, sign, submit, cl
       pending = null;
     }
   }
-  return { cancel, approve: (window, id, supplier) => review(window, id, supplier, false),
+  return { cancel, drain: () => staging.size ? Promise.allSettled([...staging]) : null, approve: (window, id, supplier) => review(window, id, supplier, false),
     resume: (window, id, supplier) => review(window, id, supplier, true),
     check: id => journal.advance(id, { allowSubmit: false }) };
 }

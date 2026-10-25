@@ -31,8 +31,11 @@ class TestPayments {
     this.#authorizeHost = authorizeHost; this.#purchaseQuote = purchaseQuote;
     this.#config = structuredClone(config); this.#client = client; this.#journal = journal; this.#wallet = wallet; this.#dialog = dialog; this.#clock = clock;
     this.#funding = createFundingApproval({ mode: config.mode, client, journal, dialog, clock, timeoutMs: 30000,
-      sign: async d => this.#sign(d.transaction), submit: async (d, { signal }) => {
-        if (config.mode === "mainnet-pilot") await simulateFunding(client, d.transaction, d.intent);
+      sign: async d => this.#sign(d.transaction),
+      preflight: config.mode === "mainnet-pilot" ? async (d, { signal }) => {
+        signal.throwIfAborted(); await simulateFunding(client, d.transaction, d.intent); signal.throwIfAborted();
+      } : null,
+      submit: async (d, { signal }) => {
         signal.throwIfAborted();
         const id = journal.nonceCoordinator.list().find(r => r.txId === d.transaction.id)?.id;
         if (!id) throw Error("Missing Test nonce reservation");
@@ -46,6 +49,7 @@ class TestPayments {
     if (signer.getAddress() !== this.#config.owner) throw Error("Test wallet changed");
     const signed = structuredClone(tx); await signer.signTransaction(signed); return signed;
   }
+  drain() { return this.#funding.drain(); }
   stop() { this.#syncAbort?.abort(); if (this.#task) { this.#task.stopped = true; this.#task.abort.abort(); } this.#funding.cancel(); }
   #creditStatus(status, reason) {
     if (status.purpose !== "credits") return status;
@@ -265,11 +269,13 @@ class TestPayments {
         // This is read-only recovery: no signing or background broadcast.
         if (p.state !== "funded") {
           await this.#journal.nonceCoordinator.reconcile(p.id); combined.throwIfAborted();
-          // A pending cancellation only needs nonce/receipt observation. Full
-          // purchase-policy reads cannot confirm it and needlessly hammer RPC.
-          if (p.cancellation && !terminal(this.#journal.nonceCoordinator.status(p.id).state)) continue;
-          await this.#journal.advance(p.id, { allowSubmit: false }); combined.throwIfAborted();
-          p = this.#journal.status(p.id);
+          // Pending envelopes only need nonce/receipt observation. Full funding
+          // proof is required after finality; rereading every contract while
+          // waiting cannot confirm a payment and floods public RPC endpoints.
+          if (terminal(this.#journal.nonceCoordinator.status(p.id).state)) {
+            await this.#journal.advance(p.id, { allowSubmit: false }); combined.throwIfAborted();
+            p = this.#journal.status(p.id);
+          } else if (p.cancellation) continue;
         }
         if (["reverted", "conflicted"].includes(p.state)) continue;
         const correction = this.#journal.nonceCoordinator.correction(p.id);
@@ -331,13 +337,18 @@ class TestPayments {
       if (action === "purchase" || action === "fund-rewards") {
         const amount = atoms(input), kind = action === "purchase" ? "credits" : "rewards";
         if (BigInt(amount) > BigInt(this.#config.limits.amount)) throw Error("Deposit exceeds the configured Test limit");
+        let maxRc = this.#config.maxRcPerTransaction, purchaseMana;
         if (action === "purchase" && isPrepaid(this.#client.d) && this.#config.mode === "mainnet-pilot") {
-          // Reject an underfunded resource ceiling before reserving a nonce or
-          // creating a signature. A failed precheck cannot strand a purchase.
           await this.#client.verify(); guard();
-          const mana = await this.#client.provider.getAccountRc(this.#owner()); guard();
-          if (typeof mana !== "string" || !/^(0|[1-9]\d*)$/.test(mana)) throw Error("Could not check this purchase. No KOIN was sent.");
-          if (BigInt(mana) < BigInt(this.#config.maxRcPerTransaction)) throw Error("Your wallet needs more available Mana to buy credits. No KOIN was sent. Your existing credits are still usable.");
+          if (isUsd(this.#client.d)) {
+            purchaseMana = { client: this.#client, nonces: this.#journal.nonceCoordinator, owner: this.#owner(),
+              maxRcPerTransaction: this.#config.maxRcPerTransaction, maxRcPerDay: this.#config.maxRcPerDay, signal: task.abort.signal };
+            maxRc = await require("../core/lib/koin-network/purchase-mana").purchaseMana(purchaseMana); guard();
+          } else {
+            const mana = await this.#client.provider.getAccountRc(this.#owner()); guard();
+            if (typeof mana !== "string" || !/^(0|[1-9]\d*)$/.test(mana)) throw Error("Could not check this purchase. No KOIN was sent.");
+            if (BigInt(mana) < BigInt(maxRc)) throw Error("Your wallet needs more available Mana to buy credits. No KOIN was sent. Your existing credits are still usable.");
+          }
         }
         let args = { account: encodedAddress(this.#owner()), amount };
         if (kind === "credits" && isUsd(this.#client.d)) {
@@ -346,8 +357,14 @@ class TestPayments {
           if (args?.account !== encodedAddress(this.#owner()) || args?.amount !== amount) throw Error("Purchase price does not match your request");
           await require("../core/lib/koin-network/purchase-quote").verify(this.#client.d, args, { now: this.#clock(), version: this.#config.version });
         }
-        return await this.#funding.approve(window, hash(crypto.randomBytes(32)), () => ({ kind, method: kind === "credits" ? "purchase" : "fund",
-          actor: this.#owner(), args, maxRc: this.#config.maxRcPerTransaction }));
+        let supplied = false;
+        return await this.#funding.approve(window, hash(crypto.randomBytes(32)), async () => {
+          // The native review displays one exact ceiling. Recheck its coverage
+          // after approval without changing it when Mana regenerates.
+          if (purchaseMana && supplied) await require("../core/lib/koin-network/purchase-mana").assertPurchaseMana(purchaseMana, maxRc);
+          supplied = true; guard();
+          return { kind, method: kind === "credits" ? "purchase" : "fund", actor: this.#owner(), args, maxRc };
+        });
       }
       const nonces = this.#journal.nonceCoordinator;
       if (action === "correct-mana") return await this.#correctMana(window, digest(input), guard);

@@ -3,6 +3,7 @@ const { test } = require("node:test"), assert = require("node:assert/strict"), f
 const CHROMIUM = process.env.KAI_TEST_CHROMIUM || "/opt/pw-browsers/chromium";
 for (const product of ["prepaid-v1", "prepaid-usd-v1"]) test(product + " customer uses Buy credits and normal Chat; provider has ONLINE and Off", { skip: !fs.existsSync(CHROMIUM), timeout: 60000 }, async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-prepaid-ui-")), core = await require("../server").createCore({ dataDir: dir, port: 0, onEvent() {} });
+  core.settings.set("network.privacyMode", "local-first");
   let browser; t.after(async () => { await browser?.close(); await core.stop(); fs.rmSync(dir, { recursive: true, force: true }); });
   browser = await require("playwright-core").chromium.launch({ executablePath: CHROMIUM, args: ["--no-sandbox", "--disable-gpu"] });
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
@@ -46,7 +47,7 @@ for (const product of ["prepaid-v1", "prepaid-usd-v1"]) test(product + " custome
   assert.doesNotMatch(await page.locator("#network-chat-account").innerText(), /reservation|reserved|settlement|allowance/i);
   assert.equal(await page.locator("#network-add-koin").isVisible(), false);
   assert.equal(await page.locator("#network-chat-reservation").isVisible(), false);
-  if (product === "prepaid-usd-v1") { await page.locator("#network-free-only").check(); await page.evaluate(() => { window.streamChat = true; }); }
+  if (product === "prepaid-usd-v1") { await page.locator("#network-spending-summary").click(); await page.locator("#network-free-only").check(); await page.evaluate(() => { window.streamChat = true; }); }
   await page.fill("#input", "Use my existing credits while the purchase confirms"); await page.locator("#btn-send").click();
   if (product === "prepaid-usd-v1") {
     await page.waitForFunction(() => document.getElementById("messages").textContent.includes("Prepaid ") && window.finishStream);

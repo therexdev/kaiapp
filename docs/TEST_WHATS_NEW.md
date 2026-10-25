@@ -1,3 +1,13 @@
+## Buy credits, start earning and use Network chat
+
+- **Buy credits** fetches the current price and opens one wallet approval showing the exact KOIN payment and credits. Confirmation continues automatically. An existing payment uses the same button to continue its saved transaction; background checks no longer lock the purchase screen.
+- Fresh purchases review a usable Mana ceiling before signing. Once a transaction is irreversibly confirmed, its verified actual Mana cost replaces the reserved ceiling so a later purchase can use the remaining daily allowance.
+- **Start earning** chooses the initial model automatically and offers installed, supported models with matching network packages. It starts without a chat. Model loading and registration respond to Stop; unavailable network qualification remains visible.
+- Network chat initially selects an available model. Send uses the shared credit balance; optional Free only is under Spending options. An explicit model choice is preserved if that model later goes offline.
+- Installer verification now includes the real desktop purchase, provider and chat controllers connected to the scheduler over local HTTP: two purchases, interrupted confirmation, a signed streamed reply and restart recovery without a duplicate charge. Blockchain finality, qualification and inference are controlled test fixtures in this check.
+
+The deployed service still has qualification criteria for Smart only. Offering an installed model does not make it paid-ready without its network qualification; this update does not change server admission or contracts.
+
 ## Finish cancellation without overloading RPC
 
 - Payment recovery now spaces its RPC requests and removes repeated full purchase checks while a cancellation is pending. Background confirmation checks also avoid those duplicate reads.

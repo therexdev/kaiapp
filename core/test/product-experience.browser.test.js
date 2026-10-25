@@ -69,7 +69,7 @@ test("Revision 2 free entry, unified credits, unavailable quote, stale network a
   assert.equal(await page.locator('.product-sidebar-credits [data-credit-total]').textContent(), "250");
   await page.locator('#view-credits [data-product-view="buy-credits"]').click(); await page.locator('[data-credit-pack="5"]').click(); await page.locator("#product-quote-refresh").click();
   await page.waitForFunction(() => document.getElementById("product-quote-state").textContent.includes("pricing is unavailable"));
-  assert.equal(await page.locator("#product-quote-approve").isVisible(), false);
+  assert.equal(await page.locator("#product-quote-approve").count(), 0);
   assert.match(await page.locator("#product-pending-purchases").textContent(), /keep using existing credits/);
   // An amount edit invalidates an in-flight quote, and repeated approval clicks
   // cannot dispatch a second payment. This fixture never signs or sends money.
@@ -78,16 +78,16 @@ test("Revision 2 free entry, unified credits, unavailable quote, stale network a
   await page.waitForFunction(() => !!window.resolvePreview);
   await page.fill("#product-usd-amount", "10"); await page.evaluate(() => window.resolvePreview());
   await page.waitForFunction(() => !document.getElementById("product-quote-refresh").disabled);
-  assert.equal(await page.locator("#product-quote-approve").isVisible(), false);
+  assert.equal(await page.locator("#product-quote-approve").count(), 0);
   await page.evaluate(() => { window.resolvePreview = null; });
   await page.locator("#product-quote-refresh").click(); await page.waitForFunction(() => !!window.resolvePreview);
-  await page.evaluate(() => window.resolvePreview()); await page.locator("#product-quote-approve").waitFor({ state: "visible" });
-  await page.evaluate(() => { const b = document.getElementById("product-quote-approve"); b.click(); b.click(); });
+  await page.evaluate(() => window.resolvePreview());
+  await page.evaluate(() => { const b = document.getElementById("product-quote-refresh"); b.click(); b.click(); });
   await page.waitForFunction(() => !!window.resolveApproval);
   assert.equal(await page.evaluate(() => window.productCalls.filter(c => c.action === "purchase-approve").length), 1);
   await page.evaluate(() => window.resolveApproval());
   await page.waitForFunction(() => document.getElementById("product-quote-state").textContent.includes("Payment cancelled"));
-  assert.equal(await page.locator("#product-quote-approve").isVisible(), false);
+  assert.equal(await page.locator("#product-quote-approve").count(), 0);
   await page.locator('#nav [data-view="chat"]').click();
   assert.equal(await page.locator('#mode-pick option[value="agent"]').isDisabled(), true, "unsupported billing is disabled before Send");
   await page.evaluate(async () => {

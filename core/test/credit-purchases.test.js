@@ -99,6 +99,7 @@ test("a saved simulation failure remains visible after restart without another s
   assert.equal(result.state, "pending"); assert.deepEqual(calls, [false]); assert.equal(f.counts().signatures, 1);
   const restarted = new CreditPurchases(f.options), status = await restarted.status(f.c, signal);
   assert.equal(status.txId, result.purchase.txId); assert.equal(status.issue, "funding_simulation_failed");
+  assert.equal(result.purchase.attempts, 0, "a failed simulation cannot consume a submission attempt");
   assert.match(status.detail, /pre-submission check/); assert.equal(status.quoteExpired, false);
   assert.doesNotMatch(JSON.stringify(status), /private-session|price_signature|signatures|purchase_quote/);
   f.state.now += 300001;
@@ -115,9 +116,12 @@ function savedPayment(f) {
 }
 async function expiredPurchase(t, options = {}) {
   const f = setup(t, { ...options, mainnet: true }), signal = new AbortController().signal;
+  // Preserve coverage for pending purchases created with the earlier low cap.
+  f.provider.getAccountRc = async () => f.c.config.maxRcPerTransaction;
   f.provider.call = async () => { throw Object.assign(Error("RPC unavailable"), { code: "koin_rpc_unavailable" }); };
   const quote = await f.controller.preview(f.c, { usd: "1" }, signal);
   const payment = await f.controller.run(f.c, f.window, "purchase-approve", quote.quote.id, signal);
+  f.provider.getAccountRc = async () => "14938227003";
   f.state.now += 300001; f.state.height++;
   const original = savedPayment(f).transaction, calls = [];
   f.provider.call = async (method, args) => {
@@ -249,10 +253,12 @@ test("an original purchase finalized during cancellation review is credited once
 
 test("a live purchase Mana review stays within the daily limit and registers the saved corrected transaction", async t => {
   const f = setup(t, { mainnet: true }), signal = new AbortController().signal;
+  f.provider.getAccountRc = async () => f.c.config.maxRcPerTransaction;
   f.provider.call = async () => { throw Error("insufficient rc"); };
   const quote = await f.controller.preview(f.c, { usd: "1" }, signal);
   const purchase = await f.controller.run(f.c, f.window, "purchase-approve", quote.quote.id, signal);
   assert.equal((await f.controller.status(f.c, signal)).recovery, "correct-mana");
+  f.provider.getAccountRc = async () => "14938227003";
   const calls = []; f.provider.call = async (_method, args) => { calls.push(args); return { receipt: { id: args.transaction.id, payer: f.c.config.owner, rc_used: "12000000" } }; };
   const recovered = await f.controller.run(f.c, f.window, "purchase-retry", undefined, signal);
   const saved = savedPayment(f);
@@ -270,13 +276,17 @@ test("a purchase after cancellation uses only the remaining daily Mana allowance
     await f.controller.run(f.c, f.window, "purchase-retry", undefined, f.signal);
     const cancellation = savedPayment(f).cancellation.transaction;
     await f.include(cancellation, { zeroTransfer: true, irreversible: true });
+    const cancellationCost = budget === "20000000" ? cancellation.header.rc_limit : "1000";
+    f.state.block.receipt.transaction_receipts[0].rc_used = cancellationCost;
     await f.controller.sync(f.c, f.signal);
     assert.equal(await f.controller.status(f.c, f.signal), null);
     f.state.record = null; f.state.height++;
+    f.provider.getAccountRc = async () => f.c.config.maxRcPerTransaction;
     f.provider.call = async () => { throw Error("insufficient rc"); };
     const quote = await f.controller.preview(f.c, { usd: "1" }, f.signal);
     await f.controller.run(f.c, f.window, "purchase-approve", quote.quote.id, f.signal);
     const original = savedPayment(f).transaction;
+    f.provider.getAccountRc = async () => "14938227003";
     assert.equal(f.counts().signatures, 3);
     const calls = [];
     f.provider.call = async (_method, args) => { calls.push(args); return { receipt: { id: args.transaction.id, payer: f.c.config.owner, rc_used: "12000000" } }; };
@@ -287,8 +297,8 @@ test("a purchase after cancellation uses only the remaining daily Mana allowance
     }
     await f.controller.run(f.c, f.window, "purchase-retry", undefined, f.signal);
     const corrected = savedPayment(f).correction.transaction;
-    assert.equal(corrected.header.rc_limit, "20000000");
-    assert.equal(BigInt(cancellation.header.rc_limit) + BigInt(corrected.header.rc_limit), BigInt(budget));
+    assert.equal(corrected.header.rc_limit, "29999000");
+    assert.equal(BigInt(cancellationCost) + BigInt(corrected.header.rc_limit), BigInt(budget));
     assert.equal(corrected.header.nonce, original.header.nonce); assert.deepEqual(corrected.operations, original.operations);
     assert.equal(f.counts().signatures, 4); assert.deepEqual(calls.map(c => c.broadcast), [false, true]);
     const op = corrected.operations.find(o => o.call_contract.contract_id === f.d.credits).call_contract;
@@ -301,9 +311,11 @@ test("a purchase after cancellation uses only the remaining daily Mana allowance
 });
 test("a price expiring during Mana review cannot create another signature", async t => {
   const f = setup(t, { mainnet: true }), signal = new AbortController().signal;
+  f.provider.getAccountRc = async () => f.c.config.maxRcPerTransaction;
   f.provider.call = async () => { throw Error("insufficient rc"); };
   const quote = await f.controller.preview(f.c, { usd: "1" }, signal);
   await f.controller.run(f.c, f.window, "purchase-approve", quote.quote.id, signal);
+  f.provider.getAccountRc = async () => "14938227003";
   f.state.now += 240000; f.state.height++;
   f.options.dialog.showMessageBox = async () => { f.state.now += 60001; f.state.height++; return { response: 1 }; };
   await assert.rejects(f.controller.run(f.c, f.window, "purchase-retry", undefined, signal), /expired/);
@@ -320,4 +332,127 @@ test("payment confirmation retains its working RPC provider across reads and ret
   await controller.status(f.c, signal); await controller.sync(f.c, signal); await controller.cancelled(f.c, signal);
   assert.equal(created, 1);
   await new CreditPurchases(f.options).status(f.c, signal); assert.equal(created, 2);
+});
+
+
+test("a background confirmation read never hides the saved payment and yields to its recovery click", async t => {
+  const f = await expiredPurchase(t), scope = new (require("node:async_hooks").AsyncLocalStorage)();
+  let reached, aborted = false, held = false;
+  const started = new Promise(resolve => { reached = resolve; }), lookup = f.provider.getTransactionsById;
+  f.provider.withSignal = (signal, run) => scope.run(signal, run);
+  f.provider.getTransactionsById = async (...args) => {
+    if (!held) {
+      held = true; reached();
+      await new Promise((resolve, reject) => {
+        const signal = scope.getStore();
+        signal.addEventListener("abort", () => { aborted = true; reject(signal.reason); }, { once: true });
+      });
+    }
+    return lookup(...args);
+  };
+  const polling = f.controller.sync(f.c, f.signal).catch(error => error);
+  await started;
+  const visible = await f.controller.status(f.c, f.signal);
+  assert.equal(visible.state, "pending"); assert.equal(visible.txId, f.original.id);
+  assert.equal(visible.recovery, "cancel-expired"); assert.equal(visible.busy, undefined);
+  f.cancel();
+  const result = await f.controller.run(f.c, f.window, "purchase-retry", undefined, f.signal);
+  await polling;
+  assert.equal(aborted, true); assert.equal(result.state, "cancelled");
+  assert.equal(f.counts().signatures, 1); assert.equal(f.calls.length, 0);
+  assert.equal((await f.controller.status(f.c, f.signal)).txId, f.original.id);
+});
+
+test("a competing approval never consumes another still-valid purchase quote", async t => {
+  const f = setup(t), signal = new AbortController().signal;
+  let release; const gate = new Promise(resolve => { release = resolve; });
+  const current = f.controller.use(f.c, signal, () => gate);
+  const quote = await f.controller.preview(f.c, { usd: "1" }, signal);
+  assert.equal((await f.controller.status(f.c, signal)).busy, true);
+  await assert.rejects(f.controller.run(f.c, f.window, "purchase-approve", quote.quote.id, signal), /open payment approval/);
+  release(); await current;
+  assert.equal(await f.controller.status(f.c, signal), null);
+  const payment = await f.controller.run(f.c, f.window, "purchase-approve", quote.quote.id, signal);
+  assert.equal(payment.state, "pending"); assert.equal(f.counts().signatures, 1); assert.equal(f.counts().reviews, 1);
+});
+
+test("stopping an unanswered cancellation dialog releases the action without signing or deleting recovery", async t => {
+  const f = await expiredPurchase(t);
+  let reached, answer; const displayed = new Promise(resolve => { reached = resolve; });
+  f.options.dialog.showMessageBox = () => { reached(); return new Promise(resolve => { answer = resolve; }); };
+  const running = f.controller.run(f.c, f.window, "purchase-retry", undefined, f.signal);
+  await displayed;
+  assert.equal((await f.controller.status(f.c, f.signal)).busy, true);
+  f.controller.stop();
+  await assert.rejects(running, /stopped/i);
+  assert.equal((await f.controller.status(f.c, f.signal)).busy, undefined);
+  answer({ response: 1 }); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.counts().signatures, 1); assert.equal(f.calls.length, 0);
+  assert.equal((await f.controller.status(f.c, f.signal)).txId, f.original.id);
+});
+
+
+test("a fresh USD purchase chooses enough bounded Mana before one native approval and one signature", async t => {
+  const f = setup(t, { mainnet: true, maxRcPerDay: "500000000" }), signal = new AbortController().signal;
+  const calls = [];
+  f.provider.call = async (_method, args) => {
+    calls.push(structuredClone(args));
+    return { receipt: { id: args.transaction.id, payer: f.c.config.owner, rc_used: "120000000" } };
+  };
+  const quote = await f.controller.preview(f.c, { usd: "1" }, signal);
+  await f.controller.run(f.c, f.window, "purchase-approve", quote.quote.id, signal);
+  assert.equal(f.counts().signatures, 1); assert.equal(f.counts().reviews, 1);
+  assert.deepEqual(calls.map(c => c.broadcast), [false, true]);
+  const original = savedPayment(f).transaction;
+  assert.equal(original.header.rc_limit, "500000000"); assert.equal(savedPayment(f).correction, undefined);
+  const op = original.operations.find(o => o.call_contract.contract_id === f.d.credits).call_contract;
+  f.request.args = await f.client.serializer.deserialize(op.args, "koin.Request");
+  await f.include(original, { irreversible: true });
+  f.state.block.receipt.transaction_receipts[0].rc_used = "120000000";
+  await f.controller.sync(f.c, signal);
+  assert.equal(await f.controller.status(f.c, signal), null);
+  assert.equal(f.registrations.at(-1), original.id);
+  f.state.record = null; f.state.height++;
+  const next = await f.controller.preview(f.c, { usd: "1" }, signal);
+  await f.controller.run(f.c, f.window, "purchase-approve", next.quote.id, signal);
+  assert.equal(savedPayment(f).transaction.header.rc_limit, "380000000");
+  assert.equal(f.counts().signatures, 2); assert.equal(f.counts().reviews, 2);
+  assert.deepEqual(calls.map(c => c.broadcast), [false, true, false, true]);
+});
+
+
+test("Stop retains the journal until a late OS signing response has been saved", async t => {
+  const f = setup(t), signal = new AbortController().signal;
+  const sign = f.signer.signTransaction.bind(f.signer);
+  let reached, release; const signing = new Promise(resolve => { reached = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  f.signer.signTransaction = async tx => { const value = await sign(tx); reached(); await gate; return value; };
+  const quote = await f.controller.preview(f.c, { usd: "1" }, signal);
+  const running = f.controller.run(f.c, f.window, "purchase-approve", quote.quote.id, signal);
+  await signing; f.controller.stop(); await running;
+  assert.equal(savedPayment(f).state, "signing");
+  assert.equal((await f.controller.status(f.c, signal)).state, "pending");
+  const another = await f.controller.preview(f.c, { usd: "1" }, signal);
+  await f.controller.run(f.c, f.window, "purchase-approve", another.quote.id, signal);
+  assert.equal(f.counts().signatures, 1);
+  release();
+  for (let count = 0; count < 100 && !savedPayment(f).transaction; count++) await new Promise(resolve => setImmediate(resolve));
+  const saved = savedPayment(f);
+  assert.equal(saved.state, "signed"); assert.equal(saved.transaction.signatures.length, 1);
+  assert.equal(f.counts().signatures, 1); assert.equal(f.state.submissions.length, 0);
+  const restarted = new CreditPurchases(f.options);
+  assert.equal((await restarted.status(f.c, signal)).txId, saved.transaction.id);
+  f.state.now += 1001;
+  await restarted.run(f.c, f.window, "purchase-retry", undefined, signal);
+  assert.equal(f.counts().signatures, 1); assert.deepEqual(f.state.submissions, [saved.transaction]);
+});
+
+test("pending purchase polling reads receipt evidence without repeatedly reading all contract policies", async t => {
+  const f = setup(t), signal = new AbortController().signal;
+  const quote = await f.controller.preview(f.c, { usd: "1" }, signal);
+  await f.controller.run(f.c, f.window, "purchase-approve", quote.quote.id, signal);
+  f.provider.readContract = async () => { throw Error("Unconfirmed polling must not reread every contract"); };
+  await f.controller.sync(f.c, signal);
+  assert.equal(f.counts().signatures, 1); assert.equal(f.state.submissions.length, 1);
+  assert.equal((await f.controller.status(f.c, signal)).state, "pending");
 });

@@ -42,6 +42,21 @@ jobs:
           KAI_SCHEDULER_URL: http://127.0.0.1:9/scheduler
           KAI_RELAY_URL: http://127.0.0.1:9
           KAI_FEEDBACK_URL: http://127.0.0.1:9/feedback
+      - name: Check out the pinned credit scheduler for integrated acceptance
+        uses: actions/checkout@v4
+        with:
+          repository: therexdev/kai
+          ref: 5e3403bbe28982315e522602e264f62c72dadf1b
+          path: verification-backend
+          persist-credentials: false
+      - name: Verify purchase, provider and paid reply together
+        run: |
+          npm ci --ignore-scripts --prefix verification-backend
+          node scripts/verify-credit-flow.js verification-backend
+        env:
+          KAI_SCHEDULER_URL: http://127.0.0.1:9/scheduler
+          KAI_RELAY_URL: http://127.0.0.1:9
+          KAI_FEEDBACK_URL: http://127.0.0.1:9/feedback
       - name: Exercise real Docker node recovery and profile isolation
         run: node scripts/verify-node-supervisor-docker.js
       - name: Verify live network producer data

@@ -275,9 +275,28 @@ class WalletNonceCoordinator {
       const corrected = other.correction?.submissions.some(a => a.day === day) ? uint(other.correction.draft.header.rc_limit) : 0n;
       // These envelopes use one identical owner nonce; only one can execute.
       const cancelled = other.cancellation?.submissions.some(a => a.day === day) ? uint(other.cancellation.draft.header.rc_limit) : 0n;
-      spent += [original, corrected, cancelled].reduce((a, b) => a > b ? a : b);
+      const reserved = [original, corrected, cancelled].reduce((a, b) => a > b ? a : b);
+      const f = other.finality;
+      // Only an exact saved envelope's canonical irreversible receipt can
+      // release unused headroom. Older proofs and unknown consuming envelopes
+      // retain their ceiling. Earlier submission days remain conservative.
+      const winner = [other, other.correction, other.cancellation].filter(Boolean).find(record =>
+        ["finalized", "reverted"].includes(record.state) && record.transaction?.id === f?.txId &&
+        record.finality?.txId === f.txId && record.finality?.blockId === f.blockId);
+      const actual = terminal(other.state) && winner && typeof f.actualRc === "string" &&
+        /^(0|[1-9]\d*)$/.test(f.actualRc) && uint(f.actualRc) <= uint(winner.draft.header.rc_limit) &&
+        /^(0|[1-9]\d*)$/.test(f.resourceDay || "") && f.resourceDay === day
+        ? uint(f.actualRc) : null;
+      spent += actual === null ? reserved : actual;
     }
     return spent;
+  }
+  availableSubmissionRc(owner, maxRcPerDay) {
+    if (!utils.isChecksumAddress(owner)) throw Error("Valid payment wallet required");
+    const budget = uint(maxRcPerDay), day = String(Math.floor(this.#now() / 86400000));
+    if (!budget) throw Error("Positive wallet resource budget required");
+    const used = this.#dailyUsed(owner, day);
+    return String(used < budget ? budget - used : 0n);
   }
   availableCorrectionRc(id, maxRcPerDay) {
     const r = this.#row(id), budget = uint(maxRcPerDay), day = String(Math.floor(this.#now() / 86400000));
@@ -481,8 +500,13 @@ class WalletNonceCoordinator {
       if (await p.getChainId() !== this.#client.d.chainId) throw Error("Wallet chain changed during finality");
       const checkedAt = this.#now();
       if (checkedAt < now) throw Error("Wallet clock moved backwards during finality");
+      const blockTime = main.block.header.timestamp;
+      const cost = typeof receipt.rc_used === "string" && /^(0|[1-9]\d*)$/.test(receipt.rc_used) &&
+        typeof blockTime === "string" && /^(0|[1-9]\d*)$/.test(blockTime) &&
+        uint(blockTime) <= time && uint(blockTime) <= BigInt(checkedAt)
+        ? { actualRc: receipt.rc_used, resourceDay: String(uint(blockTime) / 86400000n) } : {};
       return { state: receipt.reverted ? "reverted" : "finalized", checkedAt,
-        finality: { txId: tx.id, blockId: b.block_id, height: h.toString(), irreversibleHeight: lib.toString() } };
+        finality: { txId: tx.id, blockId: b.block_id, height: h.toString(), irreversibleHeight: lib.toString(), ...cost } };
     }
     return null;
   }

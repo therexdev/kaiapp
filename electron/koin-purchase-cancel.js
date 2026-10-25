@@ -6,6 +6,17 @@ const { hash } = require("../core/lib/koin-network/job-protocol");
 const { simulateCancellation } = require("../core/lib/koin-network/mana-preflight");
 const { koin } = require("./koin-review");
 
+async function review(dialog, window, options, signal) {
+  signal.throwIfAborted();
+  let abort;
+  try {
+    return await Promise.race([dialog.showMessageBox(window, options), new Promise((_, reject) => {
+      abort = () => reject(Object.assign(Error("Payment review stopped"), { code: "koin_rpc_stopped" }));
+      signal.addEventListener("abort", abort, { once: true }); if (signal.aborted) abort();
+    })]);
+  } finally { signal.removeEventListener("abort", abort); }
+}
+
 // Trusted main-process action. The renderer selects recovery, never a target,
 // amount, operation, nonce, resource limit, or signature.
 async function cancel({ id, journal, client, config, window, dialog, guard, sign, canSign, signal, clock }, trace) {
@@ -44,7 +55,7 @@ async function cancel({ id, journal, client, config, window, dialog, guard, sign
     if (!Cancel.matches(client.d, saved.draft, draft)) throw Error("Cancellation transaction changed");
   };
   await unchanged("initial-policy");
-  const answer = await dialog.showMessageBox(window, { type: "question", title: "Cancel expired credit purchase",
+  const answer = await review(dialog, window, { type: "question", title: "Cancel expired credit purchase",
     message: cancellation ? "Resume this saved payment cancellation?" : "Cancel this expired payment so you can buy credits again?",
     detail: ["KOIN transferred: 0. This transaction only reads your KOIN balance and consumes the old payment's nonce.",
       `Wallet: ${config.owner}`, `Original payment: ${saved.txId}`, `Cancellation: ${draft.id}`,
@@ -54,7 +65,7 @@ async function cancel({ id, journal, client, config, window, dialog, guard, sign
       "If the original payment already completed, its credits are recovered instead. A fresh purchase stays blocked until this is resolved.",
       cancellation ? "Resends only the saved cancellation. No new signature." : "Approves one signature for this exact zero-transfer cancellation.",
       "Stop prevents further sends but cannot undo a transaction already submitted."].join("\n"),
-    buttons: ["Keep pending", cancellation ? "Resume cancellation" : "Cancel expired payment"], defaultId: 0, cancelId: 0, noLink: true });
+    buttons: ["Keep pending", cancellation ? "Resume cancellation" : "Cancel expired payment"], defaultId: 0, cancelId: 0, noLink: true }, signal);
   guard(); if (answer.response !== 1) return result("cancelled");
   if (await settled("approved-confirmation")) return result("complete");
   await unchanged("approved-policy");

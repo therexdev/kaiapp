@@ -40,6 +40,7 @@ test("Earn local check works before service activation, reports progress, export
   await page.route("**/core/models", route => route.fulfill({ json: { aliases: [{ alias: "koinos-fast", label: "Koinos Fast", status: "ready" }], runtime: { runtime: { running: true }, activeAlias: "koinos-fast" } } }));
   await page.goto(`http://127.0.0.1:${await core.start()}`);
   await navClick(page, '#nav [data-view="earn"]');
+  await page.locator("#product-provider-options > summary").click();
   const check = page.locator("#product-provider-check"), start = check.locator("[data-check-start]"), detail = check.locator("[data-check-detail]"), summary = check.locator("[data-check-summary]");
   await page.waitForFunction(() => document.getElementById("product-provider-setup").textContent.includes("not activated"));
   assert.equal(await start.isEnabled(), true, "local checks work without an account or activated service");
