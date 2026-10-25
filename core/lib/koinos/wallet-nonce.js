@@ -267,9 +267,10 @@ class WalletNonceCoordinator {
       c.updatedAt = this.#now(); this.#save(r); return this.status(id);
     });
   }
-  #dailyUsed(owner, day) {
+  #dailyUsed(owner, day, except = null) {
     let spent = 0n;
     for (const row of this.#db.prepare("SELECT id FROM reservations WHERE owner=?").all(owner)) {
+      if (row.id === except) continue;
       const other = this.#row(row.id), original = (other.submissions || []).some(a => a.day === day) ? uint(other.draft.header.rc_limit) : 0n;
       const corrected = other.correction?.submissions.some(a => a.day === day) ? uint(other.correction.draft.header.rc_limit) : 0n;
       // These envelopes use one identical owner nonce; only one can execute.
@@ -277,6 +278,17 @@ class WalletNonceCoordinator {
       spent += [original, corrected, cancelled].reduce((a, b) => a > b ? a : b);
     }
     return spent;
+  }
+  availableCorrectionRc(id, maxRcPerDay) {
+    const r = this.#row(id), budget = uint(maxRcPerDay), day = String(Math.floor(this.#now() / 86400000));
+    if (!budget || r.purpose !== "funding" || r.remote || r.state !== "signed" || r.cancellation)
+      throw Error("Unresolved funding transaction required for a Mana review");
+    if (r.submissionPolicy && r.submissionPolicy.maxRcPerDay !== maxRcPerDay)
+      throw Error("Wallet submission policy changed");
+    // Replacing this nonce shares its reservation, but earlier payments and
+    // cancellations still count against today's unchanged wallet limit.
+    const used = this.#dailyUsed(r.owner, day, id);
+    return String(used < budget ? budget - used : 0n);
   }
   authorizeCorrectionSubmission(id, { maxRcPerDay, maxAttempts = 3, minRetryMs = 1000 }) {
     const budget = uint(maxRcPerDay); integer(maxAttempts, 1, 3); integer(minRetryMs, 1000, 3600000);

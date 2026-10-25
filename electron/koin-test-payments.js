@@ -184,13 +184,16 @@ class TestPayments {
       throw Error("The Mana correction has a saved signing fence. Check confirmation; signing it again is blocked");
     // A separate native review permits a bounded exception to this deposit's
     // old cap. It does not rewrite the manifest or change any daily policy.
-    const ceiling = BigInt(this.#config.maxRcPerDay) < 900000000n ? this.#config.maxRcPerDay : "900000000";
-    if (!correction && BigInt(ceiling) <= BigInt(saved.intent.maxRc)) throw Error("No higher Mana cap fits the existing daily limit");
+    const remaining = BigInt(nonces.availableCorrectionRc(id, this.#config.maxRcPerDay));
+    const ceiling = String(remaining < 900000000n ? remaining : 900000000n);
+    if (!correction && BigInt(ceiling) <= BigInt(saved.intent.maxRc)) throw Error("No higher Mana cap fits today's remaining wallet allowance. Keep the saved payment for recovery.");
     const draft = correction?.draft || await Transaction.prepareTransaction({
       header: { ...saved.draft.header, rc_limit: ceiling }, operations: structuredClone(saved.draft.operations), signatures: [] });
     const request = { ...saved.intent, maxRc: draft.header.rc_limit };
     await this.#client.verifyTransaction(draft, request);
     const unchanged = async () => {
+      if (BigInt(draft.header.rc_limit) > BigInt(nonces.availableCorrectionRc(id, this.#config.maxRcPerDay)))
+        throw Error("The reviewed Mana cap no longer fits today's remaining wallet allowance");
       const policy = await this.#client.verify();
       if (policy.paused || hash(JSON.stringify(policy)) !== saved.policyHash)
         throw Error("Deposit policy changed or paused; keep the saved transactions for recovery");

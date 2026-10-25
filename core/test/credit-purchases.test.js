@@ -3,14 +3,14 @@ const test = require("node:test"), assert = require("node:assert/strict"), fs = 
 const { fixture } = require("./helpers/koin-funding-recovery-fixture"), P = require("../lib/koin-network/job-protocol"), USD = require("../lib/koin-network/purchase-quote");
 const { CreditPurchases } = require("../../electron/credit-purchases");
 const Prices = require("./helpers/purchase-price-fixture");
-function setup(t, { mainnet = false } = {}) {
+function setup(t, { mainnet = false, maxRcPerDay = "20000000" } = {}) {
   const f = fixture(t, { usd: true, mainnet }); let response = 1, revoked = false, signatures = 0, reviews = 0;
   const signer = Signer.fromSeed("funding-recovery-verifier"), wallet = { address: f.signer.getAddress(), signer: f.signer };
   const sign = f.signer.signTransaction.bind(f.signer); f.signer.signTransaction = async tx => { signatures++; return sign(tx); };
   f.provider.call = async (_method, { transaction }) => { f.state.submissions.push(structuredClone(transaction)); throw Error("Lost fixture response"); };
   f.provider.getAccountRc = async () => "14938227003";
   const config = { mode: mainnet ? "mainnet-pilot" : "isolated-rehearsal", deployment: f.d, owner: wallet.address, schedulerUrl: "https://fixture.invalid/scheduler", version: 1, pricingPolicyHash: Prices.pricingPolicyHash,
-    maxRcPerTransaction: "10000000", maxRcPerDay: "20000000", limits: { amount: "500000000" } };
+    maxRcPerTransaction: "10000000", maxRcPerDay, limits: { amount: "500000000" } };
   const directory = path.join(f.dir, "credit-account-v2", P.hash("account"), P.hash(JSON.stringify(config))); fs.mkdirSync(directory, { recursive: true });
   const registrations = [], c = { config, directory, auth: { accountId: "account", sessionToken: "private-session" }, flow: { call: async (route, body) => {
     if (route === "purchase") { registrations.push(body.txId); return {}; }
@@ -113,8 +113,8 @@ function savedPayment(f) {
   const db = new DatabaseSync(path.join(directory, "wallet-nonces.sqlite"), { readOnly: true });
   try { return JSON.parse(db.prepare("SELECT data FROM reservations ORDER BY rowid DESC LIMIT 1").get().data); } finally { db.close(); }
 }
-async function expiredPurchase(t) {
-  const f = setup(t, { mainnet: true }), signal = new AbortController().signal;
+async function expiredPurchase(t, options = {}) {
+  const f = setup(t, { ...options, mainnet: true }), signal = new AbortController().signal;
   f.provider.call = async () => { throw Object.assign(Error("RPC unavailable"), { code: "koin_rpc_unavailable" }); };
   const quote = await f.controller.preview(f.c, { usd: "1" }, signal);
   const payment = await f.controller.run(f.c, f.window, "purchase-approve", quote.quote.id, signal);
@@ -230,6 +230,41 @@ test("a live purchase Mana review stays within the daily limit and registers the
   assert.deepEqual(calls.map(c => c.broadcast), [false, true]);
   assert.equal(f.registrations.at(-1), saved.correction.draft.id);
   assert.notEqual(f.registrations.at(-1), purchase.purchase.txId);
+});
+test("a purchase after cancellation uses only the remaining daily Mana allowance or stops before another signature", async t => {
+  for (const budget of ["30000000", "20000000"]) {
+    const f = await expiredPurchase(t, { maxRcPerDay: budget });
+    await f.controller.run(f.c, f.window, "purchase-retry", undefined, f.signal);
+    const cancellation = savedPayment(f).cancellation.transaction;
+    await f.include(cancellation, { zeroTransfer: true, irreversible: true });
+    await f.controller.sync(f.c, f.signal);
+    assert.equal(await f.controller.status(f.c, f.signal), null);
+    f.state.record = null; f.state.height++;
+    f.provider.call = async () => { throw Error("insufficient rc"); };
+    const quote = await f.controller.preview(f.c, { usd: "1" }, f.signal);
+    await f.controller.run(f.c, f.window, "purchase-approve", quote.quote.id, f.signal);
+    const original = savedPayment(f).transaction;
+    assert.equal(f.counts().signatures, 3);
+    const calls = [];
+    f.provider.call = async (_method, args) => { calls.push(args); return { receipt: { id: args.transaction.id, payer: f.c.config.owner, rc_used: "12000000" } }; };
+    if (budget === "20000000") {
+      await assert.rejects(f.controller.run(f.c, f.window, "purchase-retry", undefined, f.signal), /remaining wallet allowance/);
+      assert.equal(f.counts().signatures, 3); assert.equal(savedPayment(f).correction, undefined); assert.deepEqual(calls, []);
+      continue;
+    }
+    await f.controller.run(f.c, f.window, "purchase-retry", undefined, f.signal);
+    const corrected = savedPayment(f).correction.transaction;
+    assert.equal(corrected.header.rc_limit, "20000000");
+    assert.equal(BigInt(cancellation.header.rc_limit) + BigInt(corrected.header.rc_limit), BigInt(budget));
+    assert.equal(corrected.header.nonce, original.header.nonce); assert.deepEqual(corrected.operations, original.operations);
+    assert.equal(f.counts().signatures, 4); assert.deepEqual(calls.map(c => c.broadcast), [false, true]);
+    const op = corrected.operations.find(o => o.call_contract.contract_id === f.d.credits).call_contract;
+    f.request.args = await f.client.serializer.deserialize(op.args, "koin.Request");
+    await f.include(corrected, { irreversible: true });
+    await f.controller.sync(f.c, f.signal);
+    assert.equal(await f.controller.status(f.c, f.signal), null);
+    assert.equal(f.registrations.at(-1), corrected.id);
+  }
 });
 test("a price expiring during Mana review cannot create another signature", async t => {
   const f = setup(t, { mainnet: true }), signal = new AbortController().signal;
