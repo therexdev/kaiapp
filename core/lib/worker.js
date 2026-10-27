@@ -454,7 +454,7 @@ class Worker {
       // Backoff makes polls silent ON PURPOSE — the watchdog re-registering
       // through it would put the machine straight back on the roster the
       // guard just took it off.
-      if (!this._executing && !this._backoff && !this.runtime.networkWorkPaused?.() && Date.now() - last > 150000) {
+      if (this.running && !this._executing && !this._backoff && !this.runtime.networkWorkPaused?.() && Date.now() - last > 150000) {
         try {
           await this._register();
           this.onEvent({ type: "worker:watchdog-reregistered" });
@@ -499,7 +499,19 @@ class Worker {
     this._pollAbort?.abort();
     this.onEvent({ type: "worker:stopped" });
     await this._loop?.catch(() => {});
+    await this._registerGate?.catch(() => {});
     this._loop = null;
+  }
+
+  _modelOffered(model) {
+    if (!this.modelPins) return true;
+    const alias = this.models?.catalog?.aliases?.[model], pack = this.models?.catalog?.packages?.[alias?.package];
+    return !!alias && !alias.custom && !alias.dev && !pack?.custom && !this.models.quarantineOf?.(alias.package) &&
+      !!this.modelPins[model] && this.modelPins[model] === pack?.sha256 && this.models.packageStatus?.(alias.package)?.status === "ready";
+  }
+
+  _assertModelOffered(job) {
+    if (!this._modelOffered(job?.model)) throw Error("This model is not selected and available for sharing");
   }
 
   async _koinPresence() {
@@ -512,7 +524,7 @@ class Worker {
       const alias = status?.activeAlias;
       const definition = this.models?.catalog?.aliases?.[alias];
       const pack = this.models?.catalog?.packages?.[definition?.package];
-      const allowed = !!definition && !definition.custom && !definition.dev && !alias.startsWith("dev-") && /^[a-f0-9]{64}$/.test(pack?.sha256 || "");
+      const allowed = !!definition && !definition.custom && !definition.dev && !alias.startsWith("dev-") && /^[a-f0-9]{64}$/.test(pack?.sha256 || "") && this._modelOffered(alias);
       const report = { schema: 1, session: this._koinSession, sequence: ++this._koinSequence,
         at: Date.now(), model: allowed ? alias : "", modelHash: allowed ? pack.sha256 : "",
         ready: !!(allowed && status.runtime?.running && !status.loading && !this._backoff && !this.runtime.networkWorkPaused?.()) };
@@ -608,7 +620,7 @@ class Worker {
             // the machine stays on the roster while it finishes generating
             // (field finding: a busy provider went invisible for the whole
             // job after a deploy — its heartbeats were failing silently).
-            if (r.status === 401) await this._register();
+            if (r.status === 401 && this.running) await this._register();
           } catch {
             /* unreachable — next beat retries */
           }
@@ -616,6 +628,7 @@ class Worker {
         try {
           if (job.type === "koin-provider-qualification") {
             if (!this.qualificationTarget) throw Error("Automatic qualification is not enabled for this connection");
+            this._assertModelOffered(job.challenge);
             const qualification = require("./koin-network/qualification-protocol"), P = require("./koin-network/job-protocol");
             const checked = qualification.validate(job, this.models?.catalog, this.qualificationTarget);
             this._executing = true; this._shadowAbort = new AbortController();
@@ -716,6 +729,7 @@ class Worker {
 
   /** §31: only approved profiles execute — anything else is refused. */
   async _execute(job, onDelta, onPrefix) {
+    this._assertModelOffered(job);
     if (this.fundedOnly && !["koin-funded-rehearsal-chat", "koin-mainnet-pilot-chat"].includes(job.type)) throw Error("This Test worker accepts only funded Test requests");
     if (["koin-shadow-chat", "koin-funded-rehearsal-chat", "koin-mainnet-pilot-chat"].includes(job.type)) {
       if (job.type === "koin-mainnet-pilot-chat") {

@@ -66,7 +66,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
       payments: open(), session: sessionPair, config, access,
       progress: value => { if (!window.isDestroyed()) window.webContents.send("koin:chat-progress", typeof value === "string" ? { text: value } : value); } });
   };
-  const withChatSignal = async (window, run, payment = false) => {
+  const withChatSignal = async (window, run, payment = false, provider = false) => {
     const controller = new AbortController(); activeRequests.add(controller); if (payment) paymentRequests.add(controller); const stop = () => controller.abort();
     const navigation = (_event, _url, _inPlace, mainFrame) => { if (mainFrame) stop(); };
     for (const event of ["hide", "minimize", "closed"]) window.on(event, stop);
@@ -75,6 +75,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(600000)]);
     try { return await run(signal); }
     catch (error) {
+      if (signal.aborted && provider) throw Error("Provider setup stopped. Check Earn for the current sharing status.");
       if (signal.aborted && payment) throw Error("Payment review stopped. Any signed transaction remains saved; check confirmation before retrying.");
       if (signal.aborted && (creditService.service.state === "ready" || (fs.existsSync(configFile) && isPrepaid(readConfig(configFile).deployment)))) throw Error("Chat stopped. Unused credits become available automatically; any saved answer can be recovered.");
       if (signal.aborted) throw Error(signal.reason?.name === "TimeoutError"
@@ -121,9 +122,13 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
       return require("./credit-model-pricing").modelPricing(creditService, AbortSignal.timeout(10000));
     }
     if (action.startsWith("provider-public-")) {
+      if (action === "provider-public-models") {
+        if (disposed || !window.isVisible() || window.isMinimized()) throw Error("Return to the visible app to choose models to share");
+        return withChatSignal(window, signal => creditProvider.selectModels(input, signal), false, true);
+      }
       if (action === "provider-public-model") {
         if (disposed || !window.isVisible() || window.isMinimized()) throw Error("Return to the visible app to choose a provider model");
-        return withChatSignal(window, signal => creditProvider.selectModel(input, signal));
+        return withChatSignal(window, signal => creditProvider.selectModel(input, signal), false, true);
       }
       if (input !== undefined || disposed) throw Error("Provider controls take no arguments");
       if (action === "provider-public-info") return creditProvider.info();
@@ -133,7 +138,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
       if (!["provider-public-start", "provider-public-download"].includes(action)) throw Error("Unknown provider action");
       if (!window.isVisible() || window.isMinimized()) throw Error("Return to the visible app to set up sharing");
       if (action === "provider-public-start") { workerAbort?.abort(); await worker?.stop(); workerTrack?.(); workerTrack = null; }
-      return withChatSignal(window, signal => action === "provider-public-download" ? creditProvider.download(signal) : creditProvider.start(signal));
+      return withChatSignal(window, signal => action === "provider-public-download" ? creditProvider.download(signal) : creditProvider.start(signal), false, true);
     }
     if (action === "purchase-stop") {
       if (input !== undefined || disposed) throw Error("Payment Stop takes no arguments and requires an open app");

@@ -28,6 +28,7 @@ test("guided setup requires explicit download, saves On for restart, renews on a
   await assert.rejects(p.start(signal), /Download/); assert.equal(f.counts.downloads, 0);
   await p.download(signal); assert.equal(f.counts.downloads, 1); assert.equal((await p.info()).state, "ready");
   await p.start(signal); assert.equal(f.counts.started, 1); assert.equal(f.options.fundedOnly, true); assert.ok(f.options.qualificationTarget);
+  p.readStatus = async () => ({ model: "fixture", state: "qualifying", label: "CHECKING MODEL", detail: "Fixture checking" });
   assert.equal((await p.status()).state, "qualifying"); assert.equal(p.preference(f.c), true);
   await p.dispose(); const restarted = new CreditProvider(f.args); t.after(() => restarted.dispose()); await restarted.tick();
   assert.equal(f.counts.started, 2); await restarted.stop(); assert.equal(restarted.preference(f.c), false); await restarted.tick(); assert.equal(f.counts.started, 2);
@@ -220,4 +221,152 @@ test("Stop during provider model selection leaves the earlier choice and Off int
   const pending = f.controller.selectModel("smart", AbortSignal.timeout(5000)), rejected = assert.rejects(pending, /cancelled/);
   await reading; await f.controller.stop(); release(); await rejected;
   assert.equal(f.controller.savedPreference(f.c).model, "fixture"); assert.equal(f.controller.preference(f.c), false);
+});
+
+const selected = (...models) => ({ mode: "selected", models });
+const shareAll = { mode: "all", models: [] };
+function admissionRuntime(f) {
+  const Runtime = require("../lib/runtime-manager").RuntimeManager;
+  const runtime = new Runtime({ models: f.core.models });
+  const loaded = []; runtime.acquireFor = async id => { loaded.push(id); return { release() {} }; };
+  f.core.runtime = runtime; return { runtime, loaded };
+}
+test("explicit shared models persist separately from the warm hint and never warm excluded qualified Smart", async t => {
+  const f = fixture(t); f.installed = true; addSmart(f);
+  f.controller.readStatus = async () => ({ model: "smart", state: "online", models: [{ model: "fixture", state: "review-required" }] });
+  assert.deepEqual((await f.controller.info()).selection, shareAll, "old preferences default to all");
+  await f.controller.selectModels(selected("fixture"), AbortSignal.timeout(5000));
+  const { loaded } = admissionRuntime(f);
+  const info = await f.controller.info();
+  assert.deepEqual(info.selection, selected("fixture")); assert.deepEqual(info.offeredModels, ["fixture"]);
+  await f.controller.start(AbortSignal.timeout(5000));
+  assert.deepEqual(loaded, ["fixture"]); assert.deepEqual(f.options.modelPins, { fixture: P.hash("model") });
+  assert.equal(f.counts.downloads, 0);
+  await f.controller.dispose();
+  const restarted = new CreditProvider(f.args); t.after(() => restarted.dispose());
+  await restarted.tick(); assert.deepEqual(f.options.modelPins, { fixture: P.hash("model") });
+  assert.equal(restarted.preference(f.c), true); assert.deepEqual(restarted.selection(f.c), selected("fixture"));
+});
+test("shared model input rejects empty, repeated, malformed, private, changed and uninstalled choices without changing intent", async t => {
+  const f = fixture(t); f.installed = true; addSmart(f);
+  for (const input of [selected(), selected("fixture", "fixture"), selected("../private"), { ...shareAll, extra: true }, { mode: "all", models: ["fixture"] }, selected("private")])
+    await assert.rejects(f.controller.selectModels(input, AbortSignal.timeout(5000)), /Choose/);
+  f.core.models.catalog.aliases.smart.custom = true;
+  await assert.rejects(f.controller.selectModels(selected("smart"), AbortSignal.timeout(5000)), /compatible installed/);
+  f.core.models.catalog.aliases.smart.custom = false;
+  f.core.models.catalog.packages["smart-package"].sha256 = P.hash("changed");
+  await assert.rejects(f.controller.selectModels(selected("smart"), AbortSignal.timeout(5000)), /compatible installed/);
+  f.core.models.catalog.packages["smart-package"].sha256 = P.hash("smart-model");
+  f.core.models.packageStatus = id => ({ status: id === "smart-package" ? "absent" : "ready" });
+  await assert.rejects(f.controller.selectModels(selected("smart"), AbortSignal.timeout(5000)), /compatible installed/);
+  assert.deepEqual(f.controller.selection(f.c), shareAll); assert.equal(f.controller.preference(f.c), false);
+  assert.equal(f.counts.started, 0); assert.equal(f.counts.downloads, 0);
+});
+test("changing models while earning waits through the existing work acknowledgment and restarts exactly one worker", async t => {
+  const f = fixture(t); f.installed = true; addSmart(f);
+  const { runtime, loaded } = admissionRuntime(f), signal = AbortSignal.timeout(5000);
+  await f.controller.start(signal);
+  const old = f.controller.worker, work = await runtime.acquireNetworkWork(signal);
+  const applying = f.controller.selectModels(selected("smart"), signal);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(runtime.networkWorkPaused(), true); assert.equal(old.running, true);
+  assert.equal(f.counts.stopped, 0); assert.equal(f.counts.started, 1); assert.deepEqual(f.controller.selection(f.c), shareAll);
+  // This hold represents the entire poll -> inference -> signed result ACK,
+  // so a completed inference alone does not admit a replacement worker.
+  let nextPoll = false; const blocked = runtime.acquireNetworkWork(signal).then(lease => { nextPoll = true; lease.release(); });
+  await new Promise(resolve => setImmediate(resolve)); assert.equal(nextPoll, false);
+  work.release(); await applying; await blocked;
+  assert.equal(old.running, false); assert.equal(f.controller.worker.running, true);
+  assert.equal(f.counts.stopped, 1); assert.equal(f.counts.started, 2);
+  assert.deepEqual(f.options.modelPins, { smart: P.hash("smart-model") }); assert.equal(loaded.at(-1), "smart");
+  assert.equal(f.controller.preference(f.c), true); assert.equal(runtime.networkWorkPaused(), false);
+});
+test("Stop during selection drain keeps the earlier selection and cannot restart after the work releases", async t => {
+  const f = fixture(t); f.installed = true; addSmart(f);
+  const { runtime } = admissionRuntime(f), signal = AbortSignal.timeout(5000);
+  await f.controller.start(signal); const work = await runtime.acquireNetworkWork(signal);
+  const applying = f.controller.selectModels(selected("smart"), signal), rejected = assert.rejects(applying, /abort|cancel/i);
+  await new Promise(resolve => setImmediate(resolve)); await f.controller.stop(); work.release(); await rejected;
+  assert.equal(f.controller.preference(f.c), false); assert.deepEqual(f.controller.selection(f.c), shareAll);
+  assert.equal(f.counts.started, 1); assert.equal(runtime.networkWorkPaused(), false);
+  await f.controller.tick(); assert.equal(f.counts.started, 1);
+});
+test("account authorization changing while draining cannot save selection or restart the previous account", async t => {
+  const f = fixture(t); f.installed = true; addSmart(f);
+  const { runtime } = admissionRuntime(f), signal = AbortSignal.timeout(5000);
+  await f.controller.start(signal); const work = await runtime.acquireNetworkWork(signal);
+  const applying = f.controller.selectModels(selected("smart"), signal), rejected = assert.rejects(applying, /Account changed/);
+  await new Promise(resolve => setImmediate(resolve)); f.authorized = false; work.release(); await rejected;
+  assert.deepEqual(f.controller.selection(f.c), shareAll); assert.equal(f.controller.worker.running, false);
+  assert.equal(f.counts.started, 1); assert.equal(runtime.networkWorkPaused(), false);
+});
+test("all installed sharing incorporates a newly installed model, but an explicit subset does not", async t => {
+  const f = fixture(t); f.installed = true; addSmart(f); admissionRuntime(f);
+  let smartInstalled = false;
+  f.core.models.packageStatus = id => ({ status: id === "smart-package" && !smartInstalled ? "absent" : "ready" });
+  await f.controller.start(AbortSignal.timeout(5000)); assert.deepEqual(f.controller.registeredModelPins, { fixture: P.hash("model") });
+  smartInstalled = true; await f.controller.tick(); assert.equal(f.counts.started, 2);
+  assert.deepEqual(Object.keys(f.controller.registeredModelPins), ["fixture", "smart"]);
+  await f.controller.selectModels(selected("fixture"), AbortSignal.timeout(5000));
+  const before = f.counts.started; smartInstalled = false; await f.controller.tick(); smartInstalled = true; await f.controller.tick();
+  assert.equal(f.counts.started, before); assert.deepEqual(Object.keys(f.controller.registeredModelPins), ["fixture"]);
+});
+test("removed selected models do not silently fall back to other installed models", async t => {
+  const f = fixture(t); f.installed = true; addSmart(f); admissionRuntime(f);
+  await f.controller.selectModels(selected("smart"), AbortSignal.timeout(5000)); await f.controller.start(AbortSignal.timeout(5000));
+  f.core.models.packageStatus = id => ({ status: id === "smart-package" ? "absent" : "ready" });
+  await f.controller.tick(); assert.equal(f.controller.worker.running, false); assert.equal(f.counts.started, 1);
+  assert.equal(f.controller.preference(f.c), true); assert.deepEqual(f.controller.selection(f.c), selected("smart"));
+  assert.deepEqual((await f.controller.info()).offeredModels, []);
+});
+test("provider status never uses unselected model Online evidence and diagnostics explain incompatible public models", async t => {
+  const f = fixture(t); f.installed = true; addSmart(f);
+  await f.controller.selectModels(selected("fixture"), AbortSignal.timeout(5000)); await f.controller.start(AbortSignal.timeout(5000));
+  f.controller.readStatus = async options => {
+    assert.deepEqual(options.approvedModels, ["fixture", "smart"]);
+    return { model: "smart", state: "online", models: [{ model: "smart", state: "online" }, { model: "fixture", state: "qualifying", label: "CHECKING MODEL" }], readyModels: ["smart"] };
+  };
+  const status = await f.controller.status(); assert.equal(status.model, "fixture"); assert.equal(status.state, "qualifying");
+  assert.deepEqual(status.readyModels, []); assert.deepEqual(status.models.map(m => m.model), ["fixture"]);
+  f.core.models.catalog.aliases.smart.minRamGb = 64;
+  const info = await f.controller.info(), smart = info.modelAvailability.find(m => m.id === "smart");
+  assert.equal(smart.compatible, false); assert.match(smart.reason, /memory/);
+});
+test("a late catalog failure from a previous provider tick cannot stop a newly started worker", async t => {
+  const f = fixture(t); f.installed = true; admissionRuntime(f);
+  await f.controller.start(AbortSignal.timeout(5000));
+  const original = f.c.flow.models; let release, entered;
+  const reading = new Promise(resolve => { entered = resolve; });
+  f.c.flow.models = async () => { entered(); return new Promise((_resolve, reject) => { release = () => reject(Error("Old catalog failed")); }); };
+  const ticking = f.controller.tick(); await reading; await f.controller.stop();
+  f.c.flow.models = original; await f.controller.start(AbortSignal.timeout(5000));
+  const worker = f.controller.worker; release(); await ticking;
+  assert.equal(worker.running, true); assert.equal(f.controller.worker, worker); assert.equal(f.controller.preference(f.c), true);
+  assert.equal(f.controller.error, "");
+});
+test("shared model selection belongs to its account directory and does not carry into another account", async t => {
+  const f = fixture(t); f.installed = true; addSmart(f);
+  await f.controller.selectModels(selected("smart"), AbortSignal.timeout(5000));
+  const directory = path.join(f.c.directory, "different-account"); fs.mkdirSync(directory);
+  const other = { ...f.c, directory, auth: { sessionToken: "different-session" } };
+  f.args.service.context = async () => other;
+  assert.deepEqual((await f.controller.info()).selection, shareAll);
+  await f.controller.selectModels(selected("fixture"), AbortSignal.timeout(5000));
+  assert.deepEqual(f.controller.selection(other), selected("fixture")); assert.deepEqual(f.controller.selection(f.c), selected("smart"));
+});
+test("a status read begun before model selection cannot return old Online evidence while work drains", async t => {
+  const f = fixture(t); f.installed = true; addSmart(f);
+  const { runtime } = admissionRuntime(f), signal = AbortSignal.timeout(5000);
+  await f.controller.start(signal); const work = await runtime.acquireNetworkWork(signal);
+  let entered, release; const reading = new Promise(resolve => { entered = resolve; });
+  const prior = f.controller.readStatus;
+  f.controller.readStatus = async () => { entered(); await new Promise(resolve => { release = resolve; });
+    return { model: "fixture", state: "online", label: "ONLINE", validUntil: Date.now() + 10000 }; };
+  const status = f.controller.status(); await reading;
+  const applying = f.controller.selectModels(selected("smart"), signal);
+  await new Promise(resolve => setImmediate(resolve)); assert.equal(runtime.networkWorkPaused(), true);
+  release(); const result = await status;
+  assert.equal(result.state, "checking"); assert.notEqual(result.label, "ONLINE");
+  f.controller.readStatus = prior; work.release(); await applying;
+  assert.equal(f.controller.worker.running, true); assert.deepEqual(f.controller.selection(f.c), selected("smart"));
 });

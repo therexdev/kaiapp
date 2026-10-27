@@ -74,6 +74,8 @@
   $("earn-unlock").querySelector("h2").textContent = "Unlock your wallet";
   oldEarn.insertAdjacentHTML("beforeend", '<p id="product-legacy-error" class="error" role="status" hidden></p>');
   $("view-earn").insertAdjacentHTML("afterbegin", `<div class="product-earn">${head("Share your AI. Earn KOIN.", "Contribute this computer’s spare AI capacity to the network.")}<div class="product-two"><section class="product-panel product-provider"><div class="product-row"><span>Share AI capacity</span><button id="product-provider-toggle" aria-describedby="product-provider-start-hint product-provider-readiness" disabled role="switch" aria-checked="false" aria-label="Share AI capacity">Start earning</button></div><p id="product-provider-start-hint" class="product-fine">Click the button to start earning.</p><div class="product-provider-state"><span class="product-live-dot"></span><h2 id="product-provider-label">OFFLINE</h2><p id="product-provider-detail">Sharing is off. Turn it on when you’re ready.</p></div><div class="product-divider"></div><strong id="product-provider-model">Model not confirmed</strong><p id="product-provider-readiness" class="product-fine">Waiting for current model and network confirmation.</p></section><div><section class="product-panel"><p class="product-eyebrow">AI provider earnings</p><p id="product-provider-earnings">No verified earnings loaded.</p><p class="product-fine">KOIN rewards are separate from chat credits.</p><button data-product-action="payouts">Refresh earnings</button></section><section class="product-panel"><h2>Connection</h2><details id="product-provider-options"><summary>Models and diagnostics</summary><div id="product-provider-model-choice"><label for="product-provider-model-pick">Startup model</label><select id="product-provider-model-pick" disabled aria-describedby="product-provider-model-help"><option value="">Checking models…</option></select><p id="product-provider-model-help" class="product-fine">Sharing prepares installed models automatically. This optional choice only changes the startup model.</p></div><div id="product-provider-check"><h3 data-check-model>Local model check</h3><p data-check-detail role="status">Check the model currently running locally. No account or credits needed.</p><progress data-check-progress aria-label="Local model check progress" hidden></progress><p data-check-summary class="product-fine"></p><div class="product-actions"><button data-check-start data-check-action="start" class="primary">Check this computer</button><button data-check-cancel data-check-action="cancel" hidden>Cancel check</button><button data-check-copy data-check-action="copy" hidden>Copy report</button><button data-check-save data-check-action="save" hidden>Save report</button></div><p data-check-export class="product-fine" role="status"></p><p class="product-fine">This local check is diagnostic only. The network check runs automatically while earning is on.</p></div></details><div class="product-divider"></div><p id="product-provider-setup" role="status">Start earning to prepare the installed models and connect.</p><p id="product-provider-refresh" class="product-fine" role="status" hidden></p><div class="product-actions"><button id="product-provider-reload" data-product-action="provider-reload">Reload setup</button><button data-product-action="signin">Open AI credit account</button><button id="product-provider-download" data-product-action="provider-download" hidden>Download approved model</button><button id="product-provider-cancel" data-product-action="provider-cancel" hidden>Cancel setup</button><button data-product-action="payment-wallet">Reward wallet</button></div></section></div></div></div>`);
+  $("product-provider-readiness").insertAdjacentHTML("afterend", '<button id="product-provider-models-open" hidden>Choose shared models</button>');
+  $("view-earn").querySelector(".product-earn").insertAdjacentHTML("beforeend", `<section id="product-provider-models" class="product-panel product-provider-models" hidden><h2>Models you share</h2><label class="product-share-all"><input type="checkbox" id="product-provider-share-all" checked /> <span>Share all compatible installed models</span></label><p class="product-fine">Models load as needed. Each model must pass its network check and be approved before it can earn from paid work.</p><p id="product-provider-model-summary" role="status"></p><div id="product-provider-model-list"></div><p id="product-provider-selection-status" class="product-fine" role="status" hidden></p><div id="product-provider-selection-actions" class="product-actions" hidden><button id="product-provider-models-apply" class="primary">Apply selection</button><button id="product-provider-models-reset">Cancel changes</button></div></section>`);
   $("product-provider-detail").insertAdjacentHTML("afterend", '<p id="product-provider-qualification" role="status" hidden></p>');
   const onboarding = $("view-onboarding"), oldOnboarding = onboarding.firstElementChild;
   oldOnboarding.classList.add("product-local-setup"); oldOnboarding.hidden = true;
@@ -466,7 +468,96 @@
     if (action === "local") { go("chat"); $("src-pick").value = "local"; $("src-pick").dispatchEvent(new Event("change")); }
   });
   const providerCheck = window.KaiProviderCheckUI.create({ root: $("product-provider-check"), bridge: window.kaiProviderCheckBridge });
-  let providerBusy = false, providerInfoPending = false, providerExpiry, providerManualRefresh = false;
+  let providerBusy = false, providerInfoPending = false, providerExpiry, providerManualRefresh = false, providerGeneration = 0, providerReadRevision = 0, providerActionRevision = 0;
+  let providerModelInfo = null, providerModelStatus = null, providerSelectionDraft = null, providerSelectionSaved = null, providerSelectionNotice = "", providerModelsStale = true;
+  const selectionKey = selection => JSON.stringify([selection.mode, [...selection.models].sort()]);
+  const selectedProviderModels = (selection, models) => new Set(selection?.mode === "all" ? models.filter(model => model.compatible).map(model => model.id) : selection?.models || []);
+  function providerModelRows(info = providerModelInfo) {
+    return (info?.modelAvailability || (info?.models || []).filter(model => model.installed).map(model => ({ ...model, compatible: true })))
+      .filter(model => model.installed && typeof model.id === "string" && /^[a-zA-Z0-9._-]{1,100}$/.test(model.id)).slice(0, 64);
+  }
+  function acceptProviderModels(info) {
+    const selection = info.selection;
+    if (!selection || !["all", "selected"].includes(selection.mode) || !Array.isArray(selection.models) || selection.models.some(id => typeof id !== "string")) {
+      providerModelInfo = null; $("product-provider-models").hidden = true; $("product-provider-models-open").hidden = true; return;
+    }
+    if (!providerSelectionSaved || selectionKey(providerSelectionSaved) !== selectionKey(selection)) {
+      providerSelectionDraft = structuredClone(selection); providerSelectionSaved = structuredClone(selection);
+    }
+    providerModelInfo = info; $("product-provider-models").hidden = false; $("product-provider-models-open").hidden = false;
+  }
+  function currentProviderRows(status = providerModelStatus) {
+    return (Array.isArray(status?.models) ? status.models : status?.model ? [status] : [])
+      .filter(row => Number.isSafeInteger(row.validUntil) && row.validUntil > Date.now());
+  }
+  function selectedProviderStatus(info, status) {
+    if (!info.selection || !info.running) return status;
+    if (providerBusy) return { state: "checking", label: "UPDATING SHARING", detail: "Finishing current work before updating the shared models." };
+    const selected = selectedProviderModels(info.selection, providerModelRows(info)), offered = new Set(info.offeredModels || []);
+    const rows = currentProviderRows(status).filter(row => selected.has(row.model) && offered.has(row.model));
+    const ready = rows.find(row => row.state === "online");
+    if (ready) return { ...status, ...ready, label: "ONLINE" };
+    const checking = rows.find(row => ["qualifying", "preparing", "connecting"].includes(row.state));
+    if (checking) return { ...status, ...checking, label: "CHECKING MODELS" };
+    return { ...status, state: "checking", label: "WAITING FOR NETWORK", qualification: undefined,
+      detail: "Sharing is on. None of your selected models is ready for paid work yet. See each model’s network status below." };
+  }
+  function paintProviderModels() {
+    const info = providerModelInfo; if (!info?.selection || !providerSelectionDraft) return;
+    const models = providerModelRows(), selected = selectedProviderModels(info.selection, models), draft = selectedProviderModels(providerSelectionDraft, models);
+    const offered = new Set(info.offeredModels || []), states = new Map(currentProviderRows().map(row => [row.model, row]));
+    const dirty = selectionKey(providerSelectionDraft) !== selectionKey(info.selection);
+    const ready = !providerModelsStale && !providerBusy && info.running ? models.filter(model => model.compatible && selected.has(model.id) && offered.has(model.id) && states.get(model.id)?.state === "online").length : 0;
+    const chosen = models.filter(model => model.compatible && selected.has(model.id)).length;
+    $("product-provider-share-all").checked = providerSelectionDraft.mode === "all";
+    $("product-provider-share-all").disabled = providerBusy;
+    $("product-provider-model-summary").textContent = info.enabled
+      ? `${chosen} selected · ${ready} ready for paid work${!ready ? ". No selected model is currently confirmed ready." : "."}`
+      : `${chosen} selected. Earning is off.`;
+    $("product-provider-model").textContent = info.selection.mode === "all" ? `All compatible installed models (${chosen})` : `${chosen} model${chosen === 1 ? "" : "s"} selected`;
+    if (!providerBusy && !providerModelsStale) $("product-provider-readiness").textContent = !info.enabled ? "Earning is off. Your model selection is saved." : ready ? `${ready} of ${chosen} selected models qualified and ready for paid work.` : "No selected model is ready for paid work. Each model needs network qualification and approval.";
+    const active = document.activeElement?.dataset.providerSharedModel;
+    $("product-provider-model-list").innerHTML = models.map(model => {
+      const row = states.get(model.id); let label, detail = "", state = "off";
+      if (!model.compatible) { label = "Not compatible"; detail = model.reason || "This installed model cannot be offered to this network."; state = "blocked"; }
+      else if (dirty && draft.has(model.id) !== selected.has(model.id)) { label = draft.has(model.id) ? "Will share after Apply" : "Will stop sharing after Apply"; state = "checking"; }
+      else if (!selected.has(model.id)) label = "Not shared";
+      else if (providerBusy) { label = "Updating sharing…"; state = "checking"; }
+      else if (!info.enabled) label = "Selected · earning off";
+      else if (!info.running || providerModelsStale) { label = "Checking connection"; state = "checking"; }
+      else if (!offered.has(model.id)) { label = "Waiting to be offered"; state = "checking"; }
+      else if (row?.state === "online") { label = "Available for paid work"; state = "online"; }
+      else if (row?.state === "review-required") { label = "Network approval needed"; detail = row.detail || "The network has not approved this model for paid work."; state = "blocked"; }
+      else if (row?.state === "update-required") { label = "App update needed"; detail = row.detail; state = "blocked"; }
+      else if (row?.state === "qualification-failed") { label = "Network check not passed"; detail = "Another network check runs automatically."; state = "blocked"; }
+      else if (row?.state === "qualifying") { label = "Checking model"; detail = row.qualification ? `${row.qualification.passed}/${row.qualification.total} checks passed` : "The network is checking this model."; state = "checking"; }
+      else if (row?.state === "preparing") { label = "Preparing model"; state = "checking"; }
+      else if (row?.state === "network-paused") { label = "Network reconnecting"; state = "checking"; }
+      else { label = "Waiting for network qualification"; state = "checking"; }
+      return `<div class="product-provider-model-row" data-shared-model="${esc(model.id)}"><label><input type="checkbox" data-provider-shared-model="${esc(model.id)}" ${draft.has(model.id) && model.compatible ? "checked" : ""} ${providerBusy || !model.compatible ? "disabled" : ""} /><span>${esc(model.label || model.id)}</span></label><div><span class="product-model-status" data-state="${state}">${esc(label)}</span>${detail ? `<small>${esc(detail)}</small>` : ""}</div></div>`;
+    }).join("") || '<p class="product-fine">No compatible installed models found.</p>';
+    if (active) $("product-provider-model-list").querySelector(`[data-provider-shared-model="${CSS.escape(active)}"]`)?.focus({ preventScroll: true });
+    const notice = $("product-provider-selection-status");
+    notice.textContent = providerBusy ? "Finishing current work before updating the shared models. Stop earning remains available." : providerSelectionNotice || (dirty ? "Changes are not applied yet. Choose at least one model, then Apply selection." : "");
+    notice.hidden = !notice.textContent;
+    $("product-provider-selection-actions").hidden = !dirty;
+    $("product-provider-models-apply").disabled = providerBusy || !models.some(model => model.compatible && draft.has(model.id));
+    $("product-provider-models-reset").disabled = providerBusy;
+  }
+  $("product-provider-models-open").addEventListener("click", () => { $("product-provider-models").scrollIntoView({ block: "start" }); $("product-provider-share-all").focus({ preventScroll: true }); });
+  $("product-provider-share-all").addEventListener("change", event => {
+    providerSelectionDraft = event.target.checked ? { mode: "all", models: [] } : { mode: "selected", models: [] };
+    providerSelectionNotice = ""; paintProviderModels();
+  });
+  $("product-provider-model-list").addEventListener("change", event => {
+    const input = event.target.closest("[data-provider-shared-model]"); if (!input || providerBusy || !providerModelInfo) return;
+    const selected = selectedProviderModels(providerSelectionDraft, providerModelRows());
+    if (input.checked) selected.add(input.dataset.providerSharedModel); else selected.delete(input.dataset.providerSharedModel);
+    providerSelectionDraft = { mode: "selected", models: [...selected] }; providerSelectionNotice = ""; paintProviderModels();
+  });
+  $("product-provider-models-reset").addEventListener("click", () => { providerSelectionDraft = structuredClone(providerModelInfo.selection); providerSelectionNotice = ""; paintProviderModels(); });
+  $("product-provider-models-apply").addEventListener("click", () => providerAction("models", structuredClone(providerSelectionDraft)));
+
   const providerMessage = error => {
     const detail = String(error?.message || error || "Provider setup could not be reached.").replace(/^Error invoking remote method '[^']+': (?:Error: )?/, "");
     return /Unexpected token.*<|<!DOCTYPE/i.test(detail)
@@ -493,10 +584,12 @@
       notice.hidden = false; notice.textContent = "Open the desktop app to check provider setup.";
       providerManualRefresh = false; return;
     }
+    const generation = providerGeneration, revision = providerReadRevision;
+    const current = () => generation === providerGeneration && revision === providerReadRevision;
     providerInfoPending = true; reload.textContent = "Checking setup…"; reload.setAttribute("aria-busy", "true");
     let failed = false;
     try {
-      const info = await providerRead("provider-public-info"); publicProvider = true;
+      const info = await providerRead("provider-public-info"); if (!current()) return; publicProvider = true; acceptProviderModels(info);
       const on = info.enabled === true, toggle = $("product-provider-toggle");
       toggle.textContent = on ? "Stop earning" : "Start earning"; toggle.setAttribute("aria-checked", String(on)); $("product-provider-start-hint").hidden = on;
       toggle.disabled = on ? false : providerBusy || info.state !== "ready";
@@ -515,6 +608,9 @@
         state: "offline", label: on ? "RECONNECTING" : info.state === "ready" ? "OFFLINE" : "SETUP REQUIRED",
         detail: on || info.state !== "ready" ? providerMessage(info.blocked || info.detail) : "Ready to share. Start earning prepares the models and connects automatically."
       };
+      if (!current()) return;
+      providerModelStatus = status; providerModelsStale = false;
+      status = selectedProviderStatus(info, status);
       clearTimeout(providerExpiry);
       const paint = value => {
         $("product-provider-label").textContent = value.label; $("product-provider-label").dataset.state = value.state;
@@ -533,9 +629,15 @@
           ? "The local check is diagnostic. Paid work needs a passing network check."
           : "Readiness is not confirmed. " + value.detail;
       };
-      paint(status);
-      if (Number.isSafeInteger(status.validUntil)) providerExpiry = setTimeout(() => paint({ state: "stale", label: "CHECKING CONNECTION", detail: "Network confirmation has expired. Refreshing eligibility…" }), Math.max(0, status.validUntil - Date.now()));
+      paint(status); paintProviderModels();
+      const expiries = [status.validUntil, ...currentProviderRows().map(row => row.validUntil)].filter(Number.isSafeInteger);
+      if (expiries.length) providerExpiry = setTimeout(() => {
+        providerModelsStale = true; paintProviderModels();
+        paint({ state: "stale", label: "CHECKING CONNECTION", detail: "Network confirmation has expired. Refreshing eligibility…" });
+      }, Math.max(0, Math.min(...expiries) - Date.now()));
     } catch (e) {
+      if (!current()) return;
+      providerModelsStale = true; paintProviderModels();
       failed = true; publicProvider = true; clearTimeout(providerExpiry);
       $("product-provider-qualification").hidden = true; $("product-provider-qualification").textContent = "";
       $("product-provider-model-pick").disabled = true;
@@ -545,6 +647,7 @@
       $("product-provider-readiness").textContent = "Readiness is not confirmed. Waiting for a fresh network status update.";
       $("product-provider-download").hidden = true;
     } finally {
+      if (!current()) return;
       providerInfoPending = false; reload.textContent = "Reload setup"; reload.removeAttribute("aria-busy");
       if (providerManualRefresh) {
         notice.hidden = false;
@@ -556,14 +659,31 @@
   async function providerAction(action, input) {
     if (providerBusy && action !== "stop") return;
     if (action !== "stop") providerBusy = true;
+    const generation = providerGeneration, operation = ++providerActionRevision;
+    const current = () => generation === providerGeneration && operation === providerActionRevision;
+    providerReadRevision++; providerInfoPending = false;
+    if (action === "models") { providerModelsStale = true; providerModelStatus = null; clearTimeout(providerExpiry); $("product-provider-label").textContent = "UPDATING SHARING"; $("product-provider-label").dataset.state = "checking"; $("product-provider-readiness").textContent = "Model readiness will refresh after the selection is applied."; $("product-provider-qualification").hidden = true; }
+    paintProviderModels();
     $("product-provider-cancel").hidden = false; $("product-provider-download").disabled = true;
     $("product-provider-model-pick").disabled = true;
     if (action === "start") { const toggle = $("product-provider-toggle"); toggle.textContent = "Stop earning"; toggle.setAttribute("aria-checked", "true"); $("product-provider-start-hint").hidden = true; toggle.disabled = false; $("product-provider-label").textContent = "STARTING"; }
-    $("product-provider-setup").textContent = action === "model" ? "Saving the provider model…" : action === "download" ? "Downloading the approved model. You can cancel and resume later." : action === "stop" ? "Stopping new work and cancelling active inference. Verified delivered text remains saved and metered." : "Preparing the model and connecting for qualification…";
-    try { await window.kaiKoinTestBridge.run("provider-public-" + action, input); }
-    catch (e) { $("product-provider-detail").textContent = e.message; }
-    finally { if (action !== "stop") providerBusy = false; await refreshPublicProvider(); }
+    $("product-provider-setup").textContent = action === "models" ? "Applying your shared model selection…" : action === "model" ? "Saving the provider model…" : action === "download" ? "Downloading the approved model. You can cancel and resume later." : action === "stop" ? "Stopping new work and cancelling active inference. Verified delivered text remains saved and metered." : "Preparing the model and connecting for qualification…";
+    try {
+      await window.kaiKoinTestBridge.run("provider-public-" + action, input);
+      if (!current()) return;
+      if (action === "models") { providerSelectionNotice = "Model selection saved. Network readiness updates automatically."; providerSelectionSaved = null; providerSelectionDraft = null; }
+    } catch (e) { if (current()) { $("product-provider-detail").textContent = e.message; if (action === "models") providerSelectionNotice = providerMessage(e); } }
+    finally { if (current()) { providerBusy = false; providerReadRevision++; providerInfoPending = false; await refreshPublicProvider(); paintProviderModels(); } }
   }
+  for (const name of ["kai-account-signed-out", "kai-credit-identity-changed"]) window.addEventListener(name, () => {
+    providerGeneration++; providerReadRevision++; providerActionRevision++; clearTimeout(providerExpiry); providerInfoPending = providerBusy = false;
+    providerModelInfo = providerModelStatus = providerSelectionDraft = providerSelectionSaved = null; providerModelsStale = true; providerSelectionNotice = "";
+    $("product-provider-models").hidden = true; $("product-provider-models-open").hidden = true; $("product-provider-model-list").replaceChildren();
+    $("product-provider-label").textContent = "CHECKING ACCOUNT"; $("product-provider-label").dataset.state = "checking";
+    $("product-provider-model").textContent = "Checking installed models"; $("product-provider-readiness").textContent = "Waiting for current account and network confirmation.";
+    $("product-provider-toggle").disabled = true; $("product-provider-qualification").hidden = true;
+    if (!$("view-earn").hidden) refreshPublicProvider();
+  });
   $("product-provider-toggle").addEventListener("click", () => providerAction($("product-provider-toggle").getAttribute("aria-checked") === "true" ? "stop" : "start"));
   $("product-provider-model-pick").addEventListener("change", event => providerAction("model", event.target.value));
   for (const host of [document.querySelector(".product-sidebar-credits"), document.querySelector("#view-credits .product-panel")]) {

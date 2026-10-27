@@ -180,3 +180,157 @@ test("Earn distinguishes a passing local diagnostic from failed network checks a
   assert.equal(await page.evaluate(() => window.providerCalls.some(x => /start|stop|purchase|sign/.test(x))), false);
   assert.deepEqual(errors, []);
 });
+
+async function sharingFixture(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-model-sharing-ui-"));
+  const core = await require("../server").createCore({ dataDir: dir, port: 0, onEvent() {} });
+  const browser = await require("playwright-core").chromium.launch({ executablePath: CHROMIUM, args: ["--no-sandbox", "--disable-gpu"] });
+  t.after(async () => { await browser.close(); await core.stop(); fs.rmSync(dir, { recursive: true, force: true }); });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1040 } }), errors = [];
+  page.on("pageerror", error => errors.push(error.message)); t.after(() => assert.deepEqual(errors, []));
+  await page.addInitScript(() => {
+    localStorage.setItem("kai-interface-language", "en"); window.providerCalls = []; window.accountSequence = 0;
+    const names = ["Smart", "Fast", "Coder", "Vision", "Think", "Pro", "Plus", "Reason", "Writer", "Mini"];
+    window.sharedModels = names.map(name => ({ id: "koinos-" + name.toLowerCase(), label: "Koinos " + name, installed: true, compatible: true, requiredRamGb: 8 }));
+    window.providerSelection = { mode: "all", models: [] }; window.earningOn = true;
+    window.kaiKoinTestBridge = { onProgress: () => () => {}, run: async (action, input) => {
+      window.providerCalls.push({ action, input });
+      const selected = () => window.providerSelection.mode === "all" ? window.sharedModels.map(model => model.id) : window.providerSelection.models;
+      if (action === "status") return { enabled: true, configured: false, mode: "test-deployment" };
+      if (action === "chat-info") return { enabled: true, configured: false, blocked: "Fixture" };
+      if (action === "provider-public-info") {
+        const info = { state: "ready", enabled: window.earningOn, running: window.earningOn, automatic: true, model: window.sharedModels[0], models: structuredClone(window.sharedModels), selection: structuredClone(window.providerSelection), offeredModels: selected(),
+          modelAvailability: [...structuredClone(window.sharedModels), { id: "koinos-large", label: "Koinos Large", installed: true, compatible: false, reason: "Needs 64 GB; this computer has 32 GB RAM." }], detail: "Sharing is on." };
+        if (window.holdInfo) await new Promise(resolve => { window.finishInfo = resolve; });
+        if (window.infoError) throw Error("Connection unavailable"); return info;
+      }
+      if (action === "provider-public-status") {
+        const until = Date.now() + 15000, smart = { model: "koinos-smart", state: "online", label: "ONLINE", detail: "Smart is qualified.", validUntil: until };
+        const result = window.onlyTop ? smart : { ...smart, models: [smart,
+          { model: "koinos-fast", state: "review-required", label: "REVIEW REQUIRED", detail: "The network must approve this model before paid work.", validUntil: until },
+          { model: "koinos-coder", state: "qualifying", label: "CHECKING MODEL", detail: "Network check in progress.", validUntil: until, qualification: { state: "testing", passed: 2, completed: 3, total: 12, retryAt: null } }] };
+        if (window.holdStatus) await new Promise(resolve => { window.finishStatus = resolve; });
+        return result;
+      }
+      if (action === "provider-public-models") {
+        const accountSequence = window.accountSequence;
+        if (window.holdSelection) await new Promise((resolve, reject) => { window.finishSelection = resolve; window.cancelSelection = reject; });
+        if (accountSequence === window.accountSequence) window.providerSelection = structuredClone(input);
+        return { state: "models-selected" };
+      }
+      if (action === "provider-public-stop") { window.earningOn = false; window.cancelSelection?.(Error("Sharing update stopped")); return { state: "offline" }; }
+      throw Error("Fixture unavailable");
+    } };
+  });
+  await page.route("**/core/models", route => route.fulfill({ json: { aliases: [], runtime: { runtime: { running: false }, activeAlias: null } } }));
+  await page.route("**/core/earn", route => route.fulfill({ json: { wallet: { exists: true, unlocked: true, address: "fixture-wallet" }, worker: { running: false } } }));
+  await page.goto(`http://127.0.0.1:${await core.start()}`); await navClick(page, '#nav [data-view="earn"]');
+  await page.waitForFunction(() => document.getElementById("product-provider-model-summary").textContent.includes("10 selected · 1 ready"));
+  return { page, reload: page.locator("#product-provider-reload"), toggle: page.locator("#product-provider-toggle"), all: page.locator("#product-provider-share-all"), apply: page.locator("#product-provider-models-apply"),
+    row: id => page.locator(`[data-shared-model="${id}"]`), check: id => page.locator(`[data-provider-shared-model="${id}"]`) };
+}
+
+test("Earn exposes all installed models and applies a subset without confusing selection with network readiness", { skip: !fs.existsSync(CHROMIUM), timeout: 90000 }, async t => {
+  const { page, reload, toggle, all, apply, row, check } = await sharingFixture(t);
+  assert.equal(await all.isChecked(), true);
+  assert.equal(await page.locator("[data-provider-shared-model]:checked").count(), 10);
+  assert.equal(await page.locator("[data-shared-model]").count(), 11);
+  assert.equal(await apply.isVisible(), false);
+  assert.match(await row("koinos-smart").textContent(), /Available for paid work/);
+  assert.match(await row("koinos-fast").textContent(), /Network approval needed/);
+  assert.match(await row("koinos-coder").textContent(), /Checking model.*2\/12 checks passed/);
+  assert.match(await row("koinos-vision").textContent(), /Waiting for network qualification/);
+  assert.equal(await check("koinos-large").isDisabled(), true); assert.match(await row("koinos-large").textContent(), /Needs 64 GB/);
+  assert.equal(await page.locator('.product-model-status[data-state="online"]').count(), 1);
+  assert.equal(await page.locator("#product-provider-models-open").isVisible(), true);
+  assert.match(await page.locator("#product-provider-model").textContent(), /All compatible installed models \(10\)/);
+  if (process.env.KAI_PREPAID_QA_DIR) { fs.mkdirSync(process.env.KAI_PREPAID_QA_DIR, { recursive: true }); await page.screenshot({ path: path.join(process.env.KAI_PREPAID_QA_DIR, "provider-all-models.png"), animations: "disabled" }); }
+  await page.locator("#product-provider-models-open").click();
+  const modelTop = await page.locator("#product-provider-models").boundingBox(), header = await page.locator(".workspace-header").boundingBox();
+  assert.ok(modelTop.y >= header.y + header.height && modelTop.y + modelTop.height <= page.viewportSize().height, "Choose shared models brings the complete fixture list into view below the header");
+  if (process.env.KAI_PREPAID_QA_DIR) {
+    await page.screenshot({ path: path.join(process.env.KAI_PREPAID_QA_DIR, "provider-model-statuses.png"), animations: "disabled" });
+    await page.setViewportSize({ width: 780, height: 560 }); await page.locator("#product-provider-models").evaluate(node => node.scrollIntoView({ block: "start" }));
+    assert.equal(await page.locator("#view-earn").evaluate(node => node.scrollWidth <= node.clientWidth), true);
+    await page.screenshot({ path: path.join(process.env.KAI_PREPAID_QA_DIR, "provider-model-statuses-narrow.png"), animations: "disabled" });
+    await page.setViewportSize({ width: 1440, height: 1040 });
+  }
+  await check("koinos-smart").uncheck(); assert.equal(await all.isChecked(), false);
+  await reload.click(); await page.waitForFunction(() => !document.getElementById("product-provider-reload").hasAttribute("aria-busy"));
+  assert.equal(await check("koinos-smart").isChecked(), false, "periodic setup reads preserve unapplied choices");
+  assert.match(await row("koinos-smart").textContent(), /Will stop sharing after Apply/);
+  await page.evaluate(() => { window.holdStatus = true; }); await reload.click(); await page.waitForFunction(() => !!window.finishStatus);
+  await page.evaluate(() => { window.oldReadyReply = window.finishStatus; window.holdStatus = false; });
+  await page.evaluate(() => { window.holdSelection = true; }); await apply.click(); await page.waitForFunction(() => !!window.finishSelection);
+  assert.equal(await page.locator("#product-provider-label").textContent(), "UPDATING SHARING");
+  assert.equal(await page.locator('.product-model-status[data-state="online"]').count(), 0);
+  assert.equal(await toggle.isEnabled(), true); assert.equal(await toggle.textContent(), "Stop earning");
+  await reload.click(); await page.waitForFunction(() => !document.getElementById("product-provider-reload").hasAttribute("aria-busy"));
+  assert.notEqual(await page.locator("#product-provider-label").textContent(), "ONLINE", "a status reply during Apply cannot restore the previous selection’s readiness");
+  await page.evaluate(() => { window.holdSelection = false; window.finishSelection(); });
+  await page.waitForFunction(() => document.getElementById("product-provider-model-summary").textContent.includes("9 selected · 0 ready"));
+  assert.match(await page.locator("#product-provider-model-summary").textContent(), /No selected model is currently confirmed ready/);
+  assert.match(await row("koinos-smart").textContent(), /Not shared/);
+  await page.evaluate(() => window.oldReadyReply());
+  assert.match(await page.locator("#product-provider-model-summary").textContent(), /9 selected · 0 ready/);
+  assert.equal(await check("koinos-smart").isChecked(), false, "a pre-Apply status reply cannot restore the old selection");
+  assert.equal(await page.locator('.product-model-status[data-state="online"]').count(), 0);
+  assert.equal(await toggle.textContent(), "Stop earning");
+  await all.check(); await apply.click();
+  await page.waitForFunction(() => document.getElementById("product-provider-model-summary").textContent.includes("10 selected · 1 ready"));
+  assert.deepEqual(await page.evaluate(() => window.providerCalls.filter(call => call.action === "provider-public-models").map(call => call.input)), [
+    { mode: "selected", models: ["koinos-fast", "koinos-coder", "koinos-vision", "koinos-think", "koinos-pro", "koinos-plus", "koinos-reason", "koinos-writer", "koinos-mini"] }, { mode: "all", models: [] }]);
+  await all.uncheck(); assert.equal(await apply.isDisabled(), true, "an empty selection cannot be applied");
+  await page.locator("#product-provider-models-reset").click(); assert.equal(await all.isChecked(), true);
+  await page.evaluate(() => { window.onlyTop = true; }); await reload.click();
+  await page.waitForFunction(() => document.querySelector('[data-shared-model="koinos-fast"]').textContent.includes("Waiting for network qualification"));
+  assert.equal(await page.locator('.product-model-status[data-state="online"]').count(), 1, "older single-model status never qualifies the other selected models");
+  assert.equal(await page.evaluate(() => window.providerCalls.some(call => ["chat-completion", "run-chat", "provider-public-start", "provider-public-model"].includes(call.action))), false);
+});
+
+test("Earn stops pending selection, fences old-account replies and removes expired model readiness", { skip: !fs.existsSync(CHROMIUM), timeout: 90000 }, async t => {
+  const { page, reload, toggle, all, apply, row, check } = await sharingFixture(t);
+  await check("koinos-smart").uncheck(); await page.evaluate(() => { window.holdSelection = true; }); await apply.click();
+  await page.waitForFunction(() => !!window.cancelSelection);
+  await page.evaluate(() => { window.holdStatus = true; }); await reload.click(); await page.waitForFunction(() => !!window.finishStatus);
+  await page.evaluate(() => { window.oldReadyReply = window.finishStatus; window.holdStatus = false; });
+  await toggle.click();
+  await page.waitForFunction(() => document.getElementById("product-provider-toggle").textContent === "Start earning");
+  assert.equal(await page.evaluate(() => window.earningOn), false);
+  await page.evaluate(() => window.oldReadyReply());
+  assert.equal(await toggle.textContent(), "Start earning", "a pre-Stop status reply cannot restore earning or readiness");
+  assert.equal(await page.locator('.product-model-status[data-state="online"]').count(), 0);
+  await page.locator("#product-provider-models-reset").click();
+  await page.evaluate(() => { window.earningOn = true; window.holdSelection = false; }); await reload.click();
+  await page.waitForFunction(() => document.getElementById("product-provider-label").textContent === "ONLINE");
+  await check("koinos-smart").uncheck(); await page.evaluate(() => { window.holdSelection = true; window.finishSelection = null; }); await apply.click();
+  await page.waitForFunction(() => !!window.finishSelection);
+  await page.evaluate(() => {
+    window.oldSelectionReply = window.finishSelection; window.holdSelection = false; window.accountSequence++;
+    window.sharedModels = [{ id: "koinos-new", label: "New account model", installed: true, compatible: true, requiredRamGb: 4 }];
+    window.providerSelection = { mode: "all", models: [] }; window.dispatchEvent(new Event("kai-credit-identity-changed"));
+  });
+  await page.waitForFunction(() => document.getElementById("product-provider-model-list").textContent.includes("New account model"));
+  await page.evaluate(() => window.oldSelectionReply());
+  assert.equal(await check("koinos-smart").count(), 0); assert.equal(await all.isChecked(), true);
+  assert.doesNotMatch(await page.locator("#product-provider-selection-status").textContent(), /selection saved/);
+  assert.equal(await page.locator("#product-provider-label").textContent(), "WAITING FOR NETWORK");
+  assert.equal(await page.locator('.product-model-status[data-state="online"]').count(), 0);
+  await page.evaluate(() => { window.holdInfo = true; window.finishInfo = null; }); await reload.click(); await page.waitForFunction(() => !!window.finishInfo);
+  await page.evaluate(() => {
+    window.oldInfoReply = window.finishInfo; window.holdInfo = false; window.accountSequence++;
+    window.sharedModels = [{ id: "koinos-smart", label: "Current account Smart", installed: true, compatible: true, requiredRamGb: 4 }];
+    window.dispatchEvent(new Event("kai-credit-identity-changed"));
+  });
+  await page.waitForFunction(() => document.getElementById("product-provider-model-list").textContent.includes("Current account Smart"));
+  await page.evaluate(() => window.oldInfoReply());
+  assert.equal(await check("koinos-new").count(), 0);
+  await page.clock.pauseAt(new Date());
+  await page.evaluate(() => { window.infoError = true; }); await page.clock.runFor(15001);
+  await page.waitForFunction(() => document.querySelector('[data-shared-model="koinos-smart"]').textContent.includes("Checking connection"));
+  assert.equal(await page.locator('.product-model-status[data-state="online"]').count(), 0);
+  assert.match(await page.locator("#product-provider-model-summary").textContent(), /0 ready/);
+  await page.evaluate(() => { window.infoError = false; }); await reload.click();
+  await page.waitForFunction(() => document.querySelector('[data-shared-model="koinos-smart"]').textContent.includes("Available for paid work"));
+  assert.equal(await page.evaluate(() => window.providerCalls.some(call => ["chat-completion", "run-chat", "provider-public-start"].includes(call.action))), false);
+});

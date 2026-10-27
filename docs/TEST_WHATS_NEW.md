@@ -1,3 +1,10 @@
+## Choose which installed models to share
+
+- Earn defaults to **Share all compatible installed models**. You can choose a smaller set directly on Earn; the selection is saved for this credit account and deployment. Newly installed compatible models are included automatically in the default mode.
+- Each installed model shows whether it is selected and its network readiness, or why the package is incompatible. A model is marked ready for paid requests only while its verified network status is fresh. Installed or selected models are not automatically qualified.
+- Applying a selection while earning waits for current work to finish before reconnecting with the new model set. Stop remains available. Network jobs and presence reports are restricted to the selected approved packages; local Chat can still use other installed models.
+- The current service has a qualification policy for Smart only and counts the loaded, qualified model as ready. This desktop update does not widen server admission or change reward eligibility.
+
 ## Automatic KOIN estimates and model prices on Buy credits
 
 - Buy credits now shows a read-only KOIN market estimate with the currently deployed credit service, recalculates when the USD amount changes, and refreshes every 30 seconds while visible. A market estimate is approximate; Buy still obtains the exact signed payment for wallet approval.
