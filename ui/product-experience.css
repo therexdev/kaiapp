@@ -212,3 +212,5 @@
 .product-v2 .product-model-status[data-state="checking"]{background:#edf4ff;color:#155eef}
 .product-v2 .product-model-status[data-state="blocked"]{background:#fff0dc;color:#865716}
 @media(max-width:650px){.product-v2 .product-provider-model-row{grid-template-columns:1fr;gap:8px}.product-v2 .product-provider-model-row>div{padding-left:28px}}
+
+.product-v2 #product-quote-state.product-purchase-error{color:#8b1c2f;background:#fff1f3;border:1px solid #e6a3af;border-radius:10px;padding:12px;font-weight:600}

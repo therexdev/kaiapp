@@ -248,6 +248,92 @@ test("real HTTP wallet-only enrollment, free balance, purchase finality and lock
   assert.equal((await restartedDevice.context(signal)).signer.address, f.providerWallet.address);
 });
 
+const BUY_CHROMIUM = process.env.KAI_TEST_CHROMIUM || "/opt/pw-browsers/chromium";
+test("the real Buy button crosses registered desktop IPC, native review and HTTP purchase confirmation", {
+  ...options, skip: !BACKEND || !fs.existsSync(BUY_CHROMIUM), timeout: 90000,
+}, async t => {
+  const f = await fixture(t), signal = AbortSignal.timeout(75000);
+  await f.service.connectWallet(f.window, {}, signal);
+  const { CreditPurchases } = require("../../electron/credit-purchases");
+  const context = CreditService.prototype.context, open = CreditPurchases.prototype.open;
+  // Keep the production IPC/controller intact. Only its injected deployment,
+  // read-only chain and OS review are the existing isolated fixture boundary.
+  t.mock.method(CreditService.prototype, "context", function (s) { return context.call(f.service, s); });
+  t.mock.method(CreditPurchases.prototype, "open", function (...args) {
+    this.clientFactory = () => f.client; this.fetchImpl = f.service.fetchImpl;
+    return open.apply(this, args);
+  });
+  const desktop = await require("../server").createCore({ dataDir: path.join(f.dir, "browser-core"), port: 0, onEvent() {} });
+  f.cleanup(() => desktop.stop());
+  const appOrigin = "http://127.0.0.1:" + await desktop.start();
+  f.window.webContents.mainFrame = { url: appOrigin + "/" };
+  let handler;
+  const registration = require("../../electron/koin-test-ipc").registerTestPaymentIPC({
+    dataDir: f.service.dataDir, core: { account: f.account, gateway: { network: { trackShadowRequest: () => () => {} } } },
+    dialog: f.service.dialog, isTest: true, origin: appOrigin, getMainWindow: () => f.window,
+    ipcMain: { handle: (_name, fn) => { handler = fn; } },
+  });
+  f.cleanup(() => registration.dispose());
+  const browser = await require("playwright-core").chromium.launch({ executablePath: BUY_CHROMIUM, args: ["--no-sandbox"] });
+  f.cleanup(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1440, height: 980 } }), calls = [], errors = [];
+  let delayPreview = false, previewArrived, releasePreview, failSummary = false;
+  page.on("pageerror", error => errors.push(error.message));
+  const event = { sender: f.window.webContents, senderFrame: f.window.webContents.mainFrame };
+  await page.exposeBinding("fixtureDesktopIPC", async (_source, action, input) => {
+    calls.push(action);
+    if (["purchase-info", "purchase-preview", "purchase-approve", "purchase-stop", "credit-purchase-retry", "credit-status"].includes(action)) {
+      const reply = await handler(event, action, input);
+      if (action === "purchase-preview" && delayPreview) {
+        const release = new Promise(resolve => { releasePreview = resolve; });
+        previewArrived(); await release;
+      }
+      return reply;
+    }
+    // Unrelated startup panes do not make public network requests in this test.
+    if (action === "purchase-capabilities") return { purchasePricePreview: false };
+    if (action === "status") return { enabled: true, configured: false, mode: "test-deployment" };
+    if (action === "chat-info") return { configured: true, enabled: true, product: "prepaid-usd-v1", activation: "ready", models: [] };
+    if (action.startsWith("provider-public-")) return { state: "unavailable", detail: "Separate provider fixture" };
+    throw Error("This read is not needed by the isolated purchase: " + action);
+  });
+  await page.addInitScript(() => {
+    localStorage.setItem("kai-interface-language", "en");
+    window.kaiKoinTestBridge = { onProgress: () => () => {}, run: (action, input) => window.fixtureDesktopIPC(action, input) };
+  });
+  await page.route("**/core/koinos/rpc", route => route.request().postDataJSON().channel === "wallet:summary"
+    ? route.fulfill(failSummary ? { status: 503, json: { ok: false, error: "Background balance temporarily unavailable" } }
+      : { json: { ok: true, data: { address: f.wallet.address, network: "mainnet", tokenSymbol: "KOIN", koin: "100", usd: 25 } } })
+    : route.continue());
+  await page.route("**/core/earn", route => route.fulfill({ json: { wallet: f.wallet.status(), worker: { running: false } } }));
+  await page.goto(appOrigin);
+  await page.locator('.product-sidebar-credits [data-product-view="buy-credits"]').click();
+  await page.waitForFunction(() => !document.getElementById("product-quote-refresh").disabled);
+  f.approval.response = 0;
+  await page.locator("#product-quote-refresh").click();
+  await page.waitForFunction(() => document.getElementById("product-quote-state").textContent.includes("Payment cancelled"));
+  assert.equal(f.approvals.filter(a => a.title === "Buy AI credits").length, 1);
+  assert.equal(f.transactionSigns(), 0); assert.deepEqual(f.rpcCalls, []);
+  f.approval.response = 1; delayPreview = true;
+  const quoted = new Promise(resolve => { previewArrived = resolve; });
+  await page.locator("#product-quote-refresh").click();
+  await quoted;
+  failSummary = true;
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await page.waitForFunction(() => document.getElementById("product-purchase-detail").textContent.includes("Background balance temporarily unavailable"));
+  assert.equal(await page.locator("#product-quote-refresh").textContent(), "Getting current price…");
+  failSummary = false; releasePreview();
+  await page.waitForFunction(() => document.getElementById("product-quote-state").textContent.includes("Checking your payment"));
+  assert.equal(f.approvals.filter(a => a.title === "Buy AI credits").length, 2);
+  assert.equal(calls.filter(a => a === "purchase-preview").length, 2);
+  assert.equal(calls.filter(a => a === "purchase-approve").length, 2);
+  assert.equal(f.transactionSigns(), 1); assert.deepEqual(f.rpcCalls, [false, true]);
+  const paid = await f.service.run("credit-status", undefined, signal);
+  assert.equal(paid.credits.purchased.available, "100000000");
+  assert.equal(paid.purchases.filter(p => p.state === "confirmed").length, 1);
+  assert.deepEqual(errors, []);
+});
+
 test("locked-wallet Worker qualifies shared models, serves either on demand and counts only loaded reward capacity", { ...options, timeout: 120000 }, async t => {
   const f = await fixture(t, { multiModel: true }), signal = AbortSignal.timeout(105000);
   await f.service.connectWallet(f.window, {}, signal);

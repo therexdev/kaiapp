@@ -33,10 +33,12 @@ test("native fixture approval binds both exact deposit purposes and never export
   }
 });
 
-test("Cancel and preview-shaped responses create no signing fence", async t => {
+test("native Cancel is distinct from invalid approval responses and neither creates a signing fence", async t => {
   for (const response of [{ response: 0 }, { status: "reviewed", mode: "funding-preview" }]) {
     const f = fixture(t), c = controller(f, { dialog: { showMessageBox: async () => response } });
-    assert.equal((await c.approve(window(), f.id, () => f.request)).status, "cancelled");
+    const result = await c.approve(window(), f.id, () => f.request);
+    assert.equal(result.status, response.response === 0 ? "cancelled" : "unavailable");
+    assert.deepEqual(result.failure, response.response === 0 ? undefined : { stage: "dialog", code: "unavailable" });
     assert.equal(f.journal.saved(f.id), null); assert.equal(f.state.signed, 0); assert.equal(f.state.submissions.length, 0);
     assert.equal((await controller(f).approve(window(), f.id, () => f.request)).status, "await_finality");
   }

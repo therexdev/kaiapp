@@ -26,11 +26,14 @@ function createFundingApproval({ mode, client, journal, dialog, sign, submit, pr
   };
   async function review(window, id, getRequest, resume) {
     const visible = () => window && !window.isDestroyed() && window.isVisible() && !window.isMinimized();
-    if (pending || !visible()) return result("cancelled");
+    if (pending || !visible()) return { ...result("cancelled"), failure: fundingFailure("request", Error("Funding review changed or expired")) };
     digest(id);
     const startedAt = integer(clock()), expires = integer(startedAt + 180000);
     const task = pending = { stopped: false, id: null, abort: new AbortController() };
     const valid = () => !task.stopped && visible() && clock() >= startedAt && clock() < expires;
+    // A safety check ending the action is not the user pressing native Cancel.
+    // Preserve that distinction so Buy can display why no approval/payment ran.
+    const assertCurrentReview = () => { if (!valid()) throw Error("Funding review changed or expired"); };
     const waiting = async promise => {
       let listener;
       try {
@@ -49,7 +52,7 @@ function createFundingApproval({ mode, client, journal, dialog, sign, submit, pr
     let ownsFence = false, stage = "request";
     try {
       const request = intent(await waiting(Promise.resolve().then(getRequest)));
-      if (!valid()) return result("cancelled");
+      assertCurrentReview();
       stage = "journal";
       const saved = journal.saved(id);
       if (saved && JSON.stringify(saved.intent) !== JSON.stringify(request)) throw Error("Cannot replace the saved deposit");
@@ -63,7 +66,7 @@ function createFundingApproval({ mode, client, journal, dialog, sign, submit, pr
       stage = "deployment";
       const config = await client.verify(), policyHash = hash(JSON.stringify(config));
       if (config.paused || (resume && saved.policyHash !== policyHash)) throw Error("Funding policy changed or paused");
-      if (!valid()) return result("cancelled");
+      assertCurrentReview();
       const usdPurchase = isUsd(client.d) && request.kind === "credits";
       stage = "price";
       if (usdPurchase && !resume) await PriceQuote.verify(client.d, request.args, { now: clock(), version: config.credits.version });
@@ -94,11 +97,15 @@ function createFundingApproval({ mode, client, journal, dialog, sign, submit, pr
           tr("Stop prevents further sends. A transaction already sent may still be included and confirmed.")].join("\n"),
         buttons: [tr("Cancel"), tr(usdPurchase ? (resume ? "Continue payment" : "Buy credits") : resume ? "Resume saved deposit" : (mainnet ? "Send real KOIN" : mode === "test-deployment" ? "Approve testnet deposit" : "Approve fixture deposit"))], defaultId: 0, cancelId: 0, noLink: true,
       }));
-      if (response !== 1 || !valid()) return result("cancelled");
+      assertCurrentReview();
+      if (response === 0) return result("cancelled");
+      if (response !== 1) throw Error("Native payment review returned an invalid response");
       stage = "recheck";
-      if (JSON.stringify(intent(await getRequest())) !== JSON.stringify(request) || !valid()) return result("cancelled");
+      if (JSON.stringify(intent(await getRequest())) !== JSON.stringify(request)) throw Error("Funding review changed or expired");
+      assertCurrentReview();
       const currentConfig = await client.verify(), nextNonce = await client.provider.getNextNonce(request.actor);
-      if (!valid() || JSON.stringify(config) !== JSON.stringify(currentConfig) || nextNonce !== draft.header.nonce) return result("cancelled");
+      assertCurrentReview();
+      if (JSON.stringify(config) !== JSON.stringify(currentConfig) || nextNonce !== draft.header.nonce) throw Error("Funding review changed or expired");
       if (usdPurchase && !resume) await PriceQuote.verify(client.d, request.args, { now: clock(), version: currentConfig.credits.version });
       const approval = { txId: draft.id, policyHash, startedAt, expires, holdVersion: saved?.holdVersion };
       stage = "reserve";

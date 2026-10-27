@@ -477,3 +477,43 @@ test("a pre-review failure at the action deadline reports the failure instead of
   assert.deepEqual(f.counts(), { signatures: 0, reviews: 0 });
   assert.equal(f.state.submissions.length, 0);
 });
+
+test("successful RPC checks that finish after the review deadline cannot silently cancel Buy before its approval", async t => {
+  const f = setup(t), signal = new AbortController().signal, prepare = f.client.prepare.bind(f.client);
+  f.client.prepare = async (...args) => {
+    const transaction = await prepare(...args);
+    f.state.now += 180001;
+    return transaction;
+  };
+  const quote = await f.controller.preview(f.c, { usd: "1" }, signal);
+  await assert.rejects(f.controller.run(f.c, f.window, "purchase-approve", quote.quote.id, signal), /deployment\/review-changed/);
+  assert.deepEqual(f.counts(), { signatures: 0, reviews: 0 });
+  assert.equal(f.state.submissions.length, 0);
+  assert.equal(await f.controller.status(f.c, signal), null);
+});
+
+test("a changed nonce after native Buy approval reports a changed review rather than an unexplained cancellation", async t => {
+  const f = setup(t), signal = new AbortController().signal;
+  let reviews = 0;
+  f.options.dialog.showMessageBox = async () => { reviews++; f.state.nonce = "KAI="; return { response: 1 }; };
+  const quote = await f.controller.preview(f.c, { usd: "1" }, signal);
+  await assert.rejects(f.controller.run(f.c, f.window, "purchase-approve", quote.quote.id, signal), /recheck\/review-changed/);
+  assert.equal(reviews, 1); assert.equal(f.counts().signatures, 0);
+  assert.equal(f.state.submissions.length, 0);
+  assert.equal(await f.controller.status(f.c, signal), null);
+});
+
+test("a disappearing or invalid native approval cannot masquerade as the user cancelling Buy", async t => {
+  for (const scenario of ["hidden", "invalid-response"]) {
+    const f = setup(t), signal = new AbortController().signal;
+    f.options.dialog.showMessageBox = async () => {
+      if (scenario === "hidden") { f.window.emit("hide"); return { response: 0 }; }
+      return { state: "reviewed" };
+    };
+    const quote = await f.controller.preview(f.c, { usd: "1" }, signal);
+    await assert.rejects(f.controller.run(f.c, f.window, "purchase-approve", quote.quote.id, signal),
+      scenario === "hidden" ? /dialog\/review-changed/ : /dialog\/unavailable/);
+    assert.equal(f.counts().signatures, 0); assert.equal(f.state.submissions.length, 0);
+    assert.equal(await f.controller.status(f.c, signal), null);
+  }
+});

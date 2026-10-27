@@ -1,3 +1,10 @@
+## Buy credits reaches payment approval after background refresh failures
+
+- Fixed a reproduced Buy → price check → reset: a background wallet or payment-status read could invalidate the signed quote before it reached payment approval. Read-only refresh failures no longer cancel the user's purchase. Changing the selected amount, wallet or account and pressing Stop still stop that action.
+- Failed payment checks now remain visible in a red message beside the purchase button. Automatic price updates cannot erase the explanation. Review timeouts, changed payment details and interrupted native dialogs are distinguished from pressing Cancel.
+- Verification now clicks the real Buy button through the registered desktop IPC, payment controller and HTTP credit service, including a failed background balance read during pricing. Controlled native approval and blockchain fixtures confirm exactly one payment and one credit addition; these checks never use a customer's keys or funds.
+- This is an app update. The wallet-access Vultr update supplied with Test 222 remains the matching server version; it does not need to be repeated if already installed.
+
 ## Wallet connection, earning and purchases — coordinated Test update
 
 **Update the Vultr credit service first, then update Koinos AI Test.** The complete server-first procedure is in [Wallet flow update](WALLET_FIRST_RELEASE.md). The desktop update includes the wallet-only account connection and earning handoff as well as purchase recovery, pricing, wallet history and Linux restart fixes. A desktop update cannot install the remote service. Live promotion follows successful Test acceptance.
