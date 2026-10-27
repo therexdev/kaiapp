@@ -160,6 +160,53 @@ test("pack validation accepts the committed15 candidates and rejects changed pro
 function windowFixture() {
   const w = new EventEmitter(); w.isDestroyed = () => false; w.webContents = new EventEmitter(); w.webContents.mainFrame = { url: "http://127.0.0.1:41100/" }; w.webContents.send = () => {}; return w;
 }
+test("provider-check disposal removes handlers and captured listeners after the BrowserWindow is destroyed", () => {
+  const w = windowFixture(), contents = w.webContents, handlers = new Map();
+  let destroyed = false, reads = 0, cancelled = 0, disposed = 0, removed = 0;
+  w.isDestroyed = () => destroyed;
+  Object.defineProperty(w, "webContents", { get() { reads++; if (destroyed) throw Error("Object has been destroyed"); return contents; } });
+  const ipc = registerProviderCheckIPC({
+    ipcMain: { handle: (key, fn) => handlers.set(key, fn), removeHandler: key => { removed++; handlers.delete(key); } },
+    getMainWindow: () => w, createCheck: () => ({ cancel: () => { cancelled++; }, dispose: () => { disposed++; } })
+  });
+  assert.equal(w.listenerCount("closed"), 1); assert.equal(contents.listenerCount("did-start-navigation"), 1);
+  const registrationReads = reads;
+  destroyed = true; w.emit("closed"); assert.equal(cancelled, 1);
+  assert.doesNotThrow(() => ipc.dispose()); assert.doesNotThrow(() => ipc.dispose());
+  assert.equal(reads, registrationReads, "cleanup must not read destroyed BrowserWindow properties");
+  assert.equal(disposed, 1); assert.equal(removed, 1); assert.equal(handlers.size, 0);
+  assert.equal(w.listenerCount("closed"), 0); assert.equal(contents.listenerCount("did-start-navigation"), 0);
+  w.emit("closed"); contents.emit("did-start-navigation"); assert.equal(cancelled, 1);
+});
+test("provider-check registration tolerates an already destroyed window and cleanup still removes IPC", () => {
+  const w = new EventEmitter(), handlers = new Map(); let disposed = 0;
+  w.isDestroyed = () => true;
+  Object.defineProperty(w, "webContents", { get() { throw Error("Object has been destroyed"); } });
+  const ipc = registerProviderCheckIPC({
+    ipcMain: { handle: (key, fn) => handlers.set(key, fn), removeHandler: key => handlers.delete(key) },
+    getMainWindow: () => w, createCheck: () => ({ dispose: () => { disposed++; } })
+  });
+  assert.equal(w.listenerCount("closed"), 0);
+  assert.doesNotThrow(() => ipc.dispose()); assert.doesNotThrow(() => ipc.dispose());
+  assert.equal(disposed, 1); assert.equal(handlers.size, 0);
+});
+test("provider-check cleanup remains complete if the checker throws and late calls cannot restart it", async () => {
+  const w = windowFixture(), contents = w.webContents, handlers = new Map(); let onProgress, disposals = 0, sent = 0;
+  contents.send = () => { sent++; };
+  const ipc = registerProviderCheckIPC({
+    ipcMain: { handle: (key, fn) => handlers.set(key, fn), removeHandler: key => handlers.delete(key) },
+    getMainWindow: () => w, origin: "http://127.0.0.1:41100", createCheck: options => {
+      onProgress = options.onProgress;
+      return { dispose: () => { disposals++; throw Error("checker cleanup failed"); }, start: () => { throw Error("must not restart"); } };
+    }
+  });
+  const event = { sender: contents, senderFrame: contents.mainFrame }, invoke = handlers.get("provider:local-check");
+  assert.throws(() => ipc.dispose(), /checker cleanup failed/);
+  assert.doesNotThrow(() => ipc.dispose()); assert.equal(disposals, 1);
+  assert.equal(handlers.size, 0); assert.equal(w.listenerCount("closed"), 0); assert.equal(contents.listenerCount("did-start-navigation"), 0);
+  await assert.rejects(invoke(event, "start"), /access denied/);
+  onProgress({ state: "cancelled" }); assert.equal(sent, 0);
+});
 test("real provider-check IPC rejects other windows/frames and caller data, then copies and privately saves one local report", async t => {
   const f = fixture(t), w = windowFixture(), handlers = new Map(), output = path.join(f.dir, "report.json"); let copied = "", dialogCalls = 0;
   const ipc = registerProviderCheckIPC({ ipcMain: { handle: (key, fn) => handlers.set(key, fn), removeHandler: key => handlers.delete(key) }, core: f.core,

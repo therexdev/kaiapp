@@ -77,6 +77,8 @@ class McpManager {
     this.nodeRuntime = nodeRuntime; // provisions Node when a server needs npx
     this.onEvent = onEvent || (() => {});
     this._conns = new Map(); // id -> McpConnection
+    this._connecting = new Map(); // includes children still completing their handshake
+    this._generation = 0;
   }
 
   /** Rewrite an npx-based server so it runs on whichever Node we have —
@@ -154,20 +156,45 @@ class McpManager {
     const s = (this.settings.get("mcp.servers") || []).find((x) => x.id === id);
     if (!s) throw new Error("no such tool server");
     if (this._conns.has(id)) return this._conns.get(id).tools;
+    if (this._connecting.has(id)) return this._connecting.get(id).promise;
     const conn = new McpConnection(this._resolveCommand(s), this.onEvent);
-    const tools = await conn.connect().catch((e) => {
-      conn.close();
-      throw e;
-    });
-    this._conns.set(id, conn);
-    this._registerTools(s, conn);
-    // First successful connect earns auto-reconnect on next boot.
-    if (!s.autoConnect) this.setServerFlags(id, { autoConnect: true });
-    this.onEvent({ type: "mcp:connected", server: s.name, tools: tools.length });
-    return tools;
+    const generation = this._generation;
+    const pending = { conn, promise: null };
+    this._connecting.set(id, pending);
+    pending.promise = (async () => {
+      try {
+        const tools = await conn.connect();
+        // A closed HTTP request can still resolve, or disconnect/reconnect
+        // can replace this pending entry. Neither may revive retired tools.
+        if (generation !== this._generation || this._connecting.get(id) !== pending) {
+          throw new Error("MCP connection cancelled");
+        }
+        this._conns.set(id, conn);
+        this._registerTools(s, conn);
+        // First successful connect earns auto-reconnect on next boot.
+        if (!s.autoConnect) this.setServerFlags(id, { autoConnect: true });
+        this.onEvent({ type: "mcp:connected", server: s.name, tools: tools.length });
+        return tools;
+      } catch (e) {
+        conn.close();
+        if (this._conns.get(id) === conn) {
+          this._conns.delete(id);
+          this.registry.unregister(`mcp:${id}`);
+        }
+        throw e;
+      } finally {
+        if (this._connecting.get(id) === pending) this._connecting.delete(id);
+      }
+    })();
+    return pending.promise;
   }
 
   disconnect(id) {
+    const pending = this._connecting.get(id);
+    if (pending) {
+      this._connecting.delete(id);
+      pending.conn.close();
+    }
     const conn = this._conns.get(id);
     if (!conn) return;
     conn.close();
@@ -242,15 +269,20 @@ class McpManager {
 
   /** Reconnect servers the user has used before. Fire-and-forget at boot. */
   async autoConnect() {
+    const generation = this._generation;
     for (const s of this.settings.get("mcp.servers") || []) {
+      if (generation !== this._generation) return;
       if (s.autoConnect) {
-        await this.connect(s.id).catch((e) => this.onEvent({ type: "mcp:autoconnect-failed", server: s.name, message: String(e.message) }));
+        await this.connect(s.id).catch((e) => {
+          if (generation === this._generation) this.onEvent({ type: "mcp:autoconnect-failed", server: s.name, message: String(e.message) });
+        });
       }
     }
   }
 
   closeAll() {
-    for (const id of [...this._conns.keys()]) this.disconnect(id);
+    this._generation++;
+    for (const id of new Set([...this._conns.keys(), ...this._connecting.keys()])) this.disconnect(id);
   }
 }
 

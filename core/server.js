@@ -572,7 +572,6 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent, cre
   // command line, a remote URL, or any response body.
   const { GitHub } = require("./lib/github");
   code.github = new GitHub(dataDir);
-  mcp.autoConnect().catch(() => {}); // reconnect servers the user used before
 
   // Local speech-to-text (§7: audio never leaves the machine). Engine+model
   // are catalog-pinned; nothing downloads until the user opts into setup.
@@ -668,6 +667,7 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent, cre
     gateway,
     async start() {
       const p = await gateway.listen();
+      mcp.autoConnect().catch(() => {}); // only spawn tool servers after the gateway starts
       events({ type: "core:ready", message: `gateway on http://127.0.0.1:${p}` });
       // Remote access (task #94): outbound long-poll to the relay so the
       // local API works from anywhere with zero router setup. Off by

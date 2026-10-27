@@ -3,14 +3,21 @@ const fs = require("node:fs"), path = require("node:path"), { LocalProviderCheck
 const { trustedMainDocument } = require("./window-security");
 function registerProviderCheckIPC({ ipcMain, core, getMainWindow, origin, appVersion, channel, dialog, clipboard, downloadsDirectory, createCheck = options => new LocalProviderCheck(options) }) {
   const name = "provider:local-check", progress = "provider:local-check-progress";
+  let disposed = false;
   const check = createCheck({ core, appVersion, channel, onProgress: value => {
+    if (disposed) return;
     const window = getMainWindow();
     if (window && !window.isDestroyed() && trustedMainDocument({ sender: window.webContents, senderFrame: window.webContents.mainFrame }, window, origin)) window.webContents.send(progress, value);
   } });
-  const guard = event => { if (!trustedMainDocument(event, getMainWindow(), origin)) throw Error("Desktop window access denied"); };
+  const guard = event => { if (disposed || !trustedMainDocument(event, getMainWindow(), origin)) throw Error("Desktop window access denied"); };
   const initialWindow = getMainWindow(), stop = () => check.cancel();
-  initialWindow?.on("closed", stop);
-  initialWindow?.webContents.on("did-start-navigation", stop);
+  // BrowserWindow.webContents can throw after native window destruction. Keep
+  // the emitter we subscribed to so shutdown never reads that getter again.
+  const initialContents = initialWindow && !initialWindow.isDestroyed() ? initialWindow.webContents : null;
+  if (initialContents) {
+    initialWindow.on("closed", stop);
+    initialContents.on("did-start-navigation", stop);
+  }
   ipcMain.handle(name, async (event, action, input) => {
     guard(event);
     if (input !== undefined || !["start", "status", "cancel", "copy", "save"].includes(action)) throw Error("Unknown local check action");
@@ -34,6 +41,13 @@ function registerProviderCheckIPC({ ipcMain, core, getMainWindow, origin, appVer
     finally { if (fd !== undefined) fs.closeSync(fd); }
     return { saved: true };
   });
-  return { check, dispose() { check.dispose(); initialWindow?.removeListener("closed", stop); initialWindow?.webContents.removeListener("did-start-navigation", stop); ipcMain.removeHandler(name); } };
+  return { check, dispose() {
+    if (disposed) return;
+    disposed = true;
+    initialWindow?.removeListener("closed", stop);
+    initialContents?.removeListener("did-start-navigation", stop);
+    ipcMain.removeHandler(name);
+    check.dispose();
+  } };
 }
 module.exports = { registerProviderCheckIPC };

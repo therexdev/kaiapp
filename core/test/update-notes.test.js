@@ -43,7 +43,8 @@ test("reading the notes is not the same as declining the update", () => {
    * packaged path must still queue the install; the source path must return
    * WITHOUT setting `declined`.
    */
-  assert.match(MAIN, /if \(response === 0\) return autoUpdater\.quitAndInstall/);
+  assert.match(MAIN, /if \(response === 0\) return restartUpdate\(\)/);
+  assert.match(MAIN, /createUpdateRestart\(\{ app, updater: autoUpdater \}\)/);
   const src = MAIN.slice(MAIN.indexOf('buttons: ["Update and restart"'));
   const notesBranch = src.slice(src.indexOf("if (response === 1)"), src.indexOf("if (response !== 0)"));
   assert.ok(!/declined = state\.head/.test(notesBranch),

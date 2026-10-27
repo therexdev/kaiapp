@@ -1,3 +1,9 @@
+## Reliable Linux update restarts
+
+- Restarting after an AppImage update waits for the running app to exit before opening its replacement. Live and Test retain their shared profile lock throughout shutdown.
+- Fixed a shutdown exception caused by accessing an already-destroyed desktop window. Cleanup continues if one component fails, and failed startup exits instead of leaving a hidden process blocking the next launch.
+- A standalone Linux shortcut installer creates a desktop and application-menu entry for an existing AppImage. It uses the desktop location configured by the operating system and preserves the app's profile and update channel.
+
 ## Choose which installed models to share
 
 - Earn defaults to **Share all compatible installed models**. You can choose a smaller set directly on Earn; the selection is saved for this credit account and deployment. Newly installed compatible models are included automatically in the default mode.

@@ -263,6 +263,8 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
+      - name: Verify Linux update restart and shared profile handoff
+        run: xvfb-run -a node scripts/verify-linux-relaunch.js
       - name: Prepare test installer identity
         run: node scripts/prepare-test-build.js ${{ github.run_number }} ${{ github.run_attempt }}
       - run: npm run dist -- --linux --x64 --arm64 --publish never

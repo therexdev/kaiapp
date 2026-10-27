@@ -32,6 +32,11 @@ let checkDesktopUpdates = null;
 // Set the moment a real quit begins, so the close handler below knows the
 // difference between "the user pressed X" and "the app is going down".
 let quitting = false;
+const { createCleanup, failStartup } = require("./desktop-lifecycle");
+const cleanup = createCleanup({ logger: console });
+// Register before startup installs any shutdown callbacks. A failed disposer
+// must not prevent later cleanup or leave a hidden process owning the profile.
+app.on("before-quit", () => { quitting = true; });
 
 if (!app.requestSingleInstanceLock()) {
   if (release.isTest) {
@@ -42,13 +47,13 @@ if (!app.requestSingleInstanceLock()) {
         detail: "Live and Test use the same wallet, node and data. Choose Quit Koinos AI from the running app's tray menu, then open Test again. Closing its window may only hide it in the tray.",
         buttons: ["OK"],
       });
-      app.quit();
-    });
+    }).catch(error => console.error("[startup] already-running notice:", error))
+      .finally(() => app.quit());
   } else app.quit();
 } else {
   app.on("second-instance", () => {
     // Reopening restores the main window and parks the companion.
-    if (win) {
+    if (win && !win.isDestroyed() && !quitting) {
       mascot?.hide();
       if (win.isMinimized()) win.restore();
       win.show();
@@ -56,7 +61,10 @@ if (!app.requestSingleInstanceLock()) {
     }
   });
 
-  app.whenReady().then(start);
+  app.whenReady().then(start).catch(error => {
+    quitting = true;
+    return failStartup({ app, dialog, error, cleanup });
+  });
 }
 
 // Machine secret for wallet sessions: 32 random bytes, stored encrypted by
@@ -127,7 +135,7 @@ async function start() {
   protectNavigation(win.webContents, origin, url => shell.openExternal(url));
   const providerCheck = require("./provider-check-ipc").registerProviderCheckIPC({ ipcMain, core, getMainWindow: () => win, origin,
     appVersion: app.getVersion(), channel: release.channel, dialog, clipboard: require("electron").clipboard, downloadsDirectory: app.getPath("downloads") });
-  app.on("before-quit", () => providerCheck.dispose());
+  cleanup.add("provider diagnostics", () => providerCheck.dispose());
   require("../ui/locales/catalogs");
   const nativeI18n = require("../ui/i18n");
   let refreshLanguageMenu = () => {};
@@ -138,7 +146,7 @@ async function start() {
   require("./koin-review").registerKoinReviewIPC({ ipcMain, dialog, getMainWindow: () => win, origin, tr });
   require("./koin-session-review").registerSessionReviewIPC({ ipcMain, dialog, core, getMainWindow: () => win, origin, dataDir, tr });
   const testPayments = require("./koin-test-ipc").registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow: () => win, origin, dataDir, isTest: release.isTest });
-  app.on("before-quit", () => testPayments.dispose());
+  cleanup.add("credit service", () => testPayments.dispose());
   ipcMain.handle("dialog:pick-gguf", async (event) => {
     requireMain(event);
     const r = await dialog.showOpenDialog(win, {
@@ -313,6 +321,7 @@ async function start() {
     } finally {
       noticeOpen = false;
     }
+    if (quitting || !win || win.isDestroyed()) return;
     winState.set("trayNoticeSeen", true);
     if (response === 1) {
       // They just told the X to mean "quit" — so honour it for this press too.
@@ -324,10 +333,11 @@ async function start() {
   }
 
   win.on("close", (e) => {
-    winState.set("bounds", win.getBounds());
+    try { winState.set("bounds", win.getBounds()); }
+    catch (error) { console.error("[shutdown] saving window bounds:", error); }
     if (quitting || !closeHidesWindow()) return;
     e.preventDefault();
-    hideToTray();
+    hideToTray().catch(error => console.error("[window] close-to-tray notice:", error));
   });
   win.on("closed", () => {
     win = null;
@@ -434,13 +444,15 @@ async function start() {
       autoUpdater.autoDownload = true;
       autoUpdater.autoInstallOnAppQuit = true;
       const { checkForDesktopUpdate } = require("./update-check");
+      const restartUpdate = require("./update-restart").createUpdateRestart({ app, updater: autoUpdater });
+      autoUpdater.on("error", error => console.error("[update] updater error:", error));
       let downloadedVersion = null;
       checkDesktopUpdates = () => downloadedVersion
         ? Promise.resolve({ kind: "downloaded", currentVersion: app.getVersion(), version: downloadedVersion })
         : checkForDesktopUpdate(autoUpdater, { currentVersion: app.getVersion(), logger: console });
-      autoUpdater.on("update-downloaded", async (info) => {
+      const offerDownloadedUpdate = async (info) => {
         downloadedVersion = String(info.version || "");
-        if (!win) return;
+        if (quitting || !win || win.isDestroyed()) return;
         const { response } = await dialog.showMessageBox(win, {
           type: "info",
           title: "Update ready",
@@ -451,11 +463,22 @@ async function start() {
           cancelId: 2,
           noLink: true,
         });
-        // Silent install + relaunch: the app closes, updates, and reopens.
-        if (response === 0) return autoUpdater.quitAndInstall(true, true);
+        if (quitting) return;
+        // AppImage's own immediate launch can race the still-held profile lock.
+        // Its replacement must wait for this process to finish shutting down.
+        if (response === 0) return restartUpdate();
         // Reading the notes is not declining the update — open them and leave
         // the install queued for quit, exactly as "Later" would.
-        if (response === 1) shell.openExternal(notesUrl(info.version));
+        if (response === 1) await shell.openExternal(notesUrl(info.version));
+      };
+      autoUpdater.on("update-downloaded", info => {
+        offerDownloadedUpdate(info).catch(error => {
+          console.error("[update] restart failed:", error);
+          if (!quitting) {
+            try { dialog.showErrorBox("Koinos AI could not restart", "The update could not finish restarting. Your wallet and settings have been kept. Quit Koinos AI from its tray menu, then open it again."); }
+            catch (noticeError) { console.error("[update] restart notice:", noticeError); }
+          }
+        });
       });
       /*
        * Log why a check failed instead of discarding it. A silent catch is how
@@ -466,7 +489,8 @@ async function start() {
        * block the app — but now it leaves a trace.
        */
       void checkDesktopUpdates();
-      setInterval(() => { void checkDesktopUpdates(); }, 4 * 3600 * 1000);
+      const updateTimer = setInterval(() => { if (!quitting) void checkDesktopUpdates(); }, 4 * 3600 * 1000);
+      cleanup.add("desktop update timer", () => clearInterval(updateTimer));
     } catch (error) {
       console.error("[update] updater unavailable:", String(error?.message || error));
       /* updater unavailable (e.g. unpacked build) — never block the app */
@@ -513,7 +537,7 @@ async function start() {
           console.error("[update] source check failed:", e.message);
           return;
         }
-        if (!win || !state.behind) return;
+        if (quitting || !win || win.isDestroyed() || !state.behind) return;
 
         if (!state.canApply) {
           // Behind, but not safely fast-forwardable. Saying nothing here is
@@ -529,7 +553,7 @@ async function start() {
             defaultId: 0,
             cancelId: 0,
             noLink: true,
-          }).then((r) => { if (r.response === 1) shell.openExternal(notesUrl(null)); });
+          }).then((r) => { if (r.response === 1 && !quitting) return shell.openExternal(notesUrl(null)); });
           return;
         }
 
@@ -544,16 +568,18 @@ async function start() {
           cancelId: 2,
           noLink: true,
         });
+        if (quitting) return;
         if (response === 1) {
           // Show the notes and ask again next cycle, rather than treating a
           // request for information as a refusal.
-          shell.openExternal(notesUrl(null));
+          await shell.openExternal(notesUrl(null));
           return;
         }
         if (response !== 0) { declined = state.head; return; }
 
         try {
           const result = await apply(repoDir, { install: true });
+          if (quitting) return;
           if (result.depsChanged) {
             await dialog.showMessageBox(win, {
               type: "info",
@@ -563,8 +589,10 @@ async function start() {
               buttons: ["OK"],
               noLink: true,
             });
+            if (quitting) return;
             await runNpmInstall();
           }
+          if (quitting) return;
           app.relaunch();
           app.quit();
         } catch (e) {
@@ -586,8 +614,17 @@ async function start() {
       };
 
       // A moment after boot, so it never competes with the first paint.
-      setTimeout(() => { checkSource().catch(() => {}); }, 8000);
-      setInterval(() => { checkSource().catch(() => {}); }, 4 * 3600 * 1000);
+      let checkingSource = false;
+      const pollSource = async () => {
+        if (quitting || checkingSource) return;
+        checkingSource = true;
+        try { await checkSource(); }
+        catch (error) { console.error("[update] source update:", error); }
+        finally { checkingSource = false; }
+      };
+      const sourceTimer = setTimeout(() => { void pollSource(); }, 8000);
+      const sourceInterval = setInterval(() => { void pollSource(); }, 4 * 3600 * 1000);
+      cleanup.add("source update timers", () => { clearTimeout(sourceTimer); clearInterval(sourceInterval); });
     }
   }
 }
@@ -595,16 +632,13 @@ async function start() {
 // Anything that quits — the tray menu, Cmd+Q, the updater's relaunch, the OS
 // logging out — passes through here first, which is what lets the close
 // handler above tell a quit apart from a trip to the tray.
-app.on("before-quit", () => { quitting = true; });
-app.on("before-quit", () => providers?.dispose());
-app.on("before-quit", () => companionHub?.dispose());
-app.on("before-quit", () => mascot?.dispose());
-app.on("before-quit", () => core?.speech?.close());
-app.on("before-quit", () => core?.koinosNode?.nodeMgr?.dispose());
+cleanup.add("private providers", () => providers?.dispose());
+cleanup.add("companion", () => companionHub?.dispose());
+cleanup.add("companion window", () => mascot?.dispose());
+cleanup.add("speech", () => core?.speech?.close());
+cleanup.add("node supervisor", () => core?.gateway?.koinosNode?.nodeMgr?.dispose());
+cleanup.add("local model", () => core?.runtime?.stop());
+cleanup.add("Core", () => core?.stop());
+app.on("before-quit", () => { void cleanup.run(); });
 
 app.on("window-all-closed", () => app.quit());
-
-app.on("quit", () => {
-  // Stop the llama-server child with the app; nothing keeps running hidden.
-  if (core) core.runtime.stop();
-});
