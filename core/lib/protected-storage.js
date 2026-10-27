@@ -7,6 +7,9 @@ function isProtectedStorage(storage) {
   catch { return false; }
 }
 function storageState(storage) {
+  // The credit-only adapter can explain its wallet-unlock requirement. Other
+  // callers retain their existing OS storage checks and never gain fallback.
+  if (typeof storage?.storageState === "function") return storage.storageState();
   if (isProtectedStorage(storage)) return { available: true, state: "protected" };
   let backend;
   try { backend = storage?.getSelectedStorageBackend?.(); } catch {}

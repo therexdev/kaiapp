@@ -15,6 +15,7 @@ function purchaseClient(d) {
 class CreditPurchases {
   constructor({ dataDir, account, storage, dialog, fetchImpl = fetch, clock = Date.now, clientFactory = purchaseClient, marketReader, progress = () => {} }) {
     Object.assign(this, { dataDir, account, storage, dialog, fetchImpl, clientFactory, clock }); this.quotes = new CreditPurchaseQuotes({ clock, fetchImpl, marketReader }); this.active = null; this.progress = progress;
+    this.storage = require("../core/lib/wallet-credential-vault").scopedStorage(storage, "purchase-installation");
   }
   beginProgress(c, stage) {
     const now = this.clock(), op = this.purchaseOperation = { key: this.key(c), closed: false,

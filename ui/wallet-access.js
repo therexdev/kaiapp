@@ -4,20 +4,22 @@
   if (!host) return;
   const panel = document.createElement("section");
   panel.id = "product-wallet-access"; panel.className = "product-panel";
-  panel.innerHTML = '<h2>Use network credits</h2><p id="product-wallet-access-detail" role="status">Connect your wallet to check your free and purchased credits.</p><p id="product-wallet-access-address" class="product-fine"></p><div class="product-actions"><button id="product-wallet-access-connect" class="primary" disabled>Checking connection…</button><button id="product-wallet-access-session" hidden>Use free credits for this session</button><button data-product-action="signin">Sign in to an existing account</button></div><p id="product-wallet-access-session-note" class="product-fine" hidden>This session uses free credits only. Connect again after closing the app. Purchases need protected storage.</p>';
+  panel.innerHTML = '<h2>Use network credits</h2><p id="product-wallet-access-detail" role="status">Checking free credits and saved wallet access…</p><p id="product-wallet-access-address" class="product-fine"></p><div class="product-actions"><button id="product-wallet-access-connect" class="primary" disabled>Checking connection…</button><button id="product-wallet-access-session" hidden>Use free credits for this session</button><button data-product-action="signin" hidden>Sign in to an existing account</button></div><p id="product-wallet-access-session-note" class="product-fine" hidden>This session uses free credits only. Connect again after closing the app. Purchases need protected storage.</p>';
   host.querySelector(".product-head").after(panel);
   let info, pending, busy = false, revision = 0, notice = "";
   function paint() {
     const primary = $("product-wallet-access-connect"), session = $("product-wallet-access-session");
-    const connected = info?.connected === true;
+    const connected = info?.connected === true, freeAccess = info?.freeAccess === true;
+    panel.hidden = !info || freeAccess;
     const upgrade = connected && info?.sessionOnly === true && info?.secureStorage?.available === true;
-    $("product-wallet-access-detail").textContent = notice || info?.detail || "Connect your wallet to check your free and purchased credits.";
+    $("product-wallet-access-detail").textContent = notice || info?.detail || "Checking free credits and saved wallet access…";
     $("product-wallet-access-address").textContent = info?.address ? `Wallet: ${info.address}` : "";
-    $("product-wallet-access-session-note").hidden = info?.sessionOnly !== true;
+    $("product-wallet-access-session-note").hidden = true;
     const needsWallet = ["wallet-required", "wallet-unlock-required"].includes(info?.state);
-    primary.textContent = busy ? "Connecting…" : info?.state === "wallet-required" ? "Set up wallet" : info?.state === "wallet-unlock-required" ? "Unlock wallet" : upgrade ? "Save wallet connection" : connected ? "Refresh credits" : "Connect wallet";
-    primary.disabled = busy || !!pending || ((!connected || upgrade) && !needsWallet && (info?.canConnect !== true || info?.secureStorage?.available !== true));
-    session.hidden = connected || info?.canConnect !== true || info?.secureStorage?.available === true;
+    primary.textContent = busy ? "Connecting…" : freeAccess ? "Refresh credits" : info?.state === "wallet-required" ? "Set up wallet" : info?.state === "wallet-unlock-required" ? "Unlock wallet" : upgrade ? "Save wallet connection" : connected ? "Refresh credits" : "Connect wallet";
+    primary.disabled = busy || !!pending || (!freeAccess && (!connected || upgrade) && !needsWallet && (info?.canConnect !== true || info?.secureStorage?.available !== true));
+    session.hidden = freeAccess || connected || info?.canConnect !== true || info?.secureStorage?.available === true;
+    panel.querySelector('[data-product-action="signin"]').hidden = !info || freeAccess || connected;
     session.disabled = busy || !!pending;
   }
   async function refresh() {
@@ -37,6 +39,7 @@
   }
   async function connect(sessionOnly) {
     if (busy) return;
+    if (info?.freeAccess) { await window.KaiCredits?.refresh(); return; }
     if (["wallet-required", "wallet-unlock-required"].includes(info?.state)) {
       document.querySelector('#view-earn [data-product-action="payment-wallet"]')?.click(); return;
     }

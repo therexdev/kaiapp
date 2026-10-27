@@ -353,6 +353,7 @@ class Worker {
             koinMainnetPilotJobs: this.koinMainnetPilotJobs ? 1 : 0,
             koinMeteredStreaming: this.koinMainnetPilotJobs || this.koinFundedRehearsalJobs ? 1 : 0,
             koinQualification: this.qualificationTarget ? 1 : 0,
+            koinRuntimeReadiness: this.qualificationTarget && this.providerSigner && this.modelPins ? 1 : 0,
             // This claim is covered by the scoped device registration proof.
             // Availability still requires fresh qualification for every model.
             koinModelOnDemand: this.providerSigner && this.modelPins ? 1 : 0,
@@ -707,16 +708,15 @@ class Worker {
             const checked = qualification.validate(job, this.models?.catalog, this.qualificationTarget);
             this._executing = true; this._shadowAbort = new AbortController();
             const result = await require("./koin-network/shadow-worker").executeShadow({ job: checked.challenge, catalog: this.models?.catalog, runtime: this.runtime, signal: this._shadowAbort.signal,
+              requireComplete: true,
               onStage: stage => { qualificationStage = stage; } });
             this._shadowAbort.signal.throwIfAborted(); if (!this.running) throw Error("Provider qualification stopped");
             qualificationStage = "reporting";
             const signature = this.providerSigner ? await this.providerSigner.qualification(job, P.hash(result.output)) : await this.wallet.signHash(qualification.resultHash(checked, P.hash(result.output)));
             this._shadowAbort.signal.throwIfAborted(); if (!this.running) throw Error("Provider qualification stopped");
-            const response = await fetch(`${this.schedulerUrl}/koin/provider/qualification/result?token=${this.token}`, { method: "POST", redirect: "error",
-              headers: { "content-type": "application/json", connection: "close" }, signal: AbortSignal.any([this._shadowAbort.signal, AbortSignal.timeout(10000)]),
-              body: JSON.stringify({ jobId: checked.challenge.id, output: result.output, signature }) });
-            const value = await require("./koin-network/shadow-worker").readJson(response, 4096);
-            if (value.accepted !== true || !["testing", "qualified", "failed"].includes(value.qualification?.state)) throw Error("Qualification result was not acknowledged");
+            const value = await require("./koin-network/qualification-result").submitQualificationResult({
+              url: `${this.schedulerUrl}/koin/provider/qualification/result?token=${this.token}`,
+              body: { jobId: checked.challenge.id, output: result.output, signature }, signal: this._shadowAbort.signal });
             this._modelDiagnostics.delete(checked.challenge.model);
             this.stats.qualification = value.qualification;
             this.onEvent({ type: "worker:qualification", qualification: value.qualification });

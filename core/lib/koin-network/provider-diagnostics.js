@@ -3,11 +3,12 @@
 // Local observations explain a failed check; they never establish network
 // qualification. Raw runtime/RPC messages, prompts and credentials stay out.
 const CODES = Object.freeze(["preparation_timeout", "model_load_failed", "runtime_unavailable", "tokenizer_mismatch",
-  "tokenizer_unavailable", "inference_timeout", "inference_failed", "result_unconfirmed", "check_invalid"]);
+  "tokenizer_unavailable", "inference_timeout", "inference_incomplete", "inference_failed", "result_unconfirmed", "check_invalid"]);
 function code(stage, error, deadline, now = Date.now()) {
   const timedOut = error?.name === "TimeoutError" || Number.isSafeInteger(deadline) && now >= deadline;
   if (error?.message === "Shadow metering currently requires llama.cpp" || error?.message === "Prepared model is not ready") return "runtime_unavailable";
   if (error?.message === "Local tokenizer differs from quoted tokenizer") return "tokenizer_mismatch";
+  if (error?.message === "Qualification response did not finish within its output limit") return "inference_incomplete";
   if (stage === "preparing") return timedOut ? "preparation_timeout" : "model_load_failed";
   if (stage === "loading") return timedOut ? "preparation_timeout" : "model_load_failed";
   if (stage === "tokenizing") return timedOut ? "inference_timeout" : "tokenizer_unavailable";

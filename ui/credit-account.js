@@ -12,6 +12,7 @@
       const key = JSON.stringify([result.product, result.owner]);
       if (value.snapshot?.key === key && BigInt(s.version) < BigInt(value.snapshot.credits.version)) return;
       value = { status: "ready", error: null, refreshing: false, snapshot: { key, product: result.product, owner: result.owner, credits: structuredClone(s),
+        deviceFree: result.accessKind === "device-free", paidAccessLocked: result.accessKind === "device-free" && result.paidAccessLocked === true,
         purchases: structuredClone(result.purchases || []), usage: structuredClone(result.usage || []), receivedAt: clock() } }; notify();
     }
     async function refresh() {
@@ -23,7 +24,7 @@
       }
       await pending; return structuredClone(value);
     }
-    return { accept, refresh, clear() { generation++; pending = null; value = { status: "unavailable", snapshot: null, error: "Connect your wallet or sign in to check your credits.", refreshing: false }; notify(); }, get: () => structuredClone(value), subscribe(listener) { listeners.add(listener); listener(structuredClone(value)); return () => listeners.delete(listener); } };
+    return { accept, refresh, clear() { generation++; pending = null; value = { status: "loading", snapshot: null, error: null, refreshing: false }; notify(); }, get: () => structuredClone(value), subscribe(listener) { listeners.add(listener); listener(structuredClone(value)); return () => listeners.delete(listener); } };
   }
   const credits = value => { const n = BigInt(value), fraction = String(n % 100000n).padStart(5, "0").replace(/0+$/, ""); return (n / 100000n).toLocaleString() + (fraction ? "." + fraction : ""); };
   function creditPresentation(state, now = Date.now()) {
@@ -38,7 +39,7 @@
       : /Open the desktop app/i.test(status) ? "Open desktop to check your credits." : /connect.*wallet/i.test(status) ? "Wallet connection needed." : /sign in/i.test(status) ? "Credit connection needed." : "Could not refresh. Retry or view details.";
     return {
       usd, stale, total: usd ? credits(s.available) : loading ? "…" : "—",
-      breakdown: usd ? `${s.free.state === "unavailable" ? "Free allowance unavailable" : s.free.state === "ineligible" ? "Free allowance not eligible" : credits(s.free.available) + " free"} · ${credits(s.purchased.available)} purchased${stale ? " · last known" : ""}`
+      breakdown: usd ? `${s.free.state === "unavailable" ? "Free allowance unavailable" : s.free.state === "ineligible" ? "Free allowance not eligible" : credits(s.free.available) + " free"}${snapshot.deviceFree ? snapshot.paidAccessLocked ? " · purchased balance not connected" : "" : ` · ${credits(s.purchased.available)} purchased`}${stale ? " · last known" : ""}`
         : s ? "Earlier KOIN-based account" : loading ? "Checking credits…" : "Balance unavailable",
       status, compactStatus,
       detail: usd ? `Checked ${new Date(snapshot.receivedAt).toLocaleString()}.${resetText}${stale && state.error ? " " + state.error : ""}` : "",
@@ -68,7 +69,7 @@
   }
   window.KaiCredits.subscribe(paint);
   setInterval(() => { if (!document.hidden) paint(window.KaiCredits.get()); }, 1000);
-  window.addEventListener("kai-account-signed-out", () => window.KaiCredits.clear());
+  window.addEventListener("kai-account-signed-out", () => { window.KaiCredits.clear(); window.KaiCredits.refresh(); });
   window.addEventListener("kai-credit-identity-changed", () => { window.KaiCredits.clear(); window.KaiCredits.refresh(); });
   window.addEventListener("kai-network-account-changed", () => window.KaiCredits.refresh());
   document.addEventListener("visibilitychange", () => { if (!document.hidden) window.KaiCredits.refresh(); });

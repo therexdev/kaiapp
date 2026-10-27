@@ -11,7 +11,7 @@ async function readJson(response, max = 1500000) {
   }
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
-async function executeShadow({ job, catalog, runtime, signal, onChunk, onStage = () => {} }) {
+async function executeShadow({ job, catalog, runtime, signal, onChunk, onStage = () => {}, requireComplete = false }) {
   const j = ["koin-funded-rehearsal-chat", "koin-mainnet-pilot-chat"].includes(job?.type) ? require("./funded-protocol").validateJob(job, catalog) : validateJob(job, catalog), q = j.quote;
   const abort = AbortSignal.any([signal || new AbortController().signal, AbortSignal.timeout(Math.max(1, j.deadline - Date.now()))]);
   abort.throwIfAborted();
@@ -64,6 +64,15 @@ async function executeShadow({ job, catalog, runtime, signal, onChunk, onStage =
       if (output.trim() && output !== sent) await onChunk(output);
       result = { content: output };
     } else result = await readJson(response);
+    // A readiness answer must finish naturally. Reaching the output limit is
+    // valid for a normal paid generation, but cannot establish readiness from
+    // a partial answer or an unfinished reasoning prefix.
+    const naturalEnd = result.stop_type === undefined
+      ? result.stopped_eos === true || result.stopped_word === true
+      : ["eos", "word"].includes(result.stop_type);
+    if (requireComplete && (j.stream || result.error || result.stop !== true || result.stopped_limit === true || !naturalEnd ||
+        ["stopped_limit", "stopped_eos", "stopped_word"].some(key => result[key] !== undefined && typeof result[key] !== "boolean")))
+      throw Error("Qualification response did not finish within its output limit");
     if (result.truncated || typeof result.content !== "string" || !result.content.length || Buffer.byteLength(result.content) > 1048576) throw Error("Invalid or truncated shadow response");
     abort.throwIfAborted();
     return { output: result.content, usage: { prompt_tokens: q.inputTokens, completion_tokens: 0 } };

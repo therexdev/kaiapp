@@ -16,7 +16,11 @@ function fixture(t) {
       ensurePackage: async () => { downloads++; installed = true; }, cancelDownload() {} },
     hardware: { ramBytes: 8e9 }, runtime: { acquireFor: async () => ({ release() { releases++; } }) }, gateway: { earn: { stop: async () => {} }, network: { trackShadowRequest: () => () => {} } } };
   const service = { account: core.account, dataDir: directory, context: async () => { if (!authorized) throw Error("Account changed"); return c; }, fetchImpl: async (_url, init) => Response.json({ mode: config.mode, owner, chainId: config.deployment.chainId, installation: JSON.parse(init.body).installation, granted: true }) };
-  core.account = { ...core.account, assertCreditAuthorization() { throw Error("Legacy website authorization must not be used"); } };
+  const purchaseStorage = core.account.safeStorage;
+  service.purchases = new (require("../../electron/credit-purchases").CreditPurchases)({ dataDir: directory, account: service.account,
+    storage: { forPurpose: purpose => { assert.equal(purpose, "purchase-installation"); return purchaseStorage; } }, fetchImpl: service.fetchImpl });
+  core.account = { ...core.account, safeStorage: { isEncryptionAvailable: () => true, encryptString() { throw Error("Legacy website storage must not be used for credit payments"); } },
+    assertCreditAuthorization() { throw Error("Legacy website authorization must not be used"); } };
   const args = { service, core, createWorker: o => { options = o; return { running: false, status: () => ({}), async start() { started++; this.running = true; }, async stop() { stopped++; this.running = false; } }; },
     readStatus: async () => ({ state: "qualifying", label: "CHECKING MODEL", detail: "Fixture checking" }) };
   const controller = new CreditProvider(args); t.after(() => controller.dispose());

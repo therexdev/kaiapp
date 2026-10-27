@@ -19,11 +19,24 @@ test("invalid combined balance cannot replace the account's trusted state", () =
   assert.throws(() => store.accept(bad), /verified/); assert.equal(store.get().snapshot.credits.version, "1");
 });
 
-test("sign-out clears the prior balance and rejects a late response from that session", async () => {
+test("sign-out clears the prior balance, rejects its late response and permits automatic free access to load", async () => {
   let resolve; const store = createCreditState({ read: () => new Promise(done => { resolve = done; }) });
   store.accept(value("1")); const refresh = store.refresh(); await Promise.resolve();
   store.clear(); resolve(value("2")); await refresh;
-  assert.equal(store.get().snapshot, null); assert.equal(store.get().status, "unavailable");
+  assert.equal(store.get().snapshot, null); assert.equal(store.get().status, "loading");
+  const guest = { ...value("1"), owner: "automatic-free-installation", accessKind: "device-free" };
+  guest.credits.available = guest.credits.free.available; guest.credits.purchased.available = "0";
+  const freeRefresh = store.refresh(); await Promise.resolve(); resolve(guest); await freeRefresh;
+  assert.equal(store.get().status, "ready"); assert.equal(store.get().snapshot.owner, guest.owner); assert.equal(store.get().snapshot.deviceFree, true);
+});
+
+test("automatic free access never presents a locked purchased balance as zero", () => {
+  const { creditPresentation } = require("../../ui/credit-account"), store = createCreditState({ read: async () => value("1") });
+  const guest = { ...value("1"), owner: "automatic-free-installation", accessKind: "device-free", paidAccessLocked: true };
+  guest.credits.available = guest.credits.free.available; guest.credits.purchased.available = "0";
+  store.accept(guest);
+  const display = creditPresentation(store.get()); assert.match(display.breakdown, /free · purchased balance not connected/); assert.doesNotMatch(display.breakdown, /0 purchased/);
+  delete guest.paidAccessLocked; store.accept(guest); assert.doesNotMatch(creditPresentation(store.get()).breakdown, /purchased/);
 });
 
 test("opening and retrying the account reports loading without inventing a zero balance", async () => {

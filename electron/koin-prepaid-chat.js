@@ -21,6 +21,14 @@ class PrepaidChat extends ChatFlow {
     const response = await this.fetch(this.config.schedulerUrl + route, { method: "POST", redirect: "error", signal,
       headers: { "content-type": "application/json" }, body: JSON.stringify({ ...body, sessionToken: a.sessionToken,
         ...(isUsd(this.product) ? { creditWallet: /^account-[a-f0-9]{64}$/.test(selectedOwner) ? null : selectedOwner } : {}) }) });
+    if (response.status === 401 || response.status === 403) {
+      // Retire only this rejected free-session bearer. The stable installation
+      // identity, its allowance and saved request ID remain unchanged. A caller
+      // may repeat a read, but must never blindly repeat a chat/payment here.
+      this.access.invalidate?.(a);
+      await response.body?.cancel?.().catch(() => {});
+      throw Object.assign(Error("Network access expired. Reconnecting securely."), { code: "credit-access-expired", status: response.status });
+    }
     if (action === "chat" && response.ok && (response.headers.get("content-type") || "").includes("text/event-stream")) {
       let buffer = "", last, done = false, frames = 0; const decoder = new TextDecoder(), wire = protocol(this.target);
       for await (const part of response.body) {
@@ -100,7 +108,7 @@ class PrepaidChat extends ChatFlow {
       usage: { prompt_tokens: r.usage.inputTokens, completion_tokens: r.usage.outputTokens, total_tokens: r.usage.inputTokens + r.usage.outputTokens }, costUsd: isUsd(this.product) ? Number(r.usage.amount) / 1e8 : 0,
       koin: { product: this.product, state: k.state, target: this.target, session: k.session, quote: q, receipt: r, receiptHash: k.receiptHash } };
   }
-  async status() { return this.call("status"); }
+  async status(signal) { return this.call("status", {}, signal); }
   async requireCreditPriority(signal) {
     const result = await this.call("capabilities", {}, signal);
     if (result.capabilities?.creditPriority !== true) throw Error("Paid-first is unavailable on this network. Turn it off in Settings to use free credits first.");

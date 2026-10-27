@@ -72,6 +72,8 @@ class AccountService {
   _saveToken(token, metadata = {}, { sessionOnly = false } = {}) {
     const record = { ...metadata, token };
     if (sessionOnly) { this._memorySession = record; return; }
+    if (this.accountOrigin && fs.existsSync(this.file) && !this._storedTokenRecord()?.token)
+      throw authError("saved-account-unavailable", "Your saved credit connection cannot be read and has been preserved. Recover it or explicitly sign out before saving another connection.");
     const payload = JSON.stringify(record);
     fs.mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
     if (this.accountOrigin && !this._encrypted()) throw authError("secure-storage-required", storageState(this.safeStorage).detail);

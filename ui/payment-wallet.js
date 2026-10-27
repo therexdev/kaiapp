@@ -178,8 +178,12 @@
   lock.addEventListener("click", () => { window.KaiWalletPrivacy?.reset(); });
   $("payment-wallet-history-refresh").addEventListener("click", () => refresh());
   $("payment-wallet-history-more").addEventListener("click", () => { if (cursor) refresh(true); });
+  let wasVisible = visible();
   function visibility() {
-    if (visible()) { if (wallet?.address) refresh(); }
+    const nowVisible = visible(), changed = nowVisible !== wasVisible;
+    wasVisible = nowVisible;
+    if (!changed) return;
+    if (nowVisible) { if (wallet?.address) refresh(); }
     else { stop(); sendPanel.open = false; importPanel.hidden = true; window.KaiWalletPrivacy?.reset(); }
   }
   new MutationObserver(visibility).observe(page, { attributes: true, attributeFilter: ["hidden"] });

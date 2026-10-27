@@ -16,12 +16,13 @@ test("credits load on open, explain inactive service, retry existing USD account
       if (action === "status") return { enabled: true, mode: "test-deployment", configured: false };
       if (action === "credit-status") {
         window.creditReads++;
+        if (window.holdCreditRead) await new Promise(resolve => { window.finishCreditRead = resolve; });
         if (window.creditScenario === "inactive") throw Error("Error invoking remote method 'koin:test-payments': Error: " + reason);
         if (window.creditScenario === "offline") throw Error("Connection unavailable");
-        const legacy = window.creditScenario === "legacy", zero = window.creditScenario === "zero";
-        return { product: legacy ? "prepaid-v1" : "prepaid-usd-v1", owner: "fixture-account", credits: {
-          version: zero ? "2" : "1", unit: legacy ? "legacy-KOIN-1e-8" : "USD-1e-8", available: zero ? "0" : "125000000",
-          purchased: { available: zero ? "0" : "100000000" }, free: { state: "available", available: zero ? "0" : "25000000", resetAt: Date.now() + 3600000 },
+        const legacy = window.creditScenario === "legacy", zero = window.creditScenario === "zero", guest = window.creditScenario === "guest";
+        return { product: legacy ? "prepaid-v1" : "prepaid-usd-v1", owner: guest ? "free-installation" : "fixture-account", ...(guest ? { accessKind: "device-free" } : {}), credits: {
+          version: zero ? "2" : "1", unit: legacy ? "legacy-KOIN-1e-8" : "USD-1e-8", available: zero ? "0" : guest ? "25000000" : "125000000",
+          purchased: { available: zero || guest ? "0" : "100000000" }, free: { state: "available", available: zero ? "0" : "25000000", resetAt: Date.now() + 3600000 },
         }, purchases: [], usage: [] };
       }
       if (action === "provider-public-info") return { state: "unavailable", detail: reason };
@@ -46,10 +47,15 @@ test("credits load on open, explain inactive service, retry existing USD account
   await page.evaluate(() => { window.creditScenario = "zero"; }); await refresh.click();
   await page.waitForFunction(() => document.querySelector(".product-sidebar-credits [data-credit-total]").textContent === "0");
   assert.match(await page.locator(".product-sidebar-credits [data-credit-breakdown]").textContent(), /0 free.*0 purchased/);
-  await page.evaluate(() => { window.dispatchEvent(new Event("kai-account-signed-out")); });
-  assert.equal(await total.textContent(), "—");
+  await page.evaluate(() => { window.holdCreditRead = true; window.creditScenario = "guest"; window.dispatchEvent(new Event("kai-account-signed-out")); });
+  await page.waitForFunction(() => !!window.finishCreditRead);
+  assert.equal(await total.textContent(), "…", "sign-out immediately hides the prior balance while automatic free access reconnects");
   assert.equal(await page.locator("#koin-available").textContent(), "—");
-  await page.evaluate(() => { document.getElementById("koin-available").textContent = "0.10000000"; window.creditScenario = "legacy"; }); await refresh.click();
+  await page.evaluate(() => { window.holdCreditRead = false; window.finishCreditRead(); });
+  await page.waitForFunction(() => document.querySelector(".product-sidebar-credits [data-credit-total]").textContent === "250");
+  assert.match(await page.locator(".product-sidebar-credits [data-credit-breakdown]").textContent(), /^250 free$/);
+  assert.equal(await page.evaluate(() => window.KaiCredits.get().snapshot.owner), "free-installation");
+  await page.evaluate(() => { window.KaiCredits.clear(); document.getElementById("koin-available").textContent = "0.10000000"; window.creditScenario = "legacy"; }); await refresh.click();
   await page.waitForFunction(() => document.querySelector(".product-sidebar-credits [data-credit-status]").textContent.includes("Earlier balance"));
   assert.equal(await total.textContent(), "—"); assert.equal(await page.locator("#koin-available").textContent(), "0.10000000");
   await page.locator(".product-sidebar-credits [data-credit-help]").click();

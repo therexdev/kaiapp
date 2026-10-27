@@ -40,7 +40,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
   let configFile = path.join(root, "deployment.json"), journals = path.join(root, "journals");
   let journal, payments, sessionClient, sessionId, sessionRun, access, chatAbort, sessionAbort, worker, workerAbort, workerTrack, stopVersion = 0, busy = false, disposed = false;
   const creditService = new (require("./credit-service").CreditService)({ dataDir, account: core.creditAccount || core.account, dialog,
-    storage: core.account?.safeStorage, service: require("../core/lib/koin-network/credit-service.json"),
+    storage: (core.creditAccount || core.account)?.safeStorage, service: require("../core/lib/koin-network/credit-service.json"),
     purchaseProgress: value => {
       const window = getMainWindow(), progress = require("./credit-purchase-progress").purchaseProgress(value);
       if (!disposed && progress && trustedMainDocument({ sender: window?.webContents, senderFrame: window?.webContents.mainFrame }, window, origin))

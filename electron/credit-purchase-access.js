@@ -4,7 +4,8 @@ const P = require("../core/lib/koin-network/job-protocol");
 // Reuses an authenticated public account session; creates no account credential.
 // The local installation identifier only coordinates the existing signing lease.
 function installation({ dataDir, directory, config, storage }) {
-  if (!storage?.isEncryptionAvailable?.()) throw Error("Unlock OS credential storage to review payment");
+  const { isProtectedStorage, storageState } = require("../core/lib/protected-storage");
+  if (!isProtectedStorage(storage)) throw Error(storageState(storage).detail);
   const read = file => {
     if (fs.lstatSync(file).isSymbolicLink() || fs.statSync(file).size > 16384) throw Error("Invalid payment installation record");
     return JSON.parse(storage.decryptString(fs.readFileSync(file)));

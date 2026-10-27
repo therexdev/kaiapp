@@ -748,13 +748,16 @@
   }
   function qualificationDetail(q, model = "") {
     if (!q) return "";
-    let detail = `Network check: ${q.passed}/${q.total} passed · ${q.completed}/${q.total} completed${model ? ` · ${model}` : ""}.`;
+    const readiness = q.kind === "runtime-readiness";
+    let detail = `${readiness ? "Readiness check" : "Network check"}: ${q.passed}/${q.total} passed · ${q.completed}/${q.total} completed${model ? ` · ${model}` : ""}.`;
     detail += Number.isSafeInteger(q.required) ? ` Required: ${q.required}/${q.total}.` : " Required score was not reported by this server.";
     if (q.phase === "preparing") detail += " Preparing the model before timed checks.";
     if (q.state === "failed") {
       const f = q.failure;
       if (f?.code === "preparation_timeout") detail += " Model preparation did not finish before its deadline.";
-      if (f?.wrongAnswers > 0) detail += ` ${f.wrongAnswers} answer${f.wrongAnswers === 1 ? "" : "s"} did not match the required output.`;
+      if (f?.wrongAnswers > 0) detail += readiness
+        ? ` ${f.wrongAnswers} response${f.wrongAnswers === 1 ? "" : "s"} did not return the fresh check label.`
+        : ` ${f.wrongAnswers} answer${f.wrongAnswers === 1 ? "" : "s"} did not match the required output.`;
       if (f?.deadlines > 0) detail += ` ${f.deadlines} check${f.deadlines === 1 ? "" : "s"} did not finish before the deadline.`;
       if (!f || f.code === "unknown") detail += " The network did not report a complete failure reason.";
       if (Number.isSafeInteger(q.retryAt)) {
@@ -769,6 +772,7 @@
       runtime_unavailable: "The required local engine was not ready.", tokenizer_mismatch: "The local tokenizer did not match the network's pinned tokenizer.",
       tokenizer_unavailable: "The local engine could not verify the prompt's tokens.", inference_timeout: "The local check did not finish before its deadline.",
       inference_failed: "The local engine could not complete the check.", result_unconfirmed: "The network did not acknowledge the signed check result.",
+      inference_incomplete: "The model reached its response limit before finishing the check.",
       check_invalid: "The assigned check could not be verified on this computer." };
     if (!Array.isArray(info.modelDiagnostics) || info.modelDiagnostics.length > 64) return "";
     const d = info.modelDiagnostics.find(d => d?.model === model && Object.hasOwn(messages, d.code) && Number.isSafeInteger(d.at) &&
@@ -788,7 +792,7 @@
       ? `${chosen} selected · ${ready} ready for paid work${!ready ? ". No selected model is currently confirmed ready." : "."}`
       : `${chosen} selected. Earning is off.`;
     $("product-provider-model").textContent = info.selection.mode === "all" ? `All compatible installed models (${chosen})` : `${chosen} model${chosen === 1 ? "" : "s"} selected`;
-    if (!providerBusy && !providerModelsStale) $("product-provider-readiness").textContent = !info.enabled ? "Earning is off. Your model selection is saved." : ready ? `${ready} of ${chosen} selected models qualified and ready for paid work.` : "No selected model is ready for paid work. Each model needs network qualification and approval.";
+    if (!providerBusy && !providerModelsStale) $("product-provider-readiness").textContent = !info.enabled ? "Earning is off. Your model selection is saved." : ready ? `${ready} of ${chosen} selected models ready for paid work.` : "No selected model is ready for paid work yet. The network checks each selected model automatically.";
     const active = document.activeElement?.dataset.providerSharedModel;
     $("product-provider-model-list").innerHTML = models.map(model => {
       const row = states.get(model.id); let label, detail = "", state = "off";
@@ -802,8 +806,8 @@
       else if (row?.state === "online") { label = "Available for paid work"; state = "online"; }
       else if (row?.state === "review-required") { label = "Network approval needed"; detail = row.detail || "The network has not approved this model for paid work."; state = "blocked"; }
       else if (row?.state === "update-required") { label = "App update needed"; detail = row.detail; state = "blocked"; }
-      else if (row?.state === "qualification-failed") { label = "Network check not passed"; detail = row.qualification ? qualificationDetail(row.qualification) : "The server did not provide check results or a failure reason. Another network check runs automatically."; state = "blocked"; }
-      else if (row?.state === "qualifying") { label = row.qualification?.phase === "preparing" ? "Preparing model" : "Checking model"; detail = row.qualification ? qualificationDetail(row.qualification) : "The network is checking this model."; state = "checking"; }
+      else if (row?.state === "qualification-failed") { label = row.qualification?.kind === "runtime-readiness" ? "Readiness check not passed" : "Network check not passed"; detail = row.qualification ? qualificationDetail(row.qualification) : "The server did not provide check results or a failure reason. Another network check runs automatically."; state = "blocked"; }
+      else if (row?.state === "qualifying") { label = row.qualification?.phase === "preparing" ? "Preparing model" : row.qualification?.kind === "runtime-readiness" ? "Checking readiness" : "Checking model"; detail = row.qualification ? qualificationDetail(row.qualification) : "The network is checking this model."; state = "checking"; }
       else if (row?.state === "preparing") { label = "Preparing model"; state = "checking"; }
       else if (row?.state === "network-paused") { label = "Network reconnecting"; state = "checking"; }
       else { label = "Waiting for network qualification"; state = "checking"; }

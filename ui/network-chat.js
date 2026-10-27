@@ -2,7 +2,7 @@
 (() => {
   const bridge = window.kaiKoinTestBridge;
   let info = { configured: false }, pending, availabilityTimer;
-  const progress = text => { const node = document.getElementById("network-chat-status"); if (node) node.textContent = text; };
+  const progress = text => { const node = document.getElementById("network-chat-status"); if (node) { node.textContent = text; node.dataset.source = "chat"; } };
   const amount = value => { const n = BigInt(value); return `${n / 100000000n}.${(n % 100000000n).toString().padStart(8, "0")}`; };
   const alias = value => String(value || "").replace(/^koinos-network:/, "");
   const paidFirstPreference = () => localStorage.getItem("kai-credit-paid-first") === "true";
@@ -13,7 +13,8 @@
     toggle.checked = info.freeOnlySession === true ? false : paidFirstPreference();
     // A saved preference can always be turned off, even during an outage.
     toggle.disabled = info.freeOnlySession === true || !supported && !toggle.checked;
-    help.textContent = info.freeOnlySession === true ? "This temporary connection uses free credits only. Your saved credit priority applies again when you reconnect with protected storage."
+    help.textContent = info.deviceFree === true ? "Free credits are ready to use. Buying credits connects your KOIN wallet."
+      : info.freeOnlySession === true ? "This temporary connection uses free credits only. Your saved credit priority applies again when you reconnect with protected storage."
       : supported ? (toggle.checked
       ? "Purchased credits are used first. Eligible free credits cover the rest when needed. Your choice is saved on this computer."
       : "Free credits are used first on eligible models, then purchased credits. Your choice is saved on this computer.")
@@ -21,7 +22,7 @@
       : ["signin-required", "wallet-connection-required", "wallet-reauthorization-required", "secure-storage-required"].includes(info.activation) ? "Free credits are used first. Connect your wallet in Credits to check your available credit options."
       : "Free credits are used first. Paid-first will be available after the network service update.";
     const chatHelp = document.getElementById("network-chat-help");
-    if (chatHelp && info.maxRequestCredits) chatHelp.textContent = `Send a message to use your credits. ${info.freeOnlySession ? "This temporary connection uses free credits only." : toggle.checked ? "Purchased credits are used first." : "Free credits are used first."} Up to ${info.maxRequestCredits} credits per message.`;
+    if (chatHelp && info.maxRequestCredits) chatHelp.textContent = `Send a message to use your credits. ${info.deviceFree ? "Free credits are used automatically." : info.freeOnlySession ? "This temporary connection uses free credits only." : toggle.checked ? "Purchased credits are used first." : "Free credits are used first."} Up to ${info.maxRequestCredits} credits per message.`;
   }
   function paidFirst() {
     if (info.freeOnlySession === true) return false;
@@ -51,6 +52,13 @@
       if (!value || typeof value.enabled !== "boolean") throw Error("Network configuration unavailable");
       const wasFresh = availabilityFresh(), changed = JSON.stringify(info.models) !== JSON.stringify(value.models);
       info = value;
+      // Historical payment setup has its own account-help panel. A late
+      // legacy read must not leave its connection instruction below a ready
+      // current-service chat, or erase this chat's own progress/errors.
+      const chatStatus = document.getElementById("network-chat-status");
+      if (value.configured && value.product === "prepaid-usd-v1" && chatStatus?.dataset.source === "legacy") {
+        chatStatus.textContent = ""; delete chatStatus.dataset.source;
+      }
       clearTimeout(availabilityTimer);
       if (Number.isSafeInteger(value.modelAvailabilityUntil) && value.modelAvailabilityUntil > Date.now()) {
         availabilityTimer = setTimeout(() => { paintPrice(); window.dispatchEvent(new Event("kai-network-models-changed")); }, value.modelAvailabilityUntil - Date.now());
@@ -147,7 +155,13 @@
   document.getElementById("model-pick")?.addEventListener("change", paintPrice);
   document.getElementById("model-pick")?.addEventListener("focus", () => { if (document.getElementById("src-pick")?.value === "network") refresh().catch(() => {}); });
   window.KaiNetwork = { refresh, chatFetch, selectedModel, paintPrice, availabilityFresh, paidFirst, get info() { return info; },
-    acknowledge: id => bridge.run("chat-ack", id),
+    acknowledge: async id => {
+      const result = await bridge.run("chat-ack", id);
+      // Finish any read started before delivery, then sample recovery again.
+      // A successful saved reply must not advertise interrupted recovery.
+      if (pending) await pending.catch(() => {});
+      await refresh(); return result;
+    },
     recover: () => bridge.run("chat-recover"),
     paint() {
       paintPrice();

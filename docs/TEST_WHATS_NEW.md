@@ -1,3 +1,22 @@
+## Automatic free access and fresh model readiness — combined update
+
+**Update Vultr once, then update Koinos AI Test.** Use the
+[combined update guide](https://github.com/therexdev/kaiapp/blob/test/docs/AUTOMATIC_FREE_ACCESS_RELEASE.md); the earlier commands
+and storage/admission requirements below describe previous releases.
+
+- Network chat connects to the actual service-provided free allowance automatically. No account signup, KOIN wallet, wallet unlock or operating system keyring is needed for free access. This installation retains its spent allowance across restart and reconnection; sponsored funding and eligible-model limits still apply.
+- Buy credits uses the app wallet and asks for connection only when needed, within the purchase flow. On Linux/Pi without a protected system keyring, saved access can now use the app wallet's encrypted credential vault. Unlock once after restarting the app, then lock again while authorized earning continues. Payments retain their separate wallet approval. Existing paid accounts, encrypted connections and payment recovery records are preserved.
+- Shared models now complete two fresh signed runtime checks against their exact approved package, tokenizer and template. The generic twelve-question exam no longer controls readiness. Wrong, incomplete, expired or unsigned responses cannot qualify, and old failed results are never promoted. Evidence renews automatically; no chat is required to start checks, and ready models remain available between checks of other models.
+- Actual pinned Fast, Gemma 3 4B, Llama 3.1 8B and Mistral 7B weights passed 40/40 measured checks with native token-ID agreement and complete generation. The other eleven catalog models were not measured in that run and still require their own fresh checks. Runtime readiness is separate from model-quality scoring and does not multiply dormant-model rewards.
+- Only a genuinely new desktop profile starts in Local-First. Existing privacy settings and headless/Core defaults remain unchanged; Local-Only continues to block network access. Automatic free access is separate from financial wallets and cannot spend purchased credits, authorize earning or administer accounts.
+- The existing AppImage restart fix and desktop launcher remain included. Automated checks are not a claim of physical Raspberry Pi performance or the user's desktop integration; an older running updater may require downloading and launching the new ARM64 AppImage once.
+
+## Earlier release notes
+
+The entries below retain the history of earlier updates. For the current server
+command, automatic free access, keyring-free wallet protection and model
+admission behavior, use the combined guide above.
+
 ## Buy credits connects your wallet when needed
 
 - Buy credits uses the app's wallet and continues through connection to the exact payment approval. New and expired connections ask for a wallet proof in the app; no email signup or separate connection page is required. Existing saved connections are reused.
@@ -18,7 +37,7 @@
 - Fixed a scheduler loop in which repeated failed model checks could keep replacing an already-qualified model. Qualified selected capacity returns between checks, failed models retry fairly after a bounded pause, and paid requests can run between benchmark answers. A live assigned check is never interrupted or replaced.
 - Idle providers wait between empty polls, keeping network traffic bounded while Stop stays responsive.
 - Earn now shows each model's qualification score and the available failure details. Loading, tokenizer, runtime and reporting errors remain visible across idle polls instead of disappearing behind a generic retry message. Local diagnostics never grant network eligibility.
-- Models still need their own fresh signed passing checks. An actual run of the pinned Fast model completed quickly with matching token IDs but passed 10 of the required 12 cases; the two failures were JSON formatting and instruction priority. Installation alone does not mean every selected model has qualified.
+- Under the earlier quality policy, an actual run of the pinned Fast model completed quickly with matching token IDs but passed 10 of the required 12 cases; the two failures were JSON formatting and instruction priority. The current runtime-readiness policy above supersedes that admission exam. Installation alone still does not qualify a model.
 - This fix includes a narrow Vultr service update followed by the app update. Use the [exact server update command](EARNING_RECOVERY_RELEASE.md). The service updater preserves the existing configuration, keys, balances, payments, reward records and qualification evidence, and verifies the new scheduler on both loopback and HTTPS.
 
 ## Faster payment review with visible confirmation progress
@@ -49,7 +68,7 @@
 - Display-only KOIN estimates continue while the sidebar balance check is slow or unavailable. Windows payment journals use extended-length file paths while preserving their existing locations, recovery records and nonce protections.
 - Credits offers **Connect wallet** without mandatory email or password signup. Existing linked account identity, purchased balances and the service's free-credit policy remain authoritative. Opening a page never enrolls a wallet or grants credits.
 - Earn offers **Set up earning**, **Enable earning**, then **Start/Stop earning**. One native wallet review authorizes a separate device key for provider work; ordinary wallet Lock does not stop an authorized device. The key cannot spend KOIN, purchase credits or change the reward wallet. Expiry, revocation, privacy settings and fresh model qualification are enforced by both client and server.
-- Windows, macOS and supported Linux packages use the same flow. Raspberry Pi/Linux without protected credential storage offers an explicit session-only choice. Temporary buyer access is free-only, and the app shows the actual service allowance. It does not store plaintext credentials or promise restart access.
+- This earlier release offered an explicit session-only choice on Raspberry Pi/Linux without protected credential storage. The current release adds automatic free access and wallet-protected saved connections as described above; this historical temporary mode did not promise restart access.
 - Current USD credit actions work in both release channels; historical custody and deployment controls remain Test-only. Live/Test profile identity, payment journals and updater separation are preserved.
 
 ## Reliable Linux update restarts
@@ -63,7 +82,7 @@
 - Earn defaults to **Share all compatible installed models**. You can choose a smaller set directly on Earn; the selection is saved for this wallet and deployment on this computer. Newly installed compatible models are included automatically in the default mode.
 - Each installed model shows whether it is selected and its network readiness, or why the package is incompatible. A model is marked ready for paid requests only while its verified network status is fresh. Installed or selected models are not automatically qualified.
 - Applying a selection while earning waits for current work to finish before reconnecting with the new model set. Stop remains available. Network jobs and presence reports are restricted to the selected approved packages; local Chat can still use other installed models.
-- The matching Vultr update adds qualification criteria for all 15 exact catalog model packages while preserving the existing Smart policy. Each provider/model must freshly answer all 12 signed checks correctly, within 30 seconds per answer. Successful evidence lasts one day and renews automatically. This enables each supported model to qualify; it does not assert that every model or computer will pass.
+- The earlier Vultr update extended Smart's twelve-answer qualification criteria to all 15 exact catalog packages, with a 30-second limit per answer and one-day evidence. The current combined update replaces that admission exam with fresh per-model runtime-readiness checks; the old quality evidence remains historical.
 - Earning automatically loads selected models for their checks without sending a chat. Model preparation has its own bounded 120-second window before the timed questions begin, so loading is not counted as answer latency. Stop remains available.
 - Once a selected model is individually qualified, the updated provider can load it on demand for an assigned request. Models need not all stay in RAM or VRAM together. The network advertises only fresh signed qualifications; availability rewards count the actual loaded capacity, preventing installed or dormant models from multiplying rewards. Free-credit grants, payout economics and reward-wallet funding remain unchanged.
 
@@ -91,7 +110,7 @@
 
 - A local provider check waits for an in-flight network request to finish, pauses new network work while it checks the model, and resumes sharing automatically afterward. Cancelling or failing the diagnostic also releases the pause. The earning preference stays on.
 - The Earn page shows the network check's passed and completed counts and its scheduled retry time separately from the local diagnostic result. A local 12/12 result does not imply that the signed network check passed its delivery deadline.
-- Release verification now runs the actual desktop worker against the scheduler's reviewed twelve-case Smart qualification policy. It checks both successful signed qualification and rejection of a correct answer delivered after the deadline, using controlled inference responses.
+- Earlier release verification ran the actual desktop worker against the reviewed twelve-case Smart quality policy, including successful signed results and late-answer rejection with controlled inference. Current verification also exercises the separate runtime-readiness protocol described above.
 
 ## Buy credits, start earning and use Network chat
 

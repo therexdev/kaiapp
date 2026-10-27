@@ -27,6 +27,7 @@ test("selected pins gate registration and signed presence when local Chat uses a
   t.after(() => worker.stop());
   await worker._register(); assert.deepEqual(bodies[0].value.models, ["fast"]);
   assert.equal(bodies[0].value.capabilities.koinModelOnDemand, 0, "legacy wallet providers do not claim delegated on-demand readiness");
+  assert.equal(bodies[0].value.capabilities.koinRuntimeReadiness, 0);
   worker.running = true; worker._koinAvailable = true; worker._koinSession = "b".repeat(32); worker._koinSequence = 0;
   await worker._koinPresence();
   assert.equal(bodies[1].value.report.ready, false); assert.equal(bodies[1].value.report.model, "");
@@ -48,6 +49,7 @@ test("scoped providers sign the on-demand claim with exactly the selected instal
   t.after(() => worker.stop()); await worker._register();
   assert.deepEqual(signed.models, ["fast"]);
   assert.equal(signed.capabilities.koinModelOnDemand, 1);
+  assert.equal(signed.capabilities.koinRuntimeReadiness, 1, "readiness completion support is bound by the scoped registration proof");
   assert.deepEqual(registered, { ...signed, signature: "scoped-proof" });
 });
 test("funded and legacy assignments for unselected, removed or changed models cannot enter inference", async () => {

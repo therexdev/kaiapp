@@ -40,6 +40,11 @@ async function readProviderStatus(options) {
       // Only these bounded observations cross into the renderer. Evidence,
       // prompts, signatures and arbitrary server fields are not UI metadata.
       result.qualification = { state: q.state, passed: q.passed, completed: q.completed, total: q.total, retryAt: q.retryAt };
+      if (q.kind !== undefined) {
+        if (q.kind !== "runtime-readiness" || q.readinessVersion !== 1 || q.total !== 2 || q.required !== 2) throw Error("Invalid provider readiness policy");
+        result.qualification.kind = q.kind;
+        result.qualification.readinessVersion = q.readinessVersion;
+      }
       if (q.required !== undefined) {
         if (!Number.isSafeInteger(q.required) || q.required < 1 || q.required > q.total) throw Error("Invalid provider qualification requirement");
         result.qualification.required = q.required;
@@ -49,13 +54,15 @@ async function readProviderStatus(options) {
         result.qualification.phase = q.phase;
       }
       if (q.failure !== undefined) {
-        const f = q.failure, codes = ["preparation_timeout", "quality", "deadline", "quality_and_deadline", "unknown"];
+        const f = q.failure, codes = ["preparation_timeout", "quality", "deadline", "quality_and_deadline", "response", "response_and_deadline", "unknown"];
         if (q.state !== "failed" || !f || !codes.includes(f.code) || ![f.wrongAnswers, f.deadlines, f.unknown].every(n => Number.isSafeInteger(n) && n >= 0 && n <= q.total) ||
             f.wrongAnswers + f.deadlines + f.unknown !== q.completed - q.passed ||
             f.code === "preparation_timeout" && q.completed === q.total ||
-            f.code === "quality" && !(f.wrongAnswers > 0 && f.deadlines === 0 && f.unknown === 0) ||
+            ["response", "response_and_deadline"].includes(f.code) && q.kind !== "runtime-readiness" ||
+            ["quality", "quality_and_deadline"].includes(f.code) && q.kind === "runtime-readiness" ||
+            ["quality", "response"].includes(f.code) && !(f.wrongAnswers > 0 && f.deadlines === 0 && f.unknown === 0) ||
             f.code === "deadline" && !(f.deadlines > 0 && f.wrongAnswers === 0 && f.unknown === 0) ||
-            f.code === "quality_and_deadline" && !(f.wrongAnswers > 0 && f.deadlines > 0 && f.unknown === 0)) throw Error("Invalid provider qualification failure");
+            ["quality_and_deadline", "response_and_deadline"].includes(f.code) && !(f.wrongAnswers > 0 && f.deadlines > 0 && f.unknown === 0)) throw Error("Invalid provider qualification failure");
         result.qualification.failure = { code: f.code, wrongAnswers: f.wrongAnswers, deadlines: f.deadlines, unknown: f.unknown };
       }
     }

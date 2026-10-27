@@ -50,8 +50,13 @@ const json = (response, value, status = 200) => {
   response.end(JSON.stringify(value));
 };
 
-for (const lateArrival of [false, true]) {
-  test(lateArrival ? "correct signed answers cannot bypass the reviewed qualification deadline" : "Smart qualifies through the actual worker with Fast as the packaged default", { timeout: 20000 }, async () => {
+for (const scenario of ["normal-transport", "correct-answers-late-first-arrival", "temporary-upstream-failure", "saved-result-lost-acknowledgment"]) {
+  const lateArrival = scenario === "correct-answers-late-first-arrival", transientFailure = scenario === "temporary-upstream-failure", lostAck = scenario === "saved-result-lost-acknowledgment";
+  const title = lateArrival ? "correct signed answers cannot bypass the reviewed qualification deadline" : transientFailure
+    ? "a temporary result delivery failure recovers the same signed answer without another inference"
+    : lostAck ? "a saved result with a lost acknowledgment replays once without duplicate evidence or signing"
+      : "Smart qualifies through the actual worker with Fast as the packaged default";
+  test(title, { timeout: 20000 }, async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "kai-qualification-flow-"));
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (url, init) => {
@@ -60,8 +65,8 @@ for (const lateArrival of [false, true]) {
       assert.equal(destination.protocol, "http:");
       return originalFetch(url, init);
     };
-    let scheduler, worker, offset = 0, firstResult = true, failure;
-    const requests = [], events = [];
+    let scheduler, worker, offset = 0, firstResult = true, failure, qualificationSignatures = 0;
+    const requests = [], events = [], resultBodies = [];
     const signer = Signer.fromSeed("qualification-flow-controlled-provider");
     const runtime = http.createServer(async (request, response) => {
       try {
@@ -85,13 +90,28 @@ for (const lateArrival of [false, true]) {
     const server = http.createServer(async (request, response) => {
       try {
         request.url = request.url.replace(/^\/scheduler(?=\/)/, "");
-        if (lateArrival && firstResult && request.url.startsWith("/koin/provider/qualification/result")) {
+        const isResult = request.url.startsWith("/koin/provider/qualification/result");
+        let captured = "";
+        if (isResult) request.on("data", part => { captured += part; });
+        if (firstResult && isResult) {
           firstResult = false;
-          // Advance only the verifier's controlled clock after generation.
-          // No real wait, changed deadline, or fabricated failed answer.
-          offset = policy.maxLatencyMs + 1000;
+          if (lateArrival) {
+            // Advance only the verifier's controlled clock after generation.
+            // No real wait, changed deadline, or fabricated failed answer.
+            offset = policy.maxLatencyMs + 1000;
+          }
+          if (transientFailure) {
+            for await (const _part of request) { /* capture the exact first body without accepting it */ }
+            resultBodies.push(captured); json(response, { error: "Controlled temporary upstream failure" }, 503); return;
+          }
+          if (lostAck) {
+            // The real route saves and verifies the result before ending its
+            // response. Drop only that acknowledgment, preserving the journal.
+            response.end = () => { response.destroy(); return response; };
+          }
         }
         await scheduler.handle(request, response);
+        if (isResult) resultBodies.push(captured);
       } catch (error) { failure = error; json(response, { error: "Controlled scheduler assertion failed" }, 500); }
     });
     try {
@@ -104,7 +124,10 @@ for (const lateArrival of [false, true]) {
         policy, target, meter, clock: () => Date.now() + offset });
       const catalog = { aliases: { "koinos-smart": { package: pack.package, minRamGb: 8 } }, packages: { [pack.package]: { sha256: pack.modelHash } } };
       worker = new Worker({ schedulerUrl,
-        wallet: { address: signer.getAddress(), signHash: async hash => Buffer.from(await signer.signHash(hash)).toString("base64") },
+        wallet: { address: signer.getAddress(), signHash: async hash => {
+          if (worker?._executing) qualificationSignatures++;
+          return Buffer.from(await signer.signHash(hash)).toString("base64");
+        } },
         runtime: { activeAlias: "koinos-smart", status: () => ({ activeAlias: "koinos-smart", runtime: { kind: "llamacpp", running: true } }),
           acquireFor: async model => { assert.equal(model, "koinos-smart"); return { endpoint: `http://127.0.0.1:${runtime.address().port}/`, release() {} }; } },
         hardware: { ramBytes: 32e9 }, models: { catalog, aliases: () => [{ alias: "koinos-smart", status: "ready", minRamGb: 8 }] },
@@ -120,14 +143,21 @@ for (const lateArrival of [false, true]) {
       assert.equal(status?.state, lateArrival ? "failed" : "qualified");
       assert.equal(status.passed, lateArrival ? 11 : 12); assert.equal(status.completed, 12); assert.equal(status.total, 12);
       assert.equal(requests.length, 12);
+      assert.equal(qualificationSignatures, 12, "recovery reuses the existing qualification signature");
+      assert.equal(resultBodies.length, transientFailure || lostAck ? 13 : 12);
+      const byJob = new Map();
+      for (const body of resultBodies) { const id = JSON.parse(body).jobId; if (!byJob.has(id)) byJob.set(id, []); byJob.get(id).push(body); }
+      assert.equal(byJob.size, 12);
+      assert.equal([...byJob.values()].filter(bodies => bodies.length === 2).length, transientFailure || lostAck ? 1 : 0);
+      for (const bodies of byJob.values()) assert.equal(new Set(bodies).size, 1, "a retry must preserve the exact output and signature");
       assert.deepEqual(requests.map(r => r.id).sort(), pack.cases.map(c => c.id).sort());
       assert.equal(run.results.filter(r => r.reason === "deadline").length, lateArrival ? 1 : 0);
       assert.equal(qualifier.records().length, lateArrival ? 0 : 1, "late results cannot create provider eligibility");
       assert.equal(P.hash(JSON.stringify(policy)), policyHash, "the reviewed policy must remain unchanged");
       assert.equal(qualifier.policyHash, policyHash);
       assert.equal(events.filter(e => e.type === "worker:job-failed").length, lateArrival ? 1 : 0);
-      console.log(JSON.stringify({ acceptance: "passed", scenario: lateArrival ? "correct-answers-late-first-arrival" : "normal-transport",
-        status, inferences: requests.length, fullCatalogPolicyHash: meter.policyHash, qualificationPolicyHash: policyHash,
+      console.log(JSON.stringify({ acceptance: "passed", scenario,
+        status, inferences: requests.length, qualificationSignatures, resultSubmissions: resultBodies.length, fullCatalogPolicyHash: meter.policyHash, qualificationPolicyHash: policyHash,
         packagedDefault: config.model, warmModel: "koinos-smart", recordsCreated: qualifier.records().length,
         deadlineFailures: run.results.filter(r => r.reason === "deadline").length,
         controlledFixtures: ["UTF8 tokenizer", "expected inference output", "verifier clock for late arrival"],

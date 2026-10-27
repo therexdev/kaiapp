@@ -19,8 +19,12 @@ function manifest(value) {
   return { schema: 1, state: "ready", config };
 }
 class CreditService {
-  constructor({ dataDir, account, storage, service, fetchImpl = fetch, progress = () => {}, purchaseProgress = () => {}, dialog, marketReader }) {
+  constructor({ dataDir, account, storage, service, fetchImpl = fetch, progress = () => {}, purchaseProgress = () => {}, dialog, marketReader, deviceFreeAccount }) {
     Object.assign(this, { dataDir, account, storage, fetchImpl, progress, dialog }); this.service = manifest(service);
+    this.storage = require("../core/lib/wallet-credential-vault").scopedStorage(storage, "network-chat");
+    this.deviceFree = deviceFreeAccount === undefined && this.service.state === "ready" && account?.settings
+      ? new (require("../core/lib/device-free-account").DeviceFreeAccount)({ dataDir, settings: account.settings, config: this.service.config, fetchImpl })
+      : deviceFreeAccount;
     this.purchases = new (require("./credit-purchases").CreditPurchases)({ dataDir, account, storage, dialog, fetchImpl, marketReader, progress: purchaseProgress });
     this.runs = new (require("./credit-runs").CreditRuns)(this);
   }
@@ -39,6 +43,16 @@ class CreditService {
     } catch (error) {
       if (signal?.aborted) throw error;
       base.detail = String(error.message);
+      if (!["signin-required", "wallet-reauthorization-required", "secure-storage-required", "wallet-unlock-required"].includes(error.code)) {
+        const failure = setupFailure(error);
+        return { ...base, state: failure.activation, detail: failure.blocked };
+      }
+    }
+    if (this.deviceFree) {
+      try {
+        await this.deviceFree.creditAuthorization(this.service.config.schedulerUrl, signal);
+        return { ...base, freeAccess: true, state: "free-ready", detail: "Free-credit access is ready. Choose Buy credits to use your KOIN wallet for a purchase." };
+      } catch (error) { signal?.throwIfAborted(); /* Older services retain the existing wallet connection path. */ }
     }
     if (!address) return { ...base, state: "wallet-required", detail: "Create or import a wallet to connect to network credits" };
     try { await this.account.walletCapabilities(this.service.config, signal); }
@@ -53,7 +67,7 @@ class CreditService {
     if (!window || window.isDestroyed?.() || !window.isVisible?.() || window.isMinimized?.()) throw Error("Return to the visible desktop app to connect your wallet");
     return this.account.connectWallet(this.service.config, { sessionOnly: input.sessionOnly === true, review: async review => {
       const result = await this.dialog.showMessageBox(window, { type: "question", title: "Connect wallet to network credits", message: "Connect this wallet?",
-        detail: `Wallet: ${review.address}\nNetwork: ${review.serviceOrigin}\nDevice: ${review.deviceId}\n\nUse this wallet's existing network credit balance and service-provided free allowance. This proof does not transfer KOIN or authorize wallet transactions. The connection expires in 30 days and can be ended by signing out.\n\n${review.sessionOnly ? "Temporary access: this app will use free credits only. Access is kept in memory while the app is open; reconnect after restart. Private chat text will not be saved for automatic network recovery; resending the same message can recover its response." : "Access is saved in your operating system's protected credential storage and continues when your wallet is locked. Purchases still require their own approval."}`,
+        detail: `Wallet: ${review.address}\nNetwork: ${review.serviceOrigin}\nDevice: ${review.deviceId}\n\nUse this wallet's existing network credit balance and service-provided free allowance. This proof does not transfer KOIN or authorize wallet transactions. The connection expires in 30 days and can be ended by signing out.\n\n${review.sessionOnly ? "Temporary access: this app will use free credits only. Access is kept in memory while the app is open; reconnect after restart. Private chat text will not be saved for automatic network recovery; resending the same message can recover its response." : "Access is saved encrypted on this computer and continues when your wallet is locked. On computers without an operating system keyring, unlock your wallet once after restarting the app. No keyring setup is needed. Purchases still require their own approval."}`,
         buttons: ["Cancel", review.sessionOnly ? "Connect for this session" : "Connect wallet"], defaultId: 0, cancelId: 0, noLink: true });
       signal?.throwIfAborted();
       return result.response === 1 && !window.isDestroyed?.() && window.isVisible?.() && !window.isMinimized?.();
@@ -125,20 +139,39 @@ class CreditService {
     }
     // An explicit purchase preparation already verified its identity. Reuse
     // that snapshot for saved-payment reads while rechecking local authority.
-    const auth = verifiedAuth || await this.account.creditAuthorization(base.schedulerUrl, signal);
-    if (verifiedAuth) this.account.assertCreditAuthorization(auth, base.schedulerUrl);
+    let auth = verifiedAuth, authority = this.account;
+    if (!auth) {
+      try { auth = await this.account.creditAuthorization(base.schedulerUrl, signal); }
+      catch (error) {
+        signal?.throwIfAborted();
+        // Free access has its own non-spending installation identity. Never
+        // replace a saved wallet/account credential or hide a service outage
+        // behind a newly created financial account.
+        if (!this.deviceFree || !["signin-required", "wallet-reauthorization-required", "secure-storage-required", "wallet-unlock-required"].includes(error.code)) throw error;
+        auth = await this.deviceFree.creditAuthorization(base.schedulerUrl, signal);
+        authority = this.deviceFree;
+      }
+    }
+    if (auth.deviceFree) authority = this.deviceFree;
+    if (verifiedAuth) authority.assertCreditAuthorization(auth, base.schedulerUrl);
+    if (!auth.deviceFree) this.deviceFree?.clear();
     const config = { ...base, owner: auth.owner }, root = path.join(this.dataDir, "credit-account-v2", P.hash(auth.accountId)), key = P.hash(JSON.stringify(config));
     // New product files never overwrite custody/prepaid-v1 or their journals.
     const directory = path.join(root, key); fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
     const metadata = path.join(directory, "context.json");
     if (!fs.existsSync(metadata)) fs.writeFileSync(metadata, JSON.stringify({ config, accountId: auth.accountId }), { flag: "wx", mode: 0o600 });
-    const access = { authorize: (pin, nextSignal) => {
+    const access = { ...(auth.deviceFree ? { invalidate: () => authority.invalidate(auth) } : {}), authorize: (pin, nextSignal) => {
       nextSignal?.throwIfAborted();
-      this.account.assertCreditAuthorization(auth, pin);
+      authority.assertCreditAuthorization(auth, pin);
       return auth;
     } };
-    if (auth.sessionOnly && this.sessionIdentity !== auth.sessionToken) {
-      this.sessionStore?.dispose(); this.sessionStore = new (require("./session-free-chat").SessionFreeChatStore)(); this.sessionIdentity = auth.sessionToken;
+    // A renewed free-device bearer keeps the same verified owner and target.
+    // Retain its in-memory recovery key until that authority changes or the
+    // app exits; token expiry must not discard a pending private reply.
+    const sessionIdentity = auth.deviceFree ? P.hash(JSON.stringify(["device-free-chat-store-v1", auth.scope, auth.accountId,
+      auth.owner, auth.schedulerUrl, config.deployment, config.policyHash])) : auth.sessionToken;
+    if (auth.sessionOnly && this.sessionIdentity !== sessionIdentity) {
+      this.sessionStore?.dispose(); this.sessionStore = new (require("./session-free-chat").SessionFreeChatStore)(); this.sessionIdentity = sessionIdentity;
     } else if (!auth.sessionOnly && this.sessionStore) { this.sessionStore.dispose(); this.sessionStore = null; this.sessionIdentity = null; }
     const make = (cfg, dir) => auth.sessionOnly
       ? new (require("./session-free-chat").SessionFreeChat)({ config: cfg, file: path.join(dir, "chat-session-free.json"), sessionStore: this.sessionStore, access, fetchImpl: this.fetchImpl, progress: this.progress })
@@ -178,7 +211,13 @@ class CreditService {
     if (this.service.state !== "ready") return { enabled: true, configured: true, product: "prepaid-usd-v1", blocked: this.service.reason, activation: "unavailable", recoveryAvailable: false };
     try {
       const c = await this.context(signal);
-      if (c.auth?.sessionOnly) throw Object.assign(Error("Unlock your operating system keyring and reconnect with saved access before buying credits. Temporary access uses free credits only."), { code: "secure-storage-required" });
+      if (c.auth?.sessionOnly) {
+        const wallet = this.account.wallet?.status?.() || {};
+        const activation = !wallet.address ? "wallet-required" : !wallet.unlocked ? "wallet-unlock-required" : "wallet-connection-required";
+        return { enabled: true, configured: true, product: "prepaid-usd-v1", activation, blocked: activation === "wallet-required"
+          ? "Set up your KOIN wallet to buy credits. Free-credit access does not require a wallet."
+          : activation === "wallet-unlock-required" ? "Choose Buy to unlock your wallet and continue." : "Choose Buy to use your wallet and continue.", recoveryAvailable: false };
+      }
       // Buying credits depends on this account and its saved payments. Loading
       // provider availability or advanced-chat capabilities must not hold Buy.
       return { enabled: true, configured: true, product: "prepaid-usd-v1", activation: "ready", blocked: "", ...await this.purchaseState(c, signal) };
@@ -201,8 +240,8 @@ class CreditService {
       let runBudgets = false, creditPriority = false, modelCatalog, modelError = "";
       try { modelCatalog = await c.flow.models(signal); } catch (error) { modelError = String(error.message).slice(0, 220); }
       try { const r = await c.flow.call("capabilities", {}, signal); creditPriority = r.capabilities?.creditPriority === true; runBudgets = !!modelCatalog && r.capabilities?.advancedRuns === true && modelCatalog.models.every(t => r.capabilities.models?.some(m => m.model === t.model && m.version === t.version && m.maxOutput >= t.maxOutput)); } catch { /* Normal Chat remains independent of advanced-run support. */ }
-      return { enabled: true, configured: true, product: "prepaid-usd-v1", activation: "ready", blocked: modelError, ...await this.purchaseState(c, signal), model: c.config.model, maxOutput: c.config.maxOutput, models: modelCatalog?.models || [], modelAvailabilityUntil: modelCatalog?.validUntil || null,
-        runBudgets: c.auth?.sessionOnly ? false : runBudgets, creditPriority: c.auth?.sessionOnly ? false : creditPriority, freeOnlySession: c.auth?.sessionOnly === true, maxRequestCredits: require("../core/lib/koin-network/purchase-quote").credits(c.config.limits.perJob), recoveryAvailable: c.recoverable.length > 0 };
+      return { enabled: true, configured: true, product: "prepaid-usd-v1", activation: "ready", blocked: modelError, ...(c.auth?.sessionOnly ? { localPurchase: null } : await this.purchaseState(c, signal)), model: c.config.model, maxOutput: c.config.maxOutput, models: modelCatalog?.models || [], modelAvailabilityUntil: modelCatalog?.validUntil || null,
+        runBudgets: c.auth?.sessionOnly ? false : runBudgets, creditPriority: c.auth?.sessionOnly ? false : creditPriority, freeOnlySession: c.auth?.sessionOnly === true, deviceFree: c.auth?.deviceFree === true, maxRequestCredits: require("../core/lib/koin-network/purchase-quote").credits(c.config.limits.perJob), recoveryAvailable: c.recoverable.length > 0 };
     } catch (error) { return { enabled: true, configured: true, product: "prepaid-usd-v1", ...setupFailure(error), recoveryAvailable: false }; }
   }
   async run(action, input, signal, window) {
@@ -211,8 +250,8 @@ class CreditService {
       if (this.purchaseDisplayContext(signal).config !== c.config) throw Error("The pricing configuration changed; refresh the estimate");
       return result;
     }
-    const c = await this.context(signal);
-    if (c.auth?.sessionOnly && (action.startsWith("run-") || ["purchase-preview", "purchase-approve", "purchase-retry"].includes(action))) throw Object.assign(Error("Temporary network access uses free credits only. Unlock secure storage and reconnect with saved access for purchases and paid usage."), { code: "secure-storage-required" });
+    let c = await this.context(signal);
+    if (c.auth?.sessionOnly && (action.startsWith("run-") || ["purchase-preview", "purchase-approve", "purchase-retry"].includes(action))) throw Object.assign(Error("Choose Buy credits to use your KOIN wallet for purchases. Free-credit access does not require a wallet."), { code: "wallet-connection-required" });
     if (action === "run-open") return this.runs.open(c, input, signal);
     if (action === "run-chat") return this.runs.chat(c, input, signal);
     if (action === "run-status") return this.runs.status(c, input, signal);
@@ -220,8 +259,18 @@ class CreditService {
     if (action === "run-list") return { runs: this.runs.list(c) };
     if (action === "purchase-preview") return this.purchases.preview(c, input, signal);
     if (["purchase-approve", "purchase-retry"].includes(action)) return this.purchases.run(c, window, action, input, signal);
-    if (action === "purchase-sync") return this.purchases.sync(c, signal);
-    if (action === "credit-status") return c.flow.status();
+    if (action === "purchase-sync") return c.auth?.sessionOnly ? { state: "none" } : this.purchases.sync(c, signal);
+    if (action === "credit-status") {
+      let result;
+      try { result = await c.flow.status(signal); }
+      catch (error) {
+        if (!c.auth?.deviceFree || error.code !== "credit-access-expired") throw error;
+        signal?.throwIfAborted();
+        c = await this.context(signal);
+        result = await c.flow.status(signal);
+      }
+      return c.auth?.deviceFree ? { ...result, accessKind: "device-free", paidAccessLocked: Boolean(this.account.wallet?.address || this.account.file && fs.existsSync(this.account.file)) } : result;
+    }
     if (action === "network-overview") return c.flow.call("network", {}, signal);
     if (action === "chat-estimate") return c.flow.estimate(input, signal);
     if (action === "chat-recover") {
@@ -235,6 +284,6 @@ class CreditService {
     if (action === "chat-completion") { if (input?.runId !== undefined) throw Error("Use the approved run for multi-step calls"); return c.flow.chat(null, input, signal); }
     throw Error("Unknown credit service operation");
   }
-  dispose() { this.purchases.stop(); this.sessionStore?.dispose(); this.sessionStore = null; this.sessionIdentity = null; }
+  dispose() { this.purchases.stop(); this.deviceFree?.dispose(); this.sessionStore?.dispose(); this.sessionStore = null; this.sessionIdentity = null; }
 }
 module.exports = { CreditService, manifest, setupFailure };

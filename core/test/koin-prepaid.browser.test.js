@@ -13,7 +13,11 @@ for (const product of ["prepaid-v1", "prepaid-usd-v1"]) test(product + " custome
     window.kaiKoinTestBridge = { onProgress: callback => { listeners.add(callback); return () => listeners.delete(callback); }, run: async (action, input) => {
       window.calls.push({ action, input });
       const common = { enabled: true, configured: true, product, mode: "mainnet-pilot" };
-      if (action === "chat-info") return { ...common, model: "koinos-fast", maxOutput: 128, creditPriority: product === "prepaid-usd-v1", blocked: "" };
+      if (action === "chat-info") return { ...common, activation: "ready", model: "koinos-fast", maxOutput: 128, maxRequestCredits: "1", creditPriority: product === "prepaid-usd-v1", blocked: "" };
+      if (action === "credit-status" && product === "prepaid-usd-v1") return { ...common, owner: "fixture-current-account", credits: {
+        version: window.balance === "10000000" ? "1" : "2", unit: "USD-1e-8", available: window.balance,
+        purchased: { available: window.balance }, free: { state: "available", available: "0" },
+      }, purchases: [], usage: [] };
       if (action === "status") return { ...common, accessReady: true, credits: { available: window.balance, purchased: "10000000", spent: "0", held: "0" }, purchases: [], usage: [], purchasePending: !!window.pendingPurchase, worker: { running: window.provider } };
       if (["purchase", "purchase-retry"].includes(action)) { window.pendingPurchase = true; return { ...common, state: "purchase_pending" }; }
       if (action === "chat-completion") {
@@ -43,7 +47,7 @@ for (const product of ["prepaid-v1", "prepaid-usd-v1"]) test(product + " custome
   await page.locator("#koin-open-chat").click(); await page.locator("#network-chat-account").waitFor({ state: "visible" });
   await page.waitForFunction(() => document.getElementById("network-chat-balance").textContent === "100 credits");
   assert.equal(await page.locator("#network-add-koin").textContent(), "Buy credits");
-  if (product === "prepaid-usd-v1") { assert.match(await page.locator("#network-chat-help").textContent(), /1,000 credits = \$1/); assert.doesNotMatch(await page.locator("#network-chat-help").textContent(), /1 KOIN =/); }
+  if (product === "prepaid-usd-v1") { assert.match(await page.locator("#network-chat-help").textContent(), /Free credits are used first/); assert.doesNotMatch(await page.locator("#network-chat-help").textContent(), /Buy credits.*then chat|1 KOIN =/); }
   assert.doesNotMatch(await page.locator("#network-chat-account").innerText(), /reservation|reserved|settlement|allowance/i);
   assert.equal(await page.locator("#network-add-koin").isVisible(), false);
   assert.equal(await page.locator("#network-chat-reservation").isVisible(), false);

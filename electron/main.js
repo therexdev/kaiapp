@@ -67,23 +67,10 @@ if (!app.requestSingleInstanceLock()) {
   });
 }
 
-// Machine secret for wallet sessions: 32 random bytes, stored encrypted by
-// the OS credential store (safeStorage → DPAPI/Keychain). Lets the wallet
-// stay unlocked across restarts without ever writing a plaintext key.
+// Wallet resume uses only genuine OS-protected storage. The credit-only
+// wallet vault is never used to persist a secret that unlocks the wallet.
 function machineSecret(dataDir) {
-  try {
-    const { safeStorage } = require("electron");
-    if (!safeStorage.isEncryptionAvailable()) return null;
-    const fs = require("fs");
-    const p = path.join(dataDir, "machine-secret.bin");
-    if (fs.existsSync(p)) return safeStorage.decryptString(fs.readFileSync(p));
-    const secret = require("crypto").randomBytes(32).toString("hex");
-    fs.mkdirSync(dataDir, { recursive: true });
-    fs.writeFileSync(p, safeStorage.encryptString(secret));
-    return secret;
-  } catch {
-    return null; // wallet still works, it just asks for the password again
-  }
+  return require("./wallet-session-secret").machineSecret(dataDir, require("electron").safeStorage);
 }
 
 async function start() {
@@ -94,6 +81,7 @@ async function start() {
     } catch (error) { console.warn("[desktop shortcut]", error.message); }
   }
   const dataDir = process.env.KAI_CORE_DATA || path.join(app.getPath("userData"), "core");
+  require("./desktop-first-run").initializeDesktopProfile(dataDir);
   // We hold the shared Electron lock now. Snapshot configuration before even
   // machineSecret/createCore can write; never copy or relocate the node DB.
   if (release.isTest) {

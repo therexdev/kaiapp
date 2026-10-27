@@ -282,6 +282,40 @@ test("Earn explains each failed model with verified counts and bounded local err
   assert.equal(await page.locator('.product-model-status[data-state="online"]').count(), 0);
 });
 
+test("Earn distinguishes fresh runtime readiness from quality scores and keeps a ready model available", { skip: !fs.existsSync(CHROMIUM), timeout: 90000 }, async t => {
+  const { page, reload, row } = await sharingFixture(t);
+  await page.evaluate(() => {
+    const original = window.kaiKoinTestBridge.run;
+    window.readinessStage = "testing";
+    window.kaiKoinTestBridge.run = async (action, input) => {
+      const result = await original(action, input);
+      if (action === "provider-public-info" && window.readinessStage === "failed") result.modelDiagnostics = [
+        { model: "koinos-fast", code: "inference_incomplete", at: Date.now() }];
+      if (action === "provider-public-status") {
+        const state = window.readinessStage;
+        result.models = [result.models[0], { model: "koinos-fast", state: state === "testing" ? "qualifying" : state === "failed" ? "qualification-failed" : "online",
+          validUntil: Date.now() + 15000, qualification: { kind: "runtime-readiness", state: state === "online" ? "qualified" : state,
+            passed: state === "online" ? 2 : 1, completed: state === "testing" ? 1 : 2, total: 2, required: 2, retryAt: state === "failed" ? Date.now() + 300000 : null,
+            ...(state === "failed" ? { failure: { code: "response", wrongAnswers: 1, deadlines: 0, unknown: 0 } } : {}) } }];
+      }
+      return result;
+    };
+  });
+  await reload.click();
+  await page.waitForFunction(() => document.querySelector('[data-shared-model="koinos-fast"]').textContent.includes("Readiness check: 1/2"));
+  assert.match(await row("koinos-fast").textContent(), /Checking readiness.*Readiness check: 1\/2/);
+  assert.equal(await page.locator('.product-model-status[data-state="online"]').count(), 1);
+  await page.evaluate(() => { window.readinessStage = "failed"; }); await reload.click();
+  await page.waitForFunction(() => document.querySelector('[data-shared-model="koinos-fast"]').textContent.includes("Readiness check not passed"));
+  assert.match(await row("koinos-fast").textContent(), /did not return the fresh check label.*response limit before finishing/);
+  assert.doesNotMatch(await row("koinos-fast").textContent(), /quality|12\/12|Available for paid work/);
+  assert.equal(await page.locator('.product-model-status[data-state="online"]').count(), 1);
+  await page.evaluate(() => { window.readinessStage = "online"; }); await reload.click();
+  await page.waitForFunction(() => document.querySelectorAll('.product-model-status[data-state="online"]').length === 2);
+  assert.match(await row("koinos-fast").textContent(), /Available for paid work/);
+  assert.doesNotMatch(await row("koinos-fast").textContent(), /Last local check error/);
+});
+
 test("Earn exposes all installed models and applies a subset without confusing selection with network readiness", { skip: !fs.existsSync(CHROMIUM), timeout: 90000 }, async t => {
   const { page, reload, toggle, all, apply, row, check } = await sharingFixture(t);
   assert.equal(await all.isChecked(), true);

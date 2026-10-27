@@ -24,7 +24,11 @@
       ? `Mana correction · ${funded(tx) ? "deposit confirmed" : words(correction.state)}${correction.rcLimit ? " · Limit: " + amount(correction.rcLimit) + " Mana (not a KOIN fee)" : ""}${correction.txId ? " · Transaction: " + correction.txId : ""}`
       : "";
   }
-  function message(text, error = false) { status.textContent = text; status.dataset.error = String(error); if (el("network-chat-status")) el("network-chat-status").textContent = text; }
+  const currentCreditsOwnChat = () => window.KaiNetwork?.info.configured === true && window.KaiNetwork.info.product === "prepaid-usd-v1";
+  function message(text, error = false) {
+    status.textContent = text; status.dataset.error = String(error);
+    if (el("network-chat-status") && !currentCreditsOwnChat()) { el("network-chat-status").textContent = text; el("network-chat-status").dataset.source = "legacy"; }
+  }
   function activate() {
     section.hidden = false;
   }
@@ -117,16 +121,16 @@
       el("koin-reserved").parentElement.hidden = true;
       el("koin-credit-title").textContent = "Buy AI credits";
       el("koin-funding-help").textContent = result.product === "prepaid-usd-v1" ? "1,000 credits = $1. Your payment approval shows the current KOIN price and credits received. Purchased credits do not expire and are nonrefundable. Failed chats do not consume credits." : "1 KOIN = 1,000 credits. Purchased credits do not expire and are nonrefundable. Failed chats do not consume credits.";
-      el("network-chat-help").textContent = result.product === "prepaid-usd-v1" ? "Buy credits with KOIN, then chat. 1,000 credits = $1. Purchases are nonrefundable." : "Buy credits with KOIN, then chat. 1 KOIN = 1,000 credits. Purchases are nonrefundable.";
+      if (!currentCreditsOwnChat()) el("network-chat-help").textContent = result.product === "prepaid-usd-v1" ? "Buy credits with KOIN, then chat. 1,000 credits = $1. Purchases are nonrefundable." : "Buy credits with KOIN, then chat. 1 KOIN = 1,000 credits. Purchases are nonrefundable.";
       el("koin-request-title").nextElementSibling.textContent = "Send a message in Chat. Credits are used only when an answer is saved for you.";
       el("koin-available").nextElementSibling.textContent = "credits";
       el("network-chat-reservation").hidden = true;
       el("koin-connection-help").textContent = "Your network account is connected. Only buying more credits requires a wallet payment.";
       if (result.credits) {
         el("koin-available").textContent = credits(result.credits.available);
-        el("network-chat-balance").textContent = credits(result.credits.available) + " credits";
+        if (!currentCreditsOwnChat()) el("network-chat-balance").textContent = credits(result.credits.available) + " credits";
       }
-      if (result.creditState) window.KaiCredits?.accept({ product: result.product, owner: result.owner, credits: result.creditState, purchases: result.purchases, usage: result.usage });
+      if (result.creditState && !currentCreditsOwnChat()) window.KaiCredits?.accept({ product: result.product, owner: result.owner, credits: result.creditState, purchases: result.purchases, usage: result.usage });
       const history = el("koin-prepaid-rows"); history.replaceChildren();
       const rows = [...(result.purchases || []).map(p => ({ at: p.createdAt, text: p.state === "confirmed" ? `Purchased ${credits(p.amount)} credits` : p.state === "failed" ? "Purchase did not complete" : "Purchase confirming… You can keep using your existing credits." })),
         ...(result.usage || []).map(u => ({ at: u.at, text: `Chat · ${credits(u.credits)} credits` }))].sort((a,b) => b.at-a.at).slice(0,50);
@@ -138,7 +142,7 @@
     if (result.balances) {
       el("koin-available").textContent = amount(result.balances.available);
       el("koin-reserved").textContent = amount(result.balances.reserved);
-      el("network-chat-balance").textContent = `${amount(result.balances.available)} KOIN available · ${amount(result.balances.reserved)} reserved`;
+      if (!currentCreditsOwnChat()) el("network-chat-balance").textContent = `${amount(result.balances.available)} KOIN available · ${amount(result.balances.reserved)} reserved`;
     }
     if (Array.isArray(result.expiredReservations)) {
       const note = el("network-chat-reservation"), expired = result.expiredReservations;

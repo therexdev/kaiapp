@@ -91,7 +91,7 @@ async function refresh() {
   } else if (state.ready) {
     setStatus("ok", "Ready (model loads on first message)");
   } else {
-    setStatus("busy", "Setup needed");
+    setStatus("busy", "Local model not installed");
   }
   KaiI18n.setText($("status-model"), entry ? entry.label.split(" (")[0] : "No models in catalog");
   const desktopReady = KaiProviders.models().some(m => m.alias === composedChatModel());
@@ -601,8 +601,13 @@ function showView(name, { navOnly = false } = {}) {
   const heading = headings[phys] || ["Koinos AI", "Think. Build. Grow."];
   KaiI18n.setText($("workspace-title"), heading[0]);
   KaiI18n.setText($("workspace-caption"), heading[1]);
-  for (const v of document.querySelectorAll(".view")) v.hidden = true;
-  $(`view-${phys}`).hidden = false;
+  // Background model polls repaint navigation too. Only change visibility
+  // when it actually changes: repeated hidden writes fire page observers and
+  // used to clear the active Buy password through the hidden Wallet page.
+  for (const v of document.querySelectorAll(".view")) {
+    const hidden = v.id !== `view-${phys}`;
+    if (v.hidden !== hidden) v.hidden = hidden;
+  }
   // Every navigable thing carries data-view — the full-width nav rows AND
   // the Settings/Network icons under the status pane.
   if (window.kaiCompanionBridge) document.getElementById("legacy-tasks-nav")?.setAttribute("hidden", "");

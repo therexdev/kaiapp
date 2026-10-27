@@ -552,6 +552,26 @@ test("cancelling inline unlock clears its password and never resumes the purchas
   assert.deepEqual(await page.evaluate(() => window.unlockRequests || []), []);
 });
 
+test("background model polls and an already-hidden wallet page preserve a password being typed on Buy", options, async t => {
+  const { page, buy, setWallet, refresh, count } = await fixture(t);
+  setWallet({ unlocked: false }); await page.evaluate(() => { window.purchaseState = "wallet-connection-required"; }); await refresh();
+  await buy.click(); await page.locator("#product-purchase-unlock").waitFor({ state: "visible" });
+  await page.evaluate(() => {
+    const original = showView; window.buyBackgroundPaints = 0;
+    showView = function (view, options) { original(view, options); if (view === "buy-credits" && options?.navOnly) window.buyBackgroundPaints++; };
+  });
+  await page.fill("#product-purchase-unlock-pass", "fixture password");
+  await page.waitForFunction(() => window.buyBackgroundPaints >= 2, null, { timeout: 20000 });
+  assert.equal(await page.inputValue("#product-purchase-unlock-pass"), "fixture password", "routine model polling must not erase an in-progress password");
+  await page.evaluate(() => { document.getElementById("view-payment-wallet").hidden = true; });
+  assert.equal(await page.inputValue("#product-purchase-unlock-pass"), "fixture password", "an already-hidden unrelated wallet page cannot reset the active form");
+  assert.deepEqual(await page.evaluate(() => window.unlockRequests || []), []);
+  assert.equal(await count("purchase-approve"), 0);
+  await page.locator('#nav [data-view="chat"]').click();
+  assert.equal(await page.inputValue("#product-purchase-unlock-pass"), "", "leaving Buy still clears the secret");
+  assert.equal(await page.locator("#product-purchase-unlock").isVisible(), false);
+});
+
 test("missing wallet, unprotected storage and unavailable service explain the actual blocker without signup", options, async t => {
   const { page, buy, count, refresh } = await fixture(t);
   for (const [state, detail] of [["wallet-required", "Create or import a wallet to pay with KOIN."], ["secure-storage-required", "Unlock protected storage before buying credits."]]) {

@@ -1,6 +1,23 @@
 "use strict";
 const { test } = require("node:test"), assert = require("node:assert/strict");
 const { readProviderStatus } = require("../../electron/koin-provider-status");
+test("runtime readiness is a distinct two-check observation, never a quality score or raw evidence", async () => {
+  const now = Date.now(), config = { schedulerUrl: "https://test.example", owner: "provider", model: "fast", mode: "mainnet-pilot" };
+  const q = { kind: "runtime-readiness", readinessVersion: 1, state: "failed", passed: 1, completed: 2, total: 2, required: 2, retryAt: now + 300000,
+    failure: { code: "response", wrongAnswers: 1, deadlines: 0, unknown: 0 }, nonce: "private check nonce", output: "private output" };
+  const row = { address: config.owner, model: config.model, state: "qualification-failed", asOf: now, validUntil: now + 15000, qualification: q };
+  const value = { mode: config.mode, mainnetPaymentsEnabled: true, providers: [row] };
+  const options = { config, access: { authorize: () => ({ sessionToken: "private" }) }, signal: new AbortController().signal, clock: () => now, fetchImpl: async () => Response.json(value) };
+  const status = await readProviderStatus(options);
+  assert.equal(status.qualification.kind, "runtime-readiness"); assert.equal(status.state, "qualification-failed");
+  assert.deepEqual(status.qualification.failure, q.failure); assert.equal(JSON.stringify(status).includes("private"), false);
+  assert.equal(status.qualification.readinessVersion, 1);
+  for (const patch of [{ kind: "quality-passed" }, { readinessVersion: undefined }, { readinessVersion: 2 }, { total: 12 }, { required: 1 }, { failure: { ...q.failure, code: "quality" } }]) {
+    row.qualification = { ...q, ...patch }; await assert.rejects(readProviderStatus(options), /readiness|qualification/);
+  }
+  row.qualification = { ...q }; delete row.qualification.kind;
+  await assert.rejects(readProviderStatus(options), /qualification/, "readiness-specific failures need the explicit versioned mode");
+});
 test("provider status needs a fresh matching server acknowledgment; older servers never imply ONLINE", async () => {
   const config = { schedulerUrl: "https://test.example", owner: "provider", model: "approved", mode: "mainnet-pilot" }, now = Date.now();
   const value = { mode: config.mode, mainnetPaymentsEnabled: true, providers: [{ address: config.owner, model: config.model, state: "online", asOf: now, validUntil: now + 15000 }] };

@@ -21,6 +21,7 @@ class WalletService {
     this.keystorePath = path.join(walletDir, "wallet.json");
     this._signer = null;
     this._ethAddress = null;
+    this._creditVaults = new Map();
     // Old hints offered a cheap SHA-256 password prefilter, bypassing most
     // of scrypt's cost. Remove metadata without changing encrypted key bytes.
     const ks = this.readKeystore();
@@ -65,6 +66,38 @@ class WalletService {
   get signer() {
     if (!this._signer) throw new Error("Wallet is locked");
     return this._signer;
+  }
+
+  // Main-process capability only: never exposed by the wallet HTTP/IPC API.
+  // HKDF separates credit capability encryption from financial signatures.
+  creditStorage(osStorage, origin) {
+    if (new URL(origin).origin !== origin || !origin.startsWith("https://")) throw Error("Credit vault requires a canonical HTTPS origin");
+    if (!this._creditVaults.has(origin)) {
+      const vault = require("./wallet-credential-vault").createWalletCredentialVault({ osStorage, namespace: origin, walletAddress: () => this.address });
+      this._creditVaults.set(origin, vault);
+      if (this._signer) this._openCreditVaults();
+    }
+    return this._creditVaults.get(origin).storage;
+  }
+
+  _openCreditVaults() {
+    if (!this._signer || !this._creditVaults.size) return;
+    const privateKey = Buffer.from(this._koinosPrivHex(this._signer), "hex");
+    const derived = Buffer.from(crypto.hkdfSync("sha256", privateKey, Buffer.from("KAI-WALLET-CREDIT-VAULT-V1"), Buffer.from("credit-capability-encryption-only"), 32));
+    try { for (const vault of this._creditVaults.values()) vault.unlock(this.address, derived); }
+    finally { privateKey.fill(0); derived.fill(0); }
+  }
+
+  _setUnlockedSigner(signer) {
+    for (const vault of this._creditVaults.values()) vault.clear();
+    this._signer = signer;
+    this._ethAddress = null;
+    this._openCreditVaults();
+  }
+
+  disposeCreditStorage() {
+    for (const vault of this._creditVaults.values()) vault.dispose();
+    this._creditVaults.clear();
   }
 
   /*
@@ -165,7 +198,7 @@ class WalletService {
       }
     }
     this._persist(signer, password);
-    this._signer = signer;
+    this._setUnlockedSigner(signer);
     this._ensureEthAddress();
     // WIF returned once so the user can write down a backup (Advanced flow).
     return { address: signer.getAddress(), wif: signer.getPrivateKey("wif") };
@@ -188,7 +221,7 @@ class WalletService {
     }
     const signer = this._signerFromWif(wif);
     this._persist(signer, password);
-    this._signer = signer;
+    this._setUnlockedSigner(signer);
     this._ensureEthAddress();
     return { address: signer.getAddress() };
   }
@@ -205,7 +238,7 @@ class WalletService {
       fs.renameSync(this.keystorePath, `${this.keystorePath}.bak-${Date.now()}`);
     }
     this._persist(signer, password);
-    this._signer = signer;
+    this._setUnlockedSigner(signer);
     this._ensureEthAddress();
     return { address: signer.getAddress(), restored: true };
   }
@@ -230,7 +263,7 @@ class WalletService {
     let lastErr = null;
     for (const candidate of variants) {
       try {
-        this._signer = this._signerFromKeystore(candidate);
+        this._setUnlockedSigner(this._signerFromKeystore(candidate));
         this._ensureEthAddress();
         return { address: this._signer.getAddress() };
       } catch (e) {
@@ -289,7 +322,7 @@ class WalletService {
       // was replaced with a different account, stay locked instead of
       // silently signing with a key the file no longer represents.
       if (ks?.address && signer.getAddress() !== ks.address) return false;
-      this._signer = signer;
+      this._setUnlockedSigner(signer);
       this._ensureEthAddress(); // resume is how existing installs open; backfill here too
       return true;
     } catch {
@@ -366,6 +399,7 @@ class WalletService {
     this._signerFromKeystore(password); // proves the caller could have backed up
     fs.rmSync(this.keystorePath, { force: true });
     this._signer = null;
+    for (const vault of this._creditVaults.values()) vault.clear();
     this.clearSession();
     return { removed: true };
   }

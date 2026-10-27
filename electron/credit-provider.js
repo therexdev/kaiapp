@@ -249,7 +249,7 @@ class CreditProvider {
       this.context = c; this.preference(c, true, model.id); this.error = "";
       // The host lease coordinates the existing wallet; it creates no credential.
       if (!this.device) {
-      const access = require("./credit-purchase-access"), id = access.installation({ dataDir: this.service.dataDir, directory: c.directory, config: c.config, storage: this.core.account.safeStorage });
+      const access = require("./credit-purchase-access"), id = access.installation({ dataDir: this.service.dataDir, directory: c.directory, config: c.config, storage: this.service.purchases.storage });
       await access.claimHost({ c, account: this.service.account, wallet: this.core.account.wallet, installation: id, fetchImpl: this.service.fetchImpl, signal }); current(); this.guard(c, signal);
       }
       await this.core.gateway.earn?.stop?.({ userIntent: true });
@@ -281,7 +281,7 @@ class CreditProvider {
     return { state: "offline" };
   }
   async status() {
-    if (!this.worker?.running || !this.context) return { state: "offline", label: "OFFLINE", detail: this.error || "Sharing is off. Turn it on to connect and check model quality." };
+    if (!this.worker?.running || !this.context) return { state: "offline", label: "OFFLINE", detail: this.error || "Sharing is off. Turn it on to connect and check model readiness." };
     if (this.selectionAbort) return { state: "checking", label: "UPDATING SHARED MODELS", detail: "Finishing current work and reconnecting with your model selection.", models: [], readyModels: [] };
     const c = this.context; this.guard(c);
     if (this.worker.status().backoff) return { state: "paused", label: "PAUSED", detail: this.worker.status().backoffReason || "This computer is busy." };

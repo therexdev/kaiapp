@@ -22,7 +22,7 @@ async function engine(t, handler) {
   const calls = [], server = http.createServer(async (req, res) => {
     let text = ""; for await (const b of req) text += b;
     const body = JSON.parse(text); calls.push({ path: req.url, body });
-    const result = handler ? await handler(req.url, body) : req.url === "/tokenize" ? { tokens: ids } : { content: "4", tokens_predicted: 999999 };
+    const result = handler ? await handler(req.url, body) : req.url === "/tokenize" ? { tokens: ids } : { content: "4", tokens_predicted: 999999, stop: true, stopped_eos: true };
     if (result.streamParts) {
       res.writeHead(200, { "content-type": "text/event-stream" });
       for (const part of result.streamParts) res.write("data: " + JSON.stringify(part) + "\n\n");
@@ -117,6 +117,24 @@ test("truncated results are never signed as successful work", async (t) => {
   const e = await engine(t, (url) => url === "/tokenize" ? { tokens: ids } : { content: "partial", truncated: true });
   await assert.rejects(executeShadow({ job: fixtureJob(), catalog, runtime: e.runtime }), /truncated/);
   assert.equal(e.released(), 1);
+});
+test("readiness requires a natural completed response and never accepts output-limit or missing-stop metadata", async t => {
+  let completion = { content: "4", stop: true, stopped_eos: true };
+  const e = await engine(t, url => url === "/tokenize" ? { tokens: ids } : completion);
+  for (const good of [{ stop: true, stopped_eos: true }, { stop: true, stopped_word: true }, { stop: true, stop_type: "eos" }, { stop: true, stop_type: "word" }]) {
+    completion = { content: "4", ...good };
+    assert.equal((await executeShadow({ job: fixtureJob(), catalog, runtime: e.runtime, requireComplete: true })).output, "4");
+  }
+  for (const bad of [{}, { stop: true }, { stop: false, stopped_eos: true }, { stop: true, stopped_limit: true, stopped_eos: true },
+    { stop: true, stop_type: "limit", stopped_eos: true }, { stop: true, stop_type: "untrusted" },
+    { stop: true, stop_type: "none", stopped_eos: true }, { stop: true, stopped_eos: true, error: "runtime failure" },
+    { stop: true, stop_type: "eos", stopped_limit: "false" }]) {
+    completion = { content: "4", ...bad };
+    await assert.rejects(executeShadow({ job: fixtureJob(), catalog, runtime: e.runtime, requireComplete: true }), /did not finish/);
+  }
+  completion = { content: "4", stop: true, stop_type: "limit", stopped_limit: true };
+  assert.equal((await executeShadow({ job: fixtureJob(), catalog, runtime: e.runtime })).output, "4", "normal bounded generations retain their existing output-limit behavior");
+  assert.equal(e.released(), 14);
 });
 test("worker loop submits a bound shadow receipt without legacy earnings or chunk traffic", async (t) => {
   const e = await engine(t), signer = Signer.fromSeed("worker-shadow-loop"), job = fixtureJob();

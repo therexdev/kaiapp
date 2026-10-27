@@ -1,5 +1,9 @@
 # Update wallet access, earning and KOIN purchases
 
+> Superseded by [Automatic free access and model readiness](AUTOMATIC_FREE_ACCESS_RELEASE.md).
+> Use that combined server-and-app update. This page records the earlier release;
+> its system-keyring requirements and twelve-question admission policy are historical.
+
 This is the coordinated Test update for the wallet-first handoff and the related
 purchase, pricing, wallet-history, model-selection and Linux restart changes.
 The operator's rollout is **update Vultr → update Koinos AI Test → test**.

@@ -49,11 +49,32 @@ test("normal account routes and native credit IPC use the credit service while C
   core.account.safeStorage = core.creditAccount.safeStorage = storage;
   core.account._saveToken("website-session");
   const old = fs.readFileSync(core.account.file), realFetch = global.fetch, calls = [];
+  const crypto = require("node:crypto"), Free = require("../lib/device-free-account");
+  const freePin = require("../lib/wallet-credit-account").pin(require("../lib/koin-network/credit-service.json").config, creditOrigin);
+  let freeChallenge;
   t.mock.method(global, "fetch", async (url, init = {}) => {
     if (url.startsWith(base)) return realFetch(url, init);
     const u = new URL(url); calls.push(url);
     if (u.origin === creditOrigin) {
       assert.equal(init.redirect, "error");
+      if (u.pathname.startsWith("/auth/device-free/")) {
+        assert.equal(init.headers.authorization, undefined, "automatic free access must not forward a paid or website bearer");
+        if (u.pathname.endsWith("/capabilities")) return Response.json({ ok: true, capabilities: { deviceFreeCredits: 1, scope: "device-free", freeOnly: true,
+          algorithm: "Ed25519", ...freePin, challengeTtlMs: 300000, sessionTtlMs: 86400000 } });
+        if (u.pathname.endsWith("/challenge")) {
+          const now = Date.now(); freeChallenge = { schema: 1, purpose: "device-free-session", ...freePin, publicKey: JSON.parse(init.body).publicKey,
+            nonce: crypto.randomBytes(32).toString("hex"), issuedAt: now, expiresAt: now + 300000, sessionExpiresAt: now + 86400000 };
+          return Response.json({ ok: true, challenge: freeChallenge });
+        }
+        if (u.pathname.endsWith("/verify")) {
+          const body = JSON.parse(init.body); assert.equal(body.challengeId, freeChallenge.nonce);
+          const key = crypto.createPublicKey({ key: Buffer.from(freeChallenge.publicKey, "base64"), format: "der", type: "spki" });
+          assert.equal(crypto.verify(null, Free.challengeHash(freeChallenge), key, Buffer.from(body.signature, "base64")), true);
+          return Response.json({ ok: true, token: "df_" + crypto.randomBytes(32).toString("base64url"), scope: "device-free", freeOnly: true, expiresAt: freeChallenge.sessionExpiresAt,
+            account: { id: Free.accountId(freePin, freeChallenge.publicKey), scope: "device-free", freeOnly: true, wallets: [], expiresAt: freeChallenge.sessionExpiresAt } });
+        }
+        throw Error("Unexpected automatic free route");
+      }
       if (u.pathname === "/auth/device/start") return Response.json({ ok: true, userCode: "CREDIT-CODE", deviceSecret: "fixture", verifyUrl: creditOrigin + "/link", expiresInSec: 600 });
       if (u.pathname === "/auth/device/poll") return Response.json({ ok: true, token: "credit-session", account: { id: "credit-user", wallets: [] } });
       assert.equal(init.headers.authorization, "Bearer credit-session");
@@ -88,7 +109,9 @@ test("normal account routes and native credit IPC use the credit service while C
   const info = await handle(event, "purchase-info");
   assert.equal(info.activation, "ready");
   assert.equal((await request("/core/account/logout", true)).ok, true);
-  assert.equal((await handle(event, "purchase-info")).activation, "wallet-connection-required");
+  assert.equal((await handle(event, "purchase-info")).activation, "wallet-required");
+  assert.equal(core.creditAccount.wallet.exists(), false, "automatic free access does not create a payment wallet");
+  assert.equal(fs.existsSync(core.creditAccount.file), false, "automatic free access does not replace the signed-out paid credential");
   assert.deepEqual(fs.readFileSync(core.account.file), old);
   assert.equal(core.settings.get("earn.schedulerUrl"), "https://website.invalid/scheduler");
 });

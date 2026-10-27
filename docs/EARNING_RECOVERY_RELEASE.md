@@ -1,5 +1,9 @@
 # Earning recovery service update
 
+> Superseded by [Automatic free access and model readiness](AUTOMATIC_FREE_ACCESS_RELEASE.md).
+> Its single server update includes this recovery fix plus automatic free access
+> and the new runtime-readiness policy. The command below is historical.
+
 Use this once for the existing prepaid service after the unlimited-purchase update.
 The tested backend is `80eb56c94600b800c0b69910acde0937f0da052d`.
 Koinos AI Test 0.54.13-test.226.1 and later include the matching desktop changes.

@@ -10,11 +10,14 @@ function target(config) {
 }
 class ProviderDevice {
   constructor({ service, core, dialog, clock = Date.now }) {
+    this.storage = require("../core/lib/wallet-credential-vault").scopedStorage((core.creditAccount || core.account)?.safeStorage, "provider-device");
     Object.assign(this, { service, core, dialog, clock }); this.records = new Map(); this.lastActionAt = new Map(); this.generation = 0; this.busy = false;
   }
   identity() {
     if (this.service.service?.state !== "ready") throw error("backend-upgrade-required", "Earning service setup is unavailable. Your wallet and existing records are preserved.");
     const wallet = this.core.account.wallet, owner = wallet?.address;
+    if (this.identityOwner !== undefined && this.identityOwner !== owner) this.dispose();
+    this.identityOwner = owner;
     if (!owner) throw error("wallet-required", "Create a wallet or use your existing wallet to receive KOIN earnings.");
     if (this.core.gateway.network.status?.().privacyMode === "local-only" || this.core.settings?.get?.("network.privacyMode") === "local-only") throw error("network-required", "Choose Network or Local-First to enable earning.");
     const config = { ...this.service.service.config, owner }, pinned = target(config);
@@ -56,10 +59,10 @@ class ProviderDevice {
     if (record) return record;
     const file = path.join(c.directory, "authorization.enc");
     if (!fs.existsSync(file)) return null;
-    if (!isProtectedStorage(this.core.account.safeStorage)) throw error("secure-storage-required", storageState(this.core.account.safeStorage).detail);
+    if (!isProtectedStorage(this.storage)) throw error("secure-storage-required", storageState(this.storage).detail);
     if (fs.lstatSync(file).isSymbolicLink() || fs.statSync(file).size > 32768) throw error("authorization-recovery-required", "The saved earning authorization needs recovery; it has been preserved.");
-    try { record = JSON.parse(this.core.account.safeStorage.decryptString(fs.readFileSync(file))); }
-    catch { throw error("secure-storage-required", "Unlock this computer's credential store to resume earning. The saved device authorization is preserved."); }
+    try { record = JSON.parse(this.storage.decryptString(fs.readFileSync(file))); }
+    catch { throw error("secure-storage-required", "Unlock the wallet or recover the original protected storage to resume earning. The saved device authorization is preserved."); }
     this.validateRecord(c, record); this.records.set(c.identity, record); return record;
   }
   validateRecord(c, record) {
@@ -75,12 +78,18 @@ class ProviderDevice {
     const idFile = path.join(c.directory, "device-id.json"), deviceId = record.authorization.deviceId;
     if (fs.existsSync(idFile) && this.deviceId(c) !== deviceId) throw Error("The earning device identity changed");
     if (!record.sessionOnly) {
-      const storage = this.core.account.safeStorage;
+      const storage = this.storage;
       if (!isProtectedStorage(storage)) throw error("secure-storage-required", storageState(storage).detail);
       fs.mkdirSync(c.directory, { recursive: true, mode: 0o700 });
       if (fs.lstatSync(c.directory).isSymbolicLink()) throw Error("Provider directory must not be a symbolic link");
       const file = path.join(c.directory, "authorization.enc"), temp = file + "." + crypto.randomBytes(8).toString("hex") + ".tmp";
       if (fs.existsSync(file) && fs.lstatSync(file).isSymbolicLink()) throw Error("Provider authorization must not be a symbolic link");
+      // Cached keys do not authorize replacing an unreadable OS-protected
+      // record when its keyring disappears during this process.
+      if (fs.existsSync(file)) {
+        if (fs.statSync(file).size > 32768) throw Error("Saved earning authorization needs recovery and has been preserved");
+        this.validateRecord(c, JSON.parse(storage.decryptString(fs.readFileSync(file))));
+      }
       const fd = fs.openSync(temp, "wx", 0o600);
       try { fs.writeFileSync(fd, storage.encryptString(JSON.stringify(record))); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
       if (fs.existsSync(file)) {
@@ -135,11 +144,13 @@ class ProviderDevice {
   }
   assert(c, signal) {
     signal?.throwIfAborted();
-    const current = this.identity(), record = this.read(c);
-    if (current.identity !== c.identity || !record || record !== c.record || this.generation !== c.generation) throw error("authorization-required", "The reward wallet or earning authorization changed. Enable earning for the current wallet.");
+    const current = this.identity();
+    if (current.identity !== c.identity || this.generation !== c.generation) throw error("authorization-required", "The reward wallet or earning authorization changed. Enable earning for the current wallet.");
+    const record = this.read(c);
+    if (!record || record !== c.record) throw error("authorization-required", "The reward wallet or earning authorization changed. Enable earning for the current wallet.");
     if (record.revoked) throw error("authorization-revoked", "This device authorization was revoked. Enable earning again to authorize this computer.");
     if (!record.enrolled) throw error("authorization-required", "Finish authorizing this device to enable earning.");
-    if (!record.sessionOnly && !isProtectedStorage(this.core.account.safeStorage)) throw error("secure-storage-required", storageState(this.core.account.safeStorage).detail);
+    if (!record.sessionOnly && !isProtectedStorage(this.storage)) throw error("secure-storage-required", storageState(this.storage).detail);
     if (record.authorization.expiresAt <= this.clock()) throw error("authorization-expired", "This device's earning authorization expired. Enable earning again to review a new authorization.");
   }
   proof(c, action, digest) {
@@ -164,11 +175,11 @@ class ProviderDevice {
   async authorize(window, input = {}, signal) {
     if (!input || Object.keys(input).some(k => k !== "sessionOnly") || input.sessionOnly !== undefined && typeof input.sessionOnly !== "boolean") throw Error("Choose protected storage or this session only");
     if (this.busy) throw Error("Earning authorization is already in progress");
-    this.busy = true; const generation = this.generation;
+    this.busy = true;
     try {
-      const c = this.identity(); await this.capabilities(c, signal);
+      const c = this.identity(), generation = this.generation; await this.capabilities(c, signal);
       const sessionOnly = input.sessionOnly === true;
-      if (!sessionOnly && !isProtectedStorage(this.core.account.safeStorage)) throw error("secure-storage-required", storageState(this.core.account.safeStorage).detail);
+      if (!sessionOnly && !isProtectedStorage(this.storage)) throw error("secure-storage-required", storageState(this.storage).detail);
       let existing;
       try { existing = this.read(c); }
       catch (e) {
@@ -259,12 +270,16 @@ class ProviderDevice {
     });
   }
   describe() {
-    let c, record; try { c = this.identity(); record = this.read(c); } catch (e) { return { state: e.code || "unavailable", detail: e.message, canAuthorize: e.code !== "wallet-required", walletLocked: !this.core.account.wallet?.status?.().unlocked, walletReady: !!this.core.account.wallet?.address, secureStorage: storageState(this.core.account.safeStorage) }; }
+    let c, record; try { c = this.identity(); record = this.read(c); } catch (e) { return { state: e.code || "unavailable", detail: e.message, canAuthorize: e.code !== "wallet-required", walletLocked: !this.core.account.wallet?.status?.().unlocked, walletReady: !!this.core.account.wallet?.address, secureStorage: storageState(this.storage) }; }
     return { deviceAuthorized: !!record?.enrolled && !record.revoked && record.authorization.expiresAt > this.clock(), sessionOnly: record?.sessionOnly === true,
-      expiresAt: record?.authorization.expiresAt || null, walletReady: true, secureStorage: storageState(this.core.account.safeStorage), walletLocked: !this.core.account.wallet.status().unlocked, canAuthorize: true,
-      protectedStorage: isProtectedStorage(this.core.account.safeStorage) };
+      expiresAt: record?.authorization.expiresAt || null, walletReady: true, secureStorage: storageState(this.storage), walletLocked: !this.core.account.wallet.status().unlocked, canAuthorize: true,
+      protectedStorage: isProtectedStorage(this.storage) };
   }
   cancelPending() { if (this.busy) this.generation++; }
-  dispose() { this.generation++; this.records.clear(); this.lastActionAt.clear(); }
+  dispose() {
+    this.generation++;
+    for (const record of this.records.values()) record.privateKey = "";
+    this.records.clear(); this.lastActionAt.clear();
+  }
 }
 module.exports = { ProviderDevice, target };

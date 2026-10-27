@@ -23,7 +23,7 @@ test("a real qualification tokenizer error survives an idle poll and clears only
   let badTokens = true, polls = 0, loads = 0, releases = 0, signed = 0, submitted = 0, afterFailure, afterIdle, beforeAck;
   const endpoint = await server(t, (req, res) => {
     res.setHeader("content-type", "application/json");
-    res.end(JSON.stringify(req.url === "/tokenize" ? { tokens: badTokens ? [8] : [7] } : { content: "PONG" }));
+    res.end(JSON.stringify(req.url === "/tokenize" ? { tokens: badTokens ? [8] : [7] } : { content: "PONG", stop: true, stopped_eos: true }));
   });
   let worker;
   const schedulerUrl = await server(t, (req, res) => {
@@ -68,7 +68,8 @@ test("local diagnostic classifications and renderer metadata are bounded and nev
   for (const [stage, error, expected] of [["loading", secret, "model_load_failed"], ["loading", { name: "TimeoutError" }, "preparation_timeout"],
     ["preparing", secret, "model_load_failed"], ["tokenizing", secret, "tokenizer_unavailable"], ["tokenizing", Error("Local tokenizer differs from quoted tokenizer"), "tokenizer_mismatch"],
     ["loading", Error("Shadow metering currently requires llama.cpp"), "runtime_unavailable"], ["answering", secret, "inference_failed"],
-    ["answering", { name: "TimeoutError" }, "inference_timeout"], ["reporting", secret, "result_unconfirmed"], ["validating", secret, "check_invalid"]]) {
+    ["answering", { name: "TimeoutError" }, "inference_timeout"], ["answering", Error("Qualification response did not finish within its output limit"), "inference_incomplete"],
+    ["reporting", secret, "result_unconfirmed"], ["validating", secret, "check_invalid"]]) {
     assert.equal(Diagnostics.code(stage, error, now + 1000, now), expected);
   }
   assert.equal(Diagnostics.code("preparing", secret, now, now), "preparation_timeout");
