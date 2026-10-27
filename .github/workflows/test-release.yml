@@ -171,7 +171,7 @@ jobs:
           node-version: 22
       - run: npm ci
       - name: Test Windows signature rejection paths
-        run: node --test core/test/windows-signing.test.js
+        run: node --test core/test/windows-signing.test.js core/test/windows-signing-preparation.test.js
       - name: Build fast Windows voice helper
         run: node scripts/build-windows-voice.js
       - name: Build private desktop control helper
@@ -218,6 +218,8 @@ jobs:
         run: node scripts/verify-computer-control.js --packaged
       - name: Verify packaged voice recovery with native DLL unavailable
         run: node scripts/verify-neural-voice.js --packaged --without-native
+      - name: Prepare and verify Windows signing module
+        run: ./scripts/prepare-windows-signing.ps1
       - name: Require Azure signing and pin the existing publisher
         run: node scripts/configure-windows-signing.js
         env:
