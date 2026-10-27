@@ -31,7 +31,11 @@ class CreditService {
     if (this.account.settings?.get?.("network.privacyMode", "local-only") === "local-only") return { ...base, state: "online-required", detail: "Choose Network or another online route to connect your wallet" };
     try {
       const auth = await this.account.creditAuthorization(this.service.config.schedulerUrl, signal);
-      return { ...base, connected: true, state: "ready", detail: auth.sessionOnly ? "Temporary access: free credits only while the app is open. Reconnect after restart." : "Connected to network credits", sessionOnly: auth.sessionOnly === true, freeOnlySession: auth.sessionOnly === true };
+      const upgrade = auth.sessionOnly === true && secureStorage.available;
+      return { ...base, connected: true, canConnect: upgrade && Boolean(wallet.unlocked), state: upgrade && !wallet.unlocked ? "wallet-unlock-required" : "ready",
+        detail: upgrade ? wallet.unlocked ? "Save this wallet connection to buy and use paid credits. No email account is needed." : "Unlock your wallet to save this connection for purchases and paid credits. Temporary free access remains available."
+          : auth.sessionOnly ? "Temporary access: free credits only while the app is open. Reconnect after restart." : "Connected to network credits",
+        sessionOnly: auth.sessionOnly === true, freeOnlySession: auth.sessionOnly === true };
     } catch (error) {
       if (signal?.aborted) throw error;
       base.detail = String(error.message);
@@ -55,7 +59,61 @@ class CreditService {
       return result.response === 1 && !window.isDestroyed?.() && window.isVisible?.() && !window.isMinimized?.();
     } }, signal);
   }
-  async context(signal) {
+  async preparePurchase(window, signal) {
+    if (this.service.state !== "ready") throw Error(this.service.reason);
+    const visible = () => {
+      signal?.throwIfAborted();
+      if (!window || window.isDestroyed?.() || !window.isVisible?.() || window.isMinimized?.()) throw Error("Return to the visible desktop app to buy credits");
+    };
+    visible();
+    const wallet = this.account.wallet, address = wallet?.address || null;
+    const blocked = (state, detail) => ({ state, address, detail });
+    if (this.account.settings?.get?.("network.privacyMode", "local-only") === "local-only")
+      return blocked("online-required", "Choose Network or another online route to buy credits");
+    if (!require("koilib").utils.isChecksumAddress(address || "")) return blocked("wallet-required", "Create or import your KOIN wallet to buy credits");
+    if (!wallet.status?.().unlocked) return blocked("wallet-unlock-required", "Unlock your wallet to continue buying credits");
+    if (!storageState(this.storage).available) return blocked("secure-storage-required", storageState(this.storage).detail);
+    let expectedToken = this.account._token();
+    const guard = () => {
+      visible();
+      if (wallet !== this.account.wallet || address !== this.account.wallet?.address || !wallet.status?.().unlocked ||
+          this.account._token() !== expectedToken || !storageState(this.storage).available ||
+          this.account.settings?.get?.("network.privacyMode", "local-only") === "local-only")
+        throw Error("Wallet, network access or secure storage changed. Choose Buy credits again for the current wallet");
+    };
+    const matching = auth => {
+      if (auth.owner !== address || auth.localWallet !== address) throw Object.assign(Error("The saved credit connection belongs to another wallet. Your existing connection and credits have been preserved"), { code: "wallet-changed" });
+    };
+    const ready = async (state, auth) => {
+      const c = await this.context(signal, auth); guard();
+      const purchaseInfo = { enabled: true, configured: true, product: "prepaid-usd-v1", activation: "ready", blocked: "", ...await this.purchaseState(c, signal) };
+      guard(); return { state, address, purchaseInfo };
+    };
+    let auth;
+    try { auth = await this.account.creditAuthorization(this.service.config.schedulerUrl, signal); }
+    catch (error) {
+      guard();
+      // Only an absent/expired connection may prompt for new wallet proof.
+      // Network failures and identity conflicts must retain saved authority.
+      if (!["signin-required", "wallet-reauthorization-required"].includes(error.code)) throw error;
+    }
+    guard();
+    if (auth) {
+      matching(auth);
+      if (!auth.sessionOnly) return ready("ready", auth);
+    }
+    // Buy explicitly requests durable access. A former temporary free-only
+    // session can be upgraded after its keyring is available, never reused
+    // for a paid purchase. connectWallet preserves any prior account identity.
+    const result = await this.connectWallet(window, { sessionOnly: false }, signal);
+    if (result.state === "cancelled") { guard(); return { state: "cancelled", address }; }
+    if (result.state !== "connected" || result.address !== address || result.sessionOnly !== false) throw Error("The wallet connection was not confirmed for this purchase");
+    expectedToken = this.account._token(); guard();
+    auth = await this.account.creditAuthorization(this.service.config.schedulerUrl, signal); guard(); matching(auth);
+    if (auth.sessionOnly) throw Error("A saved wallet connection is required to buy credits");
+    return ready("connected", auth);
+  }
+  async context(signal, verifiedAuth) {
     if (this.service.state !== "ready") throw Error(this.service.reason);
     const base = this.service.config;
     for (const name of ["koin-foundation-test", "koin-prepaid-v1"]) {
@@ -65,7 +123,10 @@ class CreditService {
       const old = JSON.parse(fs.readFileSync(file, "utf8")).deployment;
       if (!old || [old.credits, old.rewards].some(address => [base.deployment.credits, base.deployment.rewards].includes(address))) throw Error("USD activation requires fresh contracts; earlier balances and journals remain preserved");
     }
-    const auth = await this.account.creditAuthorization(base.schedulerUrl, signal);
+    // An explicit purchase preparation already verified its identity. Reuse
+    // that snapshot for saved-payment reads while rechecking local authority.
+    const auth = verifiedAuth || await this.account.creditAuthorization(base.schedulerUrl, signal);
+    if (verifiedAuth) this.account.assertCreditAuthorization(auth, base.schedulerUrl);
     const config = { ...base, owner: auth.owner }, root = path.join(this.dataDir, "credit-account-v2", P.hash(auth.accountId)), key = P.hash(JSON.stringify(config));
     // New product files never overwrite custody/prepaid-v1 or their journals.
     const directory = path.join(root, key); fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -123,9 +184,15 @@ class CreditService {
       return { enabled: true, configured: true, product: "prepaid-usd-v1", activation: "ready", blocked: "", ...await this.purchaseState(c, signal) };
     } catch (error) { return { enabled: true, configured: true, product: "prepaid-usd-v1", ...setupFailure(error), recoveryAvailable: false }; }
   }
+  purchaseDisplayContext(signal) {
+    signal?.throwIfAborted();
+    if (this.service.state !== "ready") throw Error(this.service.reason);
+    if (this.account.settings?.get?.("network.privacyMode", "local-only") === "local-only")
+      throw Object.assign(Error("Choose Network or another online route to check the KOIN price"), { code: "online-required" });
+    return { config: this.service.config };
+  }
   async purchaseCapabilities(signal) {
-    const c = await this.context(signal);
-    return this.purchases.estimateCapabilities(c, signal);
+    return this.purchases.estimateCapabilities(this.purchaseDisplayContext(signal), signal);
   }
   async info(signal) {
     if (this.service.state !== "ready") return { enabled: true, configured: true, product: "prepaid-usd-v1", blocked: this.service.reason, activation: "unavailable", recoveryAvailable: false };
@@ -139,6 +206,11 @@ class CreditService {
     } catch (error) { return { enabled: true, configured: true, product: "prepaid-usd-v1", ...setupFailure(error), recoveryAvailable: false }; }
   }
   async run(action, input, signal, window) {
+    if (action === "purchase-estimate") {
+      const c = this.purchaseDisplayContext(signal), result = await this.purchases.estimate(c, input, signal);
+      if (this.purchaseDisplayContext(signal).config !== c.config) throw Error("The pricing configuration changed; refresh the estimate");
+      return result;
+    }
     const c = await this.context(signal);
     if (c.auth?.sessionOnly && (action.startsWith("run-") || ["purchase-preview", "purchase-approve", "purchase-retry"].includes(action))) throw Object.assign(Error("Temporary network access uses free credits only. Unlock secure storage and reconnect with saved access for purchases and paid usage."), { code: "secure-storage-required" });
     if (action === "run-open") return this.runs.open(c, input, signal);
@@ -146,7 +218,6 @@ class CreditService {
     if (action === "run-status") return this.runs.status(c, input, signal);
     if (action === "run-stop") return this.runs.stop(c, input, signal);
     if (action === "run-list") return { runs: this.runs.list(c) };
-    if (action === "purchase-estimate") return this.purchases.estimate(c, input, signal);
     if (action === "purchase-preview") return this.purchases.preview(c, input, signal);
     if (["purchase-approve", "purchase-retry"].includes(action)) return this.purchases.run(c, window, action, input, signal);
     if (action === "purchase-sync") return this.purchases.sync(c, signal);

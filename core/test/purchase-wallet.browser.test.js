@@ -39,6 +39,14 @@ async function fixture(t, fakeClock = false, previewSupported = true) {
         if (window.purchaseInfoFailure) throw Error(window.purchaseInfoFailure);
         return saved;
       }
+      if (action === "purchase-connect") {
+        const wallet = (await (await fetch("/core/earn")).json()).wallet;
+        if (window.holdConnection) await new Promise(resolve => { window.finishConnection = resolve; });
+        if (window.connectionFailure) throw Error(window.connectionFailure);
+        const result = window.connectionResult || { state: !wallet.unlocked ? "wallet-unlock-required" : window.purchaseState === "ready" ? "ready" : "connected", address: wallet.address };
+        if (["ready", "connected"].includes(result.state)) window.purchaseState = "ready";
+        return structuredClone(result);
+      }
       if (action === "chat-info") return { configured: true, enabled: true, product: "prepaid-v1", model: "fixture", maxOutput: 32, blocked: "" };
       if (action === "status") return { enabled: true, configured: false, mode: "test-deployment" };
       if (action === "credit-status") throw Error("Credit service fixture");
@@ -66,7 +74,7 @@ async function fixture(t, fakeClock = false, previewSupported = true) {
       throw Error("Unexpected fixture action: " + action);
     } };
   }, previewSupported);
-  let wallet = { address: "payment-wallet-a", network: "mainnet", tokenSymbol: "KOIN", koin: "1234.56789012", usd: 9999 }, offline = false;
+  let wallet = { address: "payment-wallet-a", network: "mainnet", tokenSymbol: "KOIN", koin: "1234.56789012", usd: 9999, unlocked: true }, offline = false;
   let pauseWallet = false, walletStarted, releaseWallet;
   await page.route("**/core/koinos/rpc", async route => {
     if (route.request().postDataJSON().channel !== "wallet:summary") return route.continue();
@@ -74,7 +82,14 @@ async function fixture(t, fakeClock = false, previewSupported = true) {
     if (pauseWallet) await new Promise(resolve => { releaseWallet = resolve; walletStarted?.(); });
     await route.fulfill(response);
   });
-  await page.route("**/core/earn", route => route.fulfill({ json: { wallet: { exists: true, unlocked: true, address: wallet.address }, worker: { running: false } } }));
+  await page.route("**/core/earn", route => route.fulfill({ json: { wallet: { exists: Boolean(wallet.address), unlocked: wallet.unlocked, address: wallet.address }, worker: { running: false } } }));
+  await page.route("**/core/earn/unlock", async route => {
+    const input = route.request().postDataJSON();
+    await page.evaluate(value => { window.unlockRequests = [...window.unlockRequests || [], value]; }, input);
+    if (input.password !== "fixture password") return route.fulfill({ status: 400, json: { error: "Wrong password" } });
+    wallet.unlocked = true;
+    return route.fulfill({ json: { ok: true, wallet: { exists: true, unlocked: true, address: wallet.address } } });
+  });
   if (fakeClock) await freezeClock(page);
   await page.goto(`http://127.0.0.1:${await core.start()}`);
   await page.locator('.product-sidebar-credits [data-product-view="buy-credits"]').click();
@@ -101,7 +116,8 @@ test("Buy credits uses one action for fresh pricing and wallet review, while gua
   await page.evaluate(() => { window.purchaseState = "unavailable"; }); await refresh();
   assert.equal(await buy.isDisabled(), true); assert.equal(await count("purchase-preview"), 0);
   await page.evaluate(() => { window.purchaseState = "signin-required"; }); await refresh();
-  assert.equal(await page.locator("#product-purchase-signin").isVisible(), true);
+  assert.equal(await page.locator("#product-purchase-signin").isVisible(), false, "Buy reconnects the wallet instead of requiring email signup");
+  assert.equal(await buy.isEnabled(), true);
   await page.evaluate(() => { window.purchaseState = "ready"; }); setWallet({ koin: "0" }); await refresh();
   await buy.click(); await page.waitForFunction(() => document.getElementById("product-quote-state").textContent.includes("Not enough KOIN"));
   assert.equal(await count("purchase-approve"), 0); assert.equal(await buy.isEnabled(), true);
@@ -172,6 +188,18 @@ test("saved payment stays actionable during checks, stops a real review and conf
   assert.equal(await count("purchase-approve"), 0, "confirmation does not silently start a new purchase");
   const checks = await count("purchase-info"); await page.locator('#nav [data-view="chat"]').click(); await page.clock.runFor(30001);
   assert.equal(await count("purchase-info"), checks, "purchase polling stops while hidden");
+});
+
+test("checking a saved payment needs no connection proof or wallet unlock", options, async t => {
+  const { page, buy, count, refresh, setWallet } = await fixture(t);
+  setWallet({ unlocked: false });
+  await page.evaluate(() => { window.localPurchase = { state: "pending", txId: "0x1220" + "a".repeat(64), detail: "Checking final confirmation." }; });
+  await refresh(); assert.equal(await buy.textContent(), "Check payment");
+  const reads = await count("purchase-info");
+  await buy.click(); await page.waitForFunction(n => window.purchaseCalls.filter(c => c.action === "purchase-info").length > n, reads);
+  assert.equal(await count("purchase-connect"), 0);
+  assert.equal(await count("purchase-preview"), 0); assert.equal(await count("purchase-approve"), 0);
+  assert.equal(await page.locator("#product-purchase-unlock").isVisible(), false);
 });
 
 test("lost payment-status reply times out and permits a fresh read without accepting the late reply", options, async t => {
@@ -422,22 +450,121 @@ test("purchase failures stay visible while automatic estimates update and clear 
   await page.evaluate(() => window.finishApproval());
 });
 
-test("wallet connection and secure-storage blockers expose the matching setup action without enabling payment", options, async t => {
+test("Buy connects or renews the installed wallet inline and continues the same selected purchase", options, async t => {
   const { page, buy, count, refresh } = await fixture(t);
-  for (const [state, label] of [["wallet-connection-required", "Connect wallet"], ["wallet-reauthorization-required", "Reconnect wallet"], ["secure-storage-required", "Secure storage options"]]) {
+  assert.equal(await count("purchase-connect"), 0, "opening the page never enrolls or signs");
+  for (const state of ["wallet-connection-required", "wallet-reauthorization-required"]) {
     await page.evaluate(value => { window.purchaseState = value; }, state); await refresh();
-    const action = page.locator("#product-purchase-connect");
-    assert.equal(await action.isVisible(), true);
-    assert.equal(await action.textContent(), label);
-    assert.equal(await action.getAttribute("data-product-action"), "wallet-connect");
+    assert.equal(await buy.isEnabled(), true, "connection is part of Buy, not a disabled prerequisite");
     assert.equal(await page.locator("#product-purchase-signin").isVisible(), false);
-    assert.equal(await buy.isDisabled(), true);
+    await page.fill("#product-usd-amount", "5");
+    const approvals = await count("purchase-approve");
+    await buy.click(); await page.waitForFunction(n => window.purchaseCalls.filter(c => c.action === "purchase-approve").length === n + 1, approvals);
+    await page.waitForFunction(() => document.getElementById("product-quote-state").textContent.includes("Payment cancelled"));
+    assert.equal(await page.locator("#view-buy-credits").isVisible(), true);
+    assert.equal(await page.locator("#view-credits").isVisible(), false);
+    assert.equal(await page.locator("#view-settings").isVisible(), false);
+    const calls = await page.evaluate(() => window.purchaseCalls.filter(c => ["purchase-connect", "purchase-preview", "purchase-approve"].includes(c.action)));
+    assert.deepEqual(calls.slice(-3).map(c => c.action), ["purchase-connect", "purchase-preview", "purchase-approve"]);
+    assert.deepEqual(calls.at(-2).input, { usd: "5" });
+  }
+  assert.equal(await count("purchase-connect"), 2); assert.equal(await count("purchase-preview"), 2); assert.equal(await count("purchase-approve"), 2);
+});
+
+test("an unconnected wallet sees changing and periodically refreshed KOIN estimates before clicking Buy", options, async t => {
+  const { page, buy, count, refresh } = await fixture(t, true);
+  await page.evaluate(() => { window.purchaseState = "wallet-connection-required"; window.marketEstimate = true; }); await refresh();
+  await page.fill("#product-usd-amount", "5"); await page.clock.runFor(351);
+  await page.waitForFunction(() => document.getElementById("product-quote-koin").textContent === "~10 KOIN");
+  assert.equal(await buy.isEnabled(), true);
+  const estimates = await count("purchase-estimate");
+  await page.evaluate(() => { window.quoteMultiplier = 3; }); await page.clock.runFor(30001);
+  await page.waitForFunction(() => document.getElementById("product-quote-koin").textContent === "~15 KOIN");
+  assert.ok(await count("purchase-estimate") > estimates);
+  assert.equal(await count("purchase-connect"), 0, "display-only estimates never enroll the wallet");
+  assert.equal(await count("purchase-preview"), 0, "display-only estimates never request signed purchase quotes");
+  assert.equal(await count("purchase-approve"), 0);
+  assert.equal(await page.locator("#product-purchase-signin").isVisible(), false);
+});
+
+test("cancelled wallet connection, Stop and changed identity cannot continue into pricing or payment", options, async t => {
+  const { page, buy, count, refresh } = await fixture(t);
+  await page.evaluate(() => { window.purchaseState = "wallet-connection-required"; window.connectionResult = { state: "cancelled" }; }); await refresh();
+  await buy.click(); await page.waitForFunction(() => /cancelled/i.test(document.getElementById("product-quote-state").textContent));
+  assert.equal(await count("purchase-preview"), 0); assert.equal(await count("purchase-approve"), 0);
+  for (const stop of [true, false]) {
+    await page.evaluate(() => { window.purchaseState = "wallet-connection-required"; window.connectionResult = { state: "connected", address: "payment-wallet-a" }; window.holdConnection = true; window.finishConnection = null; });
+    await refresh(); await buy.click(); await page.waitForFunction(() => !!window.finishConnection);
+    if (stop) await page.locator("#product-purchase-stop").click();
+    else await page.evaluate(() => window.dispatchEvent(new Event("kai-credit-identity-changed")));
+    await page.evaluate(() => { window.holdConnection = false; window.finishConnection(); });
+    await page.waitForFunction(() => !document.getElementById("product-quote-refresh").disabled);
+    assert.equal(await count("purchase-preview"), 0); assert.equal(await count("purchase-approve"), 0);
+  }
+});
+
+test("changing wallet or amount during connection cannot buy against the earlier intent", options, async t => {
+  const { page, buy, count, refresh, setWallet } = await fixture(t);
+  for (const changeWallet of [false, true]) {
+    await page.evaluate(() => { window.purchaseState = "wallet-connection-required"; window.holdConnection = true; window.finishConnection = null; });
+    await refresh(); await buy.click(); await page.waitForFunction(() => !!window.finishConnection);
+    if (changeWallet) {
+      setWallet({ address: "payment-wallet-b" });
+      await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+      await page.waitForFunction(() => !document.getElementById("product-purchase-check").disabled);
+    } else {
+      await page.evaluate(() => { const input = document.getElementById("product-usd-amount"); input.value = "5"; input.dispatchEvent(new Event("input", { bubbles: true })); });
+    }
+    await page.evaluate(() => { window.holdConnection = false; window.finishConnection(); });
+    await page.waitForFunction(() => !document.getElementById("product-quote-refresh").disabled);
+    assert.equal(await count("purchase-preview"), 0); assert.equal(await count("purchase-approve"), 0);
+  }
+});
+
+test("a locked wallet unlocks on Buy credits and resumes after the password without navigation", options, async t => {
+  const { page, buy, count, refresh, setWallet } = await fixture(t);
+  setWallet({ unlocked: false }); await page.evaluate(() => { window.purchaseState = "wallet-connection-required"; }); await refresh();
+  await buy.click(); await page.locator("#product-purchase-unlock").waitFor({ state: "visible" });
+  assert.equal(await page.locator("#view-buy-credits").isVisible(), true);
+  assert.equal(await page.locator("#view-payment-wallet").isVisible(), false);
+  assert.equal(await count("purchase-preview"), 0);
+  await page.fill("#product-purchase-unlock-pass", "wrong password"); await page.locator("#product-purchase-unlock-go").click();
+  await page.waitForFunction(() => document.getElementById("product-purchase-unlock").textContent.includes("Wrong password"));
+  assert.equal(await count("purchase-preview"), 0);
+  await page.fill("#product-purchase-unlock-pass", "fixture password"); await page.locator("#product-purchase-unlock-go").click();
+  await page.waitForFunction(() => window.purchaseCalls.some(c => c.action === "purchase-approve"));
+  assert.equal(await page.locator("#product-purchase-unlock-pass").inputValue(), "");
+  assert.equal(await page.locator("#product-purchase-unlock").isVisible(), false);
+  assert.equal(await count("purchase-preview"), 1); assert.equal(await count("purchase-approve"), 1);
+  assert.deepEqual(await page.evaluate(() => window.unlockRequests.map(r => Object.keys(r))), [["password"], ["password"]]);
+  assert.equal(await page.locator("#view-buy-credits").isVisible(), true);
+});
+
+test("cancelling inline unlock clears its password and never resumes the purchase", options, async t => {
+  const { page, buy, count, refresh, setWallet } = await fixture(t);
+  setWallet({ unlocked: false }); await page.evaluate(() => { window.purchaseState = "wallet-connection-required"; }); await refresh();
+  await buy.click(); await page.locator("#product-purchase-unlock").waitFor({ state: "visible" });
+  await page.fill("#product-purchase-unlock-pass", "fixture password");
+  await page.locator("#product-purchase-unlock-cancel").click();
+  assert.equal(await page.locator("#product-purchase-unlock").isVisible(), false);
+  assert.equal(await page.locator("#product-purchase-unlock-pass").inputValue(), "");
+  assert.equal(await count("purchase-preview"), 0); assert.equal(await count("purchase-approve"), 0);
+  assert.deepEqual(await page.evaluate(() => window.unlockRequests || []), []);
+});
+
+test("missing wallet, unprotected storage and unavailable service explain the actual blocker without signup", options, async t => {
+  const { page, buy, count, refresh } = await fixture(t);
+  for (const [state, detail] of [["wallet-required", "Create or import a wallet to pay with KOIN."], ["secure-storage-required", "Unlock protected storage before buying credits."]]) {
+    await page.evaluate(value => { window.purchaseState = "wallet-connection-required"; window.connectionResult = value; }, { state, detail }); await refresh();
+    await buy.click();
+    await page.waitForFunction(value => document.getElementById("view-buy-credits").textContent.includes(value), detail);
+    assert.equal(await page.locator("#view-buy-credits").isVisible(), true);
+    assert.equal(await page.locator("#view-settings").isVisible(), false);
+    assert.equal(await page.locator("#product-purchase-signin").isVisible(), false);
+    assert.equal(await count("purchase-preview"), 0); assert.equal(await count("purchase-approve"), 0);
   }
   await page.evaluate(() => { window.purchaseState = "service-upgrade-required"; }); await refresh();
-  assert.equal(await page.locator("#product-purchase-connect").isVisible(), false);
-  assert.equal(await buy.textContent(), "Service update required");
-  assert.equal(await buy.isDisabled(), true);
-  assert.equal(await count("purchase-preview"), 0); assert.equal(await count("purchase-approve"), 0);
+  assert.equal(await buy.textContent(), "Service update required"); assert.equal(await buy.isDisabled(), true);
 });
 
 test("read-only KOIN estimates continue while the sidebar wallet balance is pending or unavailable without enabling Buy", options, async t => {

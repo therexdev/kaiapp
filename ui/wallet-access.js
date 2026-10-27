@@ -10,12 +10,13 @@
   function paint() {
     const primary = $("product-wallet-access-connect"), session = $("product-wallet-access-session");
     const connected = info?.connected === true;
+    const upgrade = connected && info?.sessionOnly === true && info?.secureStorage?.available === true;
     $("product-wallet-access-detail").textContent = notice || info?.detail || "Connect your wallet to check your free and purchased credits.";
     $("product-wallet-access-address").textContent = info?.address ? `Wallet: ${info.address}` : "";
     $("product-wallet-access-session-note").hidden = info?.sessionOnly !== true;
     const needsWallet = ["wallet-required", "wallet-unlock-required"].includes(info?.state);
-    primary.textContent = busy ? "Connecting…" : connected ? "Refresh credits" : info?.state === "wallet-required" ? "Set up wallet" : info?.state === "wallet-unlock-required" ? "Unlock wallet" : "Connect wallet";
-    primary.disabled = busy || !!pending || (!connected && !needsWallet && (info?.canConnect !== true || info?.secureStorage?.available !== true));
+    primary.textContent = busy ? "Connecting…" : info?.state === "wallet-required" ? "Set up wallet" : info?.state === "wallet-unlock-required" ? "Unlock wallet" : upgrade ? "Save wallet connection" : connected ? "Refresh credits" : "Connect wallet";
+    primary.disabled = busy || !!pending || ((!connected || upgrade) && !needsWallet && (info?.canConnect !== true || info?.secureStorage?.available !== true));
     session.hidden = connected || info?.canConnect !== true || info?.secureStorage?.available === true;
     session.disabled = busy || !!pending;
   }
@@ -39,7 +40,8 @@
     if (["wallet-required", "wallet-unlock-required"].includes(info?.state)) {
       document.querySelector('#view-earn [data-product-action="payment-wallet"]')?.click(); return;
     }
-    if (info?.connected) { await window.KaiCredits?.refresh(); return; }
+    const upgrade = !sessionOnly && info?.sessionOnly === true && info?.secureStorage?.available === true;
+    if (info?.connected && !upgrade) { await window.KaiCredits?.refresh(); return; }
     if (info?.canConnect !== true || (!sessionOnly && info?.secureStorage?.available !== true)) return;
     busy = true; notice = "Review the wallet connection in the app's approval window."; paint();
     const generation = revision;

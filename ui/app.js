@@ -1522,7 +1522,7 @@ let earnTimer = null;
 let walletUiEpoch = 0;
 function resetWalletUiSecrets() {
   walletUiEpoch++; walletSendArmed = null;
-  for (const id of ["earn-pass", "earn-pass2", "earn-unlock-pass", "earn-reveal-pass", "earn-restore-wif", "earn-restore-pass", "earn-restore-pass2", "wallet-send-pass", "payment-wallet-import-key", "payment-wallet-import-pass", "payment-wallet-import-confirm"]) if ($(id)) $(id).value = "";
+  for (const id of ["earn-pass", "earn-pass2", "earn-unlock-pass", "earn-reveal-pass", "earn-restore-wif", "earn-restore-pass", "earn-restore-pass2", "wallet-send-pass", "payment-wallet-import-key", "payment-wallet-import-pass", "payment-wallet-import-confirm", "product-purchase-unlock-pass"]) if ($(id)) $(id).value = "";
   $("earn-wif-value").textContent = ""; $("earn-wif").hidden = true; $("earn-reveal-row").hidden = true;
   walletMsg("");
 }

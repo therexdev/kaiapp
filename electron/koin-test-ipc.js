@@ -13,7 +13,7 @@ const crypto = require("crypto");
 // Current USD credits use the same reviewed service on both release channels.
 // Historical custody, funding and imported pilot controls remain Test-only.
 const PUBLIC_CREDIT_ACTIONS = new Set([
-  "wallet-info", "wallet-connect", "purchase-info", "purchase-capabilities", "model-pricing",
+  "wallet-info", "wallet-connect", "purchase-connect", "purchase-info", "purchase-capabilities", "model-pricing",
   "purchase-estimate", "purchase-preview", "purchase-approve", "credit-purchase-retry", "purchase-stop",
   "chat-info", "credit-status", "chat-estimate", "chat-completion", "chat-recover", "chat-ack",
   "run-input", "run-open", "run-chat", "run-execute", "run-list", "run-status", "run-stop", "stop",
@@ -128,7 +128,23 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     if (action === "wallet-connect") {
       if (disposed || !window.isVisible() || window.isMinimized()) throw Error("Return to the visible app to connect your wallet");
       if (input !== undefined && (!input || Array.isArray(input) || Object.keys(input).some(k => k !== "sessionOnly") || typeof input.sessionOnly !== "boolean")) throw Error("Invalid wallet connection option");
-      return withChatSignal(window, signal => creditService.connectWallet(window, input || {}, signal));
+      if (busy) throw Error("Finish or cancel the open wallet or payment review first");
+      busy = true;
+      try { return await withChatSignal(window, signal => creditService.connectWallet(window, input || {}, signal), true); }
+      finally { busy = false; }
+    }
+    if (action === "purchase-connect") {
+      if (input !== undefined || disposed) throw Error("Purchase connection takes no arguments and requires an open app");
+      if (!window.isVisible() || window.isMinimized()) throw Error("Return to the visible app to buy credits");
+      if (busy) throw Error("Finish or cancel the open wallet or payment review first");
+      busy = true;
+      try { return await withChatSignal(window, async signal => {
+        const checking = purchaseSync; checking?.abort.abort();
+        if (checking) await checking.promise;
+        signal.throwIfAborted();
+        return creditService.preparePurchase(window, signal);
+      }, true); }
+      finally { busy = false; }
     }
     // Purchases use the public USD service, independently of any earlier
     // wallet deployment that still supports balance reads or recovery.

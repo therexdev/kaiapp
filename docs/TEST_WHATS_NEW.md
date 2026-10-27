@@ -1,3 +1,11 @@
+## Buy credits connects your wallet when needed
+
+- Buy credits uses the app's wallet and continues through connection to the exact payment approval. New and expired connections ask for a wallet proof in the app; no email signup or separate connection page is required. Existing saved connections are reused.
+- A locked wallet can be unlocked directly on Buy credits. The selected amount continues after unlocking. Cancel, Stop, leaving connection setup, or changing the wallet prevents the purchase from continuing.
+- The KOIN estimate updates before connecting, using the pinned public market reference. Model prices also appear before connection from the complete verified pricing policy. Only an explicit Buy requests a signed quote; the exact payment still requires approval.
+- Temporary free-credit access can upgrade to a saved connection once protected credential storage is available. Existing account identities, balances and saved payment recovery remain protected. Checking an existing payment's confirmation does not require unlocking the wallet.
+- This is an app update and uses the existing wallet-access service protocol; it requires no additional Vultr update.
+
 ## Raspberry Pi update error recovery
 
 - Fixed the AppImage updater path behind the uncaught JavaScript `EFAULT` write error during installation. Helper diagnostics are captured without replaying them through the running desktop process's error stream; a real installer failure still stops restart and reports failure.

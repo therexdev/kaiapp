@@ -32,17 +32,33 @@ test("an unreadable saved payment cannot enable a new purchase", async () => {
 });
 
 
-test("purchase preview support prefers the advertised service and otherwise uses the pinned independent market without delaying Buy", async () => {
-  const service = new CreditService({ service: require("../lib/koin-network/credit-service.json"), dataDir: "/unused", account: {} });
-  let response = { capabilities: {} }, calls = 0, account = 0;
-  service.context = async () => ({ config: service.service.config, auth: { accountId: String(account++) }, flow: { call: async (action, body) => {
-    assert.equal(action, "capabilities"); assert.deepEqual(body, {}); calls++; return response;
-  } } });
-  service.purchases.status = async () => null; service.purchases.cancelled = async () => [];
+test("purchase display support uses the pinned independent market before wallet connection without account or capability reads", async () => {
+  const service = new CreditService({ service: require("../lib/koin-network/credit-service.json"), dataDir: "/unused", account: { settings: { get: () => "local-first" } } });
+  service.context = () => { throw Error("Display capabilities must not open an account"); };
   assert.deepEqual(await service.purchaseCapabilities(), { purchasePricePreview: true, purchasePriceSource: "market-estimate" });
-  response = { capabilities: { purchasePricePreview: "true" } };
-  assert.deepEqual(await service.purchaseCapabilities(), { purchasePricePreview: true, purchasePriceSource: "market-estimate" });
-  response = { capabilities: { purchasePricePreview: true } };
-  assert.deepEqual(await service.purchaseCapabilities(), { purchasePricePreview: true, purchasePriceSource: "service" });
-  assert.equal((await service.purchaseInfo()).activation, "ready"); assert.equal(calls, 3, "Buy availability never waits for capability lookup");
+  service.service.config.pricingPolicyHash = "a".repeat(64);
+  assert.deepEqual(await service.purchaseCapabilities(), { purchasePricePreview: false, purchasePriceSource: "unavailable" });
+});
+
+test("fresh-wallet display estimates create no credentials, signed quotes, payment intent or account records", async () => {
+  const now = Date.now(); let reads = 0, privacy = "local-first";
+  const service = new CreditService({ service: require("../lib/koin-network/credit-service.json"), dataDir: "/unused", account: {
+    settings: { get: () => privacy }, creditAuthorization() { throw Error("No account is needed for an estimate"); }, connectWallet() { throw Error("Display cannot connect a wallet"); } },
+    marketReader: { read: async () => { reads++; return { usdPerKoinAtoms: "25000000", observedAt: now, expiresAt: now + 30000,
+      anchorHash: "0x" + "a".repeat(64), referenceKind: "market-estimate", windowSeconds: 0, source: "uniswap-v4:vKOIN/USDT" }; } } });
+  const quotes = service.purchases.quotes, prior = { saved: true }; quotes.quotes.set("existing", prior); quotes.intent = prior;
+  for (const usd of ["1", "5"]) {
+    const { estimate } = await service.run("purchase-estimate", { usd });
+    assert.equal(estimate.koin, String(Number(usd) * 4)); assert.equal(estimate.priceDetails.referenceKind, "market-estimate");
+    assert.equal(Object.hasOwn(estimate, "id"), false);
+  }
+  assert.equal(reads, 2); assert.equal(quotes.quotes.get("existing"), prior); assert.equal(quotes.quotes.size, 1); assert.equal(quotes.intent, prior);
+  privacy = "local-only";
+  await assert.rejects(service.purchaseCapabilities(), { code: "online-required" });
+  await assert.rejects(service.run("purchase-estimate", { usd: "1" }), { code: "online-required" }); assert.equal(reads, 2);
+  privacy = "local-first";
+  await assert.rejects(service.run("purchase-estimate", { usd: "1" }, AbortSignal.abort())); assert.equal(reads, 2);
+  const read = service.purchases.quotes.market.read;
+  service.purchases.quotes.market.read = async signal => { const result = await read(signal); privacy = "local-only"; return result; };
+  await assert.rejects(service.run("purchase-estimate", { usd: "1" }), { code: "online-required" });
 });

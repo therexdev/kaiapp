@@ -35,7 +35,7 @@
     const compactStatus = !status ? "" : usd ? "Last verified balance. Refresh to update." : s ? "Earlier balance: Account help."
       : loading ? "Checking your credit account…" : /not activated|activation is pending/i.test(status) ? "Credit service not activated yet."
       : /earlier KOIN account/i.test(status) ? "Earlier balance: Account help."
-      : /Open the desktop app/i.test(status) ? "Open desktop to check your credits." : /connect.*wallet/i.test(status) ? "Connect wallet in Credits." : /sign in/i.test(status) ? "Sign in to check your credits." : "Could not refresh. Retry or view details.";
+      : /Open the desktop app/i.test(status) ? "Open desktop to check your credits." : /connect.*wallet/i.test(status) ? "Wallet connection needed." : /sign in/i.test(status) ? "Credit connection needed." : "Could not refresh. Retry or view details.";
     return {
       usd, stale, total: usd ? credits(s.available) : loading ? "…" : "—",
       breakdown: usd ? `${s.free.state === "unavailable" ? "Free allowance unavailable" : s.free.state === "ineligible" ? "Free allowance not eligible" : credits(s.free.available) + " free"} · ${credits(s.purchased.available)} purchased${stale ? " · last known" : ""}`

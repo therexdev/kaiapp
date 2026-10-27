@@ -56,6 +56,11 @@ async function connect(account, config, { review, sessionOnly = false } = {}, si
   if (!utils.isChecksumAddress(address || "")) throw fail("wallet-required", "Create or import a wallet to connect to network credits");
   if (!wallet?.unlocked) throw fail("wallet-unlock-required", "Unlock your wallet once to connect it to network credits");
   if (!sessionOnly && !isProtectedStorage(account.safeStorage)) throw fail("secure-storage-required", storageState(account.safeStorage).detail);
+  // A missing token can also mean an existing encrypted connection could not
+  // be read. A newly available/different keyring is not permission to replace
+  // that identity. Temporary access may still overlay it without any write.
+  if (!sessionOnly && fs.existsSync(account.file) && !account._storedTokenRecord()?.token)
+    throw fail("saved-account-unavailable", "Your saved credit connection cannot be read and has been preserved. Unlock or recover its credential storage, or explicitly sign out of that connection before saving a new one");
   let expectedAccountId = account._tokenRecord()?.accountId || null;
   if (initialToken) {
     try { expectedAccountId = (await account.creditAuthorization(config.schedulerUrl, signal)).accountId; }

@@ -89,7 +89,8 @@ async function verifyFlow(t, { priority = false, legacy = false } = {}) {
   const window = Object.assign(new EventEmitter(), { webContents: new EventEmitter(), isDestroyed: () => false, isVisible: () => true, isMinimized: () => false });
   const signal = AbortSignal.timeout(60000);
   const beforeDisplayFiles = fs.readdirSync(directory, { recursive: true }).sort();
-  const modelPrices = await require(APP + "/electron/credit-model-pricing").modelPricing({ context: async () => c }, signal);
+  const modelPrices = require(APP + "/electron/credit-model-pricing").configuredModelPricing(config,
+    { schema: 1, product: "prepaid-usd-v1", policyHash: meter.policyHash, tariffs: meter.tariffs() });
   assert.equal(modelPrices.policyHash, meter.policyHash);
   assert.deepEqual(modelPrices.models.map(({ model, inputCreditsPerMillion, outputCreditsPerMillion, inputUsdPerMillion, outputUsdPerMillion }) =>
     ({ model, inputCreditsPerMillion, outputCreditsPerMillion, inputUsdPerMillion, outputUsdPerMillion })),

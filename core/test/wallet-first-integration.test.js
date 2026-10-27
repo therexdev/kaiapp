@@ -136,7 +136,7 @@ async function fixture(t, { sessionOnly = false, freeAllowance = "1000000", mult
   const accountOptions = { dataDir: buyerDir, settings, wallet, safeStorage: storage, accountOrigin: origin, fetchImpl };
   const account = new AccountService(accountOptions), approvals = [];
   const approval = { response: 1 };
-  const dialog = { showMessageBox: async (_window, detail) => { approvals.push(detail); await approval.wait; return { response: approval.response }; } };
+  const dialog = { showMessageBox: async (_window, detail) => { approvals.push(detail); await approval.wait; return { response: approval.responses?.length ? approval.responses.shift() : approval.response }; } };
   const serviceOptions = { dataDir: buyerDir, account, storage, service: { schema: 1, state: "ready", config }, fetchImpl, dialog };
   const service = new CreditService(serviceOptions); service.purchases.clientFactory = () => f.client;
   cleanup(() => service.purchases.stop()); cleanup(() => service.sessionStore?.dispose());
@@ -337,12 +337,15 @@ test("the real Buy button crosses registered desktop IPC, native review and HTTP
   ...options, skip: !BACKEND || !fs.existsSync(BUY_CHROMIUM), timeout: 90000,
 }, async t => {
   const f = await fixture(t), signal = AbortSignal.timeout(75000);
-  await f.service.connectWallet(f.window, {}, signal);
+  assert.equal(f.account._token(), null);
+  assert.equal(f.wallet.status().unlocked, true);
   const { CreditPurchases } = require("../../electron/credit-purchases");
   const context = CreditService.prototype.context, open = CreditPurchases.prototype.open;
+  const preparePurchase = CreditService.prototype.preparePurchase;
   // Keep the production IPC/controller intact. Only its injected deployment,
   // read-only chain and OS review are the existing isolated fixture boundary.
-  t.mock.method(CreditService.prototype, "context", function (s) { return context.call(f.service, s); });
+  t.mock.method(CreditService.prototype, "context", function (s, auth) { return context.call(f.service, s, auth); });
+  t.mock.method(CreditService.prototype, "preparePurchase", function (window, s) { return preparePurchase.call(f.service, window, s); });
   t.mock.method(CreditPurchases.prototype, "open", function (...args) {
     this.clientFactory = () => f.client; this.fetchImpl = f.service.fetchImpl;
     return open.apply(this, args);
@@ -370,7 +373,7 @@ test("the real Buy button crosses registered desktop IPC, native review and HTTP
   const event = { sender: f.window.webContents, senderFrame: f.window.webContents.mainFrame };
   await page.exposeBinding("fixtureDesktopIPC", async (_source, action, input) => {
     calls.push(action);
-    if (["purchase-info", "purchase-preview", "purchase-approve", "purchase-stop", "credit-purchase-retry", "credit-status"].includes(action)) {
+    if (["purchase-connect", "purchase-info", "purchase-preview", "purchase-approve", "purchase-stop", "credit-purchase-retry", "credit-status"].includes(action)) {
       const reply = await handler(event, action, input);
       if (action === "purchase-preview" && delayPreview) {
         const release = new Promise(resolve => { releasePreview = resolve; });
@@ -401,9 +404,21 @@ test("the real Buy button crosses registered desktop IPC, native review and HTTP
   await page.goto(appOrigin);
   await page.locator('.product-sidebar-credits [data-product-view="buy-credits"]').click();
   await page.waitForFunction(() => !document.getElementById("product-quote-refresh").disabled);
+  assert.equal(calls.includes("purchase-connect"), false, "page opening does not connect or sign");
   f.approval.response = 0;
   await page.locator("#product-quote-refresh").click();
+  await page.waitForFunction(() => /connection cancelled/i.test(document.getElementById("product-quote-state").textContent));
+  assert.equal(f.account._token(), null); assert.equal(f.wallet.hashes(), 0);
+  assert.equal(calls.includes("purchase-preview"), false); assert.equal(calls.includes("purchase-approve"), false);
+  assert.equal(f.transactionSigns(), 0); assert.deepEqual(f.rpcCalls, []);
+  assert.equal(await page.locator("#view-buy-credits").isVisible(), true);
+  f.approval.responses = [1, 0];
+  await page.locator("#product-quote-refresh").click();
   await page.waitForFunction(() => document.getElementById("product-quote-state").textContent.includes("Payment cancelled"));
+  assert.equal(f.account._tokenRecord().scope, "wallet-credits");
+  assert.equal(f.wallet.hashes(), 1, "connection acceptance signs only the domain-bound connection challenge");
+  assert.equal(await page.locator("#view-buy-credits").isVisible(), true);
+  assert.equal(await page.locator("#view-settings").isVisible(), false);
   assert.equal(f.approvals.filter(a => a.title === "Buy AI credits").length, 1);
   assert.equal(f.transactionSigns(), 0); assert.deepEqual(f.rpcCalls, []);
   f.approval.response = 1; delayPreview = true;
@@ -426,6 +441,9 @@ test("the real Buy button crosses registered desktop IPC, native review and HTTP
   releaseApproval();
   await page.waitForFunction(() => document.getElementById("product-payment-progress-label").textContent === "Credits added");
   assert.equal(f.approvals.filter(a => a.title === "Buy AI credits").length, 2);
+  assert.equal(calls.filter(a => a === "purchase-connect").length, 3);
+  assert.equal(f.approvals.filter(a => a.title === "Connect wallet to network credits").length, 2, "the accepted durable connection is reused for the next Buy");
+  assert.equal(f.wallet.hashes(), 1, "a connected purchase does not sign another connection proof");
   assert.equal(calls.filter(a => a === "purchase-preview").length, 2);
   assert.equal(calls.filter(a => a === "purchase-approve").length, 2);
   assert.equal(f.transactionSigns(), 1); assert.deepEqual(f.rpcCalls, [false, true]);
@@ -440,6 +458,19 @@ test("the real Buy button crosses registered desktop IPC, native review and HTTP
   const paid = await f.service.run("credit-status", undefined, signal);
   assert.equal(paid.credits.purchased.available, "100000000");
   assert.equal(paid.purchases.filter(p => p.state === "confirmed").length, 1);
+  await page.waitForFunction(() => document.getElementById("product-quote-refresh").textContent === "Buy credits" && !document.getElementById("product-quote-refresh").disabled);
+  const previous = f.account._tokenRecord();
+  f.account._saveToken(previous.token, { ...previous, expiresAt: Date.now() - 1 });
+  delayPreview = false;
+  f.approval.responses = [1, 0];
+  await page.locator("#product-quote-refresh").click();
+  await page.waitForFunction(() => document.getElementById("product-quote-state").textContent.includes("Payment cancelled") || document.getElementById("product-quote-state").getAttribute("role") === "alert");
+  assert.match(await page.locator("#product-quote-state").textContent(), /Payment cancelled/);
+  assert.equal(f.approvals.filter(a => a.title === "Connect wallet to network credits").length, 3, "expired wallet access renews inside the next purchase");
+  assert.equal(f.wallet.hashes(), 2);
+  assert.equal(f.account._tokenRecord().accountId, previous.accountId, "renewal retains the purchased-credit account");
+  assert.equal((await f.service.run("credit-status", undefined, signal)).credits.purchased.available, "100000000");
+  assert.equal(f.transactionSigns(), 1); assert.deepEqual(f.rpcCalls, [false, true]);
   assert.deepEqual(errors, []);
 });
 

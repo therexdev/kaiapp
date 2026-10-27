@@ -85,6 +85,44 @@ test("missing or locked credential store is distinct from a missing account and 
   assert.deepEqual(fs.readFileSync(f.account.file), bytes);
 });
 
+test("Buy preserves unreadable saved credentials before review or proof even when the keyring reports available", async t => {
+  const { CreditService } = require("../../electron/credit-service");
+  for (const unreadable of ["changed-keyring", "corrupted-record"]) {
+    const f = fixture(t); await f.account.connectWallet(config, { review: async () => true });
+    const decrypt = f.storage.decryptString;
+    if (unreadable === "changed-keyring") f.storage.decryptString = () => { throw Error("Prior key unavailable"); };
+    else fs.writeFileSync(f.account.file, Buffer.from("ENC1unreadable-fixture"));
+    const saved = fs.readFileSync(f.account.file), signed = f.state.signed, challenged = f.state.challenged;
+    let reviews = 0;
+    const window = { isDestroyed: () => false, isVisible: () => true, isMinimized: () => false };
+    const service = new CreditService({ dataDir: f.dir, account: f.account, storage: f.storage,
+      service: require("../lib/koin-network/credit-service.json"), dialog: { showMessageBox: async () => { reviews++; return { response: 1 }; } } });
+    t.after(() => service.dispose());
+    assert.equal(isProtectedStorage(f.storage), true); assert.equal(f.account._token(), null);
+    await assert.rejects(service.preparePurchase(window), { code: "saved-account-unavailable" });
+    assert.deepEqual(fs.readFileSync(f.account.file), saved);
+    assert.equal(reviews, 0); assert.equal(f.state.signed, signed); assert.equal(f.state.challenged, challenged);
+    // An explicit sign-out still permits choosing a fresh connection. This
+    // differs from a read failure silently discarding the prior identity.
+    await f.account.signOut(); assert.equal(fs.existsSync(f.account.file), false);
+    f.storage.decryptString = decrypt;
+    assert.equal((await f.account.connectWallet(config, { review: async () => true })).state, "connected");
+  }
+});
+
+test("temporary access can overlay an unreadable saved connection but cannot persist over it", async t => {
+  const f = fixture(t); await f.account.connectWallet(config, { review: async () => true });
+  const saved = fs.readFileSync(f.account.file);
+  f.storage.decryptString = () => { throw Error("Prior key unavailable"); };
+  assert.equal(isProtectedStorage(f.storage), true);
+  assert.equal((await f.account.connectWallet(config, { sessionOnly: true, review: async () => true })).sessionOnly, true);
+  assert.deepEqual(fs.readFileSync(f.account.file), saved);
+  const signed = f.state.signed; let reviews = 0;
+  await assert.rejects(f.account.connectWallet(config, { review: async () => { reviews++; return true; } }), { code: "saved-account-unavailable" });
+  assert.equal(reviews, 0); assert.equal(f.state.signed, signed);
+  assert.deepEqual(fs.readFileSync(f.account.file), saved); assert.equal(f.account._tokenRecord().sessionOnly, true);
+});
+
 test("expired authority and changed server account cannot reuse or overwrite prior credit identity", async t => {
   const f = fixture(t); await f.account.connectWallet(config, { review: async () => true });
   const original = fs.readFileSync(f.account.file), record = f.account._tokenRecord();

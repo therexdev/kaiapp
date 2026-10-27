@@ -15,6 +15,7 @@ test("Revision 2 free entry, unified credits, unavailable quote, stale network a
     window.kaiKoinTestBridge = { onProgress: fn => { listeners.add(fn); return () => listeners.delete(fn); }, run: async (action, input) => {
       window.productCalls.push({ action, input });
       if (action === "purchase-info") return { ...common, activation: "ready", blocked: "" };
+      if (action === "purchase-connect") return { state: "ready", address: common.owner };
       if (action === "purchase-capabilities") return { purchasePricePreview: false };
       if (action === "chat-info") return { ...common, activation: "ready", runBudgets: window.advancedReady === true, blocked: "", model: "fixture", maxOutput: 32, maxRequestCredits: "1" };
       if (action === "credit-status") return { ...common, credits: credit(), purchases, usage: [] };

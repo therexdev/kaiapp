@@ -17,6 +17,7 @@ async function fixture(t) {
       window.calls.push({ action, input });
       if (action === "wallet-info") return structuredClone(window.walletInfo);
       if (action === "wallet-connect") {
+        if (window.cancelConnection) return { state: "cancelled" };
         window.walletConnected = true; window.walletInfo = { ...window.walletInfo, state: "ready", connected: true, sessionOnly: input.sessionOnly, detail: "Wallet connected. Free credits only for this session." };
         return { state: "connected", sessionOnly: input.sessionOnly };
       }
@@ -60,6 +61,28 @@ test("wallet-only credits setup is explicit and a Pi session displays only the s
   assert.equal(await page.evaluate(() => localStorage.getItem("kai-credit-paid-first")), "true");
   assert.equal(await page.locator("#network-paid-first").isDisabled(), true);
   assert.deepEqual(errors, []);
+});
+test("temporary Pi access can save its wallet connection after protected storage becomes available", { skip: !fs.existsSync(CHROMIUM), timeout: 60000 }, async t => {
+  const { page, errors } = await fixture(t);
+  await page.evaluate(() => window.KaiWalletAccess.open());
+  await page.locator("#product-wallet-access-session").click();
+  await page.waitForFunction(() => window.walletInfo.connected === true);
+  await page.evaluate(async () => {
+    window.walletInfo = { ...window.walletInfo, canConnect: true, secureStorage: { available: true } };
+    await window.KaiWalletAccess.refresh();
+  });
+  const connect = page.locator("#product-wallet-access-connect");
+  assert.equal(await connect.textContent(), "Save wallet connection"); assert.equal(await connect.isEnabled(), true);
+  await page.evaluate(() => { window.cancelConnection = true; }); await connect.click();
+  await page.waitForFunction(() => !document.getElementById("product-wallet-access-connect").disabled);
+  assert.equal(await page.evaluate(() => window.walletInfo.sessionOnly), true);
+  assert.match(await page.locator("#product-wallet-access-detail").textContent(), /cancelled/);
+  await page.evaluate(() => { window.cancelConnection = false; }); await connect.click();
+  await page.waitForFunction(() => document.getElementById("product-wallet-access-connect").textContent === "Refresh credits");
+  assert.deepEqual(await page.evaluate(() => window.calls.filter(x => x.action === "wallet-connect").map(x => x.input)),
+    [{ sessionOnly: true }, { sessionOnly: false }, { sessionOnly: false }]);
+  assert.equal(await page.locator("#product-wallet-access-session-note").isVisible(), false);
+  assert.equal(await page.locator("#view-settings").isVisible(), false); assert.deepEqual(errors, []);
 });
 test("Earn enables a device explicitly, respects Cancel, and stays usable with its reward wallet locked", { skip: !fs.existsSync(CHROMIUM), timeout: 60000 }, async t => {
   const { page, errors } = await fixture(t);

@@ -90,6 +90,11 @@
 .product-v2 .product-purchase-notice{margin:12px 0;padding:12px 0;border-top:1px solid var(--border)}
 .product-v2 .product-purchase-notice p{margin:0;font-size:12px;line-height:1.6;overflow-wrap:anywhere}
 .product-v2 .product-purchase-notice .product-actions{margin-top:8px;gap:8px;flex-wrap:wrap}
+.product-v2 .product-purchase-unlock{margin:14px 0;padding:14px;border:1px solid var(--border);border-radius:10px;background:var(--bg-raised)}
+.product-v2 .product-purchase-unlock[hidden]{display:none}
+.product-v2 .product-purchase-unlock input{display:block;width:100%;box-sizing:border-box;margin-top:8px}
+.product-v2 .product-purchase-unlock .product-actions{margin-top:10px}
+.product-v2 #product-purchase-unlock-error{margin:8px 0 0;color:var(--danger,#b42318)}
 .product-v2 #product-quote-refresh:disabled{background:#e6edf8;color:#667793;border-color:#d3deed;cursor:default;opacity:1}
 /* Product pages use one natural document flow and one scrollbar. A flex child
    must not shrink the sharing panel to make room for account history. */

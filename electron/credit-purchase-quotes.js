@@ -11,6 +11,13 @@ class CreditPurchaseQuotes {
   scope(c) { return P.hash(JSON.stringify([c.auth.accountId, P.hash(c.auth.sessionToken || ""), c.config])); }
   clear() { this.quotes.clear(); this.intent = null; }
   async capabilities(c, signal) {
+    signal?.throwIfAborted();
+    if (!c.auth) {
+      // An informational price needs no account or wallet proof. Public
+      // contexts can only use the pinned read-only market implementation.
+      const supported = MarketEstimate.supports(c.config);
+      return { purchasePricePreview: supported, purchasePriceSource: supported ? "market-estimate" : "unavailable" };
+    }
     const scope = this.scope(c), now = this.clock();
     if (this.previewCapability?.scope === scope && now < this.previewCapability.expiresAt) return { ...this.previewCapability.value };
     let servicePreview = false;
