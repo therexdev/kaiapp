@@ -193,7 +193,7 @@ jobs:
           "KAI_WALLET_BACKEND=$env:GITHUB_WORKSPACE\verification-wallet-backend" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Verify Windows wallet connection, payment and locked-wallet earning
         timeout-minutes: 12
-        run: node --test --test-concurrency=1 core/test/wallet-credit-account.test.js core/test/provider-device.test.js core/test/credit-provider.test.js core/test/credit-purchases.test.js core/test/credit-purchase-progress.test.js core/test/koin-funding-approval.test.js core/test/koin-purchase-cancel.test.js core/test/koin-rpc-provider.test.js core/test/koin-chain.test.js core/test/koin-wallet-nonce.test.js core/test/local-chat-messages.test.js core/test/purchase-wallet.browser.test.js core/test/wallet-first-integration.test.js core/test/wallet-first-ui.browser.test.js core/test/credit-wallet-ipc.test.js core/test/session-free-chat.test.js core/test/koin-prepaid-chat.test.js core/test/koin-provider-status.test.js core/test/worker-proof.test.js core/test/worker-advertise.test.js core/test/worker-model-selection.test.js core/test/worker-preparation.test.js core/test/worker-start-stop.test.js core/test/worker-registration-retirement.test.js core/test/worker-qualification-diagnostics.test.js core/test/provider-setup-ui.browser.test.js
+        run: node --test --test-concurrency=1 core/test/wallet-credit-account.test.js core/test/provider-device.test.js core/test/credit-provider.test.js core/test/credit-purchases.test.js core/test/credit-purchase-progress.test.js core/test/koin-funding-approval.test.js core/test/koin-purchase-cancel.test.js core/test/koin-rpc-provider.test.js core/test/koin-chain.test.js core/test/koin-wallet-nonce.test.js core/test/local-chat-messages.test.js core/test/purchase-wallet.browser.test.js core/test/wallet-first-integration.test.js core/test/wallet-first-ui.browser.test.js core/test/credit-wallet-ipc.test.js core/test/session-free-chat.test.js core/test/koin-prepaid-chat.test.js core/test/koin-provider-status.test.js core/test/worker-proof.test.js core/test/worker-advertise.test.js core/test/worker-model-selection.test.js core/test/worker-preparation.test.js core/test/worker-start-stop.test.js core/test/worker-registration-retirement.test.js core/test/worker-qualification-diagnostics.test.js core/test/provider-setup-ui.browser.test.js core/test/update-restart.test.js
         env:
           KAI_SCHEDULER_URL: http://127.0.0.1:9/scheduler
           KAI_RELAY_URL: http://127.0.0.1:9
@@ -301,6 +301,9 @@ jobs:
         run: node scripts/prepare-test-build.js ${{ github.run_number }} ${{ github.run_attempt }}
       - run: npm run dist -- --linux --x64 --publish never
       - run: node scripts/verify-test-package.js
+      - name: Verify packaged Linux AppImage installation and restart
+        timeout-minutes: 5
+        run: xvfb-run -a node scripts/verify-linux-relaunch.js --app-dir dist/linux-unpacked
       - uses: actions/upload-artifact@v4
         with:
           name: kai-test-linux
@@ -352,6 +355,11 @@ jobs:
         run: |
           node scripts/verify-test-package.js
           node -e 'const b=require("fs").readFileSync("dist/linux-arm64-unpacked/koinos-ai-test"); if(b.subarray(0,4).toString("hex")!=="7f454c46" || b[4]!==2 || b[5]!==1 || b.readUInt16LE(18)!==183) throw Error("Packaged executable is not little-endian ELF64 AArch64")'
+      - name: Verify packaged ARM64 AppImage installation and restart
+        timeout-minutes: 5
+        run: xvfb-run -a node scripts/verify-linux-relaunch.js --app-dir dist/linux-arm64-unpacked
+        env:
+          KAI_NATIVE_QA_DIR: wallet-flow-qa
       - name: Verify packaged Secret Service and temporary sessions on ARM64
         timeout-minutes: 5
         run: xvfb-run -a node scripts/verify-linux-wallet-storage.js --app-dir dist/linux-arm64-unpacked

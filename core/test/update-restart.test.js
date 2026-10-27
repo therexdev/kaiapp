@@ -3,7 +3,7 @@
 const test = require("node:test"), assert = require("node:assert/strict");
 const fs = require("node:fs"), os = require("node:os"), path = require("node:path"), { EventEmitter } = require("node:events");
 const { createUpdateRestart, RESTART_ERROR } = require("../../electron/update-restart");
-const { AppImageUpdater } = require("electron-updater/out/AppImageUpdater");
+const { KaiAppImageUpdater } = require("../../electron/appimage-updater");
 
 function appFixture() {
   const events = [];
@@ -29,13 +29,13 @@ function realUpdater(t, { originalName = "Koinos AI 1.0.0.AppImage", fail = fals
   process.env.APPIMAGE = original; process.env.KAI_UPDATE_TEST_LOG = log;
   t.after(() => { for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } });
   const quitHandlers = [], adapter = { version: "1.0.0", onQuit: callback => quitHandlers.push(callback), isPackaged: true };
-  const updater = new AppImageUpdater(null, adapter); updater.logger = null;
+  const updater = new KaiAppImageUpdater(null, adapter); updater.logger = null;
   updater.downloadedUpdateHelper = { file: downloaded, downloadedFileInfo: { isAdminRightsRequired: false } };
   let spawned = 0; updater.spawnLog = async () => { spawned++; return true; };
   return { root, original, downloaded, wrapper, log, updater, quitHandlers, get spawned() { return spawned; } };
 }
 
-test("the pinned AppImage updater installs without launching a replacement, then Electron relaunches the renamed path", { skip: process.platform !== "linux" }, async t => {
+test("the app's AppImage updater installs without launching a replacement, then Electron relaunches the renamed path", { skip: process.platform !== "linux" }, async t => {
   const f = realUpdater(t), { app, events } = appFixture();
   const restart = createUpdateRestart({ app, updater: f.updater, platform: "linux", logger: { error() {} } });
   const a = restart(), b = restart(); assert.equal(a, b, "double clicks share one attempt");
@@ -48,6 +48,71 @@ test("the pinned AppImage updater installs without launching a replacement, then
   assert.equal(f.updater.autoInstallOnAppQuit, false);
   assert.equal(f.updater.listenerCount("appimage-filename-updated"), 0);
   assert.equal(f.updater.listenerCount("error"), 1, "only the updater's own error listener remains");
+});
+
+test("real AppImage integration stderr cannot become an uncaught parent stream error on restart or normal quit", { skip: process.platform !== "linux" }, t => {
+  const { spawnSync } = require("node:child_process");
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "kai updater stderr "));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const modulePath = path.resolve(__dirname, "../../electron/appimage-updater.js");
+  const restartPath = path.resolve(__dirname, "../../electron/update-restart.js");
+  for (const mode of ["restart", "quit"]) for (const status of [0, 7]) {
+    const folder = path.join(root, mode + status); fs.mkdirSync(folder);
+    const original = path.join(folder, "Koinos AI 1.0.0.AppImage"), cache = path.join(folder, "cache");
+    fs.mkdirSync(cache); fs.writeFileSync(original, "previous image");
+    const downloaded = path.join(cache, "Koinos AI 1.0.1.AppImage");
+    fs.writeFileSync(downloaded, `#!/bin/sh\ntest "$APPIMAGE_EXIT_AFTER_INSTALL" = true || exit 20\nprintf 'integration diagnostic' >&2\nexit ${status}\n`, { mode: 0o755 });
+    // Use an isolated process: Writable emits this write failure after the
+    // synchronous install() try/catch has returned. Never install an app-wide
+    // uncaughtException handler to conceal that asynchronous failure.
+    const script = `
+      const fs = require('node:fs'), { Writable } = require('node:stream');
+      const { KaiAppImageUpdater } = require(${JSON.stringify(modulePath)});
+      const { createUpdateRestart } = require(${JSON.stringify(restartPath)});
+      const streamErrors = [], installerErrors = [], events = [], handlers = [];
+      let parentWrites = 0, rejected = false;
+      Object.defineProperty(process, 'stderr', { value: new Writable({ write(chunk, encoding, callback) {
+        parentWrites++; const error = Error('fixture parent stderr is unavailable'); error.code = 'EFAULT'; callback(error);
+      } }) });
+      process.on('uncaughtException', error => streamErrors.push(error.code || error.message));
+      process.env.APPIMAGE = ${JSON.stringify(original)};
+      const updater = new KaiAppImageUpdater(null, { version: '1.0.0', isPackaged: true, onQuit: callback => handlers.push(callback) });
+      updater.logger = null;
+      updater.on('error', error => installerErrors.push({ status: error.status, stderr: String(error.stderr || '') }));
+      updater.downloadedUpdateHelper = { file: ${JSON.stringify(downloaded)}, downloadedFileInfo: { isAdminRightsRequired: false } };
+      const app = { relaunch() { events.push('relaunch'); }, quit() { events.push('quit'); } };
+      (async () => {
+        if (${JSON.stringify(mode)} === 'quit') { updater.addQuitHandler(); handlers[0](0); }
+        else { try { await createUpdateRestart({ app, updater, platform: 'linux', logger: { error() {} } })(); } catch { rejected = true; } }
+        setImmediate(() => fs.writeSync(1, JSON.stringify({ parentWrites, streamErrors, installerErrors, events, rejected, installedOnce: updater.quitAndInstallCalled })));
+      })();`;
+    const child = spawnSync(process.execPath, ["-e", script], { encoding: "utf8", timeout: 10000 });
+    assert.equal(child.status, 0, child.stderr); assert.equal(child.error, undefined);
+    const result = JSON.parse(child.stdout);
+    assert.equal(result.parentWrites, 0, "integration diagnostics never replay into the GUI's stderr");
+    assert.deepEqual(result.streamErrors, [], "the asynchronous EFAULT cannot escape installation");
+    assert.equal(result.installedOnce, true);
+    assert.deepEqual(result.installerErrors, status ? [{ status: 7, stderr: "integration diagnostic" }] : [], "a genuine child failure retains its status and diagnostic");
+    assert.deepEqual(result.events, mode === "restart" && status === 0 ? ["relaunch", "quit"] : []);
+    assert.equal(result.rejected, mode === "restart" && status !== 0);
+  }
+});
+
+test("the stderr failure fixture reproduces the uncaught execFileSync replay the AppImage fix prevents", { skip: process.platform !== "linux" }, () => {
+  const { spawnSync } = require("node:child_process");
+  const child = spawnSync(process.execPath, ["-e", `
+    const fs = require('node:fs'), { Writable } = require('node:stream');
+    const errors = []; let caught = false;
+    Object.defineProperty(process, 'stderr', { value: new Writable({ write(chunk, encoding, callback) {
+      const error = Error('fixture stderr'); error.code = 'EFAULT'; callback(error);
+    } }) });
+    process.on('uncaughtException', error => errors.push(error.code));
+    try { require('node:child_process').execFileSync('/bin/sh', ['-c', 'printf integration-diagnostic >&2']); }
+    catch { caught = true; }
+    setImmediate(() => fs.writeSync(1, JSON.stringify({ errors, caught })));
+  `], { encoding: "utf8", timeout: 10000 });
+  assert.equal(child.status, 0, child.stderr);
+  assert.deepEqual(JSON.parse(child.stdout), { errors: ["EFAULT"], caught: false });
 });
 
 test("a custom AppImage filename is preserved when the updater emits no rename", { skip: process.platform !== "linux" }, async t => {

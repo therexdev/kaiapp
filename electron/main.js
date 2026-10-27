@@ -444,7 +444,9 @@ async function start() {
   // with "Later" falling back to install-on-quit. Packaged builds only.
   if (app.isPackaged) {
     try {
-      const { autoUpdater } = require("electron-updater");
+      const autoUpdater = process.platform === "linux"
+        ? new (require("./appimage-updater").KaiAppImageUpdater)()
+        : require("electron-updater").autoUpdater;
       // Only Test follows the separate test feed; live follows stable releases.
       configureUpdater(autoUpdater, release);
       autoUpdater.autoDownload = true;

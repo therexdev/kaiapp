@@ -1,10 +1,17 @@
+## Raspberry Pi update error recovery
+
+- Fixed the AppImage updater path behind the uncaught JavaScript `EFAULT` write error during installation. Helper diagnostics are captured without replaying them through the running desktop process's error stream; a real installer failure still stops restart and reports failure.
+- Both **Restart now** and automatic installation when closing use the fix. The replacement still waits for the original app to finish cleanup and release its shared Live/Test profile lock.
+- Release checks exercise the actual AppImage updater in native Linux Electron, including a failing parent error stream, successful and failed helper processes, and the packaged ARM64 executable.
+- A currently running older version still contains its older updater. A direct download and launch of the fixed ARM64 AppImage after quitting the old app avoids that first update transition. Your existing profile, wallet and installed models are reused.
+
 ## Earning stays available while other models are checked
 
 - Fixed a scheduler loop in which repeated failed model checks could keep replacing an already-qualified model. Qualified selected capacity returns between checks, failed models retry fairly after a bounded pause, and paid requests can run between benchmark answers. A live assigned check is never interrupted or replaced.
 - Idle providers wait between empty polls, keeping network traffic bounded while Stop stays responsive.
 - Earn now shows each model's qualification score and the available failure details. Loading, tokenizer, runtime and reporting errors remain visible across idle polls instead of disappearing behind a generic retry message. Local diagnostics never grant network eligibility.
 - Models still need their own fresh signed passing checks. An actual run of the pinned Fast model completed quickly with matching token IDs but passed 10 of the required 12 cases; the two failures were JSON formatting and instruction priority. Installation alone does not mean every selected model has qualified.
-- This fix includes a narrow Vultr service update followed by the app update. The service updater preserves the existing configuration, keys, balances, payments, reward records and qualification evidence, and verifies the new scheduler on both loopback and HTTPS.
+- This fix includes a narrow Vultr service update followed by the app update. Use the [exact server update command](EARNING_RECOVERY_RELEASE.md). The service updater preserves the existing configuration, keys, balances, payments, reward records and qualification evidence, and verifies the new scheduler on both loopback and HTTPS.
 
 ## Faster payment review with visible confirmation progress
 
