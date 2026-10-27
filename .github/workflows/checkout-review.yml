@@ -1,0 +1,88 @@
+name: Isolated checkout regression review
+
+on:
+  push:
+    branches: ["work/checkout-validation-20261027"]
+    paths:
+      - "scripts/checkout-review-edit.py"
+      - ".github/workflows/checkout-review.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: checkout-review-20261027
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.repository == 'therexdev/kaiapp' && github.ref == 'refs/heads/work/checkout-validation-20261027'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BASE: 96be1229683d29fc3132f103c4ff529baa888efd
+      TARGET: fix/buy-credits-no-silent-reset
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install test dependencies
+        run: npm ci
+      - name: Require Chromium for actual browser regression checks
+        run: |
+          PLAYWRIGHT_BROWSERS_PATH="$HOME/pw-browsers" npx playwright-core install chromium
+          BROWSER=$(find "$HOME/pw-browsers" -type f -name chrome -path '*chrome-linux*' | head -1)
+          test -n "$BROWSER" && test -x "$BROWSER"
+          echo "KAI_TEST_CHROMIUM=$BROWSER" >> "$GITHUB_ENV"
+      - name: Demonstrate both regressions on the unchanged application
+        run: |
+          python3 scripts/checkout-review-edit.py tests
+          set +e
+          node --test --test-name-pattern='checkout failure stays visible|changed purchase amount gives' core/test/purchase-wallet.browser.test.js > checkout-before.log 2>&1
+          RESULT=$?
+          set -e
+          cat checkout-before.log
+          test "$RESULT" -ne 0
+          grep -Eq '^# fail 2$' checkout-before.log
+          grep -Eq '^# cancelled 0$' checkout-before.log
+      - name: Apply the hash-guarded checkout-only fix
+        run: |
+          python3 scripts/checkout-review-edit.py fix
+          node --check ui/product-experience.js
+          git diff --check
+      - name: Check browser checkout, native quotes, payment status and pricing
+        run: |
+          set -o pipefail
+          node --test core/test/purchase-wallet.browser.test.js core/test/credit-purchase-quotes.test.js core/test/credit-purchase-info.test.js core/test/credit-model-pricing.test.js 2>&1 | tee checkout-after.log
+      - name: Publish only validated application files to a new review branch
+        run: |
+          test -z "$(git ls-remote --heads origin "refs/heads/$TARGET")"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          # Build from the pinned application tree, not this temporary workflow.
+          # Neither this editing script nor this workflow enters the review branch.
+          git read-tree "$BASE"
+          git add ui/product-experience.js core/test/purchase-wallet.browser.test.js docs/TEST_WHATS_NEW.md
+          git diff --cached --check
+          git diff --cached --name-only > checkout-files.txt
+          printf '%s\n' core/test/purchase-wallet.browser.test.js docs/TEST_WHATS_NEW.md ui/product-experience.js > checkout-expected.txt
+          cmp checkout-files.txt checkout-expected.txt
+          git diff --cached > checkout-fix.patch
+          TREE=$(git write-tree)
+          COMMIT=$(printf '%s\n' 'Keep checkout failures visible and explain stopped purchase reviews' '' 'Preserve the current Earn/model changes. Keep read-only price refreshes from erasing checkout errors, explain invalidated selections, and hand the exact quote to native review. No changes to spending limits, wallet authority, payment recovery, backend services or release channels.' | git commit-tree "$TREE" -p "$BASE")
+          git push origin "$COMMIT:refs/heads/$TARGET"
+          printf 'Validated checkout commit: `%s` on `%s`. No Test/Live branch or installer was changed.\n' "$COMMIT" "$TARGET" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: checkout-regression-review
+          path: |
+            checkout-before.log
+            checkout-after.log
+            checkout-fix.patch
+            checkout-files.txt
+          if-no-files-found: ignore
