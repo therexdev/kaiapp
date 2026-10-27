@@ -1,0 +1,17 @@
+name: Windows SQLite path diagnostic
+on:
+  push:
+    branches: [work/windows-sqlite-path-20261027]
+permissions:
+  contents: read
+jobs:
+  paths:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Probe synthetic SQLite paths and existing journal identity
+        run: node scripts/probe-windows-sqlite-paths.js
