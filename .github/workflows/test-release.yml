@@ -12,6 +12,10 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # Exact backend revision included in the server-first update directions.
+  KAI_WALLET_BACKEND_COMMIT: a8edc3bd6d21c40cebe175f7ead36844900b2b7c
+
 jobs:
   verify:
     if: github.ref == 'refs/heads/test'
@@ -46,12 +50,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: therexdev/kai
-          ref: 11474a9d851769bccfb56008b2a3d4cbd6521ff3
+          ref: ${{ env.KAI_WALLET_BACKEND_COMMIT }}
           path: verification-backend
           persist-credentials: false
       - name: Verify purchase, provider and paid reply together
         run: |
           npm ci --ignore-scripts --prefix verification-backend
+          (cd verification-backend && node --test scripts/probe-wallet-credit-auth.js scripts/probe-wallet-credit-router.js scripts/probe-koin-provider-devices.js scripts/probe-koin-model-catalog.js scripts/probe-catalog-qualification.js scripts/probe-koin-on-demand-readiness.js scripts/probe-koin-qualification-preparation.js scripts/probe-koin-multi-model-readiness.js scripts/probe-koin-credit-priority.js scripts/probe-koin-purchase-journal.js deploy/koin-mainnet/update-wallet-access.test.js)
           node scripts/verify-credit-flow.js verification-backend
           node scripts/verify-provider-qualification.js verification-backend
           KAI_WALLET_BACKEND="$GITHUB_WORKSPACE/verification-backend" node --test core/test/wallet-first-integration.test.js
@@ -164,13 +169,35 @@ jobs:
   windows:
     needs: verify
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - run: npm ci
+      - name: Check out the matching credit scheduler
+        uses: actions/checkout@v4
+        with:
+          repository: therexdev/kai
+          ref: ${{ env.KAI_WALLET_BACKEND_COMMIT }}
+          path: verification-wallet-backend
+          persist-credentials: false
+      - run: npm ci --ignore-scripts --prefix verification-wallet-backend
+      - name: Install the pinned browser and configure wallet-flow checks
+        shell: pwsh
+        run: |
+          npx playwright-core install chromium
+          $kaiChromium = node -e 'process.stdout.write(require("playwright-core").chromium.executablePath())'
+          "KAI_TEST_CHROMIUM=$kaiChromium" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "KAI_WALLET_BACKEND=$env:GITHUB_WORKSPACE\verification-wallet-backend" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Verify Windows wallet connection, payment and locked-wallet earning
+        timeout-minutes: 12
+        run: node --test --test-concurrency=1 core/test/wallet-credit-account.test.js core/test/provider-device.test.js core/test/credit-provider.test.js core/test/credit-purchases.test.js core/test/purchase-wallet.browser.test.js core/test/wallet-first-integration.test.js core/test/wallet-first-ui.browser.test.js core/test/credit-wallet-ipc.test.js core/test/session-free-chat.test.js core/test/koin-prepaid-chat.test.js core/test/koin-provider-status.test.js core/test/worker-proof.test.js core/test/worker-advertise.test.js core/test/worker-model-selection.test.js core/test/worker-preparation.test.js core/test/worker-start-stop.test.js core/test/worker-registration-retirement.test.js
+        env:
+          KAI_SCHEDULER_URL: http://127.0.0.1:9/scheduler
+          KAI_RELAY_URL: http://127.0.0.1:9
+          KAI_FEEDBACK_URL: http://127.0.0.1:9/feedback
       - name: Test Windows signature rejection paths
         run: node --test core/test/windows-signing.test.js core/test/windows-signing-preparation.test.js
       - name: Verify Windows long-profile payment journal recovery
@@ -272,7 +299,7 @@ jobs:
         run: xvfb-run -a node scripts/verify-linux-relaunch.js
       - name: Prepare test installer identity
         run: node scripts/prepare-test-build.js ${{ github.run_number }} ${{ github.run_attempt }}
-      - run: npm run dist -- --linux --x64 --arm64 --publish never
+      - run: npm run dist -- --linux --x64 --publish never
       - run: node scripts/verify-test-package.js
       - uses: actions/upload-artifact@v4
         with:
@@ -282,8 +309,76 @@ jobs:
             dist/test*.yml
           if-no-files-found: error
 
+  linux-arm64-native:
+    # Publish the same native ARM64 package used by credential/restart acceptance.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    env:
+      KAI_SCHEDULER_URL: http://127.0.0.1:9/scheduler
+      KAI_RELAY_URL: http://127.0.0.1:9
+      KAI_FEEDBACK_URL: http://127.0.0.1:9/feedback
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Require native Linux ARM64 and the reviewed backend
+        run: node -e 'if (process.platform !== "linux" || process.arch !== "arm64" || !/^[a-f0-9]{40}$/.test(process.env.KAI_WALLET_BACKEND_COMMIT)) throw Error("Native ARM64 and an exact backend revision are required")'
+      - uses: actions/checkout@v4
+        with:
+          repository: therexdev/kai
+          ref: ${{ env.KAI_WALLET_BACKEND_COMMIT }}
+          path: verification-wallet-backend
+          persist-credentials: false
+      - name: Install native display and disposable keyring dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y gnome-keyring libsecret-1-0 xvfb xauth dbus-x11 libglib2.0-bin xdg-user-dirs libgtk-3-0t64 libnss3 libasound2t64 libgbm1
+      - run: npm ci
+      - run: npm ci --ignore-scripts --prefix verification-wallet-backend
+      - name: Verify ARM64 wallet, earning, launcher and backend integration
+        run: node --test core/test/wallet-credit-account.test.js core/test/provider-device.test.js core/test/session-free-chat.test.js core/test/credit-wallet-ipc.test.js core/test/koin-windows-journals.test.js core/test/linux-shortcut.test.js core/test/linux-shortcut-auto.test.js core/test/update-restart.test.js core/test/worker-preparation.test.js core/test/worker-model-selection.test.js core/test/wallet-first-integration.test.js
+        env:
+          KAI_WALLET_BACKEND: ${{ github.workspace }}/verification-wallet-backend
+      - name: Verify native ARM64 relaunch and shared profile exclusion
+        run: xvfb-run -a node scripts/verify-linux-relaunch.js
+      - name: Prepare separate Test package identity
+        run: node scripts/prepare-test-build.js ${{ github.run_number }} ${{ github.run_attempt }}
+      - name: Build ARM64 AppImage for native verification
+        run: npm run dist -- --linux --arm64 --publish never
+      - name: Verify ARM64 package content and architecture
+        run: |
+          node scripts/verify-test-package.js
+          node -e 'const b=require("fs").readFileSync("dist/linux-arm64-unpacked/koinos-ai-test"); if(b.subarray(0,4).toString("hex")!=="7f454c46" || b[4]!==2 || b[5]!==1 || b.readUInt16LE(18)!==183) throw Error("Packaged executable is not little-endian ELF64 AArch64")'
+      - name: Verify packaged Secret Service and temporary sessions on ARM64
+        timeout-minutes: 5
+        run: xvfb-run -a node scripts/verify-linux-wallet-storage.js --app-dir dist/linux-arm64-unpacked
+        env:
+          KAI_NATIVE_QA_DIR: wallet-flow-qa
+      - name: Save verified native ARM64 installer and feed
+        uses: actions/upload-artifact@v4
+        with:
+          name: kai-test-linux-arm64
+          path: |
+            dist/*.AppImage
+            dist/test-linux-arm64.yml
+          if-no-files-found: error
+      - name: Record native ARM64 verification identities
+        run: |
+          mkdir -p wallet-flow-qa
+          node -e 'require("fs").writeFileSync("wallet-flow-qa/test-arm64-verification.json",JSON.stringify({desktop:process.env.GITHUB_SHA,backend:process.env.KAI_WALLET_BACKEND_COMMIT,run:process.env.GITHUB_RUN_ID,platform:process.platform,arch:process.arch,published:false,physicalPi:false},null,2)+"\n")'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wallet-flow-native-arm64-evidence
+          path: wallet-flow-qa/*.json
+          if-no-files-found: ignore
+          retention-days: 7
+
   publish:
-    needs: [windows, linux, macos]
+    needs: [windows, linux, macos, linux-arm64-native]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:

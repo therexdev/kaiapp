@@ -1,6 +1,6 @@
-## Wallet-first network flow — coordinated release candidate
+## Wallet connection, earning and purchases — coordinated Test update
 
-This candidate requires the matching wallet-credit and provider-device server update. It has not been published to Test or Live. Desktop and server verification must pass together before activation.
+**Update the Vultr credit service first, then update Koinos AI Test.** The complete server-first procedure is in [Wallet flow update](WALLET_FIRST_RELEASE.md). The desktop update includes the wallet-only account connection and earning handoff as well as purchase recovery, pricing, wallet history and Linux restart fixes. A desktop update cannot install the remote service. Live promotion follows successful Test acceptance.
 
 - Buy takes its exact verified quote straight to native payment approval. An unrelated sidebar balance refresh can no longer cancel that handoff, and automatic price updates no longer hide a payment failure. Account, wallet, quote, saved-payment, balance and Mana checks remain in the payment controller before submission.
 - Display-only KOIN estimates continue while the sidebar balance check is slow or unavailable. Windows payment journals use extended-length file paths while preserving their existing locations, recovery records and nonce protections.
@@ -13,14 +13,16 @@ This candidate requires the matching wallet-credit and provider-device server up
 
 - Restarting after an AppImage update waits for the running app to exit before opening its replacement. Live and Test retain their shared profile lock throughout shutdown.
 - Fixed a shutdown exception caused by accessing an already-destroyed desktop window. Cleanup continues if one component fails, and failed startup exits instead of leaving a hidden process blocking the next launch.
-- A standalone Linux shortcut installer creates a desktop and application-menu entry for an existing AppImage. It uses the desktop location configured by the operating system and preserves the app's profile and update channel.
+- Launching the Linux AppImage creates a desktop and application-menu entry for that channel and refreshes its target after an update. An intentionally removed desktop icon stays removed; unrelated shortcuts are preserved. The standalone shortcut installer remains available for an existing AppImage.
 
 ## Choose which installed models to share
 
 - Earn defaults to **Share all compatible installed models**. You can choose a smaller set directly on Earn; the selection is saved for this wallet and deployment on this computer. Newly installed compatible models are included automatically in the default mode.
 - Each installed model shows whether it is selected and its network readiness, or why the package is incompatible. A model is marked ready for paid requests only while its verified network status is fresh. Installed or selected models are not automatically qualified.
 - Applying a selection while earning waits for current work to finish before reconnecting with the new model set. Stop remains available. Network jobs and presence reports are restricted to the selected approved packages; local Chat can still use other installed models.
-- The last reviewed service configuration has a qualification policy for Smart only and counts the loaded, qualified model as ready. This desktop update does not widen server admission or change reward eligibility.
+- The matching Vultr update adds qualification criteria for all 15 exact catalog model packages while preserving the existing Smart policy. Each provider/model must freshly answer all 12 signed checks correctly, within 30 seconds per answer. Successful evidence lasts one day and renews automatically. This enables each supported model to qualify; it does not assert that every model or computer will pass.
+- Earning automatically loads selected models for their checks without sending a chat. Model preparation has its own bounded 120-second window before the timed questions begin, so loading is not counted as answer latency. Stop remains available.
+- Once a selected model is individually qualified, the updated provider can load it on demand for an assigned request. Models need not all stay in RAM or VRAM together. The network advertises only fresh signed qualifications; availability rewards count the actual loaded capacity, preventing installed or dormant models from multiplying rewards. Free-credit grants, payout economics and reward-wallet funding remain unchanged.
 
 ## Automatic KOIN estimates and model prices on Buy credits
 
@@ -56,7 +58,7 @@ This candidate requires the matching wallet-credit and provider-device server up
 - Network chat initially selects an available model. Send uses the shared credit balance; optional Free only is under Spending options. An explicit model choice is preserved if that model later goes offline.
 - Installer verification now includes the real desktop purchase, provider and chat controllers connected to the scheduler over local HTTP: two purchases, interrupted confirmation, a signed streamed reply and restart recovery without a duplicate charge. Blockchain finality, qualification and inference are controlled test fixtures in this check.
 
-The deployed service still has qualification criteria for Smart only. Offering an installed model does not make it paid-ready without its network qualification; this update does not change server admission or contracts.
+Earlier service releases qualified Smart only. The coordinated server update above extends the same objective checks to the pinned catalog; every provider/model still needs its own fresh successful qualification. Contract deployment, free-credit grants and payout economics are unchanged.
 
 ## Finish cancellation without overloading RPC
 

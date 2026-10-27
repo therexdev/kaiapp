@@ -26,6 +26,7 @@ test("selected pins gate registration and signed presence when local Chat uses a
     hardware: { ramBytes: 8e9 }, models: models(), modelPins: { fast: hash } });
   t.after(() => worker.stop());
   await worker._register(); assert.deepEqual(bodies[0].value.models, ["fast"]);
+  assert.equal(bodies[0].value.capabilities.koinModelOnDemand, 0, "legacy wallet providers do not claim delegated on-demand readiness");
   worker.running = true; worker._koinAvailable = true; worker._koinSession = "b".repeat(32); worker._koinSequence = 0;
   await worker._koinPresence();
   assert.equal(bodies[1].value.report.ready, false); assert.equal(bodies[1].value.report.model, "");
@@ -33,6 +34,21 @@ test("selected pins gate registration and signed presence when local Chat uses a
   assert.equal(bodies[2].value.report.ready, true); assert.equal(bodies[2].value.report.model, "fast");
   worker.models.quarantineOf = () => "revoked"; await worker._koinPresence();
   assert.equal(bodies[3].value.report.ready, false); assert.equal(bodies[3].value.report.model, "");
+});
+test("scoped providers sign the on-demand claim with exactly the selected installed models", async t => {
+  let registered, signed;
+  const schedulerUrl = await server(t, async (req, res) => {
+    let body = ""; for await (const part of req) body += part;
+    registered = JSON.parse(body); res.end(JSON.stringify({ ok: true, token: "scoped" }));
+  });
+  const providerSigner = { address: wallet.address, register: async body => { signed = structuredClone(body); return "scoped-proof"; },
+    presence() {}, assign() {}, qualification() {}, chunk() {}, result() {}, release() {} };
+  const worker = new Worker({ schedulerUrl, providerSigner, runtime: {}, hardware: { ramBytes: 8e9 }, models: models(),
+    modelPins: { fast: hash }, fundedOnly: true, qualificationTarget: target });
+  t.after(() => worker.stop()); await worker._register();
+  assert.deepEqual(signed.models, ["fast"]);
+  assert.equal(signed.capabilities.koinModelOnDemand, 1);
+  assert.deepEqual(registered, { ...signed, signature: "scoped-proof" });
 });
 test("funded and legacy assignments for unselected, removed or changed models cannot enter inference", async () => {
   let loads = 0;

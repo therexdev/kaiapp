@@ -87,6 +87,12 @@ function machineSecret(dataDir) {
 }
 
 async function start() {
+  if (process.platform === "linux" && app.isPackaged && process.env.APPIMAGE) {
+    try {
+      require("./linux-shortcut").installLinuxShortcut({ packaged: true, home: app.getPath("home"),
+        desktop: app.getPath("desktop"), channel: release.channel });
+    } catch (error) { console.warn("[desktop shortcut]", error.message); }
+  }
   const dataDir = process.env.KAI_CORE_DATA || path.join(app.getPath("userData"), "core");
   // We hold the shared Electron lock now. Snapshot configuration before even
   // machineSecret/createCore can write; never copy or relocate the node DB.

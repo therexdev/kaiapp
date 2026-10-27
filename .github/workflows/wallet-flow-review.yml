@@ -16,7 +16,7 @@ concurrency:
 
 env:
   # Exact reviewed backend paired with this desktop candidate.
-  KAI_WALLET_BACKEND_COMMIT: 11474a9d851769bccfb56008b2a3d4cbd6521ff3
+  KAI_WALLET_BACKEND_COMMIT: a8edc3bd6d21c40cebe175f7ead36844900b2b7c
   KAI_SCHEDULER_URL: http://127.0.0.1:9/scheduler
   KAI_RELAY_URL: http://127.0.0.1:9
   KAI_FEEDBACK_URL: http://127.0.0.1:9/feedback
@@ -58,7 +58,7 @@ jobs:
           echo "KAI_WALLET_BACKEND=$GITHUB_WORKSPACE/verification-wallet-backend" >> "$GITHUB_ENV"
       - name: Verify wallet sessions, device authority and preserving server updater
         working-directory: verification-wallet-backend
-        run: node --test scripts/probe-wallet-credit-auth.js scripts/probe-wallet-credit-router.js scripts/probe-koin-provider-devices.js scripts/probe-koin-model-catalog.js scripts/probe-koin-credit-priority.js scripts/probe-koin-purchase-journal.js deploy/koin-mainnet/update-wallet-access.test.js
+        run: node --test scripts/probe-wallet-credit-auth.js scripts/probe-wallet-credit-router.js scripts/probe-koin-provider-devices.js scripts/probe-koin-model-catalog.js scripts/probe-catalog-qualification.js scripts/probe-koin-on-demand-readiness.js scripts/probe-koin-qualification-preparation.js scripts/probe-koin-multi-model-readiness.js scripts/probe-koin-credit-priority.js scripts/probe-koin-purchase-journal.js deploy/koin-mainnet/update-wallet-access.test.js
       - name: Run the Linux application suite
         if: runner.os == 'Linux'
         run: npm test
@@ -115,7 +115,7 @@ jobs:
       - run: npm ci
       - run: npm ci --ignore-scripts --prefix verification-wallet-backend
       - name: Verify ARM64 wallet, earning, launcher and backend integration
-        run: node --test core/test/wallet-credit-account.test.js core/test/provider-device.test.js core/test/session-free-chat.test.js core/test/credit-wallet-ipc.test.js core/test/koin-windows-journals.test.js core/test/linux-shortcut.test.js core/test/update-restart.test.js core/test/wallet-first-integration.test.js
+        run: node --test core/test/wallet-credit-account.test.js core/test/provider-device.test.js core/test/session-free-chat.test.js core/test/credit-wallet-ipc.test.js core/test/koin-windows-journals.test.js core/test/linux-shortcut.test.js core/test/linux-shortcut-auto.test.js core/test/update-restart.test.js core/test/worker-preparation.test.js core/test/worker-model-selection.test.js core/test/wallet-first-integration.test.js
         env:
           KAI_WALLET_BACKEND: ${{ github.workspace }}/verification-wallet-backend
       - name: Verify native ARM64 relaunch and shared profile exclusion
@@ -177,7 +177,7 @@ jobs:
         run: node --test core/test/koin-windows-journals.test.js
       - name: Verify Windows credit, purchase and earning behavior
         timeout-minutes: 12
-        run: node --test --test-concurrency=1 core/test/wallet-credit-account.test.js core/test/provider-device.test.js core/test/credit-provider.test.js core/test/credit-purchases.test.js core/test/purchase-wallet.browser.test.js core/test/wallet-first-integration.test.js core/test/wallet-first-ui.browser.test.js core/test/credit-wallet-ipc.test.js core/test/session-free-chat.test.js core/test/koin-prepaid-chat.test.js core/test/koin-provider-status.test.js core/test/worker-proof.test.js core/test/worker-advertise.test.js core/test/worker-model-selection.test.js core/test/worker-start-stop.test.js core/test/worker-registration-retirement.test.js
+        run: node --test --test-concurrency=1 core/test/wallet-credit-account.test.js core/test/provider-device.test.js core/test/credit-provider.test.js core/test/credit-purchases.test.js core/test/purchase-wallet.browser.test.js core/test/wallet-first-integration.test.js core/test/wallet-first-ui.browser.test.js core/test/credit-wallet-ipc.test.js core/test/session-free-chat.test.js core/test/koin-prepaid-chat.test.js core/test/koin-provider-status.test.js core/test/worker-proof.test.js core/test/worker-advertise.test.js core/test/worker-model-selection.test.js core/test/worker-preparation.test.js core/test/worker-start-stop.test.js core/test/worker-registration-retirement.test.js
       - name: Verify real Windows profile exclusion and encrypted credential reuse
         run: node scripts/verify-shared-profile.js
       - name: Test signing rejection paths

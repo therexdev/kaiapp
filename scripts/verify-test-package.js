@@ -29,7 +29,7 @@ for (const archive of archives) {
   for (const required of ["ui/workflows.js", "ui/workflows.css", "ui/workflow-model.js", "electron/workflow-engine.js", "electron/workflow-events.js", "electron/workflow-assistant.js", "electron/workflow-values.js", "electron/workflow-schedules.js", "core/lib/composio-triggers.js", "electron/pocket-voice.js", "electron/pocket-voice-worker.js", "ui/mascot-pocket.js", "ui/pocket-credits.html", "core/runtimes/pocket.json", "electron/computer-highlight.js", "electron/computer-control.js", "electron/native-computer.js", "ui/computer-tools.js", "electron/providers.js", "electron/provider-http.js", "ui/desktop-providers.js", "electron/mascot.js", "electron/mascot-layout.js", "electron/windows-voice.js", "electron/mascot-preload.js", "ui/mascot.html",
     "ui/i18n.js", "ui/language-settings.js", "ui/language.css", "ui/locales/catalogs.js", "electron/language.js",
     "ui/network-chat.js", "electron/credit-models.js", "electron/koin-chat-flow.js", "electron/koin-provider-status.js",
-    "ui/wallet-access.js", "core/lib/protected-storage.js", "core/lib/wallet-credit-account.js", "core/lib/sqlite-path.js",
+    "electron/linux-shortcut.js", "ui/wallet-access.js", "core/lib/protected-storage.js", "core/lib/wallet-credit-account.js", "core/lib/sqlite-path.js",
     "core/lib/koin-network/provider-device-protocol.js", "electron/provider-device.js", "electron/session-free-chat.js",
     "electron/provider-check.js", "electron/provider-check-ipc.js", "ui/provider-check.js", "core/provider-check/candidates.json",
     "core/lib/koin-network/purchase-market.js", "core/lib/koin-network/purchase-provenance.js",

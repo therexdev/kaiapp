@@ -348,6 +348,9 @@ class Worker {
             koinMainnetPilotJobs: this.koinMainnetPilotJobs ? 1 : 0,
             koinMeteredStreaming: this.koinMainnetPilotJobs || this.koinFundedRehearsalJobs ? 1 : 0,
             koinQualification: this.qualificationTarget ? 1 : 0,
+            // This claim is covered by the scoped device registration proof.
+            // Availability still requires fresh qualification for every model.
+            koinModelOnDemand: this.providerSigner && this.modelPins ? 1 : 0,
             ...(ramGb ? { ramGb: Math.round(ramGb) } : {}),
             ...(this.preferredModel ? { preferredModel: this.preferredModel } : {}),
           },
@@ -535,11 +538,12 @@ class Worker {
         ready: !!(allowed && status.runtime?.running && !status.loading && !this._backoff && !this.runtime.networkWorkPaused?.()) };
       const signature = this.providerSigner ? await this.providerSigner.presence(report) : await this.wallet.signHash(presenceHash(this.address, this.schedulerUrl, report));
       if (!this.running) return;
-      await fetch(`${this.schedulerUrl}/koin/presence`, {
+      const response = await fetch(`${this.schedulerUrl}/koin/presence`, {
         method: "POST", headers: { "content-type": "application/json", connection: "close" },
         signal: AbortSignal.any([this._koinAbort.signal, AbortSignal.timeout(4000)]),
         body: JSON.stringify({ address: this.address, report, signature }),
       });
+      return response.ok;
     } finally {
       this._koinSending = false;
       if (this._koinPresencePending) {
@@ -547,6 +551,44 @@ class Worker {
         queueMicrotask(() => this._koinPresence().catch(() => {}));
       }
     }
+  }
+
+  async _prepareQualification(job) {
+    if (!this.providerSigner || !this.qualificationTarget || !this.modelPins) throw Error("Scoped model preparation is unavailable");
+    this._assertModelOffered(job);
+    const checked = require("./koin-network/qualification-protocol").validatePreparation(job, this.models?.catalog, this.qualificationTarget);
+    if (typeof this.runtime.acquireFor !== "function") throw Error("Model preparation requires a managed runtime lease");
+    this._executing = true; this._shadowAbort = new AbortController();
+    const signal = AbortSignal.any([this._shadowAbort.signal, this._workAbort?.signal || new AbortController().signal,
+      AbortSignal.timeout(Math.max(1, checked.expiresAt - Date.now()))]);
+    const current = () => { signal.throwIfAborted(); if (!this.running || this._backoff) throw Error("Provider preparation stopped"); this._assertModelOffered(checked); };
+    current(); this.onEvent({ type: "worker:model-warming", model: checked.model });
+    let hold, accepting = true, aborted;
+    const cancelled = new Promise((_, reject) => { aborted = () => reject(signal.reason); signal.addEventListener("abort", aborted, { once: true }); });
+    // Runtime loading is shared with local Chat. Stop must release any late
+    // lease without terminating another local caller's engine or advertising
+    // readiness after this provider request has expired.
+    const acquiring = Promise.resolve().then(() => { current(); return this.runtime.acquireFor(checked.model); }).then(lease => {
+      if (!accepting || signal.aborted) { lease.release(); throw signal.reason || Error("Provider preparation stopped"); }
+      return lease;
+    });
+    try {
+      hold = await Promise.race([acquiring, cancelled]); current();
+      for (;;) {
+        current();
+        const status = this.runtime.status?.();
+        if (status?.activeAlias !== checked.model || status.loading || !status.runtime?.running || status.runtime.kind !== "llamacpp") throw Error("Prepared model is not ready");
+        if (await this._koinPresence()) { current(); return; }
+        // Signed presence is rate limited independently of model loading.
+        // Wait within this preparation's original deadline rather than
+        // repeatedly asking the scheduler to reload an already resident model.
+        await new Promise((resolve, reject) => {
+          const stop = () => { clearTimeout(timer); signal.removeEventListener("abort", stop); reject(signal.reason); };
+          const timer = setTimeout(() => { signal.removeEventListener("abort", stop); resolve(); }, Math.min(10000, Math.max(1, checked.expiresAt - Date.now())));
+          signal.addEventListener("abort", stop, { once: true }); if (signal.aborted) stop();
+        });
+      }
+    } finally { accepting = false; signal.removeEventListener("abort", aborted); hold?.release(); }
   }
 
   async _run() {
@@ -631,6 +673,7 @@ class Worker {
           }
         }, 25000);
         try {
+          if (job.type === "koin-provider-prepare") { await this._prepareQualification(job); continue; }
           this.providerSigner?.assign(job);
           if (job.type === "koin-provider-qualification") {
             if (!this.qualificationTarget) throw Error("Automatic qualification is not enabled for this connection");

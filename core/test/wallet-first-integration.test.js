@@ -38,7 +38,7 @@ function desktopWallet(signer) {
     signHash: async value => { if (!unlocked) throw Error("Wallet locked"); hashes++; return Buffer.from(await signer.signHash(value)).toString("base64"); },
     hashes: () => hashes };
 }
-async function fixture(t, { sessionOnly = false, freeAllowance = "1000000" } = {}) {
+async function fixture(t, { sessionOnly = false, freeAllowance = "1000000", multiModel = false } = {}) {
   const cleanup = cleanupStack(t);
   const backend = createRequire(path.join(path.resolve(BACKEND), "package.json"));
   const f = require("./helpers/koin-funding-recovery-fixture").fixture({ after: cleanup }, { usd: true, mainnet: true });
@@ -47,8 +47,9 @@ async function fixture(t, { sessionOnly = false, freeAllowance = "1000000" } = {
   let offset = 0; const clock = () => Date.now() + offset;
   const tariff = { model: "koinos-smart", version: 1, modelHash: P.hash("model"), tokenizerHash: P.hash("tokenizer"), templateHash: P.hash("template"),
     inputAtomsPerMillion: "1000000", outputAtomsPerMillion: "1000000", maxOutputTokens: 64, contextTokens: 4096, maxLatencyMs: 30000 };
+  const tariffs = [tariff, ...(multiModel ? ["koinos-fast", "koinos-balanced", "llama-3.1-8b"].map(model => ({ ...tariff, model, modelHash: P.hash(model) })) : [])];
   const encode = value => [...Buffer.from(value)], render = JSON.stringify;
-  const meter = new (backend("./lib/koin-network/metering").Meter)([{ tariff, adapter: { ...tariff, encode, render, input: value => encode(render(value)).length, output: value => encode(value).length } }]);
+  const meter = new (backend("./lib/koin-network/metering").Meter)(tariffs.map(tariff => ({ tariff, adapter: { ...tariff, encode, render, input: value => encode(render(value)).length, output: value => encode(value).length } })));
   const config = { schema: 1, mode: "mainnet-pilot", deployment: f.d, schedulerUrl, policyHash: meter.policyHash, version: 1, model: tariff.model, maxOutput: 64,
     pricingPolicyHash: Prices.pricingPolicyHash, maxRcPerTransaction: "10000000", maxRcPerDay: "500000000", limits: { amount: "10000000000", perJob: "1000000", maxJobs: 10, durationMs: 3600000 } };
   const target = require("../../electron/provider-device").target(config);
@@ -56,21 +57,42 @@ async function fixture(t, { sessionOnly = false, freeAllowance = "1000000" } = {
   cleanup(() => accounts.service.db.close());
   accounts.service.configureWalletCredits({ target, schedulerUrl, clock });
   const chain = new (backend("./lib/koin-network/chain").KoinChain)(f.d, f.provider);
-  const networkOverview = () => ({ observedAt: clock(), validUntil: clock() + 15000, models: [{ id: tariff.model, available: true, providers: 1, freeEligible: true }] });
+  let runtime;
+  const networkOverview = () => {
+    if (!multiModel) return { observedAt: clock(), validUntil: clock() + 15000, models: [{ id: tariff.model, available: true, providers: 1, freeEligible: true }] };
+    // The controlled chain remains serving during real preparation timers;
+    // sample before the overview so its timestamp can never be in the future.
+    runtime.lastServing = clock();
+    return backend("./lib/koin-network/network-overview").networkOverview(runtime);
+  };
   const deviceOptions = { directory: path.join(dir, "provider-devices"), schedulerUrl, target, deployment: f.d, clock,
     catalog: () => backend("./lib/koin-network/model-catalog").modelCatalog({ meter, target, networkOverview, clock }), status: () => ({ providers: [], observedAt: clock() }) };
   let devices = new (backend("./lib/koin-network/provider-devices").ProviderDevices)(deviceOptions);
   cleanup(() => devices.close());
   const scheduler = new (backend("./lib/scheduler").Scheduler)({ dataDir: path.join(dir, "scheduler"), accounts: accounts.service, providerDevices: devices,
     operatorSecret: "a".repeat(64), priceSources: [], bootstrapPoolSat: "0", workerProofEnforce: true,
+    ...(multiModel ? { koinShadow: { audience: schedulerUrl, clock, providerDevices: devices } } : {}),
     koinPrepaid: { client: chain, target, meter, clock, providerDevices: devices, encryptionKey: Buffer.alloc(32, 53), publicAccounts: true, waitMs: 30000,
-      freePolicy: { version: 1, accountDaily: freeAllowance, networkDaily: "10000000", originDaily: "10000000", accountConcurrent: 4, eligibleModels: [tariff.model] },
-      networkOverview, qualify: () => true, accept: () => true,
+      freePolicy: { version: 1, accountDaily: freeAllowance, networkDaily: "10000000", originDaily: "10000000", accountConcurrent: 4, eligibleModels: tariffs.map(t => t.model) },
+      networkOverview, qualify: (...args) => multiModel ? runtime.qualified(...args) : true, accept: () => true,
       purchaseQuote: (owner, amount, denomination) => { assert.equal(denomination, "USD"); return Prices.issue({ deployment: f.d, signer: Signer.fromSeed("funding-recovery-verifier"), account: owner, amount: USD.nativeForDollars(amount, "25000000"), usdPerKoin: "25000000", version: 1, now: clock() }); } } });
   cleanup(() => scheduler.close());
   const hosts = new (backend("./lib/koin-network/test-hosts").TestHosts)(path.join(dir, "hosts"), f.d.chainId);
   cleanup(() => hosts.close());
-  const runtime = { accounts: accounts.service, scheduler, hosts, config, prepaid: true, clock, claims: { accountStatus: () => [] } };
+  runtime = { accounts: accounts.service, scheduler, hosts, config: multiModel ? { ...config, models: tariffs.map(tariff => ({ tariff })), freePolicy: { eligibleModels: tariffs.map(t => t.model) } } : config,
+    prepaid: true, clock, claims: { accountStatus: () => [] } };
+  if (multiModel) {
+    Object.setPrototypeOf(runtime, backend("./lib/koin-network/test-runtime").TestRuntime.prototype);
+    Object.assign(runtime, { target, meter, providerDevices: devices, reviewedQualifications: () => [], lastServing: clock(), cycle: { days: () => [] } });
+    // Deliberately tiny fixture policies: exercise real signed qualification,
+    // never claim production inference quality or replace the deployed suite.
+    runtime.qualifier = new (backend("./lib/koin-network/provider-qualification-set").ProviderQualificationSet)({
+      file: path.join(dir, "qualification.json"), target, meter, clock, providerDevices: devices, preparePresence: worker => devices.presence(worker),
+      policies: tariffs.map(t => ({ schema: 1, model: t.model, modelHash: t.modelHash, modelWeight: "100", coverageBps: 10000,
+        reviewedEvidenceHash: P.hash("integration-only:" + t.model), minPass: 1, maxLatencyMs: 30000, renewBeforeMs: 60000, retryMs: 300000,
+        cases: [{ id: "fixture-answer", messages: [{ role: "user", content: "Fixture benchmark" }], maxOutput: 16, expected: [t.model === "koinos-balanced" ? "No" : "Yes"] }] })) });
+    scheduler.providerQualification = runtime.qualifier;
+  }
   const authApp = backend("./lib/credit-account-web").createCreditAccountWeb(accounts.router);
   const handler = backend("./test-server").createHandler({ runtime, config, secret: "a".repeat(64), authApp });
   let inferenceCalls = 0;
@@ -115,7 +137,8 @@ async function fixture(t, { sessionOnly = false, freeAllowance = "1000000" } = {
   cleanup(() => service.purchases.stop()); cleanup(() => service.sessionStore?.dispose());
   const window = Object.assign(new EventEmitter(), { isDestroyed: () => false, isVisible: () => true, isMinimized: () => false, webContents: new EventEmitter() });
   const providerWallet = desktopWallet(Signer.fromSeed("wallet-first-provider")), providerStorage = protectedStorage();
-  const core = { account: { wallet: providerWallet, safeStorage: providerStorage }, settings, gateway: { network: { status: () => ({ privacyMode: "local-first" }) } }, models: { catalog: { aliases: { [tariff.model]: { package: "fixture" } }, packages: { fixture: { sha256: tariff.modelHash } } } } };
+  const core = { account: { wallet: providerWallet, safeStorage: providerStorage }, settings, gateway: { network: { status: () => ({ privacyMode: "local-first" }) } },
+    models: { catalog: { aliases: Object.fromEntries(tariffs.map(t => [t.model, { package: t.model }])), packages: Object.fromEntries(tariffs.map(t => [t.model, { sha256: t.modelHash }])) } } };
   const providerService = { service: serviceOptions.service, dataDir: path.join(dir, "provider"), fetchImpl };
   const providerDevice = new ProviderDevice({ service: providerService, core, dialog, clock });
   cleanup(() => providerDevice.dispose());
@@ -136,17 +159,18 @@ async function fixture(t, { sessionOnly = false, freeAllowance = "1000000" } = {
   async function startWorker(context) {
     const { Worker } = require("../lib/worker");
     const previous = globalThis.fetch; globalThis.fetch = fetchImpl;
-    const workerRuntime = { activeAlias: tariff.model, status: () => ({ activeAlias: tariff.model, runtime: { kind: "llamacpp", running: true } }),
-      acquireFor: async model => { assert.equal(model, tariff.model); return { endpoint: base, release() {} }; } };
-    const models = { ...core.models, aliases: () => [{ alias: tariff.model, status: "ready", minRamGb: 1 }], packageStatus: () => ({ status: "ready" }) };
+    const acquisitions = [], selected = multiModel ? tariffs.slice(0, 3) : tariffs;
+    const workerRuntime = { activeAlias: tariff.model, status: () => ({ activeAlias: workerRuntime.activeAlias, runtime: { kind: "llamacpp", running: true } }),
+      acquireFor: async model => { assert.ok(selected.some(t => t.model === model)); acquisitions.push(model); workerRuntime.activeAlias = model; return { endpoint: base, release() {} }; } };
+    const models = { ...core.models, aliases: () => tariffs.map(t => ({ alias: t.model, status: "ready", minRamGb: 1 })), packageStatus: () => ({ status: "ready" }) };
     const events = [];
     activeWorker = new Worker({ schedulerUrl, providerSigner: context.signer, runtime: workerRuntime, hardware: { ramBytes: 32e9 }, models,
-      modelPins: { [tariff.model]: tariff.modelHash }, fundedOnly: true, qualificationTarget: target, koinMainnetPilotJobs: true, koinMainnetTarget: target, idlePollMs: 5000, onEvent: event => events.push(event) });
+      modelPins: Object.fromEntries(selected.map(t => [t.model, t.modelHash])), fundedOnly: true, qualificationTarget: target, koinMainnetPilotJobs: true, koinMainnetTarget: target, idlePollMs: 5000, onEvent: event => events.push(event) });
     await activeWorker.start();
-    return { worker: activeWorker, events, async stop() { await activeWorker.stop(); globalThis.fetch = previous; } };
+    return { worker: activeWorker, events, runtime: workerRuntime, acquisitions, async stop() { await activeWorker.stop(); globalThis.fetch = previous; } };
   }
   return { ...f, dir, backend, account, accountOptions, approvals, approval, service, serviceOptions, providerDevice, providerService, providerWallet, core, window, target, wire,
-    config, tariff, scheduler, request, register, wallet, storage, clock, rpcCalls, transactionSigns: () => transactionSigns,
+    config, tariff, tariffs, runtime, networkOverview, scheduler, request, register, wallet, storage, clock, rpcCalls, transactionSigns: () => transactionSigns,
     startWorker, cleanup, inferenceCalls: () => inferenceCalls,
     get devices() { return devices; }, restartDevices() { devices.close(); devices = new (backend("./lib/koin-network/provider-devices").ProviderDevices)(deviceOptions); scheduler.providerDevices = devices; scheduler.koinPrepaid.ledger.providerDevices = devices; }, advance: ms => { offset += ms; } };
 }
@@ -222,6 +246,67 @@ test("real HTTP wallet-only enrollment, free balance, purchase finality and lock
   const restartedDevice = new ProviderDevice({ service: f.providerService, core: f.core, dialog: { showMessageBox: () => { throw Error("No new approval expected"); } }, clock: f.clock });
   f.cleanup(() => restartedDevice.dispose());
   assert.equal((await restartedDevice.context(signal)).signer.address, f.providerWallet.address);
+});
+
+test("locked-wallet Worker qualifies shared models, serves either on demand and counts only loaded reward capacity", { ...options, timeout: 120000 }, async t => {
+  const f = await fixture(t, { multiModel: true }), signal = AbortSignal.timeout(105000);
+  await f.service.connectWallet(f.window, {}, signal);
+  await f.providerDevice.authorize(f.window, {}, signal);
+  const context = await f.providerDevice.context(signal), signedWhileUnlocked = f.providerWallet.hashes();
+  f.providerWallet.lock(); f.wallet.lock();
+  const running = await f.startWorker(context), address = f.providerWallet.address;
+  async function until(check, message) {
+    const end = Date.now() + 60000;
+    while (!check() && Date.now() < end) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.ok(check(), message + ": " + JSON.stringify(running.events));
+  }
+  await until(() => ["koinos-smart", "koinos-fast"].every(model => f.runtime.qualifier.status(address, model)?.state === "qualified") &&
+    f.runtime.qualifier.status(address, "koinos-balanced")?.state === "failed", "actual signed model qualifications must finish");
+  const registered = [...f.scheduler.workers.values()].find(w => w.address === address);
+  assert.equal(registered.capabilities.koinModelOnDemand, 1, "on-demand capability is covered by real device registration");
+  assert.deepEqual([...registered.models].sort(), ["koinos-balanced", "koinos-fast", "koinos-smart"]);
+  assert.equal(f.runtime.qualifier.status(address, "llama-3.1-8b"), null, "installed but unselected models never receive benchmarks");
+  assert.equal(f.runtime.qualifications().length, 2, "failed answers do not create qualification");
+  assert.ok(running.events.some(e => e.type === "worker:model-warming" && e.model === "koinos-fast"), "cold preparation precedes the signed timed benchmark");
+  for (const engine of f.runtime.qualifier.engines.values()) for (const record of Object.values(engine.state.records)) {
+    assert.ok(record.evidence.results.every(result => result.signature.startsWith("pd1.")), "qualification retains actual scoped-device signature evidence");
+  }
+  const loaded = running.runtime.activeAlias, other = loaded === "koinos-smart" ? "koinos-fast" : "koinos-smart";
+  assert.ok(["koinos-smart", "koinos-fast"].includes(loaded));
+  const reportPresence = async () => {
+    const prior = f.devices.presence(registered), wait = Math.max(0, (prior?.at || 0) + 10001 - Date.now());
+    if (wait) await new Promise(resolve => setTimeout(resolve, wait));
+    await running.worker._koinPresence();
+  };
+  await reportPresence();
+  await until(() => f.networkOverview().models.filter(m => m.available).length === 2, "both separately qualified models must be available");
+  const readiness = f.backend("./lib/koin-network/provider-readiness").providerReadiness(f.runtime, address);
+  assert.equal(readiness.models.find(m => m.model === other).onDemand, true);
+  assert.equal(readiness.models.find(m => m.model === loaded).onDemand, false);
+  for (const id of ["koinos-balanced", "llama-3.1-8b"]) assert.equal(f.networkOverview().models.find(m => m.id === id).available, false);
+  const rewardModels = () => Object.values(f.scheduler.koinShadow.ledger.state.qualifications).filter(q => q.expires > f.clock()).map(q => q.model);
+  await f.runtime.collectRewards();
+  assert.deepEqual(rewardModels(), [loaded], "advertising two ready models never creates two simultaneous reward slots");
+  const beforeJobs = f.scheduler.koinPrepaid.ledger.jobs().length;
+  for (const model of ["koinos-balanced", "llama-3.1-8b"]) {
+    await assert.rejects(f.service.run("chat-completion", { model: "koinos-network:" + model, messages: [{ role: "user", content: "Must not dispatch" }], max_tokens: 16, stream: false }, signal));
+  }
+  assert.equal(f.scheduler.koinPrepaid.ledger.jobs().length, beforeJobs, "unqualified and excluded models cannot enqueue paid work");
+  const acquired = running.acquisitions.length;
+  const answer = await f.service.run("chat-completion", { model: "koinos-network:" + other, messages: [{ role: "user", content: "Switch to the other shared model" }], max_tokens: 16, stream: false }, signal);
+  assert.equal(answer.choices[0].message.content, "Yes");
+  assert.ok(answer.koin.receipt.signature.startsWith("pd1."));
+  await until(() => running.worker.stats.mainnetPilotJobsDone === 1, "the actual Worker must finish the assigned model switch");
+  assert.deepEqual(running.acquisitions.slice(acquired), [other]);
+  assert.equal(running.runtime.activeAlias, other);
+  await reportPresence();
+  await f.runtime.collectRewards();
+  assert.deepEqual(rewardModels(), [other], "model switch replaces, rather than multiplies, active reward capacity");
+  assert.deepEqual(f.networkOverview().models.filter(m => m.available).map(m => m.id).sort(), ["koinos-fast", "koinos-smart"]);
+  assert.equal(f.providerWallet.status().unlocked, false);
+  assert.equal(f.providerWallet.hashes(), signedWhileUnlocked, "qualification and assigned work use only the non-spending device key");
+  assert.equal(f.transactionSigns(), 0, "fixture uses actual free allowance and never signs a payment");
+  await running.stop();
 });
 
 test("temporary wallet access survives locking for free chat and cannot escalate into paid usage or account administration", options, async t => {
