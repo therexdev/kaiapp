@@ -13,9 +13,9 @@ function manifest(value) {
   return { schema: 1, state: "ready", config };
 }
 class CreditService {
-  constructor({ dataDir, account, storage, service, fetchImpl = fetch, progress = () => {}, dialog }) {
+  constructor({ dataDir, account, storage, service, fetchImpl = fetch, progress = () => {}, dialog, marketReader }) {
     Object.assign(this, { dataDir, account, storage, fetchImpl, progress }); this.service = manifest(service);
-    this.purchases = new (require("./credit-purchases").CreditPurchases)({ dataDir, account, storage, dialog, fetchImpl });
+    this.purchases = new (require("./credit-purchases").CreditPurchases)({ dataDir, account, storage, dialog, fetchImpl, marketReader });
     this.runs = new (require("./credit-runs").CreditRuns)(this);
   }
   async context(signal) {
@@ -82,8 +82,7 @@ class CreditService {
   }
   async purchaseCapabilities(signal) {
     const c = await this.context(signal);
-    const result = await c.flow.call("capabilities", {}, signal);
-    return { purchasePricePreview: result?.capabilities?.purchasePricePreview === true };
+    return this.purchases.estimateCapabilities(c, signal);
   }
   async info(signal) {
     if (this.service.state !== "ready") return { enabled: true, configured: true, product: "prepaid-usd-v1", blocked: this.service.reason, activation: "unavailable", recoveryAvailable: false };

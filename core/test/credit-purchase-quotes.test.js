@@ -80,7 +80,7 @@ test("read-only purchase estimates calculate exact rounding without issuing or r
   const f = fixture(), signed = await f.quotes.preview(f.c, { usd: "1" });
   const cached = f.quotes.quotes.get(signed.quote.id), intent = f.quotes.intent;
   const price = structuredClone(cached.provenance.summary), calls = [];
-  f.c.flow.call = async (action, body) => { calls.push({ action, body }); return { price }; };
+  f.c.flow.call = async (action, body) => { if (action === "capabilities") return { capabilities: { purchasePricePreview: true } }; calls.push({ action, body }); return { price }; };
   for (const usd of ["1", "5", "10", "1.23"]) {
     const { estimate } = await f.quotes.estimate(f.c, { usd });
     assert.equal(estimate.koin, USD.dollars(USD.nativeForDollars(usd, price.usdPerKoinAtoms)));
@@ -104,11 +104,11 @@ test("purchase estimates reject stale, mismatched or excessive pricing and never
     const f = fixture(), { quote } = await f.quotes.preview(f.c, { usd: "1" });
     const price = structuredClone(f.quotes.quotes.get(quote.id).provenance.summary); mutate(price);
     f.quotes.clear(); let calls = 0;
-    f.c.flow.call = async (action, body) => { assert.equal(action, "purchase-price"); assert.deepEqual(body, {}); calls++; return { price }; };
+    f.c.flow.call = async (action, body) => { if (action === "capabilities") return { capabilities: { purchasePricePreview: true } }; assert.equal(action, "purchase-price"); assert.deepEqual(body, {}); calls++; return { price }; };
     await assert.rejects(f.quotes.estimate(f.c, { usd: "1" }));
     assert.equal(calls, 1); assert.equal(f.quotes.quotes.size, 0); assert.equal(f.quotes.intent, null);
   }
-  const f = fixture(); f.c.flow.call = async action => { assert.equal(action, "purchase-price"); throw Error("Not found"); };
+  const f = fixture(); f.c.flow.call = async action => { if (action === "capabilities") return { capabilities: { purchasePricePreview: true } }; assert.equal(action, "purchase-price"); throw Error("Not found"); };
   await assert.rejects(f.quotes.estimate(f.c, { usd: "1" }), /Not found/);
   await assert.rejects(f.quotes.estimate(f.c, { usd: "1", quote: "replace" }), /Select/);
   await assert.rejects(f.quotes.estimate(f.c, { usd: "1.234" }), /decimal/);

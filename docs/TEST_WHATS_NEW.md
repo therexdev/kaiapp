@@ -1,3 +1,9 @@
+## Automatic KOIN estimates and model prices on Buy credits
+
+- Buy credits now shows a read-only KOIN market estimate with the currently deployed credit service, recalculates when the USD amount changes, and refreshes every 30 seconds while visible. A market estimate is approximate; Buy still obtains the exact signed payment for wallet approval.
+- Removed the repeated wallet-balance card and the normal Ready to buy card. Actionable payment errors and saved-payment recovery remain visible.
+- Model pricing appears below the purchase area, showing input and output rates in credits and dollars per million tokens. The table uses the complete configured tariff policy, including models that are not currently online. Loading model prices does not block a purchase.
+
 ## A clearer wallet with native transaction history
 
 - The app wallet uses the node wallet's address card and separate KOIN, VHP and Mana balance boxes, followed by native transaction history. It does not include the node's Ethereum funding wallet or token controls.
@@ -8,7 +14,7 @@
 
 - Buy credits calculates the KOIN estimate when an amount is entered, refreshes it every 30 seconds while the page is visible, and discards expired or out-of-date responses. Display-only price reads never create signed purchase quotes or use the quote allowance. Buy still opens one wallet approval for the exact current payment.
 - Settings contains **Use paid credits before free credits when using the network**, off by default. Free credits remain first unless this is enabled. Eligible free credits can cover the remainder after purchased credits run out; saved requests and approved multi-step runs keep their original priority.
-- These two features require the matching credit-service update. Older services keep normal purchases and free-first chat working; the app explains unavailable automatic previews and does not enable an unsupported paid-first preference. Publishing this desktop release does not deploy the server update.
+- Paid-first priority and merchant-validated price previews require the matching credit-service update. Older services keep normal purchases and free-first chat working; the app now supplies a separate read-only market estimate and does not enable an unsupported paid-first preference. Publishing this desktop release does not deploy the server update.
 - The Earn button is red while sharing is off and green while sharing is on, with a larger click target and an off-state start hint. Verified ONLINE status remains a separate network observation.
 - Removed obsolete payment rehearsals and simulated reward displays. Real saved Research, Agent and Team outputs are under **Account help → Research & agent results**, with automatic history loading. Payment recovery and model diagnostics are preserved.
 

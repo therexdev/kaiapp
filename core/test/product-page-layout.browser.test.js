@@ -64,7 +64,8 @@ test("Earn, wallet and account help stay separate; product headings and scroll r
     await capture(`earn-${size.width}`);
     await page.locator('.product-sidebar-credits [data-product-view="buy-credits"]').click();
     assert.equal(await headingFits("buy-credits"), true, `Purchase heading fits ${size.width}×${size.height}`);
-    await page.waitForFunction(() => document.getElementById("product-wallet-balance").textContent.includes("149.38227003"));
+    await page.waitForFunction(() => document.getElementById("product-purchase-detail").textContent.includes("not activated"));
+    assert.equal(await page.locator(".product-purchase-wallet,.product-purchase-availability").count(), 0);
     await capture(`buy-credits-${size.width}`);
     await page.locator("#view-buy-credits").evaluate(el => { el.scrollTop = el.scrollHeight; });
     await page.locator("#nav-network").click();
@@ -79,7 +80,7 @@ test("Earn, wallet and account help stay separate; product headings and scroll r
     await page.locator('.product-sidebar-credits [data-product-view="buy-credits"]').click();
     assert.equal(await headingFits("buy-credits"), true, "returning after a scroll starts at the heading");
   }
-  await page.locator('#view-buy-credits [data-product-action="payment-wallet"]').click();
+  await page.locator('#sidebar-wallet').click();
   await page.locator("#wallet-address").waitFor({ state: "visible" });
   assert.equal(await page.locator("#view-payment-wallet").isVisible(), true);
   assert.equal(await page.inputValue("#wallet-address"), "fixture-wallet");

@@ -20,6 +20,8 @@ async function verifyFlow(t, { priority = false, legacy = false } = {}) {
   const cleanup = [], f = fixture({ after: fn => cleanup.push(fn) }, { mainnet: true, usd: true }); f.state.now = Date.now();
   let scheduler, provider, runtimeServer, nativeReviews = 0, signedPurchases = 0, inferenceCalls = 0, loaded = null;
   let priceReads = 0, quoteIssues = 0, displayedRate = "25000000", networkObservedAt = Date.now();
+  let marketReads = 0;
+  const pricingPolicyHash = legacy ? require(APP + "/core/lib/koin-network/purchase-market-estimate").PIN : Prices.pricingPolicyHash;
   const submissions = [], txs = new Map(), blocks = new Map(), actions = [], events = [], loads = [];
   const owner = f.signer.getAddress(), workerSigner = Signer.fromSeed("simple-flow-provider-fixture"), verifier = Signer.fromSeed("funding-recovery-verifier");
   const fallbackOwner = Signer.fromSeed("partial-paid-balance-fixture").getAddress();
@@ -64,7 +66,7 @@ async function verifyFlow(t, { priority = false, legacy = false } = {}) {
       usdPerKoinAtoms: displayedRate, marketObservedAt: now - 60000, expiresAt: now + 300000, windowSeconds: 1800,
       anchorHash: "0x" + P.hash("fixture-price-anchor"), pricingPolicyHash: Prices.pricingPolicyHash, referenceHash: P.hash("fixture-price-reference"),
       maxPurchaseUsdAtoms: "10000000000", maxPurchaseKoinAtoms: "100000000000" }; },
-    purchaseQuote: (account, dollars, unit) => { quoteIssues++; assert.equal(unit, "USD"); return Prices.issue({ deployment: f.d, signer: verifier, account, amount: require(APP + "/core/lib/koin-network/purchase-quote").nativeForDollars(dollars, "25000000"), usdPerKoin: "25000000", version: 1, now: Date.now() }); }
+    purchaseQuote: (account, dollars, unit) => { quoteIssues++; assert.equal(unit, "USD"); return Prices.issue({ deployment: f.d, signer: verifier, account, amount: require(APP + "/core/lib/koin-network/purchase-quote").nativeForDollars(dollars, "25000000"), usdPerKoin: "25000000", pricingPolicyHash, version: 1, now: Date.now() }); }
   } });
   runtimeServer = http.createServer(async (req, res) => {
     let text = ""; for await (const part of req) text += part; const b = JSON.parse(text);
@@ -73,20 +75,45 @@ async function verifyFlow(t, { priority = false, legacy = false } = {}) {
     res.writeHead(200, { "content-type": "text/event-stream" }); res.end('data: {"content":"PONG","stop":true}\n\n');
   });
   await new Promise(r => runtimeServer.listen(0, "127.0.0.1", r));
-  const config = { mode: "mainnet-pilot", deployment: f.d, owner, schedulerUrl: base, version: 1, pricingPolicyHash: Prices.pricingPolicyHash, policyHash: meter.policyHash, model, maxOutput: 16, maxRcPerTransaction: "100000000", maxRcPerDay: "500000000", limits: { amount: "10000000000", perJob: "1000000" } };
+  const config = { mode: "mainnet-pilot", deployment: f.d, owner, schedulerUrl: base, version: 1, pricingPolicyHash, policyHash: meter.policyHash, model, maxOutput: 16, maxRcPerTransaction: "100000000", maxRcPerDay: "500000000", limits: { amount: "10000000000", perJob: "1000000" } };
   const directory = path.join(f.dir, "buyer"); fs.mkdirSync(directory);
   const access = { authorize: () => ({ owner, sessionToken: "buyer-session" }) };
   const flowOptions = { file: path.join(directory, "chat.json"), config, access, storage, fetchImpl: fetch, progress: value => events.push(value) };
   let chat = new PrepaidChat(flowOptions), c = { config, directory, auth: { accountId: "buyer-session", sessionToken: "buyer-session" }, flow: chat };
   const account = { wallet: { address: owner, signer: f.signer }, assertCreditAuthorization() {} };
-  const purchaseOptions = { dataDir: f.dir, account, storage, fetchImpl: fetch, clientFactory: () => f.client, dialog: { showMessageBox: async (_window, review) => { nativeReviews++; assert.match(review.detail, /KOIN/); return { response: 1 }; } } };
+  const marketReader = { read: async nextSignal => { nextSignal?.throwIfAborted(); marketReads++; return {
+    usdPerKoinAtoms: displayedRate, observedAt: Date.now() - 16 * 60000, expiresAt: Date.now() + 60000,
+    anchorHash: "0x" + P.hash("controlled-independent-market"), referenceKind: "market-estimate", windowSeconds: 0, source: "uniswap-v4:vKOIN/USDT" }; } };
+  const purchaseOptions = { dataDir: f.dir, account, storage, fetchImpl: fetch, marketReader, clientFactory: () => f.client, dialog: { showMessageBox: async (_window, review) => { nativeReviews++; assert.match(review.detail, /KOIN/); return { response: 1 }; } } };
   let buyer = new CreditPurchases(purchaseOptions);
   const window = Object.assign(new EventEmitter(), { webContents: new EventEmitter(), isDestroyed: () => false, isVisible: () => true, isMinimized: () => false });
   const signal = AbortSignal.timeout(60000);
+  const beforeDisplayFiles = fs.readdirSync(directory, { recursive: true }).sort();
+  const modelPrices = await require(APP + "/electron/credit-model-pricing").modelPricing({ context: async () => c }, signal);
+  assert.equal(modelPrices.policyHash, meter.policyHash);
+  assert.deepEqual(modelPrices.models.map(({ model, inputCreditsPerMillion, outputCreditsPerMillion, inputUsdPerMillion, outputUsdPerMillion }) =>
+    ({ model, inputCreditsPerMillion, outputCreditsPerMillion, inputUsdPerMillion, outputUsdPerMillion })),
+    [{ model, inputCreditsPerMillion: "10", outputCreditsPerMillion: "20", inputUsdPerMillion: "0.01", outputUsdPerMillion: "0.02" }],
+    "the configured model's exact rates are visible even before its provider starts");
+  assert.equal(provider?.worker?.running, undefined);
+  assert.equal(quoteIssues, 0); assert.equal(nativeReviews, 0); assert.equal(signedPurchases, 0);
   if (legacy) {
     const { capabilities } = await chat.call("capabilities", {}, signal);
     assert.notEqual(capabilities.creditPriority, true, "compatibility requires the old deployed service without paid-first support");
     assert.notEqual(capabilities.purchasePricePreview, true, "compatibility requires the old service without read-only price previews");
+    assert.deepEqual(await buyer.estimateCapabilities(c, signal), { purchasePricePreview: true, purchasePriceSource: "market-estimate" });
+    for (const [usd, koin] of [["1", "4"], ["5", "20"], ["1.23", "4.92"]]) {
+      const shown = await buyer.estimate(c, { usd }, signal);
+      assert.equal(shown.estimate.koin, koin); assert.equal(shown.estimate.id, undefined);
+      assert.equal(shown.estimate.priceDetails.referenceKind, "market-estimate");
+      assert.equal(shown.estimate.priceDetails.windowSeconds, 0, "spot display must not claim merchant TWAP validation");
+    }
+    displayedRate = "50000000";
+    assert.equal((await buyer.estimate(c, { usd: "1" }, signal)).estimate.koin, "2", "display refresh uses the changed independent observation");
+    assert.equal(marketReads, 4); assert.equal(priceReads, 0); assert.equal(quoteIssues, 0);
+    assert.equal(nativeReviews, 0); assert.equal(signedPurchases, 0); assert.equal(submissions.length, 0);
+    assert.equal(buyer.quotes.quotes.size, 0); assert.equal(buyer.quotes.intent, undefined);
+    assert.deepEqual(fs.readdirSync(directory, { recursive: true }).sort(), beforeDisplayFiles, "display-only prices never create a payment journal or other buyer files");
   }
   if (priority) {
     for (const [usd, koin] of [["1", "4"], ["5", "20"], ["1.23", "4.92"], ["1", "4"]]) {
@@ -100,7 +127,7 @@ async function verifyFlow(t, { priority = false, legacy = false } = {}) {
     assert.equal(nativeReviews, 0); assert.equal(signedPurchases, 0); assert.equal(submissions.length, 0);
     assert.equal(buyer.quotes.quotes.size, 0); assert.equal(buyer.quotes.intent, undefined, "display estimates cannot alter an approval intent");
   }
-  const buy = async () => { const q = await buyer.preview(c, { usd: "1" }, signal); const result = await buyer.run(c, window, "purchase-approve", q.quote.id, signal); assert.equal(result.state, "pending"); return submissions.at(-1); };
+  const buy = async () => { const q = await buyer.preview(c, { usd: "1" }, signal); assert.equal(q.quote.koin, "4", "Buy reviews the exact signed merchant offer even when the market estimate differs"); const result = await buyer.run(c, window, "purchase-approve", q.quote.id, signal); assert.equal(result.state, "pending"); return submissions.at(-1); };
   const first = await buy(); assert.ok(first); assert.equal(first.header.rc_limit, "500000000"); assert.equal(nativeReviews, 1); assert.equal(signedPurchases, 1); assert.equal(submissions.length, 1);
   assert.equal(scheduler.koinPrepaid.ledger.balance(owner).purchased, "0");
   await include(first, false); await buyer.sync(c, signal); assert.equal(scheduler.koinPrepaid.ledger.balance(owner).purchased, "0", "reversible payment cannot create credits");
@@ -190,7 +217,7 @@ async function verifyFlow(t, { priority = false, legacy = false } = {}) {
     priorityResults.push({ preference: "paid-first-with-free-fallback", paid: fallbackJob.funding.paidUsed, free: fallbackJob.funding.freeUsed, recoveredWithoutDebit: true });
   }
   await provider.stop(); assert.equal(provider.worker.running, false);
-  console.log(JSON.stringify({ acceptance: "passed", legacyBackend: legacy, priorityResults, readOnlyPriceEstimates: priceReads, signedPriceQuotes: quoteIssues, backgroundConfirmationYieldsToPurchase: true, actualRcPerPurchase: "150000000", reviewedRcLimits: submissions.map(tx => tx.header.rc_limit), signedPurchases, nativeReviews, broadcasts: submissions.length, creditsPurchasedAtoms: "200000000", chatChargeAtoms: answer.koin.receipt.usage.amount, purchasedChargeAtoms: spent, inferenceCalls, recoveredWithoutDebit: true, providerStartedBeforeChat: true, modelLoads: loads.length, actualModules: ["CreditPurchases", "FundingRecovery", "WalletNonceCoordinator", "PrepaidChat", "CreditProvider", "Worker", "Scheduler", "PrepaidLedger", "PrepaidPurchases"], controlledFixtures: ["chain blocks/finality", "exchange price", "model tokenizer/output", "qualification acceptance"] }));
+  console.log(JSON.stringify({ acceptance: "passed", legacyBackend: legacy, priorityResults, readOnlyPriceEstimates: priceReads, readOnlyMarketEstimates: marketReads, signedPriceQuotes: quoteIssues, backgroundConfirmationYieldsToPurchase: true, actualRcPerPurchase: "150000000", reviewedRcLimits: submissions.map(tx => tx.header.rc_limit), signedPurchases, nativeReviews, broadcasts: submissions.length, creditsPurchasedAtoms: "200000000", chatChargeAtoms: answer.koin.receipt.usage.amount, purchasedChargeAtoms: spent, inferenceCalls, recoveredWithoutDebit: true, providerStartedBeforeChat: true, modelLoads: loads.length, actualModules: ["CreditPurchases", "FundingRecovery", "WalletNonceCoordinator", "PrepaidChat", "CreditProvider", "Worker", "Scheduler", "PrepaidLedger", "PrepaidPurchases"], controlledFixtures: ["chain blocks/finality", "exchange price", "model tokenizer/output", "qualification acceptance"] }));
 }
 if (LEGACY) test("old deployed backend keeps purchases, free-first signed replies and recovery working without new capabilities", { timeout: 65000 }, t => verifyFlow(t, { legacy: true }));
 else {

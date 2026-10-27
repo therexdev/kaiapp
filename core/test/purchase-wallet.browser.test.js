@@ -22,6 +22,15 @@ async function fixture(t, fakeClock = false, previewSupported = true) {
     window.kaiKoinTestBridge = { onProgress: () => () => {}, run: async (action, input) => {
       window.purchaseCalls.push({ action, input });
       if (action === "purchase-capabilities") { if (window.holdCapabilities) await new Promise(resolve => { window.finishCapabilities = resolve; }); return window.previewSupported ? { purchasePricePreview: true } : {}; }
+      if (action === "model-pricing") {
+        const pricing = window.modelPricing || { schema: 1, product: "prepaid-usd-v1", policyHash: "a".repeat(64), observedAt: Date.now(), availabilityValidUntil: Date.now() + 15000, models: [
+          { model: "koinos-fast", label: "Koinos Fast", inputCreditsPerMillion: "120", outputCreditsPerMillion: "450", inputUsdPerMillion: "0.12", outputUsdPerMillion: "0.45" },
+          { model: "koinos-smart", label: "Koinos Smart", inputCreditsPerMillion: "1000", outputCreditsPerMillion: "2500", inputUsdPerMillion: "1", outputUsdPerMillion: "2.5" }
+        ] };
+        if (window.holdModelPricing) await new Promise(resolve => { window.finishModelPricing = resolve; });
+        if (window.modelPricingFailure) throw Error(window.modelPricingFailure);
+        return pricing;
+      }
       if (action === "purchase-info") {
         const saved = { activation: window.purchaseState, localPurchase: structuredClone(window.localPurchase || null), cancelledPurchases: window.cancelledPurchases || [], blocked: window.purchaseState === "signin-required" ? "Sign in to your credit account" : "The credit service is not activated yet" };
         if (window.holdInfo) await new Promise(resolve => { window.finishInfo = resolve; });
@@ -35,7 +44,8 @@ async function fixture(t, fakeClock = false, previewSupported = true) {
         if (window.holdQuote && action === "purchase-preview") await new Promise(resolve => { window.finishQuote = resolve; });
         if (window.holdEstimate && action === "purchase-estimate") await new Promise(resolve => { window.finishEstimate = resolve; });
         if (window.quoteFailure) throw Error(window.quoteFailure);
-        return { [action === "purchase-estimate" ? "estimate" : "quote"]: { ...(action === "purchase-preview" ? { id: "fixture-quote" } : {}), koin: String(Number(input.usd) * (window.quoteMultiplier || 2)), credits: String(Number(input.usd) * 1000), observedAt: Date.now() - 17 * 60000, expiresAt: Date.now() + (window.quoteLifetime || 60000), priceDetails: { usdPerKoin: "0.5", windowSeconds: 1800, referenceKind: "merchant-exchange-reference" } } };
+        if (action === "purchase-preview" && window.purchasePreviewFailure) throw Error(window.purchasePreviewFailure);
+        return { [action === "purchase-estimate" ? "estimate" : "quote"]: { ...(action === "purchase-preview" ? { id: "fixture-quote" } : window.paymentLimitKoin ? { withinPaymentLimit: Number(input.usd) * (window.quoteMultiplier || 2) <= Number(window.paymentLimitKoin), paymentLimitKoin: window.paymentLimitKoin } : {}), koin: String(Number(input.usd) * (window.quoteMultiplier || 2)), credits: String(Number(input.usd) * 1000), observedAt: Date.now() - 17 * 60000, expiresAt: Date.now() + (window.quoteLifetime || 60000), priceDetails: { usdPerKoin: "0.5", windowSeconds: window.marketEstimate && action === "purchase-estimate" || window.invalidExactMarket && action === "purchase-preview" ? 0 : 1800, referenceKind: window.marketEstimate && action === "purchase-estimate" || window.invalidExactMarket && action === "purchase-preview" ? "market-estimate" : "merchant-exchange-reference" } } };
       }
       if (action === "credit-purchase-retry") {
         if (window.holdRecovery) await new Promise(resolve => { window.finishRecovery = resolve; });
@@ -66,19 +76,22 @@ async function fixture(t, fakeClock = false, previewSupported = true) {
   const buy = page.locator("#product-quote-refresh"), status = page.locator("#product-quote-state");
   await page.waitForFunction(() => !document.getElementById("product-quote-refresh").disabled);
   if (previewSupported) await page.waitForFunction(() => document.getElementById("product-quote-koin").textContent === "2 KOIN");
-  else await page.waitForFunction(() => document.getElementById("product-price-preview-support").textContent.includes("network service update"));
+  else await page.waitForFunction(() => document.getElementById("product-price-preview-support").textContent.includes("Price preview is unavailable"));
   return { page, buy, status, setWallet: value => { wallet = { ...wallet, ...value }; }, setOffline: value => { offline = value; },
     holdWallet: () => { pauseWallet = true; return new Promise(resolve => { walletStarted = resolve; }); },
     finishWallet: () => { pauseWallet = false; releaseWallet?.(); },
     count: action => page.evaluate(name => window.purchaseCalls.filter(c => c.action === name).length, action),
-    refresh: async () => { await page.locator("#product-purchase-check").click(); await page.waitForFunction(() => !document.getElementById("product-purchase-check").disabled); } };
+    reopen: async () => { await page.locator('#nav [data-view="chat"]').click(); await page.locator('.product-sidebar-credits [data-product-view="buy-credits"]').click(); },
+    refresh: async () => { await page.locator('#nav [data-view="chat"]').click(); await page.locator('.product-sidebar-credits [data-product-view="buy-credits"]').click(); await page.waitForFunction(() => !document.getElementById("product-purchase-check").disabled); } };
 }
 
 test("Buy credits uses one action for fresh pricing and wallet review, while guarding balance and changed identities", options, async t => {
   const { page, buy, status, setWallet, setOffline, count, refresh } = await fixture(t);
   assert.equal(await buy.textContent(), "Buy credits");
   assert.equal(await page.locator("#product-quote-approve").count(), 0);
-  assert.equal(await page.locator("#product-wallet-balance").textContent(), "1,234.56789012 KOIN");
+  assert.equal(await page.locator(".product-purchase-wallet,.product-purchase-availability,#product-wallet-balance,#product-payment-balance").count(), 0, "redundant wallet and Ready to buy panels are removed");
+  assert.equal(await page.locator("#product-purchase-notice").isVisible(), false, "healthy purchases show no status panel");
+  assert.equal(await page.locator("#product-purchase-check").isVisible(), false);
   assert.doesNotMatch(await page.locator("#view-buy-credits").textContent(), /9999/);
   await page.evaluate(() => { window.purchaseState = "unavailable"; }); await refresh();
   assert.equal(await buy.isDisabled(), true); assert.equal(await count("purchase-preview"), 0);
@@ -118,7 +131,7 @@ test("Buy credits uses one action for fresh pricing and wallet review, while gua
   await page.evaluate(() => { window.holdStop = false; window.finishStop(); }); await page.waitForFunction(() => !document.getElementById("product-quote-refresh").disabled);
   setOffline(true); await refresh(); assert.equal(await buy.isDisabled(), true);
   setOffline(false); setWallet({ network: "harbinger", tokenSymbol: "tKOIN" }); await refresh();
-  assert.equal(await buy.isDisabled(), true); assert.match(await page.locator("#product-wallet-note").textContent(), /Mainnet/);
+  assert.equal(await buy.isDisabled(), true); assert.match(await page.locator("#product-purchase-detail").textContent(), /Mainnet/);
   setWallet({ network: "mainnet", tokenSymbol: "KOIN", koin: "10" }); await refresh();
   await page.setViewportSize({ width: 780, height: 560 });
   assert.equal(await page.locator("#view-buy-credits").evaluate(n => n.scrollWidth <= n.clientWidth), true);
@@ -156,9 +169,9 @@ test("saved payment stays actionable during checks, stops a real review and conf
 });
 
 test("lost payment-status reply times out and permits a fresh read without accepting the late reply", options, async t => {
-  const { page, buy } = await fixture(t);
+  const { page, buy, reopen } = await fixture(t);
   await freezeClock(page);
-  await page.evaluate(() => { window.holdInfo = true; }); await page.locator("#product-purchase-check").click();
+  await page.evaluate(() => { window.holdInfo = true; }); await reopen();
   await page.waitForFunction(() => !!window.finishInfo); await page.clock.runFor(12001);
   await page.waitForFunction(() => !document.getElementById("product-purchase-check").disabled);
   assert.match(await page.locator("#product-purchase-detail").textContent(), /could not be reached/);
@@ -168,19 +181,20 @@ test("lost payment-status reply times out and permits a fresh read without accep
 });
 
 test("shared purchase refresh stays busy until the wallet read finishes, then reads a changed wallet afresh", options, async t => {
-  const { page, buy, setWallet, setOffline, holdWallet, finishWallet, refresh } = await fixture(t);
+  const { page, buy, setWallet, setOffline, holdWallet, finishWallet, reopen } = await fixture(t);
   const check = page.locator("#product-purchase-check");
   setOffline(true);
   const started = holdWallet();
-  await check.click(); await started;
-  assert.equal(await check.isDisabled(), true, "the completed account read must not enable Check again while the wallet read is still pending");
+  await reopen(); await started;
+  assert.equal(await buy.isDisabled(), true, "the completed account read must not enable buying while the wallet read is still pending");
   setOffline(false); setWallet({ network: "harbinger", tokenSymbol: "tKOIN" });
   finishWallet();
   await page.waitForFunction(() => !document.getElementById("product-purchase-check").disabled);
-  assert.match(await page.locator("#product-wallet-note").textContent(), /RPC unavailable/);
-  await refresh();
-  assert.match(await page.locator("#product-wallet-note").textContent(), /Mainnet/);
-  assert.match(await page.locator("#product-wallet-balance").textContent(), /tKOIN/);
+  assert.match(await page.locator("#product-purchase-detail").textContent(), /RPC unavailable/);
+  assert.equal(await check.isVisible(), true, "failed wallet reads expose a compact retry action");
+  await check.click(); await page.waitForFunction(() => !document.getElementById("product-purchase-check").disabled);
+  assert.match(await page.locator("#product-purchase-detail").textContent(), /Mainnet/);
+  assert.equal(await page.locator("#product-purchase-wallet").isVisible(), true, "wrong-network purchases link to the wallet");
   assert.equal(await buy.isDisabled(), true, "the new network is checked before purchases become available");
 });
 
@@ -253,9 +267,9 @@ test("Buy does not wait for a background price read and a late estimate cannot r
 });
 
 
-test("older servers keep Buy working without automatic signed quotes or repeated unsupported price requests", options, async t => {
+test("a desktop without price-preview capability keeps Buy working without automatic signed quotes or repeated unsupported requests", options, async t => {
   const { page, buy, count } = await fixture(t, true, false);
-  assert.match(await page.locator("#product-price-preview-support").textContent(), /Automatic price previews will be available after the network service update/);
+  assert.match(await page.locator("#product-price-preview-support").textContent(), /Price preview is unavailable/);
   assert.equal(await buy.isEnabled(), true);
   await page.fill("#product-usd-amount", "5"); await page.clock.runFor(60001);
   assert.equal(await count("purchase-estimate"), 0);
@@ -265,9 +279,100 @@ test("older servers keep Buy working without automatic signed quotes or repeated
   assert.equal(await count("purchase-preview"), 1); assert.equal(await count("purchase-approve"), 1);
   await page.waitForFunction(() => document.getElementById("product-quote-state").textContent.includes("Payment cancelled"));
   await page.evaluate(() => { window.holdCapabilities = true; });
-  await page.locator("#product-purchase-check").click(); await page.waitForFunction(() => !!window.finishCapabilities);
+  await page.locator('#nav [data-view="chat"]').click(); await page.locator('.product-sidebar-credits [data-product-view="buy-credits"]').click(); await page.waitForFunction(() => !!window.finishCapabilities);
   await page.waitForFunction(() => !document.getElementById("product-quote-refresh").disabled);
   await buy.click(); await page.waitForFunction(() => window.purchaseCalls.filter(c => c.action === "purchase-approve").length === 2);
   assert.equal(await count("purchase-estimate"), 0, "capability outage cannot trigger signed preview fallback or hold Buy");
   await page.evaluate(() => { window.holdCapabilities = false; window.finishCapabilities(); });
+});
+
+
+test("market estimates are labeled before buying and cannot replace the exact payment approval", options, async t => {
+  const { page, buy, count } = await fixture(t, true);
+  await page.evaluate(() => { window.marketEstimate = true; });
+  await page.fill("#product-usd-amount", "5"); await page.clock.runFor(351);
+  await page.waitForFunction(() => document.getElementById("product-quote-koin").textContent === "~10 KOIN");
+  assert.equal(await page.locator("#product-quote-label").textContent(), "Estimated KOIN payment");
+  assert.equal(await page.locator("[data-credit-pack].selected").getAttribute("data-credit-pack"), "5");
+  assert.equal(await page.locator("#product-pack-credits").textContent(), "5,000");
+  if (process.env.KAI_PRODUCT_QA_DIR) { fs.mkdirSync(process.env.KAI_PRODUCT_QA_DIR, { recursive: true }); await page.screenshot({ path: path.join(process.env.KAI_PRODUCT_QA_DIR, "buy-market-model-prices.png"), animations: "disabled" }); }
+  assert.match(await page.locator("#product-quote-state").textContent(), /Market estimate updates every 30 seconds/);
+  await page.locator("#product-quote-details summary").click();
+  assert.match(await page.locator("#product-quote-reference").textContent(), /exact KOIN payment.*wallet before approval/);
+  assert.doesNotMatch(await page.locator("#product-quote-window").textContent(), /averaging window/);
+  assert.equal(await count("purchase-preview"), 0); assert.equal(await count("purchase-approve"), 0);
+  await page.evaluate(() => { window.holdApproval = true; }); await buy.click();
+  await page.waitForFunction(() => !!window.finishApproval);
+  assert.equal(await page.locator("#product-quote-koin").textContent(), "10 KOIN");
+  assert.equal(await page.locator("#product-quote-label").textContent(), "KOIN payment");
+  assert.equal(await count("purchase-preview"), 1); assert.equal(await count("purchase-approve"), 1);
+  await page.evaluate(() => { window.holdApproval = false; window.finishApproval(); });
+  await page.waitForFunction(() => document.getElementById("product-quote-state").textContent.includes("Payment cancelled"));
+  await page.evaluate(() => { window.invalidExactMarket = true; }); await buy.click();
+  await page.waitForFunction(() => document.getElementById("product-quote-state").textContent.includes("price could not be verified"));
+  assert.equal(await count("purchase-approve"), 1, "display-only market estimates cannot authorize a payment");
+});
+
+test("model pricing shows configured input/output rates, survives availability expiry and stays independent from payments", options, async t => {
+  const { page, buy, count, reopen } = await fixture(t, true);
+  const table = page.locator("#product-model-pricing-table"); await table.waitFor({ state: "visible" });
+  assert.equal(await page.locator("#product-model-pricing-rows tr").count(), 2);
+  const smart = page.locator("#product-model-pricing-rows tr").nth(1);
+  assert.match(await smart.textContent(), /Koinos Smart1,000 credits\$12,500 credits\$2.5/);
+  assert.match(await page.locator("#product-model-pricing").textContent(), /per 1 million tokens.*Input includes your messages and context; output is the model’s reply/);
+  const reads = await count("model-pricing"); await page.clock.runFor(30001);
+  assert.equal(await table.isVisible(), true); assert.equal(await count("model-pricing"), reads, "availability expiry does not expire immutable prices or trigger pricing polling");
+  assert.equal(await page.locator("#product-model-pricing button").count(), 0);
+  await page.evaluate(() => { window.holdModelPricing = true; }); await reopen();
+  await page.waitForFunction(() => !!window.finishModelPricing);
+  await buy.click(); await page.waitForFunction(() => window.purchaseCalls.some(call => call.action === "purchase-approve"));
+  assert.equal(await count("purchase-approve"), 1, "a pending tariff read cannot hold the payment button");
+  await page.clock.runFor(12001);
+  assert.equal(await table.isVisible(), false); assert.match(await page.locator("#product-model-pricing-status").textContent(), /could not be reached/);
+  await page.evaluate(() => { window.holdModelPricing = false; window.finishModelPricing(); });
+  await reopen(); await table.waitFor({ state: "visible" });
+  await page.evaluate(() => { window.modelPricingFailure = "Model pricing connection unavailable"; });
+  await reopen(); await table.waitFor({ state: "hidden" });
+  assert.match(await page.locator("#product-model-pricing-status").textContent(), /connection unavailable/);
+  await page.waitForFunction(() => !document.getElementById("product-quote-refresh").disabled);
+  assert.equal(await buy.isEnabled(), true);
+});
+
+test("model price replies from an old account are ignored and model labels are rendered as text", options, async t => {
+  const { page, reopen } = await fixture(t);
+  await page.evaluate(() => { window.holdModelPricing = true; }); await reopen();
+  await page.waitForFunction(() => !!window.finishModelPricing);
+  await page.evaluate(() => {
+    window.oldModelReply = window.finishModelPricing; window.holdModelPricing = false;
+    window.modelPricing = { schema: 1, product: "prepaid-usd-v1", policyHash: "b".repeat(64), observedAt: Date.now(), availabilityValidUntil: Date.now() + 15000, models: [{ model: "new-model", label: '<img src=x onerror="window.badModel=true">', inputCreditsPerMillion: "1.25", outputCreditsPerMillion: "2.5", inputUsdPerMillion: "0.00125", outputUsdPerMillion: "0.0025" }] };
+    window.dispatchEvent(new Event("kai-credit-identity-changed"));
+  });
+  await page.waitForFunction(() => document.getElementById("product-model-pricing-rows").textContent.includes("window.badModel"));
+  await page.evaluate(() => window.oldModelReply());
+  assert.equal(await page.locator("#product-model-pricing-rows tr").count(), 1);
+  assert.equal(await page.locator("#product-model-pricing-rows img").count(), 0);
+  assert.equal(await page.evaluate(() => !!window.badModel), false);
+  assert.doesNotMatch(await page.locator("#product-model-pricing-rows").textContent(), /Koinos Smart/);
+});
+
+
+test("above-limit market prices remain visible while the real purchase ceiling stays enforced", options, async t => {
+  const { page, buy, count } = await fixture(t, true);
+  await page.evaluate(() => { window.marketEstimate = true; window.quoteMultiplier = 55; window.paymentLimitKoin = "100"; window.purchasePreviewFailure = "This amount exceeds the 100 KOIN purchase limit"; });
+  await page.fill("#product-usd-amount", "5"); await page.clock.runFor(351);
+  await page.waitForFunction(() => document.getElementById("product-quote-koin").textContent === "~275 KOIN");
+  assert.equal(await page.locator("#product-price-limit").isVisible(), true);
+  assert.match(await page.locator("#product-price-limit").textContent(), /100 KOIN purchase limit.*Choose a smaller USD amount/);
+  assert.equal(await count("purchase-approve"), 0);
+  await buy.click(); await page.waitForFunction(() => document.getElementById("product-quote-state").textContent.includes("exceeds the 100 KOIN purchase limit"));
+  assert.equal(await count("purchase-preview"), 1); assert.equal(await count("purchase-approve"), 0, "displaying an estimate never bypasses the signed payment ceiling");
+  assert.equal(await page.locator("#product-quote-koin").textContent(), "~275 KOIN");
+  await page.evaluate(() => { window.purchasePreviewFailure = null; });
+  await page.fill("#product-usd-amount", "1");
+  assert.equal(await page.locator("#product-price-limit").isVisible(), false, "an edited amount clears the previous limit warning immediately");
+  await page.clock.runFor(351);
+  await page.waitForFunction(() => document.getElementById("product-quote-koin").textContent === "~55 KOIN");
+  assert.equal(await page.locator("#product-price-limit").isVisible(), false);
+  await buy.click(); await page.waitForFunction(() => window.purchaseCalls.some(call => call.action === "purchase-approve"));
+  assert.equal(await count("purchase-approve"), 1);
 });

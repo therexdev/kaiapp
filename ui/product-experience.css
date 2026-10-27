@@ -87,18 +87,10 @@
    controls remain reachable instead of clipping fixed regions. */
 @media(max-height:650px){.product-v2 #sidebar{overflow-y:auto}.product-v2 #nav{flex:0 0 auto;max-height:none}.product-v2 .rail-icons,.product-v2 .local-note{flex-shrink:0}}
 
-/* Payment funding is visible even before the credit service is activated. */
-.product-purchase-wallet,.product-purchase-availability{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:18px 22px;margin:0 0 14px;border:1px solid var(--border);border-radius:14px;background:var(--bg-raised)}
-.product-purchase-wallet>div:first-child,.product-purchase-availability>div:first-child{min-width:0}
-.product-purchase-wallet strong{font-size:23px;font-weight:650}
-.product-purchase-wallet p,.product-purchase-availability p{font-size:11px;line-height:1.65;color:var(--text-dim);margin:5px 0 0;overflow-wrap:anywhere}
-.product-purchase-wallet .product-eyebrow{margin:0 0 5px}
-.product-purchase-availability{background:#eef4ff;border-color:#cddfff}
-.product-purchase-availability strong{font-size:13px}
-.product-purchase-wallet .product-actions,.product-purchase-availability .product-actions{flex-shrink:0;flex-wrap:wrap}
-.product-purchase-wallet button,.product-purchase-availability button{font-size:11px}
+.product-v2 .product-purchase-notice{margin:12px 0;padding:12px 0;border-top:1px solid var(--border)}
+.product-v2 .product-purchase-notice p{margin:0;font-size:12px;line-height:1.6;overflow-wrap:anywhere}
+.product-v2 .product-purchase-notice .product-actions{margin-top:8px;gap:8px;flex-wrap:wrap}
 .product-v2 #product-quote-refresh:disabled{background:#e6edf8;color:#667793;border-color:#d3deed;cursor:default;opacity:1}
-@media(max-width:900px){.product-purchase-wallet,.product-purchase-availability{align-items:flex-start;flex-direction:column;gap:12px;padding:17px}.product-purchase-wallet strong{font-size:21px}}
 /* Product pages use one natural document flow and one scrollbar. A flex child
    must not shrink the sharing panel to make room for account history. */
 .product-v2 #main{min-height:0;overflow:clip}
@@ -132,13 +124,8 @@
 
 .product-v2 #product-local-payment{white-space:pre-wrap;overflow-wrap:anywhere}.product-v2 .product-payment-transaction{display:block;overflow-wrap:anywhere}
 
-/* Keep the purchase itself in view; balances and status are compact context. */
+/* Keep the purchase itself in view; errors appear only when action is needed. */
 .product-v2 #view-buy-credits .product-head{margin-bottom:16px}
-.product-v2 #view-buy-credits .product-purchase-wallet,.product-v2 #view-buy-credits .product-purchase-availability{padding:12px 16px;gap:12px;flex-direction:row;align-items:center}
-.product-v2 #view-buy-credits .product-purchase-wallet .product-actions,.product-v2 #view-buy-credits .product-purchase-availability .product-actions{margin:0;gap:6px;flex-shrink:1}
-.product-v2 #view-buy-credits .product-purchase-wallet strong{font-size:20px}
-.product-v2 #view-buy-credits .product-purchase-wallet .product-eyebrow{font-size:9px!important}
-.product-v2 #view-buy-credits #product-wallet-note:empty{display:none}
 .product-v2 #view-buy-credits .product-steps{display:none}
 .product-v2 #view-buy-credits .product-packs{margin:12px 0}
 .product-v2 #view-buy-credits .product-packs button{padding:12px 4px}
@@ -148,7 +135,6 @@
 .product-v2 #product-provider-options>summary{cursor:pointer;color:var(--text-dim);font-size:12px;padding:4px 0}
 .product-v2 #product-provider-options[open]>summary{margin-bottom:12px}
 @media(min-width:700px){.product-v2 #view-buy-credits .product-two{grid-template-columns:1fr 1fr}}
-@media(max-width:520px){.product-v2 #view-buy-credits .product-purchase-wallet,.product-v2 #view-buy-credits .product-purchase-availability{flex-wrap:wrap}}
 
 .product-v2 #view-recovery #credit-run-results{padding:18px 0;border-top:1px solid var(--border);margin-top:24px}.product-v2 #credit-run-results>summary{font-size:13px;font-weight:600;cursor:pointer}.product-v2 #credit-run-history summary{cursor:pointer;font-size:12px}.product-v2 #credit-run-history{overflow-wrap:anywhere}
 
@@ -203,3 +189,13 @@
 .product-v2 #payment-wallet-import-panel label{display:block;font-size:12px;color:var(--text-dim);margin:12px 0}
 .product-v2 #payment-wallet-import-panel input{display:block;width:100%;margin-top:6px;padding:10px}
 @media(max-width:700px){.product-v2 .payment-wallet-table table,.product-v2 .payment-wallet-table tbody{display:block}.product-v2 .payment-wallet-table thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}.product-v2 .payment-wallet-table tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 12px;border-top:1px solid var(--border);padding:14px 0}.product-v2 .payment-wallet-table td{display:block;padding:0!important;border:0;min-width:0!important;max-width:none!important}.product-v2 .payment-wallet-table td:first-child{grid-column:1 / -1}.product-v2 .payment-wallet-table td:nth-child(3){grid-column:1;grid-row:3;font-size:11px;color:var(--text-dim)}.product-v2 .payment-wallet-table td:last-child{grid-column:2;grid-row:2;font-size:11px}.product-v2 .payment-wallet-table small{overflow-wrap:anywhere}}
+
+.product-v2 .product-model-pricing{margin-top:18px}
+.product-v2 .product-model-pricing>p{max-width:750px}
+.product-v2 .product-model-pricing table{width:100%;border-collapse:collapse;text-align:left;font-size:12px}
+.product-v2 .product-model-pricing thead th{font-size:10px;font-weight:600;color:var(--text-dim);padding:12px 10px;border-bottom:1px solid var(--border)}
+.product-v2 .product-model-pricing tbody th,.product-v2 .product-model-pricing td{padding:12px 10px;border-bottom:1px solid var(--border);font-weight:500}
+.product-v2 .product-model-pricing tbody th{width:40%;overflow-wrap:anywhere}
+.product-v2 .product-model-pricing td strong{display:block;font-size:12px;font-weight:600;white-space:nowrap}
+.product-v2 .product-model-pricing td small{display:block;margin-top:4px;color:var(--text-dim);font-size:11px}
+@media(max-width:520px){.product-v2 .product-model-pricing thead th,.product-v2 .product-model-pricing tbody th,.product-v2 .product-model-pricing td{padding:10px 6px;font-size:10px}.product-v2 .product-model-pricing td strong{font-size:10px}}

@@ -13,14 +13,15 @@ function purchaseClient(d) {
   return new KoinChain(d, new PinnedRpcProvider(d.rpc, d.chainId, { requestIntervalMs: 250 }));
 }
 class CreditPurchases {
-  constructor({ dataDir, account, storage, dialog, fetchImpl = fetch, clock = Date.now, clientFactory = purchaseClient }) {
-    Object.assign(this, { dataDir, account, storage, dialog, fetchImpl, clientFactory, clock }); this.quotes = new CreditPurchaseQuotes({ clock }); this.active = null;
+  constructor({ dataDir, account, storage, dialog, fetchImpl = fetch, clock = Date.now, clientFactory = purchaseClient, marketReader }) {
+    Object.assign(this, { dataDir, account, storage, dialog, fetchImpl, clientFactory, clock }); this.quotes = new CreditPurchaseQuotes({ clock, fetchImpl, marketReader }); this.active = null;
   }
   stop() { this.quotes.clear(); this.background?.abort.abort(); this.active?.stop(); }
   async pauseSync() {
     const pending = this.background;
     if (pending) { pending.abort.abort(); await pending.promise.catch(() => {}); }
   }
+  async estimateCapabilities(c, signal) { return this.quotes.capabilities(c, signal); }
   async estimate(c, input, signal) { return this.quotes.estimate(c, input, signal); }
   async preview(c, input, signal) { return this.quotes.preview(c, input, signal); }
   async status(c, signal) {

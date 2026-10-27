@@ -32,17 +32,17 @@ test("an unreadable saved payment cannot enable a new purchase", async () => {
 });
 
 
-test("automatic purchase previews require an explicit server capability and do not change purchase availability", async () => {
+test("purchase preview support prefers the advertised service and otherwise uses the pinned independent market without delaying Buy", async () => {
   const service = new CreditService({ service: require("../lib/koin-network/credit-service.json"), dataDir: "/unused", account: {} });
-  let response = { capabilities: {} }, calls = 0;
-  service.context = async () => ({ flow: { call: async (action, body) => {
+  let response = { capabilities: {} }, calls = 0, account = 0;
+  service.context = async () => ({ config: service.service.config, auth: { accountId: String(account++) }, flow: { call: async (action, body) => {
     assert.equal(action, "capabilities"); assert.deepEqual(body, {}); calls++; return response;
   } } });
   service.purchases.status = async () => null; service.purchases.cancelled = async () => [];
-  assert.deepEqual(await service.purchaseCapabilities(), { purchasePricePreview: false });
+  assert.deepEqual(await service.purchaseCapabilities(), { purchasePricePreview: true, purchasePriceSource: "market-estimate" });
   response = { capabilities: { purchasePricePreview: "true" } };
-  assert.deepEqual(await service.purchaseCapabilities(), { purchasePricePreview: false });
+  assert.deepEqual(await service.purchaseCapabilities(), { purchasePricePreview: true, purchasePriceSource: "market-estimate" });
   response = { capabilities: { purchasePricePreview: true } };
-  assert.deepEqual(await service.purchaseCapabilities(), { purchasePricePreview: true });
+  assert.deepEqual(await service.purchaseCapabilities(), { purchasePricePreview: true, purchasePriceSource: "service" });
   assert.equal((await service.purchaseInfo()).activation, "ready"); assert.equal(calls, 3, "Buy availability never waits for capability lookup");
 });

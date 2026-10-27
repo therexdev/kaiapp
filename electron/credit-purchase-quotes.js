@@ -3,27 +3,53 @@ const { utils } = require("koilib"), P = require("../core/lib/koin-network/job-p
 const USD = require("../core/lib/koin-network/purchase-quote");
 const Provenance = require("../core/lib/koin-network/purchase-provenance");
 const crypto = require("node:crypto");
+const MarketEstimate = require("../core/lib/koin-network/purchase-market-estimate");
 // Private main-process cache. Renderer approval supplies only the opaque ID,
 // never a replacement price, wallet, transaction or scheduler endpoint.
 class CreditPurchaseQuotes {
-  constructor({ clock = Date.now } = {}) { this.clock = clock; this.quotes = new Map(); }
+  constructor({ clock = Date.now, fetchImpl = fetch, marketReader } = {}) { this.clock = clock; this.quotes = new Map(); this.market = marketReader || new MarketEstimate.PurchaseMarketEstimate({ clock, fetchImpl }); this.previewCapability = null; }
   scope(c) { return P.hash(JSON.stringify([c.auth.accountId, P.hash(c.auth.sessionToken || ""), c.config])); }
   clear() { this.quotes.clear(); this.intent = null; }
+  async capabilities(c, signal) {
+    const scope = this.scope(c), now = this.clock();
+    if (this.previewCapability?.scope === scope && now < this.previewCapability.expiresAt) return { ...this.previewCapability.value };
+    let servicePreview = false;
+    try {
+      const deadline = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(2500)]);
+      const response = await c.flow.call("capabilities", {}, deadline);
+      servicePreview = response?.capabilities?.purchasePricePreview === true;
+    } catch { signal?.throwIfAborted(); /* Display-only market reads also work with the older service. */ }
+    signal?.throwIfAborted();
+    const fallback = MarketEstimate.supports(c.config), value = { purchasePricePreview: servicePreview || fallback,
+      purchasePriceSource: servicePreview ? "service" : fallback ? "market-estimate" : "unavailable" };
+    this.previewCapability = { scope, value, expiresAt: this.clock() + 30000 }; return { ...value };
+  }
   // Read-only display estimate. It never issues a signed purchase quote,
   // consumes a quote authorization budget, or changes the approval cache.
   async estimate(c, input, signal) {
     if (!input || Object.keys(input).join() !== "usd") throw Error("Select a USD credit amount");
     USD.nativeForDollars(input.usd, "100000000");
     if (typeof c.config.pricingPolicyHash !== "string" || !/^[0-9a-f]{64}$/.test(c.config.pricingPolicyHash)) throw Error("Purchasing needs the approved pricing configuration");
-    const response = await c.flow.call("purchase-price", {}, signal);
-    signal?.throwIfAborted();
-    const price = Provenance.summary(response?.price), now = this.clock();
-    if (price.pricingPolicyHash !== c.config.pricingPolicyHash || price.expiresAt <= now || price.marketObservedAt > now + 5000) throw Error("The current purchase price could not be verified");
+    const capability = await this.capabilities(c, signal);
+    let price, independent = false;
+    if (capability.purchasePriceSource === "service") {
+      const response = await c.flow.call("purchase-price", {}, signal);
+      signal?.throwIfAborted(); price = Provenance.summary(response?.price);
+      if (price.pricingPolicyHash !== c.config.pricingPolicyHash || price.expiresAt <= this.clock() || price.marketObservedAt > this.clock() + 5000) throw Error("The current purchase price could not be verified");
+    } else {
+      if (!MarketEstimate.supports(c.config)) throw Error("Automatic price preview is unavailable for this pricing policy");
+      price = await this.market.read(signal); independent = true; signal?.throwIfAborted();
+      if (!price || price.referenceKind !== "market-estimate" || price.windowSeconds !== 0 || price.source !== "uniswap-v4:vKOIN/USDT" ||
+          typeof price.usdPerKoinAtoms !== "string" || !/^[1-9]\d{0,19}$/.test(price.usdPerKoinAtoms) || BigInt(price.usdPerKoinAtoms) >= 1n << 64n ||
+          !Number.isSafeInteger(price.observedAt) || price.observedAt > this.clock() || this.clock() - price.observedAt >= MarketEstimate.MAX_PRICE_AGE_MS ||
+          !Number.isSafeInteger(price.expiresAt) || price.expiresAt <= this.clock() || price.expiresAt > this.clock() + 60000 || !/^0x[0-9a-f]{64}$/.test(price.anchorHash)) throw Error("The market estimate could not be verified");
+    }
     const amount = USD.nativeForDollars(input.usd, price.usdPerKoinAtoms), credited = String(BigInt(amount) * BigInt(price.usdPerKoinAtoms) / USD.USD_ATOMS);
-    if (BigInt(amount) > BigInt(c.config.limits.amount)) throw Error("This purchase exceeds the configured payment limit");
-    if (BigInt(amount) > BigInt(price.maxPurchaseKoinAtoms) || BigInt(credited) > BigInt(price.maxPurchaseUsdAtoms)) throw Error("Choose a smaller amount for the currently available purchase liquidity");
-    return { estimate: { koin: USD.dollars(amount), credits: USD.credits(credited), usd: USD.dollars(credited), observedAt: price.marketObservedAt, expiresAt: price.expiresAt,
-      priceDetails: { usdPerKoin: USD.dollars(price.usdPerKoinAtoms), windowSeconds: price.windowSeconds, referenceKind: price.referenceKind } } };
+    const withinPaymentLimit = BigInt(amount) <= BigInt(c.config.limits.amount);
+    if (!independent && (BigInt(amount) > BigInt(price.maxPurchaseKoinAtoms) || BigInt(credited) > BigInt(price.maxPurchaseUsdAtoms))) throw Error("Choose a smaller amount for the currently available purchase liquidity");
+    return { estimate: { koin: USD.dollars(amount), credits: USD.credits(credited), usd: USD.dollars(credited), withinPaymentLimit, paymentLimitKoin: USD.dollars(c.config.limits.amount), observedAt: independent ? price.observedAt : price.marketObservedAt, expiresAt: price.expiresAt,
+      priceDetails: { usdPerKoin: USD.dollars(price.usdPerKoinAtoms), windowSeconds: price.windowSeconds, referenceKind: price.referenceKind,
+        ...(independent ? { source: price.source, anchorHash: price.anchorHash } : {}) } } };
   }
   async preview(c, input, signal) {
     if (!input || Object.keys(input).join() !== "usd") throw Error("Select a USD credit amount");

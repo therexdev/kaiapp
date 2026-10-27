@@ -116,6 +116,10 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
       if (input !== undefined || disposed) throw Error("Purchase capabilities take no arguments and require an open app");
       return creditService.purchaseCapabilities(AbortSignal.timeout(10000));
     }
+    if (action === "model-pricing") {
+      if (input !== undefined || disposed) throw Error("Model pricing takes no arguments and requires an open app");
+      return require("./credit-model-pricing").modelPricing(creditService, AbortSignal.timeout(10000));
+    }
     if (action.startsWith("provider-public-")) {
       if (action === "provider-public-model") {
         if (disposed || !window.isVisible() || window.isMinimized()) throw Error("Return to the visible app to choose a provider model");
