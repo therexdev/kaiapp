@@ -75,3 +75,42 @@ test("a lost quote response reuses its intent while a subsequent same-amount pur
   assert.equal(ids[0], ids[1]); await f.quotes.consume(f.c, retry.quote.id);
   await f.quotes.preview(f.c, { usd: "1" }); assert.notEqual(ids[1], ids[2]);
 });
+
+test("read-only purchase estimates calculate exact rounding without issuing or replacing a signed quote", async () => {
+  const f = fixture(), signed = await f.quotes.preview(f.c, { usd: "1" });
+  const cached = f.quotes.quotes.get(signed.quote.id), intent = f.quotes.intent;
+  const price = structuredClone(cached.provenance.summary), calls = [];
+  f.c.flow.call = async (action, body) => { calls.push({ action, body }); return { price }; };
+  for (const usd of ["1", "5", "10", "1.23"]) {
+    const { estimate } = await f.quotes.estimate(f.c, { usd });
+    assert.equal(estimate.koin, USD.dollars(USD.nativeForDollars(usd, price.usdPerKoinAtoms)));
+    assert.equal(Object.hasOwn(estimate, "id"), false);
+  }
+  assert.deepEqual(calls, Array.from({ length: 4 }, () => ({ action: "purchase-price", body: {} })));
+  assert.equal(f.quotes.intent, intent); assert.equal(f.quotes.quotes.size, 1);
+  assert.equal(f.quotes.quotes.get(signed.quote.id), cached);
+  await f.quotes.consume(f.c, signed.quote.id);
+});
+
+test("purchase estimates reject stale, mismatched or excessive pricing and never fall back to signed issuance", async () => {
+  for (const mutate of [
+    p => { p.expiresAt = 1792180000000; },
+    p => { p.marketObservedAt = 1792180006000; },
+    p => { p.pricingPolicyHash = P.hash("wrong policy"); },
+    p => { p.market.poolId = "0x" + "0".repeat(64); },
+    p => { p.maxPurchaseUsdAtoms = "1"; },
+    p => { p.maxPurchaseKoinAtoms = "1"; },
+  ]) {
+    const f = fixture(), { quote } = await f.quotes.preview(f.c, { usd: "1" });
+    const price = structuredClone(f.quotes.quotes.get(quote.id).provenance.summary); mutate(price);
+    f.quotes.clear(); let calls = 0;
+    f.c.flow.call = async (action, body) => { assert.equal(action, "purchase-price"); assert.deepEqual(body, {}); calls++; return { price }; };
+    await assert.rejects(f.quotes.estimate(f.c, { usd: "1" }));
+    assert.equal(calls, 1); assert.equal(f.quotes.quotes.size, 0); assert.equal(f.quotes.intent, null);
+  }
+  const f = fixture(); f.c.flow.call = async action => { assert.equal(action, "purchase-price"); throw Error("Not found"); };
+  await assert.rejects(f.quotes.estimate(f.c, { usd: "1" }), /Not found/);
+  await assert.rejects(f.quotes.estimate(f.c, { usd: "1", quote: "replace" }), /Select/);
+  await assert.rejects(f.quotes.estimate(f.c, { usd: "1.234" }), /decimal/);
+  assert.equal(f.quotes.quotes.size, 0);
+});

@@ -1529,21 +1529,6 @@ async function renderEarn() {
     earnErr("Core unreachable");
     return;
   }
-  const formatAtoms = value => {
-    if (typeof value !== "string" || !/^(0|[1-9]\d*)$/.test(value)) return "—";
-    const n = BigInt(value);
-    return `${n / 100000000n}.${(n % 100000000n).toString().padStart(8, "0")} KOIN`;
-  };
-  const koin = s.koin;
-  const quality = { "qualified-shadow": "Verified for shadow scoring", "awaiting-verification": "Awaiting capacity verification",
-    "local-only": "Local-Only mode", "unreported": "No capacity report", "unavailable": "Awaiting master integration" };
-  const koinRows = [
-    ["Available to claim", "Not active"], ["Usage credits", "Not active"],
-    ["Availability estimate (simulation)", koin?.estimate?.simulated ? formatAtoms(koin.estimate.availability) : "Awaiting verified data"],
-    ["Paid-work estimate (simulation)", koin?.estimate?.simulated ? formatAtoms(koin.estimate.work) : "Awaiting verified data"],
-    ["Capacity status", quality[koin?.qualification] || "Awaiting master integration"],
-  ];
-  $("koin-stats").innerHTML = koinRows.map(([k, v]) => KaiI18n.html`<span class="k">${k}</span><span>${esc(v)}</span>`).join("");
   const wifShowing = !$("earn-wif").hidden;
   $("earn-setup").hidden = s.wallet.exists && !wifShowing;
   $("earn-unlock").hidden = !s.wallet.exists || s.wallet.unlocked;

@@ -9,6 +9,22 @@ class CreditPurchaseQuotes {
   constructor({ clock = Date.now } = {}) { this.clock = clock; this.quotes = new Map(); }
   scope(c) { return P.hash(JSON.stringify([c.auth.accountId, P.hash(c.auth.sessionToken || ""), c.config])); }
   clear() { this.quotes.clear(); this.intent = null; }
+  // Read-only display estimate. It never issues a signed purchase quote,
+  // consumes a quote authorization budget, or changes the approval cache.
+  async estimate(c, input, signal) {
+    if (!input || Object.keys(input).join() !== "usd") throw Error("Select a USD credit amount");
+    USD.nativeForDollars(input.usd, "100000000");
+    if (typeof c.config.pricingPolicyHash !== "string" || !/^[0-9a-f]{64}$/.test(c.config.pricingPolicyHash)) throw Error("Purchasing needs the approved pricing configuration");
+    const response = await c.flow.call("purchase-price", {}, signal);
+    signal?.throwIfAborted();
+    const price = Provenance.summary(response?.price), now = this.clock();
+    if (price.pricingPolicyHash !== c.config.pricingPolicyHash || price.expiresAt <= now || price.marketObservedAt > now + 5000) throw Error("The current purchase price could not be verified");
+    const amount = USD.nativeForDollars(input.usd, price.usdPerKoinAtoms), credited = String(BigInt(amount) * BigInt(price.usdPerKoinAtoms) / USD.USD_ATOMS);
+    if (BigInt(amount) > BigInt(c.config.limits.amount)) throw Error("This purchase exceeds the configured payment limit");
+    if (BigInt(amount) > BigInt(price.maxPurchaseKoinAtoms) || BigInt(credited) > BigInt(price.maxPurchaseUsdAtoms)) throw Error("Choose a smaller amount for the currently available purchase liquidity");
+    return { estimate: { koin: USD.dollars(amount), credits: USD.credits(credited), usd: USD.dollars(credited), observedAt: price.marketObservedAt, expiresAt: price.expiresAt,
+      priceDetails: { usdPerKoin: USD.dollars(price.usdPerKoinAtoms), windowSeconds: price.windowSeconds, referenceKind: price.referenceKind } } };
+  }
   async preview(c, input, signal) {
     if (!input || Object.keys(input).join() !== "usd") throw Error("Select a USD credit amount");
     // Validate decimal syntax before making a network request.

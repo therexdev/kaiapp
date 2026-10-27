@@ -183,7 +183,6 @@
           <p id="network-chat-reservation" role="status" hidden></p>
           <p id="network-chat-status" role="status" aria-live="polite"></p>
           <p id="network-credit-sources" role="status"></p>
-          <details id="network-free-preference" hidden><summary id="network-spending-summary">Spending options</summary><label><input type="checkbox" id="network-free-only" /> Free credits only</label><p>Leave this off to use purchased credits after free credits. Your choice is saved.</p></details>
         </div>
         <form id="composer">
           <div class="composer-options">
@@ -408,32 +407,6 @@
         <div class="api-card">
           <h1>KOIN · Earnings &amp; wallet</h1>
           <p class="lede">Contribute AI capacity, track network rewards and manage your KOIN wallet.</p>
-          <div id="koin-shadow-overview" class="koin-overview">
-            <h2>KOIN rewards are in preparation</h2>
-            <p class="hint">This Test build measures availability without paying KOIN rewards. Purchases and automatic payouts will open after contract verification. Your existing mainnet wallet remains available below.</p>
-            <div class="hw-summary" id="koin-stats" aria-live="polite"></div>
-            <p class="hint">Launch policy: up to 5% of the free reward pool per day; 70% for verified availability and 30% for paid work. Unused rewards remain in the pool.</p>
-          </div>
-
-          <div id="koin-review-preview" class="koin-overview" hidden>
-            <h2>Preview a spending review</h2>
-            <p class="hint">See the model, maximum request cost and session limits before reviewing an example. Prices are illustrative; paid requests are not active.</p>
-            <button id="btn-koin-review-preview" class="small" type="button">Preview review</button>
-            <p id="koin-review-status" class="hint" role="status" aria-live="polite"></p>
-          </div>
-
-          <div id="koin-session-rehearsal" class="koin-overview" hidden>
-            <h2>KOIN session rehearsal</h2>
-            <p class="hint">Approve a bounded session once. This developer rehearsal does not enable paid chat or move KOIN.</p>
-            <div class="form-row">
-              <button id="btn-koin-session-review" class="small" type="button">Review session limits</button>
-              <button id="btn-koin-session-retry" class="small" type="button">Retry saved approval</button>
-              <button id="btn-koin-session-status" class="small" type="button">Refresh session</button>
-              <button id="btn-koin-session-revoke" class="small" type="button">Revoke session approval</button>
-            </div>
-            <p id="koin-session-status" class="hint" role="status" aria-live="polite"></p>
-          </div>
-
           <section id="koin-test-payments" class="koin-payments" aria-labelledby="koin-test-title" hidden>
             <header class="kp-heading">
               <div><p class="kp-eyebrow">Your network account</p><h2 id="koin-test-title">KOIN payments</h2><p class="hint">Use network AI and earn by sharing your computer.</p></div>
@@ -493,11 +466,10 @@
               <div class="kp-details-body">
                 <section aria-labelledby="koin-spending-title"><h3 id="koin-spending-title">Spending limits</h3><p id="koin-spending-summary" class="hint">The normal chat prepares your spending allowance when you send your first message.</p><div class="kp-actions"><button data-koin-test="reserve" class="small">Reserve credits</button><button data-koin-test="session-review" class="small">Review limits</button><button data-koin-test="session-status" class="small">Check spending</button><button data-koin-test="session-revoke" class="small">Stop new requests</button></div></section>
                 <section><h3>Payment history</h3><div class="kp-actions"><button data-koin-test="backup" class="small">Back up history</button><button data-koin-test="restore" class="small">Restore history</button></div></section>
-                <section><h3>Earlier test request recovery</h3><p class="hint">For an interrupted request from the old test panel only. Normal chat recovers by resending the original message in Chat.</p><label for="koin-test-prompt">Original test prompt</label><textarea id="koin-test-prompt" rows="2" maxlength="12000"></textarea><div class="kp-actions"><button data-koin-test="chat-status" class="small">Check pending request</button><button data-koin-test="chat-retry" class="small">Retry pending request</button><button data-koin-test="session-retry" class="small">Recover spending approval</button></div><div id="koin-answer-wrap" class="kp-answer" hidden><span>Recovered response</span><div id="koin-test-answer" aria-live="polite"></div></div></section>
+                <section><h3>Earlier request recovery</h3><p class="hint">Recover an interrupted request from the earlier payment panel. For current conversations, use Recover saved reply in Account help.</p><label for="koin-test-prompt">Original message</label><textarea id="koin-test-prompt" rows="2" maxlength="12000"></textarea><div class="kp-actions"><button data-koin-test="chat-status" class="small">Check pending request</button><button data-koin-test="chat-retry" class="small">Retry pending request</button><button data-koin-test="session-retry" class="small">Recover spending approval</button></div><div id="koin-answer-wrap" class="kp-answer" hidden><span>Recovered response</span><div id="koin-test-answer" aria-live="polite"></div></div></section>
                 <section><h3>Release reserved credits</h3><p class="hint">Revocation stops new work. Reserved credits can be released after settlement, then refunded.</p><label for="koin-test-session-id">Session ID</label><input id="koin-test-session-id" type="text" maxlength="64" /><div class="kp-actions"><button data-koin-test="revoke" class="small">Revoke on chain</button><button data-koin-test="release" class="small">Release expired reservation</button></div></section>
                 <section><h3>Transaction recovery</h3><p class="hint">Select a transaction in Payment activity. Use its original transaction ID from chain history. A nonce conflict requires irreversible chain evidence.</p><label for="koin-test-recovery-tx">Transaction ID</label><input id="koin-test-recovery-tx" type="text" maxlength="70" placeholder="Transaction ID from chain history" /><div class="kp-actions"><button data-koin-test="recover" class="small">Recover original transaction</button><button data-koin-test="repair" class="small">Review nonce conflict</button></div></section>
                 <section><h3>Fund the reward pool</h3><p class="hint">This deposit funds network rewards. It does not buy credits for your own requests.</p><label for="koin-reward-amount">Reward funding amount in KOIN</label><div class="kp-amount"><input id="koin-reward-amount" type="text" inputmode="decimal" maxlength="22" placeholder="Enter KOIN amount" /><button data-koin-test="fund-rewards" class="small">Fund rewards</button></div></section>
-                <details id="koin-developer-tools"><summary>Developer previews</summary><div id="koin-developer-content"></div></details>
               </div>
             </details>
           </section>
@@ -557,14 +529,7 @@
               <button id="btn-earn-toggle" class="primary">Start Earning</button>
             </div>
             <p class="hint">Stopping is immediate — no job runs after you press Stop.</p>
-            <section id="koin-purchase-placeholder">
-            <h2>AI usage credits</h2>
-            <p class="hint">Credits will be prepaid with KOIN. Unused funds stay reserved; only consumed usage is split: 60% to rewards, 25% to mining and 15% to operations.</p>
-            <div class="form-row">
-              <button id="btn-koin-purchase" class="primary small" disabled>Purchases not active</button>
-              <span class="hint">Rewards will be sent automatically. No claim is needed.</span>
-            </div>
-            </section>
+
             <details id="earn-legacy">
               <summary>Legacy test KAI</summary>
               <p class="hint">Historical test balances are separate from KOIN. No conversion or distribution has been applied.</p>
@@ -655,6 +620,11 @@
             <select id="interface-language" aria-describedby="language-setting-note"></select>
             <p class="hint" id="language-setting-note">Choose the language used for menus, settings, and setup. You can change it at any time.</p>
             <p class="hint" id="language-setting-status" role="status"></p>
+          </section>
+          <section id="network-credit-settings">
+            <h2>Network credits</h2>
+            <label class="setting-toggle" for="network-paid-first"><input type="checkbox" id="network-paid-first" aria-describedby="network-credit-priority-help" disabled /> Use paid credits before free credits when using the network</label>
+            <p class="hint" id="network-credit-priority-help" role="status">Free credits are used first by default. Checking network support…</p>
           </section>
           <section id="desktop-providers" hidden>
             <h2>Desktop AI connections</h2>
@@ -1221,7 +1191,6 @@
   <script src="desktop-providers.js"></script>
   <script src="brand.js"></script>
   <script src="app.js"></script>
-  <script src="koin-review.js"></script>
   <script src="koin-payments.js"></script>
   <script src="app-navigation.js"></script>
   <script src="mascot-launcher.js"></script>

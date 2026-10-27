@@ -10,13 +10,14 @@ function setup(t, product = "prepaid-v1", multi = false) {
   const tariffs = (multi ? [tariff, second] : [tariff]).sort((a, b) => `${a.model}:${a.version}` < `${b.model}:${b.version}` ? -1 : 1);
   const config = { owner, version: 1, model: "fixture", maxOutput: 16, schedulerUrl: "https://prepaid.invalid/scheduler", policyHash: P.hash(JSON.stringify(["KAI-KOIN-SHADOW-TARIFFS-V1", ...tariffs])),
     deployment: { product, chainId: require("../lib/koin-network/payment-network").MAINNET_CHAIN, credits: Signer.fromSeed("contract").getAddress(), creditsHash: "0x1220" + P.hash("wasm") } };
-  const calls = [], progress = []; let failAck = false, tamper = false, streaming, flow, unavailable, catalogOutage = false, catalogTamper = false, tariffTamper = false;
+  const calls = [], progress = []; let failAck = false, tamper = false, streaming, flow, unavailable, catalogOutage = false, catalogTamper = false, tariffTamper = false, prioritySupported = true, priorityEcho = true;
   const storage = { isEncryptionAvailable: () => true, encryptString: s => Buffer.from(s).map(b => b ^ 42), decryptString: b => b.map(n => n ^ 42).toString() };
   const options = { file: path.join(directory, "chat.json"), storage, config, progress: value => {
     if (value?.delta) assert.equal(flow.read().state, "answered", "stream prefix must be durable before renderer delivery"); progress.push(value);
   }, access: { authorize: () => ({ sessionToken: "secret", owner }) }, payments: { run: () => { throw Error("No wallet actions during chat"); } }, fetchImpl: async (url, init) => {
     const b = JSON.parse(init.body), action = url.split("/").at(-1); calls.push({ action, b });
     let value = {};
+    if (action === "capabilities") value.capabilities = { creditPriority: prioritySupported };
     if (action === "models") {
       if (catalogOutage) throw Error("Catalog unavailable");
       const at = Date.now(), listed = structuredClone(tariffs); if (catalogTamper) listed[0].inputAtomsPerMillion = "9999999";
@@ -25,7 +26,7 @@ function setup(t, product = "prepaid-v1", multi = false) {
     }
     const selected = structuredClone(tariffs.find(t => t.model === b.model) || tariff);
     const cost = (input, output) => String((BigInt(input) * BigInt(selected.inputAtomsPerMillion) + BigInt(output) * BigInt(selected.outputAtomsPerMillion) + 999999n) / 1000000n);
-    if (action === "estimate") value.estimate = { model: b.model, unit: product === "prepaid-usd-v1" ? "USD-1e-8" : "legacy-KOIN-1e-8", maxCharge: cost(5, b.max_tokens), maxFree: b.freeOnly ? cost(5, b.max_tokens) : "0", maxPaid: b.freeOnly ? "0" : cost(5, b.max_tokens), allowed: true };
+    if (action === "estimate") value.estimate = { model: b.model, unit: product === "prepaid-usd-v1" ? "USD-1e-8" : "legacy-KOIN-1e-8", maxCharge: cost(5, b.max_tokens), maxFree: b.freeOnly ? cost(5, b.max_tokens) : "0", maxPaid: b.freeOnly ? "0" : cost(5, b.max_tokens), allowed: true, ...(b.paidFirst && priorityEcho ? { paidFirst: true } : {}) };
     if (action === "completions") {
       const at = Date.now(); if (tariffTamper) selected.inputAtomsPerMillion = "4000000";
       const q = { schema: 2, mode: "shadow", domain: flow.target.domain, policyHash: config.policyHash, tariff: selected, requestHash: P.hash(JSON.stringify(b.messages)),
@@ -60,6 +61,7 @@ function setup(t, product = "prepaid-v1", multi = false) {
   } };
   flow = new PrepaidChat(options);
   return { flow, options, calls, progress, stream: value => { streaming = value; }, file: options.file, body: { model: "koinos-network", messages: [{ role: "user", content: "A private question" }], max_tokens: 16 },
+    priority: (supported, echo = true) => { prioritySupported = supported; priorityEcho = echo; },
     unavailable: model => { unavailable = model; }, catalogOutage: () => { catalogOutage = true; }, catalogTamper: () => { catalogTamper = true; }, tariffTamper: () => { tariffTamper = true; }, tariffs,
     signal: new AbortController().signal, failAck: () => { failAck = true; }, tamper: () => { tamper = true; } };
 }
@@ -103,7 +105,7 @@ test("interrupted metered stream preserves the last verified prefix and restart 
   assert.equal(f.calls.filter(c => c.action === "completions").length, 1);
   assert.ok(!fs.readFileSync(f.file, "utf8").includes("A private"));
 });
-test("advanced subcalls keep separate encrypted recovery records and repeated calls do not charge again", async t => {
+for (const paidFirst of [false, true]) test(`advanced ${paidFirst ? "paid-first" : "free-first"} subcalls keep their approved priority and encrypted recovery without another charge`, async t => {
   const f = setup(t, "prepaid-usd-v1", true), { CreditRuns, creditAtoms } = require("../../electron/credit-runs"), directory = path.dirname(f.file);
   assert.equal(creditAtoms("12.34567"), "1234567"); assert.throws(() => creditAtoms("0")); assert.throws(() => creditAtoms("1.000001"));
   let approved;
@@ -111,7 +113,7 @@ test("advanced subcalls keep separate encrypted recovery records and repeated ca
   const transport = async (url, init) => {
     const b = JSON.parse(init.body), action = url.split("/").at(-1);
     if (action.startsWith("run-")) {
-      if (action === "run-open") approved = { id: b.runId, model: b.model, maxTotal: b.maxTotal, freeOnly: b.freeOnly, state: "open" };
+      if (action === "run-open") approved = { id: b.runId, model: b.model, maxTotal: b.maxTotal, freeOnly: b.freeOnly, ...(b.paidFirst ? { paidFirst: true } : {}), state: "open" };
       if (action === "run-stop") approved.state = "stopped";
       return Response.json({ ok: true, product: "prepaid-usd-v1", mode: "mainnet-pilot", paymentsEnabled: true, owner: f.options.config.owner, run: approved });
     }
@@ -121,12 +123,13 @@ test("advanced subcalls keep separate encrypted recovery records and repeated ca
   const service = { storage: f.options.storage, account: { assertCreditAuthorization() {} }, fetchImpl: transport, progress() {} };
   const c = { directory, config: f.options.config, flow: f.flow, auth: { owner: f.options.config.owner, sessionToken: "secret" } };
   const create = () => { const r = new CreditRuns(service), make = r.flow.bind(r); r.flow = (...args) => { const flow = make(...args); f.flow.file = flow.file; return flow; }; return r; };
-  let runs = create(); const { run } = await runs.open(c, { budget: "1", mode: "research", model: "fixture-large", freeOnly: false }, f.signal);
-  const first = { runId: run.id, callId: P.hash("first subcall"), request: { ...f.body, model: "koinos-network:fixture-large", max_tokens: 8, stream: false } };
+  let runs = create(); const { run } = await runs.open(c, { budget: "1", mode: "research", model: "fixture-large", freeOnly: false, ...(paidFirst ? { paidFirst: true } : {}) }, f.signal);
+  const first = { runId: run.id, callId: P.hash("first subcall"), request: { ...f.body, model: "koinos-network:fixture-large", max_tokens: 8, stream: false, paidFirst: !paidFirst } };
   const answer = await runs.chat(c, first, f.signal); runs = create();
   assert.equal((await runs.chat(c, first, f.signal)).id, answer.id);
   assert.equal(f.calls.filter(c => c.action === "completions").length, 1);
   assert.equal(f.calls.find(c => c.action === "completions").b.runId, run.id);
+  assert.equal(f.calls.find(c => c.action === "completions").b.paidFirst === true, paidFirst, "run keeps its approved priority despite a changed global selection");
   await runs.chat(c, { ...first, callId: P.hash("second subcall") }, f.signal);
   const recovered = await runs.status(c, run.id, f.signal); assert.equal(recovered.steps.length, 2);
   assert.ok(recovered.steps.every(s => s.text === "A private answer" && s.credits === "19"));
@@ -179,4 +182,29 @@ test("catalog verifier rejects stale readiness, duplicate aliases, omitted model
   assert.throws(() => Models.tariffs([t, t], config.policyHash), /Unique/);
   assert.throws(() => Models.tariffs([{ ...t, model: "desktop:openai" }], config.policyHash), /Unique/);
   assert.throws(() => Models.tariffs([{ ...t, model: "dev-tiny" }], config.policyHash), /Unique/);
+});
+
+test("paid-first is capability checked, binds the estimate and survives encrypted reply recovery", async t => {
+  const f = setup(t, "prepaid-usd-v1"), body = { ...f.body, paidFirst: true, freeOnly: false };
+  const result = await f.flow.chat(null, body, f.signal);
+  assert.equal(f.calls.find(c => c.action === "estimate").b.paidFirst, true);
+  assert.equal(f.calls.find(c => c.action === "completions").b.paidFirst, true);
+  assert.match(f.progress.filter(p => typeof p === "string").join(" "), /purchased first/);
+  f.priority(false);
+  const recovered = await new PrepaidChat(f.options).recover(null, f.signal);
+  assert.equal(recovered.completion.id, result.id);
+  assert.equal(f.calls.filter(c => c.action === "completions").length, 1);
+  assert.equal(f.calls.filter(c => c.action === "capabilities").length, 1, "saved answer recovery does not depend on a new capability read");
+});
+test("paid-first cannot silently fall back when unsupported or missing from the verified estimate", async t => {
+  const f = setup(t, "prepaid-usd-v1"), body = { ...f.body, paidFirst: true };
+  f.priority(false); await assert.rejects(f.flow.chat(null, body, f.signal), /Paid-first is unavailable/);
+  assert.equal(f.calls.some(c => c.action === "estimate" || c.action === "completions"), false);
+  f.priority(true, false); await assert.rejects(f.flow.chat(null, body, f.signal), /estimate could not be verified/);
+  assert.equal(f.calls.some(c => c.action === "completions"), false);
+  assert.equal(fs.existsSync(f.file), false);
+  assert.throws(() => f.flow.input({ ...body, freeOnly: true }), /cannot be combined/);
+  assert.throws(() => f.flow.input({ ...body, paidFirst: "true" }), /Invalid paid-first/);
+  assert.deepEqual(f.flow.input({ ...f.body, paidFirst: false }), f.flow.input(f.body), "default keeps existing recovery hashes");
+  const legacy = setup(t); assert.throws(() => legacy.flow.input({ ...legacy.body, paidFirst: true }), /Invalid paid-first/);
 });

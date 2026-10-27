@@ -13,7 +13,7 @@ for (const product of ["prepaid-v1", "prepaid-usd-v1"]) test(product + " custome
     window.kaiKoinTestBridge = { onProgress: callback => { listeners.add(callback); return () => listeners.delete(callback); }, run: async (action, input) => {
       window.calls.push({ action, input });
       const common = { enabled: true, configured: true, product, mode: "mainnet-pilot" };
-      if (action === "chat-info") return { ...common, model: "koinos-fast", maxOutput: 128, blocked: "" };
+      if (action === "chat-info") return { ...common, model: "koinos-fast", maxOutput: 128, creditPriority: product === "prepaid-usd-v1", blocked: "" };
       if (action === "status") return { ...common, accessReady: true, credits: { available: window.balance, purchased: "10000000", spent: "0", held: "0" }, purchases: [], usage: [], purchasePending: !!window.pendingPurchase, worker: { running: window.provider } };
       if (["purchase", "purchase-retry"].includes(action)) { window.pendingPurchase = true; return { ...common, state: "purchase_pending" }; }
       if (action === "chat-completion") {
@@ -47,12 +47,12 @@ for (const product of ["prepaid-v1", "prepaid-usd-v1"]) test(product + " custome
   assert.doesNotMatch(await page.locator("#network-chat-account").innerText(), /reservation|reserved|settlement|allowance/i);
   assert.equal(await page.locator("#network-add-koin").isVisible(), false);
   assert.equal(await page.locator("#network-chat-reservation").isVisible(), false);
-  if (product === "prepaid-usd-v1") { await page.locator("#network-spending-summary").click(); await page.locator("#network-free-only").check(); await page.evaluate(() => { window.streamChat = true; }); }
+  if (product === "prepaid-usd-v1") { await page.locator("#nav-settings").click(); await page.locator("#network-paid-first").check(); await page.locator('#nav [data-view="chat"]').click(); await page.evaluate(() => { window.streamChat = true; }); }
   await page.fill("#input", "Use my existing credits while the purchase confirms"); await page.locator("#btn-send").click();
   if (product === "prepaid-usd-v1") {
     await page.waitForFunction(() => document.getElementById("messages").textContent.includes("Prepaid ") && window.finishStream);
     assert.equal(await page.locator("#btn-send").isDisabled(), true);
-    assert.equal(await page.evaluate(() => window.calls.find(c => c.action === "chat-completion").input.freeOnly), true);
+    assert.equal(await page.evaluate(() => window.calls.find(c => c.action === "chat-completion").input.paidFirst), true);
     await page.evaluate(() => window.finishStream());
   }
   await page.waitForFunction(() => document.getElementById("messages").textContent.includes("Prepaid answer") && !document.getElementById("btn-send").disabled);

@@ -64,10 +64,9 @@ test("earn wallet UI: create -> lock -> unlock -> restore -> unlock (real browse
 
     // KOIN transition never presents test-KAI as a mainnet balance.
     assert.match(await page.textContent("#view-earn h1"), /KOIN/);
-    assert.match(await page.textContent("#koin-stats"), /Not active/);
-    assert.equal(await page.locator("#btn-koin-purchase").isDisabled(), true);
+    assert.equal(await page.locator("#koin-stats, #btn-koin-purchase").count(), 0, "obsolete simulated balances and disabled purchase placeholder are removed");
     assert.equal(await page.locator("#btn-koin-claim").count(), 0);
-    assert.match(await page.textContent("#product-earlier-provider"), /Rewards will be sent automatically/);
+    assert.match(await page.textContent("#product-provider-earnings"), /No verified earnings loaded|Refresh to check your rewards/);
     assert.equal(await page.locator("#earn-legacy").getAttribute("open"), null);
     assert.equal(await page.locator("#earn-deposit-amt").count(), 0);
     assert.equal(await page.locator("#wallet-send-pass").isVisible(), true);

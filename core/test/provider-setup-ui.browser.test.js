@@ -42,6 +42,8 @@ test("Earn setup clicks acknowledge pending checks, show current blockers and re
   await navClick(page, '#nav [data-view="earn"]');
   const reload = page.locator("#product-provider-reload"), toggle = page.locator("#product-provider-toggle"), notice = page.locator("#product-provider-refresh");
   await page.waitForFunction(() => document.getElementById("product-provider-detail").textContent.includes("Unlock"));
+  assert.equal(await page.locator("#product-provider-start-hint").isVisible(), true);
+  assert.equal(await toggle.evaluate(el => getComputedStyle(el).backgroundColor), "rgb(183, 47, 64)");
   assert.equal(await toggle.isDisabled(), true); assert.match(await page.locator("#product-provider-setup").textContent(), /Unlock/);
   assert.doesNotMatch(await page.locator("#product-provider-setup").textContent(), /DOCTYPE/);
   if (process.env.KAI_PREPAID_QA_DIR) {
@@ -91,8 +93,13 @@ test("Earn setup clicks acknowledge pending checks, show current blockers and re
   if (process.env.KAI_PREPAID_QA_DIR) await page.screenshot({ path: path.join(process.env.KAI_PREPAID_QA_DIR, "provider-model-selection.png"), animations: "disabled" });
   await toggle.click(); await page.waitForFunction(() => document.getElementById("product-provider-label").textContent === "CHECKING MODEL");
   assert.equal(await toggle.textContent(), "Stop earning"); assert.equal(await toggle.isEnabled(), true);
+  assert.equal(await page.locator("#product-provider-start-hint").isVisible(), false);
+  assert.equal(await toggle.evaluate(el => getComputedStyle(el).backgroundColor), "rgb(22, 128, 82)");
+  assert.ok((await toggle.boundingBox()).height >= 44, "earning control has an obvious click target");
   assert.equal(await picker.isDisabled(), true);
   await toggle.click(); await page.waitForFunction(() => document.getElementById("product-provider-toggle").textContent === "Start earning");
+  assert.equal(await page.locator("#product-provider-start-hint").isVisible(), true);
+  assert.equal(await toggle.evaluate(el => getComputedStyle(el).backgroundColor), "rgb(183, 47, 64)");
   assert.equal(await page.evaluate(() => window.providerCalls.filter(x => x === "provider-public-start").length), 1);
   assert.equal(await page.evaluate(() => window.providerCalls.filter(x => x === "provider-public-stop").length), 1);
   assert.equal(await picker.inputValue(), "koinos-smart"); assert.equal(await picker.isEnabled(), true);

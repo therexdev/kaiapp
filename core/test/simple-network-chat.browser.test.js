@@ -20,7 +20,7 @@ test("Network selection chooses an online default and Send verifies one credit d
     deployment: { product: "prepaid-usd-v1", chainId: require("../lib/koin-network/payment-network").MAINNET_CHAIN,
       credits: Signer.fromSeed("simple-chat-contract").getAddress(), creditsHash: "0x1220" + P.hash("wasm") } };
   const common = { enabled: true, configured: true, activation: "ready", blocked: "", product: "prepaid-usd-v1", mode: "mainnet-pilot", paymentsEnabled: true, owner };
-  const calls = [], requests = new Map(); let page, browser, flow, spent = 0n, online = "koinos-smart";
+  const calls = [], requests = new Map(); let page, browser, flow, spent = 0n, online = "koinos-smart", creditPriority = true;
   const balance = () => ({ ...common, credits: { unit: "USD-1e-8", version: String(requests.size + 1), available: String(100000000n - spent),
     purchased: { purchased: "100000000", spent: String(spent), available: String(100000000n - spent), held: "0" },
     free: { state: "ineligible", available: "0" }, observedAt: Date.now() }, purchases: [], usage: [] });
@@ -30,9 +30,10 @@ test("Network selection chooses an online default and Send verifies one credit d
     payments: { run: () => { throw Error("Normal chat must never request a wallet action"); } },
     fetchImpl: async (url, init) => {
       const body = JSON.parse(init.body), action = url.split("/").at(-1); let value = {};
+      if (action === "capabilities") value.capabilities = { creditPriority };
       if (action === "models") { const now = Date.now(); value.catalog = { schema: 1, policyHash: config.policyHash, tariffs, asOf: now, validUntil: now + 15000,
         models: tariffs.map(tariff => ({ model: tariff.model, available: tariff.model === online, providers: tariff.model === online ? 1 : 0 })) }; }
-      if (action === "estimate") value.estimate = { model: body.model, unit: "USD-1e-8", maxCharge: String((5 + body.max_tokens) * 100), maxFree: "0", maxPaid: String((5 + body.max_tokens) * 100), allowed: !body.freeOnly };
+      if (action === "estimate") value.estimate = { model: body.model, unit: "USD-1e-8", maxCharge: String((5 + body.max_tokens) * 100), maxFree: "0", maxPaid: String((5 + body.max_tokens) * 100), allowed: !body.freeOnly, ...(body.paidFirst ? { paidFirst: true } : {}) };
       if (action === "completions") {
         assert.equal(body.freeOnly, false); assert.equal(body.model, online);
         let completion = requests.get(body.requestId);
@@ -62,7 +63,7 @@ test("Network selection chooses an online default and Send verifies one credit d
   const errors = []; page.on("pageerror", error => errors.push(error.message));
   await page.exposeFunction("simpleCreditIPC", async (action, input) => {
     calls.push({ action, input }); const signal = AbortSignal.timeout(10000);
-    if (["chat-info", "purchase-info"].includes(action)) { const catalog = await flow.models(signal); return { ...common, model: config.model, maxOutput: 16, maxRequestCredits: "10", models: catalog.models, modelAvailabilityUntil: catalog.validUntil }; }
+    if (["chat-info", "purchase-info"].includes(action)) { const catalog = await flow.models(signal); return { ...common, model: config.model, maxOutput: 16, maxRequestCredits: "10", creditPriority, models: catalog.models, modelAvailabilityUntil: catalog.validUntil }; }
     if (action === "credit-status") return balance();
     if (action === "chat-completion") return flow.chat(null, input, signal);
     if (action === "chat-ack") { flow.acknowledge(input); return { state: "delivered" }; }
@@ -79,8 +80,9 @@ test("Network selection chooses an online default and Send verifies one credit d
   await page.locator('#nav [data-view="chat"]').click();
   await page.selectOption("#src-pick", "network");
   await page.waitForFunction(() => document.getElementById("model-pick").value === "koinos-network:koinos-smart");
-  assert.equal(await page.locator("#network-free-only").isVisible(), false, "ordinary Send has no spending checkbox to complete");
-  assert.equal(await page.locator("#network-free-only").isChecked(), false);
+  assert.equal(await page.locator("#network-free-only").count(), 0, "ordinary Send has no spending checkbox");
+  assert.equal(await page.locator("#network-paid-first").isVisible(), false);
+  assert.equal(await page.locator("#network-paid-first").isChecked(), false);
   assert.equal(await page.locator("#credit-run-review").isVisible(), false);
   await page.fill("#input", "Use my purchased credits"); await page.click("#btn-send");
   await page.waitForFunction(() => document.getElementById("messages").textContent.includes("A signed network answer") && !document.getElementById("btn-send").disabled);
@@ -105,12 +107,26 @@ test("Network selection chooses an online default and Send verifies one credit d
   await page.waitForFunction(() => document.getElementById("messages").textContent.includes("model is unavailable") && !document.getElementById("btn-send").disabled);
   assert.equal(requests.size, 1); assert.equal(spent, 800n);
 
-  await page.locator("#network-spending-summary").click(); await page.locator("#network-free-only").check();
-  assert.equal(await page.locator("#network-spending-summary").textContent(), "Spending: free credits only");
+  await page.locator("#nav-settings").click();
+  await page.locator("#network-paid-first").check();
+  assert.match(await page.locator("#network-credit-priority-help").textContent(), /Purchased credits are used first/);
   await page.reload(); await page.locator('#nav [data-view="chat"]').click(); await page.selectOption("#src-pick", "network");
   await page.waitForFunction(() => document.getElementById("model-pick").value === "koinos-network:koinos-fast");
-  assert.equal(await page.locator("#network-free-only").isChecked(), true);
-  assert.equal(await page.locator("#network-spending-summary").textContent(), "Spending: free credits only");
+  assert.equal(await page.locator("#network-paid-first").isChecked(), true);
+  await page.selectOption("#model-pick", "koinos-network:koinos-smart");
+  await page.fill("#input", "Use purchased credits first"); await page.click("#btn-send");
+  await page.waitForFunction(() => document.getElementById("messages").textContent.includes("A signed network answer") && !document.getElementById("btn-send").disabled);
+  assert.equal(requests.size, 2);
+  assert.equal(calls.filter(call => call.action === "chat-completion").at(-1).input.paidFirst, true);
+  creditPriority = false;
+  await page.evaluate(() => KaiNetwork.refresh());
+  await page.fill("#input", "Do not silently switch spending order"); await page.click("#btn-send");
+  await page.waitForFunction(() => document.getElementById("messages").textContent.includes("Paid-first is unavailable") && !document.getElementById("btn-send").disabled);
+  assert.equal(requests.size, 2);
+  await page.locator("#nav-settings").click();
+  await page.locator("#network-paid-first").uncheck();
+  assert.equal(await page.locator("#network-paid-first").isDisabled(), true);
+  assert.match(await page.locator("#network-credit-priority-help").textContent(), /network service update/);
 
   core.settings.set("network.privacyMode", "local-only");
   await page.reload();

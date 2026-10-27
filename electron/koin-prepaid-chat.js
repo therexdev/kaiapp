@@ -96,12 +96,17 @@ class PrepaidChat extends ChatFlow {
       koin: { product: this.product, state: k.state, target: this.target, session: k.session, quote: q, receipt: r, receiptHash: k.receiptHash } };
   }
   async status() { return this.call("status"); }
+  async requireCreditPriority(signal) {
+    const result = await this.call("capabilities", {}, signal);
+    if (result.capabilities?.creditPriority !== true) throw Error("Paid-first is unavailable on this network. Turn it off in Settings to use free credits first.");
+  }
   async estimate(value, signal, catalogReady = false) {
     if (isUsd(this.product) && !catalogReady) await this.models(signal);
     const input = this.input(value); this.available(input.model);
-    const result = await this.call("estimate", { model: input.model, messages: input.messages, max_tokens: input.maxOutput, freeOnly: input.freeOnly === true, ...(input.runId ? { runId: input.runId } : {}) }, signal);
+    if (input.paidFirst) await this.requireCreditPriority(signal);
+    const result = await this.call("estimate", { model: input.model, messages: input.messages, max_tokens: input.maxOutput, freeOnly: input.freeOnly === true, ...(input.paidFirst ? { paidFirst: true } : {}), ...(input.runId ? { runId: input.runId } : {}) }, signal);
     const e = result.estimate;
-    if (!e || e.model !== input.model || e.unit !== (isUsd(this.product) ? "USD-1e-8" : "legacy-KOIN-1e-8") || typeof e.allowed !== "boolean" ||
+    if (!e || (e.paidFirst === true) !== (input.paidFirst === true) || e.model !== input.model || e.unit !== (isUsd(this.product) ? "USD-1e-8" : "legacy-KOIN-1e-8") || typeof e.allowed !== "boolean" ||
         ![e.maxCharge, e.maxFree, e.maxPaid].every(n => typeof n === "string" && /^(0|[1-9]\d{0,19})$/.test(n)) || BigInt(e.maxFree) + BigInt(e.maxPaid) !== BigInt(e.maxCharge)) throw Error("Credit estimate could not be verified");
     if (this.config.limits?.perJob && BigInt(e.maxCharge) > BigInt(this.config.limits.perJob)) throw Error("This message exceeds your saved per-request credit limit. Shorten it or choose a local model.");
     return e;
@@ -149,12 +154,12 @@ class PrepaidChat extends ChatFlow {
       const estimate = await this.estimate(value, signal, true);
       if (!estimate.allowed) throw Error(input.freeOnly ? "Free only is on. This request exceeds your available free credits." : "Not enough credits for this request. Buy credits or choose a local model.");
       const credits = require("../core/lib/koin-network/purchase-quote").credits;
-      this.progress(`Maximum ${credits(estimate.maxCharge)} credits · free first (${credits(estimate.maxFree)}) · up to ${credits(estimate.maxPaid)} purchased credits`);
+      this.progress(`Maximum ${credits(estimate.maxCharge)} credits · ${input.paidFirst ? "purchased first" : "free first"} · up to ${credits(estimate.maxFree)} free / ${credits(estimate.maxPaid)} purchased credits`);
       record = { schema: 1, owner: this.config.owner, deployment: P.hash(JSON.stringify(this.config)), id: crypto.randomBytes(32).toString("hex"),
         session: P.hash("prepaid-account:" + this.config.owner), requestHash, state: "pending", ...(this.approvedTariffs ? { tariffs: this.approvedTariffs } : {}), maxPaid: estimate.maxPaid, costEstimate: estimate, input: this.storage.encryptString(JSON.stringify(value)).toString("base64") };
       this.save(record);
     }
-    this.progress(record.costEstimate ? `Generating your answer · maximum ${require("../core/lib/koin-network/purchase-quote").credits(record.costEstimate.maxCharge)} credits · up to ${require("../core/lib/koin-network/purchase-quote").credits(record.maxPaid)} purchased credits after free credits` : "Generating your answer…");
+    this.progress(record.costEstimate ? `Generating your answer · maximum ${require("../core/lib/koin-network/purchase-quote").credits(record.costEstimate.maxCharge)} credits · up to ${require("../core/lib/koin-network/purchase-quote").credits(record.maxPaid)} purchased credits ${input.paidFirst ? "before" : "after"} free credits` : "Generating your answer…");
     try {
       let prefix = "", sequence = 0, amount = 0n;
       const delivered = completion => {
@@ -165,7 +170,7 @@ class PrepaidChat extends ChatFlow {
         if (delta) this.progress({ requestId: record.id, delta, servedModel: input.model, creditsAtoms: receipt.usage.amount });
       };
       const response = await this.call("chat", { billing: "koin-" + this.product, requestId: record.id, model: input.model, messages: input.messages, max_tokens: input.maxOutput,
-        stream: value.stream !== false, ...(record.maxPaid !== undefined ? { maxPaid: record.maxPaid } : {}), ...(input.freeOnly !== undefined ? { freeOnly: input.freeOnly } : {}), ...(input.runId ? { runId: input.runId } : {}) }, signal, delivered);
+        stream: value.stream !== false, ...(record.maxPaid !== undefined ? { maxPaid: record.maxPaid } : {}), ...(input.freeOnly !== undefined ? { freeOnly: input.freeOnly } : {}), ...(input.paidFirst ? { paidFirst: true } : {}), ...(input.runId ? { runId: input.runId } : {}) }, signal, delivered);
       const answer = this.verify(response.completion, input, record.id);
       // Persist the verified answer before displaying it. The service has already
       // recorded this one usage charge and retains an encrypted recovery copy.

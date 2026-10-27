@@ -1,3 +1,11 @@
+## Automatic price previews, credit preferences and clearer earning controls
+
+- Buy credits calculates the KOIN estimate when an amount is entered, refreshes it every 30 seconds while the page is visible, and discards expired or out-of-date responses. Display-only price reads never create signed purchase quotes or use the quote allowance. Buy still opens one wallet approval for the exact current payment.
+- Settings contains **Use paid credits before free credits when using the network**, off by default. Free credits remain first unless this is enabled. Eligible free credits can cover the remainder after purchased credits run out; saved requests and approved multi-step runs keep their original priority.
+- These two features require the matching credit-service update. Older services keep normal purchases and free-first chat working; the app explains unavailable automatic previews and does not enable an unsupported paid-first preference. Publishing this desktop release does not deploy the server update.
+- The Earn button is red while sharing is off and green while sharing is on, with a larger click target and an off-state start hint. Verified ONLINE status remains a separate network observation.
+- Removed obsolete payment rehearsals and simulated reward displays. Real saved Research, Agent and Team outputs are under **Account help → Research & agent results**, with automatic history loading. Payment recovery and model diagnostics are preserved.
+
 ## Keep local diagnostics from interrupting network qualification
 
 - A local provider check waits for an in-flight network request to finish, pauses new network work while it checks the model, and resumes sharing automatically afterward. Cancelling or failing the diagnostic also releases the pause. The earning preference stays on.

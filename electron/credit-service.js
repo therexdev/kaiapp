@@ -80,15 +80,20 @@ class CreditService {
       return { enabled: true, configured: true, product: "prepaid-usd-v1", activation: "ready", blocked: "", ...await this.purchaseState(c, signal) };
     } catch (error) { return { enabled: true, configured: true, product: "prepaid-usd-v1", activation: "signin-required", blocked: String(error.message), recoveryAvailable: false }; }
   }
+  async purchaseCapabilities(signal) {
+    const c = await this.context(signal);
+    const result = await c.flow.call("capabilities", {}, signal);
+    return { purchasePricePreview: result?.capabilities?.purchasePricePreview === true };
+  }
   async info(signal) {
     if (this.service.state !== "ready") return { enabled: true, configured: true, product: "prepaid-usd-v1", blocked: this.service.reason, activation: "unavailable", recoveryAvailable: false };
     try {
       const c = await this.context(signal);
-      let runBudgets = false, modelCatalog, modelError = "";
+      let runBudgets = false, creditPriority = false, modelCatalog, modelError = "";
       try { modelCatalog = await c.flow.models(signal); } catch (error) { modelError = String(error.message).slice(0, 220); }
-      try { const r = await c.flow.call("capabilities", {}, signal); runBudgets = !!modelCatalog && r.capabilities?.advancedRuns === true && modelCatalog.models.every(t => r.capabilities.models?.some(m => m.model === t.model && m.version === t.version && m.maxOutput >= t.maxOutput)); } catch { /* Normal Chat remains independent of advanced-run support. */ }
+      try { const r = await c.flow.call("capabilities", {}, signal); creditPriority = r.capabilities?.creditPriority === true; runBudgets = !!modelCatalog && r.capabilities?.advancedRuns === true && modelCatalog.models.every(t => r.capabilities.models?.some(m => m.model === t.model && m.version === t.version && m.maxOutput >= t.maxOutput)); } catch { /* Normal Chat remains independent of advanced-run support. */ }
       return { enabled: true, configured: true, product: "prepaid-usd-v1", activation: "ready", blocked: modelError, ...await this.purchaseState(c, signal), model: c.config.model, maxOutput: c.config.maxOutput, models: modelCatalog?.models || [], modelAvailabilityUntil: modelCatalog?.validUntil || null,
-        runBudgets, maxRequestCredits: require("../core/lib/koin-network/purchase-quote").credits(c.config.limits.perJob), recoveryAvailable: c.recoverable.length > 0 };
+        runBudgets, creditPriority, maxRequestCredits: require("../core/lib/koin-network/purchase-quote").credits(c.config.limits.perJob), recoveryAvailable: c.recoverable.length > 0 };
     } catch (error) { return { enabled: true, configured: true, product: "prepaid-usd-v1", activation: "signin-required", blocked: String(error.message), recoveryAvailable: false }; }
   }
   async run(action, input, signal, window) {
@@ -98,6 +103,7 @@ class CreditService {
     if (action === "run-status") return this.runs.status(c, input, signal);
     if (action === "run-stop") return this.runs.stop(c, input, signal);
     if (action === "run-list") return { runs: this.runs.list(c) };
+    if (action === "purchase-estimate") return this.purchases.estimate(c, input, signal);
     if (action === "purchase-preview") return this.purchases.preview(c, input, signal);
     if (["purchase-approve", "purchase-retry"].includes(action)) return this.purchases.run(c, window, action, input, signal);
     if (action === "purchase-sync") return this.purchases.sync(c, signal);

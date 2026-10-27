@@ -5,7 +5,7 @@
   const el = id => document.getElementById(id);
   const status = el("koin-test-payment-status"), select = el("koin-test-transaction");
   const buttons = [...section.querySelectorAll("[data-koin-test]")];
-  let busy = false, configured = false, mainnet = false, hasSession = false, providing = false, activated = false;
+  let busy = false, configured = false, mainnet = false, hasSession = false, providing = false;
   let transactions = [], prepaid = false;
   const credits = value => { const n = BigInt(value || "0"); return `${n / 100000n}.${(n % 100000n).toString().padStart(5, "0")}`.replace(/\.?0+$/, "") || "0"; };
   const amount = value => {
@@ -27,12 +27,6 @@
   function message(text, error = false) { status.textContent = text; status.dataset.error = String(error); if (el("network-chat-status")) el("network-chat-status").textContent = text; }
   function activate() {
     section.hidden = false;
-    if (activated) return;
-    activated = true;
-    el("koin-purchase-placeholder").hidden = true;
-    for (const id of ["koin-shadow-overview", "koin-review-preview", "koin-session-rehearsal"]) {
-      if (el(id)) el("koin-developer-content").appendChild(el(id));
-    }
   }
   function controls() {
     const selected = transactions.find(item => item.id === select.value);
@@ -132,7 +126,6 @@
         el("koin-available").textContent = credits(result.credits.available);
         el("network-chat-balance").textContent = credits(result.credits.available) + " credits";
       }
-      el("network-free-preference").hidden = result.product !== "prepaid-usd-v1";
       if (result.creditState) window.KaiCredits?.accept({ product: result.product, owner: result.owner, credits: result.creditState, purchases: result.purchases, usage: result.usage });
       const history = el("koin-prepaid-rows"); history.replaceChildren();
       const rows = [...(result.purchases || []).map(p => ({ at: p.createdAt, text: p.state === "confirmed" ? `Purchased ${credits(p.amount)} credits` : p.state === "failed" ? "Purchase did not complete" : "Purchase confirming… You can keep using your existing credits." })),

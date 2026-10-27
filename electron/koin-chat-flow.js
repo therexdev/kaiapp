@@ -6,9 +6,11 @@ const P = require("../core/lib/koin-network/job-protocol");
 const terminal = s => ["finalized", "reverted", "consumed_elsewhere"].includes(s);
 const delay = (ms, signal) => require("node:timers/promises").setTimeout(ms, undefined, { signal });
 function request(value, config, tariffs) {
-  if (!value || Object.keys(value).some(k => !["model", "messages", "max_tokens", "stream", "freeOnly", "runId"].includes(k))) throw Error("Unsupported network chat request");
+  if (!value || Object.keys(value).some(k => !["model", "messages", "max_tokens", "stream", "freeOnly", "paidFirst", "runId"].includes(k))) throw Error("Unsupported network chat request");
   if (value.runId !== undefined) { P.digest(value.runId); if (!require("../core/lib/koin-network/product").isUsd(config.deployment)) throw Error("Advanced run budgets require USD credits"); }
   if (value.freeOnly !== undefined && (typeof value.freeOnly !== "boolean" || !require("../core/lib/koin-network/product").isPrepaid(config.deployment))) throw Error("Invalid Free only preference");
+  if (value.paidFirst !== undefined && (typeof value.paidFirst !== "boolean" || !require("../core/lib/koin-network/product").isUsd(config.deployment))) throw Error("Invalid paid-first preference");
+  if (value.paidFirst && value.freeOnly) throw Error("Paid-first cannot be combined with Free only");
   const selected = value.model === "koinos-network" ? config.model : typeof value.model === "string" && value.model.startsWith("koinos-network:") ? value.model.slice(15) : null;
   const tariff = tariffs?.find(t => t.model === selected);
   if (!selected || (tariffs ? !tariff : selected !== config.model)) throw Error("Choose the approved network model");
@@ -18,7 +20,7 @@ function request(value, config, tariffs) {
   if (Buffer.byteLength(JSON.stringify(messages)) > 24000) throw Error("This conversation is too long for the current network model. Start a new chat or shorten the message");
   const ceiling = tariff ? Math.min(config.maxOutput, tariff.maxOutputTokens) : config.maxOutput;
   const maxOutput = value.max_tokens === undefined ? ceiling : P.integer(value.max_tokens, 1, ceiling);
-  return { messages, model: selected, maxOutput, ...(value.freeOnly !== undefined ? { freeOnly: value.freeOnly } : {}), ...(value.runId ? { runId: value.runId } : {}) };
+  return { messages, model: selected, maxOutput, ...(value.freeOnly !== undefined ? { freeOnly: value.freeOnly } : {}), ...(value.paidFirst === true ? { paidFirst: true } : {}), ...(value.runId ? { runId: value.runId } : {}) };
 }
 class ChatFlow {
   constructor({ file, storage, payments, session, config, progress = () => {}, wait = delay, pollMs = 5000, attempts = 36 }) {

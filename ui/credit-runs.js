@@ -1,11 +1,12 @@
 "use strict";
 (() => {
-  const bridge = window.kaiKoinTestBridge, host = document.getElementById("network-chat-account"); if (!bridge || !host) return;
+  const bridge = window.kaiKoinTestBridge; if (!bridge) return;
   const dialog = document.createElement("dialog"); dialog.id = "credit-run-review";
-  dialog.innerHTML = '<form method="dialog"><h2>Set a total run budget</h2><p>Research, Agents and Teams can make several AI calls. This one ceiling covers every model call and retry. Local tools add no network-credit charge; their permissions still apply.</p><label>Total credits <input id="credit-run-budget" inputmode="decimal" autocomplete="off" required /></label><label><input id="credit-run-free-only" type="checkbox" /> Free only</label><p id="credit-run-cost">Free credits are used first. Unless Free only is selected, purchased credits may cover the rest, up to this total budget.</p><p>Stop ends new work. Verified delivered work is charged once; useful partial results are saved below.</p><p id="credit-run-error" role="alert"></p><button value="cancel" formnovalidate>Cancel</button><button id="credit-run-start" value="start" class="primary">Start within this budget</button></form>';
+  dialog.innerHTML = '<form method="dialog"><h2>Set a total run budget</h2><p>Research, Agents and Teams can make several AI calls. This one ceiling covers every model call and retry. Local tools add no network-credit charge; their permissions still apply.</p><label>Total credits <input id="credit-run-budget" inputmode="decimal" autocomplete="off" required /></label><label><input id="credit-run-free-only" type="checkbox" /> Free only</label><p id="credit-run-cost">Free credits are used first. Unless Free only is selected, purchased credits may cover the rest, up to this total budget.</p><p>Stop ends new work. Verified delivered work is charged once; useful partial results are saved in Account help → Research &amp; agent results.</p><p id="credit-run-error" role="alert"></p><button value="cancel" formnovalidate>Cancel</button><button id="credit-run-start" value="start" class="primary">Start within this budget</button></form>';
   document.body.appendChild(dialog);
-  const saved = document.createElement("details"); saved.id = "credit-run-results"; saved.innerHTML = '<summary>Saved multi-step results</summary><button type="button" id="credit-run-refresh">Refresh saved runs</button><div id="credit-run-history"></div>';
-  host.appendChild(saved);
+  const saved = document.createElement("details"); saved.id = "credit-run-results"; saved.innerHTML = '<summary>Research &amp; agent results</summary><p>Saved responses from Research, Agents and Teams, including useful results from interrupted runs.</p><div id="credit-run-history"></div>';
+  // Recovery belongs with account history, not beside every network message.
+  document.addEventListener("DOMContentLoaded", () => document.getElementById("view-recovery")?.appendChild(saved), { once: true });
   let active = null, opening = false;
   const random = () => [...crypto.getRandomValues(new Uint8Array(32))].map(b => b.toString(16).padStart(2, "0")).join("");
   const credits = n => { const amount = BigInt(n); return `${amount / 100000n}.${(amount % 100000n).toString().padStart(5, "0")}`.replace(/\.?0+$/, "") || "0"; };
@@ -17,11 +18,11 @@
       const selected = window.KaiNetwork.selectedModel();
       if (Array.isArray(info.models) && !selected?.available) throw Error("Choose an available network model before starting this run.");
       document.getElementById("credit-run-error").textContent = "";
-      document.getElementById("credit-run-free-only").checked = document.getElementById("network-free-only").checked;
+      document.getElementById("credit-run-free-only").checked = false; paintCost();
       const accepted = await new Promise(resolve => { dialog.addEventListener("close", () => resolve(dialog.returnValue === "start"), { once: true }); dialog.showModal(); });
       if (!accepted) return false;
       const budget = document.getElementById("credit-run-budget").value.trim(), freeOnly = document.getElementById("credit-run-free-only").checked;
-      const result = await bridge.run("run-open", { mode, budget, freeOnly, ...(selected ? { model: selected.model } : {}) });
+      const result = await bridge.run("run-open", { mode, budget, freeOnly, ...(window.KaiNetwork.paidFirst?.() === true && !freeOnly ? { paidFirst: true } : {}), ...(selected ? { model: selected.model } : {}) });
       if (!/^[a-f0-9]{64}$/.test(result.run?.id || "")) throw Error("Run approval unavailable");
       active = result.run; return true;
     } finally { opening = false; }
@@ -45,7 +46,7 @@
     const stream = new ReadableStream({ start(c) { controller = c; }, cancel() { ended = true; stop(); unsubscribe(); } });
     init.signal?.throwIfAborted(); init.signal?.addEventListener("abort", stop, { once: true });
     bridge.run("run-execute", { runId: id, kind, body }).then(result => frame(init.signal?.aborted
-      ? { done: true, error: "Stopped. Delivered intermediate results remain saved below." } : { done: true, ...result })).catch(error => frame({ done: true, error: error.message })).finally(() => {
+      ? { done: true, error: "Stopped. Delivered intermediate results are saved in Account help → Research & agent results." } : { done: true, ...result })).catch(error => frame({ done: true, error: error.message })).finally(() => {
       unsubscribe(); init.signal?.removeEventListener("abort", stop); if (!ended) { ended = true; controller.close(); }
     });
     return Promise.resolve(new Response(stream, { headers: { "content-type": "text/event-stream" } }));
@@ -80,6 +81,14 @@
     if (!active) return; const id = active.id; active = null;
     await bridge.run("run-stop", id).catch(() => {}); await history(); window.KaiCredits?.refresh();
   }
-  document.getElementById("credit-run-refresh").addEventListener("click", history);
+  function paintCost() {
+    document.getElementById("credit-run-cost").textContent = document.getElementById("credit-run-free-only").checked
+      ? "This run uses free credits only, up to the total budget."
+      : window.KaiNetwork.paidFirst?.() === true
+        ? "Purchased credits are used first, then eligible free credits, up to this total budget."
+        : "Free credits are used first. Purchased credits may cover the rest, up to this total budget.";
+  }
+  document.getElementById("credit-run-free-only").addEventListener("change", paintCost);
+  saved.addEventListener("toggle", () => { if (saved.open) history(); });
   window.KaiCreditRuns = { begin, dispatch, execute, finish, get active() { return active; }, input: (inputId, text) => bridge.run("run-input", { runId: active?.id, inputId, text }), stop: () => active ? bridge.run("run-stop", active.id) : Promise.resolve() };
 })();

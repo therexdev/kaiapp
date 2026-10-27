@@ -112,6 +112,10 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
       if (input !== undefined || disposed) throw Error("Purchase availability takes no arguments and requires an open app");
       return creditService.purchaseInfo(AbortSignal.timeout(10000));
     }
+    if (action === "purchase-capabilities") {
+      if (input !== undefined || disposed) throw Error("Purchase capabilities take no arguments and require an open app");
+      return creditService.purchaseCapabilities(AbortSignal.timeout(10000));
+    }
     if (action.startsWith("provider-public-")) {
       if (action === "provider-public-model") {
         if (disposed || !window.isVisible() || window.isMinimized()) throw Error("Return to the visible app to choose a provider model");
@@ -158,7 +162,10 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
       if (input !== undefined) throw Error("Provider controls take no arguments");
       workerAbort?.abort(); await worker?.stop(); workerTrack?.(); workerTrack = null; return { state: "test_worker_stopped" };
     }
-    if (action === "purchase-preview") return withChatSignal(window, signal => creditService.run(action, input, signal), true);
+    if (["purchase-estimate", "purchase-preview"].includes(action)) {
+      if (disposed || !window.isVisible() || window.isMinimized()) throw Error("Return to the visible app for the current price");
+      return withChatSignal(window, signal => creditService.run(action, input, AbortSignal.any([signal, AbortSignal.timeout(15000)])), true);
+    }
     if (["purchase-approve", "credit-purchase-retry"].includes(action)) {
       if (disposed || busy) throw Error("Finish or cancel the open payment approval first");
       if (!window.isVisible() || window.isMinimized()) throw Error("Return to the visible desktop window to review payment");

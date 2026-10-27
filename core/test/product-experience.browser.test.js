@@ -15,6 +15,7 @@ test("Revision 2 free entry, unified credits, unavailable quote, stale network a
     window.kaiKoinTestBridge = { onProgress: fn => { listeners.add(fn); return () => listeners.delete(fn); }, run: async (action, input) => {
       window.productCalls.push({ action, input });
       if (action === "purchase-info") return { ...common, activation: "ready", blocked: "" };
+      if (action === "purchase-capabilities") return { purchasePricePreview: false };
       if (action === "chat-info") return { ...common, activation: "ready", runBudgets: window.advancedReady === true, blocked: "", model: "fixture", maxOutput: 32, maxRequestCredits: "1" };
       if (action === "credit-status") return { ...common, credits: credit(), purchases, usage: [] };
       if (action === "status") return { ...common, accessReady: true, credits: credit().purchased, creditState: credit(), purchases, usage: [], purchasePending: true, worker: { running: window.productSharing } };
@@ -108,8 +109,13 @@ test("Revision 2 free entry, unified credits, unavailable quote, stale network a
   await page.click("#btn-send"); await page.fill("#credit-run-budget", "1"); await page.click("#credit-run-start");
   await page.waitForFunction(() => window.productCalls.filter(c => c.action === "run-chat").length === 2 && !document.getElementById("btn-send").disabled);
   assert.equal(await page.evaluate(() => window.productCalls.filter(c => c.action === "run-chat").every(c => c.input.request.max_tokens === 32)), true);
+  assert.equal(await page.locator("#network-chat-account #credit-run-results").count(), 0, "saved workflow results do not clutter normal chat");
+  assert.equal(await page.locator("#credit-run-refresh").count(), 0);
+  await page.locator('.product-sidebar-credits [data-product-view="credits"]').click();
+  await page.locator('#view-credits .product-footer [data-product-action="legacy"]').click();
   await page.locator("#credit-run-results > summary").click(); await page.locator("#credit-run-history summary").first().click();
   await page.waitForFunction(() => document.getElementById("credit-run-history").textContent.includes("Saved useful intermediate result"));
+  await page.locator('#nav [data-view="chat"]').click();
   await page.selectOption("#mode-pick", "research"); await page.fill("#input", "Run budgeted research"); await page.click("#btn-send");
   await page.fill("#credit-run-budget", "1"); await page.click("#credit-run-start");
   await page.waitForFunction(() => window.productCalls.filter(c => c.action === "run-chat").length === 4 && !document.getElementById("btn-send").disabled);

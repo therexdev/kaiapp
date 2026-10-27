@@ -30,3 +30,19 @@ test("an unreadable saved payment cannot enable a new purchase", async () => {
   service.context = async () => { throw Error("Sign in to the credit account"); };
   assert.equal((await service.purchaseInfo()).activation, "signin-required");
 });
+
+
+test("automatic purchase previews require an explicit server capability and do not change purchase availability", async () => {
+  const service = new CreditService({ service: require("../lib/koin-network/credit-service.json"), dataDir: "/unused", account: {} });
+  let response = { capabilities: {} }, calls = 0;
+  service.context = async () => ({ flow: { call: async (action, body) => {
+    assert.equal(action, "capabilities"); assert.deepEqual(body, {}); calls++; return response;
+  } } });
+  service.purchases.status = async () => null; service.purchases.cancelled = async () => [];
+  assert.deepEqual(await service.purchaseCapabilities(), { purchasePricePreview: false });
+  response = { capabilities: { purchasePricePreview: "true" } };
+  assert.deepEqual(await service.purchaseCapabilities(), { purchasePricePreview: false });
+  response = { capabilities: { purchasePricePreview: true } };
+  assert.deepEqual(await service.purchaseCapabilities(), { purchasePricePreview: true });
+  assert.equal((await service.purchaseInfo()).activation, "ready"); assert.equal(calls, 3, "Buy availability never waits for capability lookup");
+});

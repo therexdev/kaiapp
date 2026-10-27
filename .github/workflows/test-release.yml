@@ -46,7 +46,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: therexdev/kai
-          ref: 5e3403bbe28982315e522602e264f62c72dadf1b
+          ref: 9d4ad205cf06fe54cc1a38f7088e87443eb7e87b
           path: verification-backend
           persist-credentials: false
       - name: Verify purchase, provider and paid reply together
@@ -54,6 +54,21 @@ jobs:
           npm ci --ignore-scripts --prefix verification-backend
           node scripts/verify-credit-flow.js verification-backend
           node scripts/verify-provider-qualification.js verification-backend
+        env:
+          KAI_SCHEDULER_URL: http://127.0.0.1:9/scheduler
+          KAI_RELAY_URL: http://127.0.0.1:9
+          KAI_FEEDBACK_URL: http://127.0.0.1:9/feedback
+      - name: Check out the currently deployed credit service for compatibility
+        uses: actions/checkout@v4
+        with:
+          repository: therexdev/kai
+          ref: cbdb3a581bf6b1e188379f18b99654a496626142
+          path: verification-deployed-backend
+          persist-credentials: false
+      - name: Verify existing purchases and free-first chat before service upgrade
+        run: |
+          npm ci --ignore-scripts --prefix verification-deployed-backend
+          node scripts/verify-credit-flow.js verification-deployed-backend --legacy-backend
         env:
           KAI_SCHEDULER_URL: http://127.0.0.1:9/scheduler
           KAI_RELAY_URL: http://127.0.0.1:9

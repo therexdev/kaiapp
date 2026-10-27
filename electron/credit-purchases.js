@@ -21,6 +21,7 @@ class CreditPurchases {
     const pending = this.background;
     if (pending) { pending.abort.abort(); await pending.promise.catch(() => {}); }
   }
+  async estimate(c, input, signal) { return this.quotes.estimate(c, input, signal); }
   async preview(c, input, signal) { return this.quotes.preview(c, input, signal); }
   async status(c, signal) {
     return this.read(c, signal, payments => {
