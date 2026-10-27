@@ -115,7 +115,7 @@ jobs:
       - run: npm ci
       - run: npm ci --ignore-scripts --prefix verification-wallet-backend
       - name: Verify ARM64 wallet, earning, launcher and backend integration
-        run: node --test core/test/wallet-credit-account.test.js core/test/provider-device.test.js core/test/session-free-chat.test.js core/test/credit-wallet-ipc.test.js core/test/linux-shortcut.test.js core/test/update-restart.test.js core/test/wallet-first-integration.test.js
+        run: node --test core/test/wallet-credit-account.test.js core/test/provider-device.test.js core/test/session-free-chat.test.js core/test/credit-wallet-ipc.test.js core/test/koin-windows-journals.test.js core/test/linux-shortcut.test.js core/test/update-restart.test.js core/test/wallet-first-integration.test.js
         env:
           KAI_WALLET_BACKEND: ${{ github.workspace }}/verification-wallet-backend
       - name: Verify native ARM64 relaunch and shared profile exclusion
@@ -172,6 +172,9 @@ jobs:
           $kaiChromium = node -e 'process.stdout.write(require("playwright-core").chromium.executablePath())'
           "KAI_TEST_CHROMIUM=$kaiChromium" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "KAI_WALLET_BACKEND=$env:GITHUB_WORKSPACE\verification-wallet-backend" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Verify long Windows payment paths and preserved recovery
+        timeout-minutes: 3
+        run: node --test core/test/koin-windows-journals.test.js
       - name: Verify Windows credit, purchase and earning behavior
         timeout-minutes: 12
         run: node --test --test-concurrency=1 core/test/wallet-credit-account.test.js core/test/provider-device.test.js core/test/credit-provider.test.js core/test/credit-purchases.test.js core/test/purchase-wallet.browser.test.js core/test/wallet-first-integration.test.js core/test/wallet-first-ui.browser.test.js core/test/credit-wallet-ipc.test.js core/test/session-free-chat.test.js core/test/koin-prepaid-chat.test.js core/test/koin-provider-status.test.js core/test/worker-proof.test.js core/test/worker-advertise.test.js core/test/worker-model-selection.test.js core/test/worker-start-stop.test.js core/test/worker-registration-retirement.test.js

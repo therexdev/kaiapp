@@ -1,6 +1,7 @@
 "use strict";
 const { isPrepaid, isUsd } = require("../core/lib/koin-network/product");
 const fs = require("fs"), path = require("path"), { DatabaseSync } = require("node:sqlite");
+const { sqlitePath } = require("../core/lib/sqlite-path");
 const { Signer, utils } = require("koilib");
 const { KoinChain } = require("../core/lib/koin-network/chain");
 const { FundingObserver, intent } = require("../core/lib/koin-network/funding-observer");
@@ -24,7 +25,7 @@ class FundingRecovery {
     fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
     this.#guard = new JournalSet(directory);
     try {
-      const file = path.join(directory, "funding-recovery.sqlite"); this.#db = new DatabaseSync(file); fs.chmodSync(file, 0o600);
+      const file = path.join(directory, "funding-recovery.sqlite"); this.#db = new DatabaseSync(sqlitePath(file)); fs.chmodSync(file, 0o600);
       this.#db.exec(`PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
         CREATE TABLE IF NOT EXISTS identity(id INTEGER PRIMARY KEY CHECK(id=1), data TEXT NOT NULL, clock INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS deposits(id TEXT PRIMARY KEY, owner TEXT NOT NULL, state TEXT NOT NULL, tx_id TEXT NOT NULL UNIQUE, hash TEXT NOT NULL, data TEXT NOT NULL);

@@ -8,12 +8,95 @@ const config = JSON.parse(fs.readFileSync(process.env.KAI_NATIVE_WALLET_CONFIG, 
 const report = value => { const file = path.join(config.root, phase + ".json"); fs.writeFileSync(file + ".tmp", JSON.stringify(value)); fs.renameSync(file + ".tmp", file); };
 const fail = error => { report({ error: String(error.stack || error) }); app.exit(1); };
 const load = file => require(path.join(config.sourceRoot, file));
+async function verifyLongPathJournals() {
+  // Use this Electron runtime's built-in SQLite and the packaged production
+  // recovery classes. This is an unsigned isolated rehearsal, with no wallet
+  // signer or broadcast transport. Ordinary persisted paths must stay intact.
+  const { DatabaseSync } = require("node:sqlite"), { Transaction, Signer, utils } = load("node_modules/koilib");
+  const { sqlitePath } = load("core/lib/sqlite-path.js"), { JournalSet } = load("core/lib/koin-network/journal-set.js");
+  const { FundingRecovery } = load("electron/koin-funding-recovery.js"), { KoinChain } = load("core/lib/koin-network/chain.js");
+  const { hash } = load("core/lib/koin-network/job-protocol.js");
+  const shortFile = path.join(config.root, "sqlite-same-physical-file.sqlite");
+  let db = new DatabaseSync(shortFile);
+  try {
+    if (phase === "enroll") { db.exec("CREATE TABLE fixture(value TEXT NOT NULL)"); db.prepare("INSERT INTO fixture VALUES(?)").run("native-same-file"); }
+    assert.equal(db.prepare("SELECT value FROM fixture").get().value, "native-same-file");
+  } finally { db.close(); }
+  db = new DatabaseSync(sqlitePath(shortFile), { readOnly: true });
+  try { assert.equal(db.prepare("SELECT value FROM fixture").get().value, "native-same-file"); }
+  finally { db.close(); }
+  let parent = path.join(config.root, "long-sqlite");
+  while (parent.length < 340) parent = path.join(parent, "native-journal-" + "j".repeat(48));
+  const directory = path.join(parent, "journals"), backupParent = path.join(parent, "external-backups"), backup = path.join(backupParent, "latest");
+  fs.mkdirSync(backupParent, { recursive: true });
+  const anchorFile = directory + ".recovery-anchor.sqlite", nonceFile = path.join(directory, "wallet-nonces.sqlite");
+  assert.ok(anchorFile.length > 300); assert.ok(path.join(backup, "funding-recovery.sqlite").length > 300);
+  const deployment = { schema: 1, network: "isolated", decimals: 8, rpc: ["http://127.0.0.1:1"],
+    chainId: utils.encodeBase64url(Buffer.from("1220" + "6".repeat(64), "hex")) };
+  for (const role of ["token", "credits", "rewards", "admin", "verifier", "mining", "operations"]) deployment[role] = Signer.fromSeed("native-storage-fixture-" + role).getAddress();
+  for (const role of ["token", "credits", "rewards"]) deployment[role + "Hash"] = "0x1220" + "1".repeat(64);
+  const client = new KoinChain(deployment, { getChainId: async () => deployment.chainId, getNextNonce: async () => "KAE=" });
+  const options = { mode: "isolated-rehearsal", client, clock: () => 1000000, maxRcPerDay: "20000000" };
+  const tx = new Transaction({ provider: client.provider, options: { payer: deployment.admin, rcLimit: "10000000" } });
+  await tx.pushOperation({ call_contract: { contract_id: deployment.token, entry_point: 1, args: "" } });
+  await tx.prepare({ chainId: deployment.chainId, nonce: "KAE=" });
+  assert.ok(!tx.transaction.signatures?.length);
+  const id = hash("native-long-path-unsigned-nonce"), savedFile = path.join(config.root, "journal-public.json");
+  let journal, guard;
+  const closeJournal = () => { if (journal) { const handle = journal; journal = null; handle.close(); } };
+  const readAnchor = () => {
+    const handle = new DatabaseSync(sqlitePath(anchorFile), { readOnly: true });
+    try { return { ...handle.prepare("SELECT pair_id,directory,generation FROM anchor WHERE id=1").get() }; }
+    finally { handle.close(); }
+  };
+  try {
+    journal = new FundingRecovery(directory, options);
+    assert.equal(journal.paymentsEnabled, false); assert.equal(journal.list().length, 0);
+    if (phase === "enroll") {
+      assert.equal((await journal.nonceCoordinator.reserve(id, "send", tx.transaction)).action, "sign_original");
+    }
+    assert.equal(journal.nonceCoordinator.status(id).state, "signing");
+    assert.equal(journal.nonceCoordinator.status(id).txId, tx.transaction.id);
+    assert.equal(journal.nonceCoordinator.envelope(id), null);
+    assert.equal(journal.nonceCoordinator.pending(deployment.admin, "send").length, 1);
+    await assert.rejects(journal.nonceCoordinator.reserve(hash("native-second-nonce"), "send", tx.transaction), /owns this wallet nonce/);
+    closeJournal();
+    // Supplying the namespace explicitly must reopen the same anchor and nonce,
+    // without changing the directory identity stored by the application.
+    journal = new FundingRecovery(sqlitePath(directory), options);
+    assert.equal(journal.nonceCoordinator.status(id).txId, tx.transaction.id); closeJournal();
+    const anchor = readAnchor(); assert.equal(anchor.directory, fs.realpathSync(directory));
+    assert.equal(anchor.directory.startsWith("\\\\?\\"), false);
+    guard = new JournalSet(directory, { maintenance: true });
+    if (phase === "enroll") {
+      const manifest = guard.snapshot(backup);
+      assert.equal(manifest.pairId, anchor.pair_id); assert.equal(manifest.generation, anchor.generation);
+      fs.writeFileSync(savedFile, JSON.stringify(anchor));
+    } else {
+      assert.deepEqual(anchor, JSON.parse(fs.readFileSync(savedFile, "utf8")));
+      assert.equal(guard.restore(backup).restored, true);
+      journal = new FundingRecovery(directory, options);
+      assert.equal(journal.nonceCoordinator.status(id).txId, tx.transaction.id); closeJournal();
+    }
+    assert.equal(guard.inspect(backup).restorable, true); assert.deepEqual(readAnchor(), anchor);
+    guard.close(); guard = null;
+    if (phase === "restart") {
+      db = new DatabaseSync(sqlitePath(nonceFile));
+      try { db.exec("UPDATE recovery_generation SET generation=generation+1"); } finally { db.close(); }
+      assert.throws(() => new FundingRecovery(directory, options), /generation mismatch/);
+    }
+    return { ordinaryNamespaceSameFile: true, namespaceDirectoryIdentity: true, unsignedNoncePreserved: true, backupVerified: true,
+      restored: phase === "restart", generationTamperRejected: phase === "restart", anchorLength: anchorFile.length,
+      backupLength: path.join(backup, "funding-recovery.sqlite").length, pairId: anchor.pair_id, generation: anchor.generation, txId: tx.transaction.id };
+  } finally { try { closeJournal(); } finally { guard?.close(); } }
+}
 app.setPath("appData", config.profile);
 load("core/lib/release-channel.js").configureDesktop(app, load("core/lib/release-channel.js").channelConfig("test"));
 if (!app.requestSingleInstanceLock()) fail(Error("Isolated fixture profile was already in use"));
 else app.whenReady().then(async () => {
   assert.equal(process.platform, "win32"); assert.equal(safeStorage.isEncryptionAvailable(), true);
   assert.equal(load("core/lib/protected-storage.js").isProtectedStorage(safeStorage), true);
+  const sqlite = await verifyLongPathJournals();
   const dataDir = path.join(app.getPath("userData"), "native-credential-fixture"), walletDir = path.join(dataDir, "wallet");
   const { WalletService } = load("core/lib/wallet.js"), { AccountService } = load("core/lib/account.js"), { ProviderDevice, target } = load("electron/provider-device.js"), { CreditProvider } = load("electron/credit-provider.js");
   const P = load("core/lib/koin-network/provider-device-protocol.js"), W = load("core/lib/wallet-credit-account.js");
@@ -98,6 +181,6 @@ else app.whenReady().then(async () => {
   assert.equal(walletSignCalls, phase === "enroll" ? 2 : 0);
   const result = { phase, packaged: config.packaged, profile: app.getPath("userData"), address: wallet.address, authorizationId: proof.authorizationId, deviceId: proof.deviceId,
     walletLocked: !wallet.status().unlocked, walletSignerAbsent: wallet._signer === null, walletSigningRejected: true, protectedStorage: true, offPreserved: true,
-    accountRestored: true, scopedProofVerified: true, walletSignCalls, controlledApprovals };
+    accountRestored: true, scopedProofVerified: true, walletSignCalls, controlledApprovals, sqlite };
   await provider.dispose(); report(result); app.quit();
 }).catch(fail);

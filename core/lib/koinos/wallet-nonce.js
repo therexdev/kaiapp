@@ -1,6 +1,7 @@
 "use strict";
 // Explicit rehearsal or Foundation Test configuration; never loads a wallet or key.
 const fs = require("fs"), path = require("path"), { DatabaseSync } = require("node:sqlite");
+const { sqlitePath } = require("../sqlite-path");
 const { isDeepStrictEqual } = require("node:util");
 const { Transaction, Signer, utils } = require("koilib");
 const { KoinChain } = require("../koin-network/chain");
@@ -36,7 +37,7 @@ class WalletNonceCoordinator {
     fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
     this.#guard = new JournalSet(directory);
     try {
-      const file = path.join(directory, "wallet-nonces.sqlite"); this.#db = new DatabaseSync(file); fs.chmodSync(file, 0o600);
+      const file = path.join(directory, "wallet-nonces.sqlite"); this.#db = new DatabaseSync(sqlitePath(file)); fs.chmodSync(file, 0o600);
       this.#db.exec(`PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
         CREATE TABLE IF NOT EXISTS identity(id INTEGER PRIMARY KEY CHECK(id=1), data TEXT NOT NULL, clock INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS reservations(id TEXT PRIMARY KEY, owner TEXT NOT NULL, state TEXT NOT NULL, tx_id TEXT NOT NULL, hash TEXT NOT NULL, data TEXT NOT NULL);

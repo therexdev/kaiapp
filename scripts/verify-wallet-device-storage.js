@@ -51,13 +51,19 @@ async function main() {
       assert.equal(result.error, undefined, result.error); assert.equal(record.code, 0, record.output);
       assert.equal(result.walletLocked, true); assert.equal(result.walletSignerAbsent, true);
       assert.equal(result.offPreserved, true); assert.equal(result.protectedStorage, true); assert.equal(result.walletSigningRejected, true);
+      assert.equal(result.sqlite.ordinaryNamespaceSameFile, true); assert.equal(result.sqlite.namespaceDirectoryIdentity, true);
+      assert.equal(result.sqlite.unsignedNoncePreserved, true); assert.equal(result.sqlite.backupVerified, true);
+      assert.ok(result.sqlite.anchorLength > 300); assert.ok(result.sqlite.backupLength > 300);
       return result;
     }
     const enrolled = await phase("enroll"), resumed = await phase("restart");
     assert.equal(enrolled.address, resumed.address); assert.equal(enrolled.deviceId, resumed.deviceId); assert.equal(enrolled.authorizationId, resumed.authorizationId);
     assert.equal(resumed.accountRestored, true); assert.equal(resumed.scopedProofVerified, true); assert.equal(resumed.walletSignCalls, 0); assert.equal(resumed.controlledApprovals, 0);
+    assert.equal(enrolled.sqlite.pairId, resumed.sqlite.pairId); assert.equal(enrolled.sqlite.generation, resumed.sqlite.generation); assert.equal(enrolled.sqlite.txId, resumed.sqlite.txId);
+    assert.equal(resumed.sqlite.restored, true); assert.equal(resumed.sqlite.generationTamperRejected, true);
     if (packaged) assert.equal(digest(originalArchive), archiveHash, "The original candidate package must remain unchanged");
     console.log("PASS: native Windows safeStorage protects wallet-credit and provider-device credentials across Electron restart; the real wallet stays locked, its signer is absent, scoped device proof verifies, and saved Off prevents worker startup. Approvals and service replies are controlled fixtures; no network or funds are used.");
+    console.log(`PASS: packaged Electron SQLite preserves the same journal anchor and unsigned nonce across restart at ${resumed.sqlite.anchorLength} characters, verifies and restores its external backup at ${resumed.sqlite.backupLength} characters, and rejects an altered generation. Ordinary and namespaced paths identify the same files.`);
   } finally {
     for (const record of children) if (!record.closed) record.child.kill();
     await Promise.all(children.map(record => record.done));

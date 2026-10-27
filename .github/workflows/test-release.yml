@@ -173,6 +173,8 @@ jobs:
       - run: npm ci
       - name: Test Windows signature rejection paths
         run: node --test core/test/windows-signing.test.js core/test/windows-signing-preparation.test.js
+      - name: Verify Windows long-profile payment journal recovery
+        run: node --test core/test/koin-windows-journals.test.js
       - name: Build fast Windows voice helper
         run: node scripts/build-windows-voice.js
       - name: Build private desktop control helper

@@ -1,5 +1,6 @@
 "use strict";
 const fs = require("fs"), path = require("path"), { DatabaseSync } = require("node:sqlite");
+const { sqlitePath } = require("../core/lib/sqlite-path");
 const { isDeepStrictEqual } = require("node:util");
 function directories(dataDir) {
   const result = ["koin-foundation-test", "koin-prepaid-v1", "koin-prepaid-usd-v1"].map(name => path.join(dataDir, name, "journals"));
@@ -23,7 +24,7 @@ function directories(dataDir) {
 }
 function read(file, run) {
   if (fs.lstatSync(file).isSymbolicLink()) throw Error("Review linked payment journals before payment");
-  const db = new DatabaseSync(file, { readOnly: true });
+  const db = new DatabaseSync(sqlitePath(file), { readOnly: true });
   try { if (db.prepare("PRAGMA quick_check").get().quick_check !== "ok") throw Error("Recover damaged payment journal before payment"); return run(db); }
   finally { db.close(); }
 }

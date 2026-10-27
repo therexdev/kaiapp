@@ -3,6 +3,7 @@
 This candidate requires the matching wallet-credit and provider-device server update. It has not been published to Test or Live. Desktop and server verification must pass together before activation.
 
 - Buy takes its exact verified quote straight to native payment approval. An unrelated sidebar balance refresh can no longer cancel that handoff, and automatic price updates no longer hide a payment failure. Account, wallet, quote, saved-payment, balance and Mana checks remain in the payment controller before submission.
+- Display-only KOIN estimates continue while the sidebar balance check is slow or unavailable. Windows payment journals use extended-length file paths while preserving their existing locations, recovery records and nonce protections.
 - Credits offers **Connect wallet** without mandatory email or password signup. Existing linked account identity, purchased balances and the service's free-credit policy remain authoritative. Opening a page never enrolls a wallet or grants credits.
 - Earn offers **Set up earning**, **Enable earning**, then **Start/Stop earning**. One native wallet review authorizes a separate device key for provider work; ordinary wallet Lock does not stop an authorized device. The key cannot spend KOIN, purchase credits or change the reward wallet. Expiry, revocation, privacy settings and fresh model qualification are enforced by both client and server.
 - Windows, macOS and supported Linux packages use the same flow. Raspberry Pi/Linux without protected credential storage offers an explicit session-only choice. Temporary buyer access is free-only, and the app shows the actual service allowance. It does not store plaintext credentials or promise restart access.
@@ -16,10 +17,10 @@ This candidate requires the matching wallet-credit and provider-device server up
 
 ## Choose which installed models to share
 
-- Earn defaults to **Share all compatible installed models**. You can choose a smaller set directly on Earn; the selection is saved for this credit account and deployment. Newly installed compatible models are included automatically in the default mode.
+- Earn defaults to **Share all compatible installed models**. You can choose a smaller set directly on Earn; the selection is saved for this wallet and deployment on this computer. Newly installed compatible models are included automatically in the default mode.
 - Each installed model shows whether it is selected and its network readiness, or why the package is incompatible. A model is marked ready for paid requests only while its verified network status is fresh. Installed or selected models are not automatically qualified.
 - Applying a selection while earning waits for current work to finish before reconnecting with the new model set. Stop remains available. Network jobs and presence reports are restricted to the selected approved packages; local Chat can still use other installed models.
-- The current service has a qualification policy for Smart only and counts the loaded, qualified model as ready. This desktop update does not widen server admission or change reward eligibility.
+- The last reviewed service configuration has a qualification policy for Smart only and counts the loaded, qualified model as ready. This desktop update does not widen server admission or change reward eligibility.
 
 ## Automatic KOIN estimates and model prices on Buy credits
 

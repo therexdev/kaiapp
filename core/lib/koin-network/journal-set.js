@@ -1,13 +1,14 @@
 "use strict";
 const fs = require("node:fs"), path = require("node:path"), os = require("node:os"), crypto = require("node:crypto");
 const { DatabaseSync } = require("node:sqlite");
+const { sqlitePath, filesystemPath } = require("../sqlite-path");
 const DEFAULT_FILES = ["funding-recovery.sqlite", "wallet-nonces.sqlite"];
 const hash = value => crypto.createHash("sha256").update(value).digest("hex");
 const json = value => JSON.stringify(value);
 function regular(file) {
   const s = fs.lstatSync(file); if (!s.isFile() || s.isSymbolicLink()) throw Error("Regular journal file required");
 }
-function syncFile(file) { const fd = fs.openSync(file, "r"); try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); } }
+function syncFile(file) { const fd = fs.openSync(file, "r+"); try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); } }
 
 // The anchor stays OUTSIDE the replaceable journal directory. It witnesses the
 // newest committed generation; a backup cannot restore or reset that witness.
@@ -15,7 +16,7 @@ function syncFile(file) { const fd = fs.openSync(file, "r"); try { fs.fsyncSync(
 class JournalSet {
   #anchor; #directory; #files; #lease; #id;
   constructor(directory, { files = DEFAULT_FILES, maintenance = false } = {}) {
-    this.#directory = path.resolve(directory);
+    this.#directory = path.resolve(filesystemPath(directory));
     if (!Array.isArray(files) || !files.length || files.length > 16 || files.some(f => !/^[a-z][a-z0-9-]{0,60}\.sqlite$/.test(f)) || new Set(files).size !== files.length) throw Error("Explicit journal file set required");
     this.#files = [...files].sort();
     fs.mkdirSync(this.#directory, { recursive: true, mode: 0o700 });
@@ -27,7 +28,7 @@ class JournalSet {
     if (!fs.existsSync(anchorFile) && this.#files.some(f => fs.existsSync(path.join(this.#directory, f)))) throw Error("Journal recovery anchor missing; do not initialize over existing records");
     if (maintenance && !fs.existsSync(anchorFile)) throw Error("Existing journal recovery anchor required");
     if (fs.existsSync(anchorFile)) regular(anchorFile);
-    this.#anchor = new DatabaseSync(anchorFile); fs.chmodSync(anchorFile, 0o600);
+    this.#anchor = new DatabaseSync(sqlitePath(anchorFile)); fs.chmodSync(anchorFile, 0o600);
     try {
       this.#anchor.exec(`PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
         CREATE TABLE IF NOT EXISTS anchor(id INTEGER PRIMARY KEY CHECK(id=1), pair_id TEXT NOT NULL, directory TEXT NOT NULL, files TEXT NOT NULL, generation INTEGER NOT NULL);
@@ -74,7 +75,7 @@ class JournalSet {
         if (expected.has(file)) throw Error(file === "wallet-nonces.sqlite" ? "Shared wallet nonce journal missing; restore both journals" : "Tracked funding journal missing; restore both journals");
         continue;
       }
-      regular(p); const db = new DatabaseSync(p, { readOnly: true });
+      regular(p); const db = new DatabaseSync(sqlitePath(p), { readOnly: true });
       try {
         const exists = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='recovery_generation'").get();
         if (!exists) throw Error("Journal generation missing; reviewed migration required");
@@ -88,7 +89,7 @@ class JournalSet {
   }
   #name(db) {
     const reported = db.prepare("PRAGMA database_list").all().find(r => r.name === "main")?.file;
-    const file = reported && fs.realpathSync(reported);
+    const file = reported && fs.realpathSync(filesystemPath(reported));
     if (!file || path.dirname(file) !== this.#directory || !this.#files.includes(path.basename(file))) throw Error("Database outside journal set");
     return path.basename(file);
   }
@@ -123,7 +124,7 @@ class JournalSet {
     });
   }
   snapshot(destination) {
-    const requested = path.resolve(destination), target = path.join(fs.realpathSync(path.dirname(requested)), path.basename(requested));
+    const requested = path.resolve(filesystemPath(destination)), target = path.join(fs.realpathSync(path.dirname(requested)), path.basename(requested));
     if (target === this.#directory || target.startsWith(this.#directory + path.sep) || fs.existsSync(target)) throw Error("New external backup directory required");
     return this.#locked(() => {
       const anchor = this.#assertGeneration(), entries = [];
@@ -131,8 +132,8 @@ class JournalSet {
       try {
         for (const file of this.#files) {
           const source = path.join(this.#directory, file); regular(source);
-          const db = new DatabaseSync(source, { readOnly: true }), output = path.join(target, file);
-          try { db.prepare("VACUUM INTO ?").run(output); } finally { db.close(); }
+          const db = new DatabaseSync(sqlitePath(source), { readOnly: true }), output = path.join(target, file);
+          try { db.prepare("VACUUM INTO ?").run(sqlitePath(output)); } finally { db.close(); }
           fs.chmodSync(output, 0o600); syncFile(output);
           entries.push({ name: file, sha256: hash(fs.readFileSync(output)), size: fs.statSync(output).size });
         }
@@ -146,7 +147,7 @@ class JournalSet {
     });
   }
   #inspect(directory) {
-    const root = path.resolve(directory), file = path.join(root, "manifest.json"); regular(file);
+    const root = path.resolve(filesystemPath(directory)), file = path.join(root, "manifest.json"); regular(file);
     if (fs.statSync(file).size > 16384) throw Error("Backup manifest too large");
     const text = fs.readFileSync(file, "utf8"), m = JSON.parse(text), witness = this.#anchor.prepare("SELECT * FROM backups WHERE id=?").get(m.id);
     if (m.schema !== 1 || m.mode !== "journal-backup" || m.pairId !== this.#id || !witness || witness.manifest_hash !== hash(text) || witness.generation !== m.generation ||
@@ -154,7 +155,7 @@ class JournalSet {
     for (const entry of m.files) {
       const p = path.join(root, entry.name); regular(p);
       if (fs.statSync(p).size !== entry.size || hash(fs.readFileSync(p)) !== entry.sha256) throw Error("Backup file checksum changed");
-      const db = new DatabaseSync(p, { readOnly: true });
+      const db = new DatabaseSync(sqlitePath(p), { readOnly: true });
       try { if (db.prepare("PRAGMA quick_check").get().quick_check !== "ok") throw Error("Corrupt journal backup"); }
       finally { db.close(); }
     }
@@ -177,7 +178,7 @@ class JournalSet {
       try {
         for (const f of m.files) {
           const temp = path.join(this.#directory, f.name + ".restore-" + m.id);
-          fs.copyFileSync(path.join(path.resolve(directory), f.name), temp, fs.constants.COPYFILE_EXCL); fs.chmodSync(temp, 0o600); syncFile(temp);
+          fs.copyFileSync(path.join(path.resolve(filesystemPath(directory)), f.name), temp, fs.constants.COPYFILE_EXCL); fs.chmodSync(temp, 0o600); syncFile(temp);
           prepared.push({ temp, file: path.join(this.#directory, f.name) });
         }
         for (const { temp, file } of prepared) {
