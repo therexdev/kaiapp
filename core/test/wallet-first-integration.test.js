@@ -38,7 +38,7 @@ function desktopWallet(signer) {
     signHash: async value => { if (!unlocked) throw Error("Wallet locked"); hashes++; return Buffer.from(await signer.signHash(value)).toString("base64"); },
     hashes: () => hashes };
 }
-async function fixture(t, { sessionOnly = false, freeAllowance = "1000000", multiModel = false } = {}) {
+async function fixture(t, { sessionOnly = false, freeAllowance = "1000000", multiModel = false, irreversiblePurchase = true, quoteTtlMs = USD.MAX_QUOTE_MS } = {}) {
   const cleanup = cleanupStack(t);
   const backend = createRequire(path.join(path.resolve(BACKEND), "package.json"));
   const f = require("./helpers/koin-funding-recovery-fixture").fixture({ after: cleanup }, { usd: true, mainnet: true });
@@ -75,7 +75,7 @@ async function fixture(t, { sessionOnly = false, freeAllowance = "1000000", mult
     koinPrepaid: { client: chain, target, meter, clock, providerDevices: devices, encryptionKey: Buffer.alloc(32, 53), publicAccounts: true, waitMs: 30000,
       freePolicy: { version: 1, accountDaily: freeAllowance, networkDaily: "10000000", originDaily: "10000000", accountConcurrent: 4, eligibleModels: tariffs.map(t => t.model) },
       networkOverview, qualify: (...args) => multiModel ? runtime.qualified(...args) : true, accept: () => true,
-      purchaseQuote: (owner, amount, denomination) => { assert.equal(denomination, "USD"); return Prices.issue({ deployment: f.d, signer: Signer.fromSeed("funding-recovery-verifier"), account: owner, amount: USD.nativeForDollars(amount, "25000000"), usdPerKoin: "25000000", version: 1, now: clock() }); } } });
+      purchaseQuote: (owner, amount, denomination) => { assert.equal(denomination, "USD"); return Prices.issue({ deployment: f.d, signer: Signer.fromSeed("funding-recovery-verifier"), account: owner, amount: USD.nativeForDollars(amount, "25000000"), usdPerKoin: "25000000", version: 1, now: clock(), ttlMs: quoteTtlMs }); } } });
   cleanup(() => scheduler.close());
   const hosts = new (backend("./lib/koin-network/test-hosts").TestHosts)(path.join(dir, "hosts"), f.d.chainId);
   cleanup(() => hosts.close());
@@ -120,7 +120,7 @@ async function fixture(t, { sessionOnly = false, freeAllowance = "1000000", mult
       const op = args.transaction.operations[1].call_contract;
       const decoded = await f.client.serializer.deserialize(op.args, "koin.Request");
       f.request.args = { account: decoded.account, amount: decoded.amount, purchase_quote: USD.quote(decoded.purchase_quote), price_signature: decoded.price_signature };
-      f.state.now = clock(); await f.include(args.transaction, { irreversible: true });
+      f.state.now = clock(); await f.include(args.transaction, { irreversible: irreversiblePurchase });
     }
     return { receipt };
   };
@@ -131,7 +131,7 @@ async function fixture(t, { sessionOnly = false, freeAllowance = "1000000", mult
   const accountOptions = { dataDir: buyerDir, settings, wallet, safeStorage: storage, accountOrigin: origin, fetchImpl };
   const account = new AccountService(accountOptions), approvals = [];
   const approval = { response: 1 };
-  const dialog = { showMessageBox: async (_window, detail) => { approvals.push(detail); return { response: approval.response }; } };
+  const dialog = { showMessageBox: async (_window, detail) => { approvals.push(detail); await approval.wait; return { response: approval.response }; } };
   const serviceOptions = { dataDir: buyerDir, account, storage, service: { schema: 1, state: "ready", config }, fetchImpl, dialog };
   const service = new CreditService(serviceOptions); service.purchases.clientFactory = () => f.client;
   cleanup(() => service.purchases.stop()); cleanup(() => service.sessionStore?.dispose());
@@ -248,6 +248,85 @@ test("real HTTP wallet-only enrollment, free balance, purchase finality and lock
   assert.equal((await restartedDevice.context(signal)).signer.address, f.providerWallet.address);
 });
 
+test("an included purchase outlives its quote, survives restart and credits once without cancellation or another signature", options, async t => {
+  const f = await fixture(t, { irreversiblePurchase: false, quoteTtlMs: 60000 }), signal = AbortSignal.timeout(45000), progress = [];
+  f.service.purchases.clock = f.clock; f.service.purchases.quotes.clock = f.clock;
+  f.service.purchases.progress = value => progress.push(value);
+  await f.service.connectWallet(f.window, {}, signal);
+  const preview = await f.service.run("purchase-preview", { usd: "1" }, signal);
+  const bought = await f.service.run("purchase-approve", preview.quote.id, signal, f.window);
+  assert.equal(bought.state, "pending"); assert.ok(bought.purchase.txId);
+  const reviewedCount = f.approvals.length;
+  assert.equal(f.approvals.filter(a => a.title === "Buy AI credits").length, 1);
+  assert.equal(f.transactionSigns(), 1); assert.deepEqual(f.rpcCalls, [false, true]);
+  assert.equal((await f.service.run("credit-status", undefined, signal)).credits.purchased.available, "0", "reversible inclusion cannot spend credits");
+
+  // The payment was included before its 60-second quote expired. Time spent
+  // waiting for LIB must never turn that successful inclusion into a refund,
+  // a cancellation approval or another signed purchase.
+  f.advance(61000); f.state.now = f.clock(); f.state.height++;
+  await f.service.run("purchase-sync", undefined, signal);
+  const included = (await f.service.purchaseInfo(signal)).localPurchase;
+  assert.equal(included.quoteExpired, true);
+  assert.equal(included.confirmation.state, "included");
+  assert.equal(included.confirmation.txId, bought.purchase.txId);
+  assert.equal(included.recovery, null);
+  assert.match(included.detail, /included in a block/i);
+  assert.doesNotMatch(included.detail, /zero-transfer|use Continue payment/i);
+  const retry = await f.service.run("purchase-retry", undefined, signal, f.window);
+  assert.equal(retry.state, "pending");
+  assert.equal(f.approvals.length, reviewedCount, "included payment must not open a cancellation or second purchase approval");
+  assert.equal(f.transactionSigns(), 1); assert.deepEqual(f.rpcCalls, [false, true]);
+  assert.ok(progress.some(p => p.stage === "awaiting-confirmation" && p.blockHeight && p.irreversibleHeight), "progress exposes verified inclusion while waiting for LIB");
+
+  f.service.purchases.stop();
+  const resumed = new CreditService({ ...f.serviceOptions, purchaseProgress: value => progress.push(value) });
+  resumed.purchases.clientFactory = () => f.client;
+  resumed.purchases.clock = f.clock; resumed.purchases.quotes.clock = f.clock;
+  f.cleanup(() => resumed.purchases.stop()); f.cleanup(() => resumed.sessionStore?.dispose());
+  await resumed.run("purchase-sync", undefined, signal);
+  assert.equal((await resumed.purchaseInfo(signal)).localPurchase.confirmation.state, "included", "restart reobserves the saved exact envelope");
+  f.state.lib = f.state.height;
+  await resumed.run("purchase-sync", undefined, signal);
+  await resumed.run("purchase-sync", undefined, signal);
+  const paid = await resumed.run("credit-status", undefined, signal);
+  assert.equal(paid.credits.purchased.available, "100000000");
+  assert.equal(paid.purchases.filter(p => p.state === "confirmed").length, 1);
+  assert.equal((await resumed.purchaseInfo(signal)).localPurchase, null);
+  assert.ok(progress.some(p => p.stage === "complete" && p.outcome === "credited" && p.txId === bought.purchase.txId));
+  assert.equal(f.approvals.length, reviewedCount); assert.equal(f.transactionSigns(), 1);
+  assert.deepEqual(f.rpcCalls, [false, true], "confirmation and restart never broadcast another envelope");
+});
+
+test("retry after restart recovers an already-confirmed expired quote without cancelling or buying twice", options, async t => {
+  const f = await fixture(t, { quoteTtlMs: 60000 }), signal = AbortSignal.timeout(45000);
+  f.service.purchases.clock = f.clock; f.service.purchases.quotes.clock = f.clock;
+  await f.service.connectWallet(f.window, {}, signal);
+  const preview = await f.service.run("purchase-preview", { usd: "1" }, signal);
+  const bought = await f.service.run("purchase-approve", preview.quote.id, signal, f.window);
+  const reviewedCount = f.approvals.length;
+  assert.equal((await f.service.run("credit-status", undefined, signal)).credits.purchased.available, "100000000");
+  assert.ok((await f.service.purchaseInfo(signal)).localPurchase, "desktop saved payment still awaits its own finality reconciliation");
+  f.advance(61000); f.state.now = f.clock(); f.state.height++; f.state.lib = f.state.height;
+  f.service.purchases.stop();
+  const resumed = new CreditService(f.serviceOptions);
+  resumed.purchases.clientFactory = () => f.client;
+  resumed.purchases.clock = f.clock; resumed.purchases.quotes.clock = f.clock;
+  f.cleanup(() => resumed.purchases.stop()); f.cleanup(() => resumed.sessionStore?.dispose());
+  const pending = (await resumed.purchaseInfo(signal)).localPurchase;
+  assert.equal(pending.quoteExpired, true); assert.equal(pending.txId, bought.purchase.txId);
+  assert.doesNotMatch(pending.detail, /zero-transfer cancellation|expired before submission/i);
+  const recovered = await resumed.run("purchase-retry", undefined, signal, f.window);
+  assert.equal(recovered.state, "complete");
+  assert.equal(recovered.purchase.state, "funded");
+  assert.equal((await resumed.purchaseInfo(signal)).localPurchase, null);
+  const paid = await resumed.run("credit-status", undefined, signal);
+  assert.equal(paid.credits.purchased.available, "100000000");
+  assert.equal(paid.purchases.filter(p => p.state === "confirmed").length, 1);
+  assert.equal(f.approvals.length, reviewedCount); assert.equal(f.transactionSigns(), 1);
+  assert.deepEqual(f.rpcCalls, [false, true]);
+});
+
 const BUY_CHROMIUM = process.env.KAI_TEST_CHROMIUM || "/opt/pw-browsers/chromium";
 test("the real Buy button crosses registered desktop IPC, native review and HTTP purchase confirmation", {
   ...options, skip: !BACKEND || !fs.existsSync(BUY_CHROMIUM), timeout: 90000,
@@ -276,7 +355,11 @@ test("the real Buy button crosses registered desktop IPC, native review and HTTP
   f.cleanup(() => registration.dispose());
   const browser = await require("playwright-core").chromium.launch({ executablePath: BUY_CHROMIUM, args: ["--no-sandbox"] });
   f.cleanup(() => browser.close());
-  const page = await browser.newPage({ viewport: { width: 1440, height: 980 } }), calls = [], errors = [];
+  const page = await browser.newPage({ viewport: { width: 1440, height: 980 } }), calls = [], errors = [], progress = [];
+  f.window.webContents.send = (channel, value) => {
+    assert.equal(channel, "koin:purchase-progress"); progress.push(value);
+    void page.evaluate(value => window.fixturePurchaseProgress?.(value), value).catch(error => errors.push(error.message));
+  };
   let delayPreview = false, previewArrived, releasePreview, failSummary = false;
   page.on("pageerror", error => errors.push(error.message));
   const event = { sender: f.window.webContents, senderFrame: f.window.webContents.mainFrame };
@@ -299,7 +382,11 @@ test("the real Buy button crosses registered desktop IPC, native review and HTTP
   });
   await page.addInitScript(() => {
     localStorage.setItem("kai-interface-language", "en");
-    window.kaiKoinTestBridge = { onProgress: () => () => {}, run: (action, input) => window.fixtureDesktopIPC(action, input) };
+    const listeners = new Set();
+    window.fixturePurchaseProgress = value => { for (const listener of listeners) listener(value); };
+    window.kaiKoinTestBridge = { onProgress: () => () => {},
+      onPurchaseProgress: listener => { listeners.add(listener); return () => listeners.delete(listener); },
+      run: (action, input) => window.fixtureDesktopIPC(action, input) };
   });
   await page.route("**/core/koinos/rpc", route => route.request().postDataJSON().channel === "wallet:summary"
     ? route.fulfill(failSummary ? { status: 503, json: { ok: false, error: "Background balance temporarily unavailable" } }
@@ -315,6 +402,8 @@ test("the real Buy button crosses registered desktop IPC, native review and HTTP
   assert.equal(f.approvals.filter(a => a.title === "Buy AI credits").length, 1);
   assert.equal(f.transactionSigns(), 0); assert.deepEqual(f.rpcCalls, []);
   f.approval.response = 1; delayPreview = true;
+  let releaseApproval;
+  f.approval.wait = new Promise(resolve => { releaseApproval = resolve; });
   const quoted = new Promise(resolve => { previewArrived = resolve; });
   await page.locator("#product-quote-refresh").click();
   await quoted;
@@ -323,11 +412,26 @@ test("the real Buy button crosses registered desktop IPC, native review and HTTP
   await page.waitForFunction(() => document.getElementById("product-purchase-detail").textContent.includes("Background balance temporarily unavailable"));
   assert.equal(await page.locator("#product-quote-refresh").textContent(), "Getting current price…");
   failSummary = false; releasePreview();
-  await page.waitForFunction(() => document.getElementById("product-quote-state").textContent.includes("Checking your payment"));
+  await page.waitForFunction(() => document.getElementById("product-payment-progress").dataset.stage === "wallet-approval");
+  assert.equal(await page.locator("#product-payment-progress").getAttribute("aria-busy"), "true");
+  assert.equal(await page.locator("#product-payment-progress").isVisible(), true);
+  assert.equal(await page.locator(".product-payment-spinner").isVisible(), true);
+  assert.match(await page.locator("#product-payment-progress-label").textContent(), /wallet/i);
+  assert.equal(f.transactionSigns(), 0, "wallet progress is visible before any signing");
+  releaseApproval();
+  await page.waitForFunction(() => document.getElementById("product-payment-progress-label").textContent === "Credits added");
   assert.equal(f.approvals.filter(a => a.title === "Buy AI credits").length, 2);
   assert.equal(calls.filter(a => a === "purchase-preview").length, 2);
   assert.equal(calls.filter(a => a === "purchase-approve").length, 2);
   assert.equal(f.transactionSigns(), 1); assert.deepEqual(f.rpcCalls, [false, true]);
+  const completed = progress.find(p => p.stage === "complete" && p.outcome === "credited");
+  assert.ok(completed, "registered desktop IPC delivers the actual backend-confirmed result");
+  const phases = progress.filter(p => p.operationId === completed.operationId).map(p => p.stage);
+  for (const stage of ["getting-price", "checking-network", "wallet-approval", "rechecking-payment", "signing", "checking-mana", "submitting", "updating-credits", "complete"])
+    assert.ok(phases.includes(stage), "real purchase emits " + stage);
+  assert.ok(phases.indexOf("wallet-approval") < phases.indexOf("signing"));
+  assert.ok(phases.indexOf("signing") < phases.indexOf("submitting"));
+  assert.equal(await page.locator("#product-payment-progress").getAttribute("aria-busy"), "false");
   const paid = await f.service.run("credit-status", undefined, signal);
   assert.equal(paid.credits.purchased.available, "100000000");
   assert.equal(paid.purchases.filter(p => p.state === "confirmed").length, 1);

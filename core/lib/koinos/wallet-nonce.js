@@ -30,6 +30,7 @@ function unsigned(tx) { return { id: tx.id, header: structuredClone(tx.header), 
 
 class WalletNonceCoordinator {
   #db; #client; #clock; #identity; #guard;
+  #confirmations = new Map();
   constructor(directory, { mode, client, clock = Date.now }) {
     assertPaymentMode(mode, client);
     this.#client = client; this.#clock = clock;
@@ -93,6 +94,20 @@ class WalletNonceCoordinator {
       ...(r.cancellation ? { cancellation: { state: r.cancellation.state, txId: r.cancellation.draft.id, attempts: r.cancellation.submissions.length, finality: structuredClone(r.cancellation.finality) } } : {}),
       ...(c ? { correction: { state: c.state, txId: c.draft.id, rcLimit: c.draft.header.rc_limit,
         nonce: c.draft.header.nonce, attempts: c.submissions.length, finality: structuredClone(c.finality) } } : {}) };
+  }
+  // Display-only observations do not release nonce reservations or credit a
+  // payment. Reversible inclusion must remain distinct from finality.
+  confirmation(id) {
+    const r = this.#row(id), values = [r.transaction, r.correction?.transaction, r.cancellation?.transaction]
+      .filter(Boolean).map(tx => this.#confirmations.get(tx.id))
+      .filter(v => v && this.#now() >= v.checkedAt && this.#now() - v.checkedAt < 30000);
+    const observed = values.find(v => ["finalized", "reverted"].includes(v.state)) || values.find(v => v.state === "included") || values[0];
+    return observed ? structuredClone(observed) : null;
+  }
+  #confirmation(value) {
+    this.#confirmations.delete(value.txId);
+    this.#confirmations.set(value.txId, value);
+    while (this.#confirmations.size > 32) this.#confirmations.delete(this.#confirmations.keys().next().value);
   }
   pending(owner, purpose) {
     if (!utils.isChecksumAddress(owner) || !purposes.includes(purpose)) throw Error("Invalid pending wallet request");
@@ -445,7 +460,11 @@ class WalletNonceCoordinator {
   // Read-only reconciliation. Only this observer can release a reservation;
   // elapsed time, acknowledgments, user Stop and a later tip nonce cannot.
   async reconcile(id) {
+    return this.#client.withVerificationScope(() => this.#reconcile(id));
+  }
+  async #reconcile(id) {
     const r = this.#row(id); if (terminal(r.state) || !r.transaction) return this.status(id);
+    for (const tx of [r.transaction, r.correction?.transaction, r.cancellation?.transaction].filter(Boolean)) this.#confirmations.delete(tx.id);
     const original = await this.#inspectFinality(r.transaction);
     const corrected = !original && r.correction?.transaction ? await this.#inspectFinality(r.correction.transaction) : null;
     const cancelled = !original && !corrected && r.cancellation?.transaction ? await this.#inspectFinality(r.cancellation.transaction) : null;
@@ -471,25 +490,29 @@ class WalletNonceCoordinator {
   #fresh(proof) { if (this.#now() < proof.checkedAt || this.#now() - proof.checkedAt > 5000) throw Error("Stale wallet finality evidence"); }
   async #inspectFinality(tx) {
     const p = this.#client.provider;
-    if (await p.getChainId() !== this.#client.d.chainId) throw Error("Wallet nonce chain changed");
-    const lookup = response(await p.getTransactionsById([tx.id])).transactions ?? [];
+    this.#confirmations.delete(tx.id);
+    const [chainId, found] = await Promise.all([p.getChainId(), p.getTransactionsById([tx.id])]);
+    if (chainId !== this.#client.d.chainId) throw Error("Wallet nonce chain changed");
+    const lookup = response(found).transactions ?? [];
     if (!Array.isArray(lookup)) throw Error("Invalid wallet transaction lookup");
     const records = lookup.filter(v => v.transaction?.id === tx.id);
-    if (!records.length) return null;
+    if (!records.length) { this.#confirmation({ state: "waiting", txId: tx.id, checkedAt: this.#now() }); return null; }
     if (records.length !== 1) throw Error("Ambiguous wallet transaction lookup");
     const verify = async v => { await this.#verify(v); this.#signatures(v, true); if (v.id !== tx.id) throw Error("Wallet finality transaction changed"); };
     await verify(records[0].transaction);
     const containing = records[0].containing_blocks ?? [];
     if (!Array.isArray(containing) || containing.length > 100) throw Error("Invalid wallet containing blocks");
     containing.forEach(objectId);
-    const head = response(await p.getHeadInfo()), height = uint(head.head_topology?.height), lib = uint(head.last_irreversible_block), time = uint(head.head_block_time);
+    if (!containing.length) { this.#confirmation({ state: "waiting", txId: tx.id, checkedAt: this.#now() }); return null; }
+    const [observedHead, observedBlocks] = await Promise.all([p.getHeadInfo(), p.getBlocksById(containing, { returnBlock: false, returnReceipt: false })]);
+    const head = response(observedHead), height = uint(head.head_topology?.height), lib = uint(head.last_irreversible_block), time = uint(head.head_block_time);
     const headId = objectId(head.head_topology.id), now = this.#now();
     if (!height || height > BigInt(Number.MAX_SAFE_INTEGER) || lib > height || time > BigInt(now) + 60000n || time + 120000n < BigInt(now)) throw Error("Stale wallet nonce head");
-    const blocks = response(await p.getBlocksById(containing, { returnBlock: false, returnReceipt: false })).block_items ?? [];
+    const blocks = response(observedBlocks).block_items ?? [];
     if (!Array.isArray(blocks)) throw Error("Invalid wallet blocks");
     for (const b of blocks) {
       if (!containing.includes(b.block_id)) throw Error("Unexpected wallet block");
-      const h = uint(b.block_height); if (!h || h > lib) continue;
+      const h = uint(b.block_height); if (!h || h > height) continue;
       const [main] = await p.getBlocks(Number(h), 1, headId, { returnBlock: true, returnReceipt: true });
       if (!main || main.block_id !== b.block_id) continue;
       if (main.block?.id !== b.block_id || uint(main.block_height) !== h || uint(main.block.header?.height) !== h ||
@@ -501,6 +524,9 @@ class WalletNonceCoordinator {
       if (await p.getChainId() !== this.#client.d.chainId) throw Error("Wallet chain changed during finality");
       const checkedAt = this.#now();
       if (checkedAt < now) throw Error("Wallet clock moved backwards during finality");
+      this.#confirmation({ state: h > lib ? "included" : receipt.reverted ? "reverted" : "finalized", txId: tx.id,
+        blockHeight: h.toString(), irreversibleHeight: lib.toString(), checkedAt, ...(receipt.reverted ? { reverted: true } : {}) });
+      if (h > lib) return null;
       const blockTime = main.block.header.timestamp;
       const cost = typeof receipt.rc_used === "string" && /^(0|[1-9]\d*)$/.test(receipt.rc_used) &&
         typeof blockTime === "string" && /^(0|[1-9]\d*)$/.test(blockTime) &&

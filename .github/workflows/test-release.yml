@@ -14,7 +14,7 @@ permissions:
 
 env:
   # Exact backend revision included in the server-first update directions.
-  KAI_WALLET_BACKEND_COMMIT: a8edc3bd6d21c40cebe175f7ead36844900b2b7c
+  KAI_WALLET_BACKEND_COMMIT: b85363e6c6188fb215e9a98fc8fdaed5869ede75
 
 jobs:
   verify:
@@ -56,7 +56,7 @@ jobs:
       - name: Verify purchase, provider and paid reply together
         run: |
           npm ci --ignore-scripts --prefix verification-backend
-          (cd verification-backend && node --test scripts/probe-wallet-credit-auth.js scripts/probe-wallet-credit-router.js scripts/probe-koin-provider-devices.js scripts/probe-koin-model-catalog.js scripts/probe-catalog-qualification.js scripts/probe-koin-on-demand-readiness.js scripts/probe-koin-qualification-preparation.js scripts/probe-koin-multi-model-readiness.js scripts/probe-koin-credit-priority.js scripts/probe-koin-purchase-journal.js deploy/koin-mainnet/update-wallet-access.test.js)
+          (cd verification-backend && node --test scripts/probe-wallet-credit-auth.js scripts/probe-wallet-credit-router.js scripts/probe-koin-provider-devices.js scripts/probe-koin-model-catalog.js scripts/probe-catalog-qualification.js scripts/probe-koin-on-demand-readiness.js scripts/probe-koin-qualification-preparation.js scripts/probe-koin-multi-model-readiness.js scripts/probe-koin-credit-priority.js scripts/probe-koin-purchase-journal.js scripts/probe-purchase-quotes-http.js deploy/koin-mainnet/update-wallet-access.test.js deploy/koin-mainnet/update-purchase-quotes.test.js)
           node scripts/verify-credit-flow.js verification-backend
           node scripts/verify-provider-qualification.js verification-backend
           KAI_WALLET_BACKEND="$GITHUB_WORKSPACE/verification-backend" node --test core/test/wallet-first-integration.test.js
@@ -193,7 +193,7 @@ jobs:
           "KAI_WALLET_BACKEND=$env:GITHUB_WORKSPACE\verification-wallet-backend" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Verify Windows wallet connection, payment and locked-wallet earning
         timeout-minutes: 12
-        run: node --test --test-concurrency=1 core/test/wallet-credit-account.test.js core/test/provider-device.test.js core/test/credit-provider.test.js core/test/credit-purchases.test.js core/test/purchase-wallet.browser.test.js core/test/wallet-first-integration.test.js core/test/wallet-first-ui.browser.test.js core/test/credit-wallet-ipc.test.js core/test/session-free-chat.test.js core/test/koin-prepaid-chat.test.js core/test/koin-provider-status.test.js core/test/worker-proof.test.js core/test/worker-advertise.test.js core/test/worker-model-selection.test.js core/test/worker-preparation.test.js core/test/worker-start-stop.test.js core/test/worker-registration-retirement.test.js
+        run: node --test --test-concurrency=1 core/test/wallet-credit-account.test.js core/test/provider-device.test.js core/test/credit-provider.test.js core/test/credit-purchases.test.js core/test/credit-purchase-progress.test.js core/test/koin-funding-approval.test.js core/test/koin-purchase-cancel.test.js core/test/koin-rpc-provider.test.js core/test/koin-chain.test.js core/test/koin-wallet-nonce.test.js core/test/local-chat-messages.test.js core/test/purchase-wallet.browser.test.js core/test/wallet-first-integration.test.js core/test/wallet-first-ui.browser.test.js core/test/credit-wallet-ipc.test.js core/test/session-free-chat.test.js core/test/koin-prepaid-chat.test.js core/test/koin-provider-status.test.js core/test/worker-proof.test.js core/test/worker-advertise.test.js core/test/worker-model-selection.test.js core/test/worker-preparation.test.js core/test/worker-start-stop.test.js core/test/worker-registration-retirement.test.js
         env:
           KAI_SCHEDULER_URL: http://127.0.0.1:9/scheduler
           KAI_RELAY_URL: http://127.0.0.1:9
@@ -339,7 +339,7 @@ jobs:
       - run: npm ci
       - run: npm ci --ignore-scripts --prefix verification-wallet-backend
       - name: Verify ARM64 wallet, earning, launcher and backend integration
-        run: node --test core/test/wallet-credit-account.test.js core/test/provider-device.test.js core/test/session-free-chat.test.js core/test/credit-wallet-ipc.test.js core/test/koin-windows-journals.test.js core/test/linux-shortcut.test.js core/test/linux-shortcut-auto.test.js core/test/update-restart.test.js core/test/worker-preparation.test.js core/test/worker-model-selection.test.js core/test/wallet-first-integration.test.js
+        run: node --test core/test/wallet-credit-account.test.js core/test/provider-device.test.js core/test/session-free-chat.test.js core/test/credit-wallet-ipc.test.js core/test/credit-purchase-progress.test.js core/test/local-chat-messages.test.js core/test/koin-windows-journals.test.js core/test/linux-shortcut.test.js core/test/linux-shortcut-auto.test.js core/test/update-restart.test.js core/test/worker-preparation.test.js core/test/worker-model-selection.test.js core/test/wallet-first-integration.test.js
         env:
           KAI_WALLET_BACKEND: ${{ github.workspace }}/verification-wallet-backend
       - name: Verify native ARM64 relaunch and shared profile exclusion

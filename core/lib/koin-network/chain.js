@@ -2,6 +2,7 @@
 const { Serializer, Transaction, utils, Signer } = require("koilib"),
   crypto = require("crypto");
 const { PinnedRpcProvider } = require("./rpc-provider");
+const { AsyncLocalStorage } = require("node:async_hooks");
 const P = require("./policy");
 const { isPrepaid, isUsd, MASTER_NODE } = require("./product");
 const PriceQuote = require("./purchase-quote");
@@ -109,6 +110,7 @@ function validateDeployment(d) {
   return structuredClone(d);
 }
 class KoinChain {
+  #verificationScopes = new AsyncLocalStorage();
   constructor(deployment, provider) {
     this.d = validateDeployment(deployment);
     if (this.d.network === "isolated" && !provider)
@@ -166,7 +168,31 @@ class KoinChain {
       if (value.config?.[key] === "0") delete value.config[key];
     return value;
   }
+  // A payment phase can perform several checks against the same freshly
+  // verified deployment. Scope this reuse explicitly; a wallet dialog must
+  // end one scope and its response must start another. Ordinary verify calls,
+  // independent actions and nested scopes always perform their own first read.
+  withVerificationScope(run) {
+    if (typeof run !== "function") throw Error("Verification scope requires an operation");
+    return this.#verificationScopes.run({}, () => this.provider.withVerificationScope ? this.provider.withVerificationScope(run) : run());
+  }
   async verify() {
+    const scope = this.#verificationScopes.getStore();
+    if (!scope) return this.#verifyFresh();
+    const now = Date.now(), current = scope.current;
+    if (current && current.provider === this.provider && current.generation === this.provider.readGeneration &&
+        now >= current.startedAt && now - current.startedAt < 10000) {
+      const value = await current.promise;
+      // The endpoint can change while another simultaneous read is in flight.
+      if (current.provider === this.provider && current.generation === this.provider.readGeneration &&
+          Date.now() >= current.startedAt && Date.now() - current.startedAt < 10000) return structuredClone(value);
+    }
+    const entry = { provider: this.provider, generation: this.provider.readGeneration, startedAt: Date.now() };
+    entry.promise = this.#verifyFresh(); scope.current = entry;
+    try { return structuredClone(await entry.promise); }
+    catch (error) { if (scope.current === entry) scope.current = null; throw error; }
+  }
+  async #verifyFresh() {
     const d = this.d;
     // Independent public reads must not stretch a funding snapshot across many
     // blocks. Validate every result before exposing the verified configuration.

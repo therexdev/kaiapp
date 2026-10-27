@@ -19,7 +19,9 @@ async function fixture(t, fakeClock = false, previewSupported = true) {
   await page.addInitScript(previewSupported => {
     localStorage.setItem("kai-interface-language", "en");
     window.purchaseState = "ready"; window.purchaseCalls = []; window.previewSupported = previewSupported;
-    window.kaiKoinTestBridge = { onProgress: () => () => {}, run: async (action, input) => {
+    const paymentListeners = new Set(); window.purchaseOperation = 0;
+    window.emitPurchaseProgress = value => { for (const listener of paymentListeners) listener(value); };
+    window.kaiKoinTestBridge = { onProgress: () => () => {}, onPurchaseProgress: listener => { paymentListeners.add(listener); return () => paymentListeners.delete(listener); }, run: async (action, input) => {
       window.purchaseCalls.push({ action, input });
       if (action === "purchase-capabilities") { if (window.holdCapabilities) await new Promise(resolve => { window.finishCapabilities = resolve; }); return window.previewSupported ? { purchasePricePreview: true } : {}; }
       if (action === "model-pricing") {
@@ -32,7 +34,7 @@ async function fixture(t, fakeClock = false, previewSupported = true) {
         return pricing;
       }
       if (action === "purchase-info") {
-        const saved = { activation: window.purchaseState, localPurchase: structuredClone(window.localPurchase || null), cancelledPurchases: window.cancelledPurchases || [], blocked: window.purchaseState === "signin-required" ? "Sign in to your credit account" : "The credit service is not activated yet" };
+        const saved = { activation: window.purchaseState, localPurchase: structuredClone(window.localPurchase || null), purchaseProgress: structuredClone(window.purchaseProgress || null), cancelledPurchases: window.cancelledPurchases || [], blocked: window.purchaseState === "signin-required" ? "Sign in to your credit account" : "The credit service is not activated yet" };
         if (window.holdInfo) await new Promise(resolve => { window.finishInfo = resolve; });
         if (window.purchaseInfoFailure) throw Error(window.purchaseInfoFailure);
         return saved;
@@ -42,6 +44,7 @@ async function fixture(t, fakeClock = false, previewSupported = true) {
       if (action === "credit-status") throw Error("Credit service fixture");
       if (action === "provider-public-info") return { state: "unavailable", detail: "Fixture" };
       if (["purchase-preview", "purchase-estimate"].includes(action)) {
+        if (action === "purchase-preview") { window.purchaseOperation++; window.purchaseStartedAt = Date.now(); }
         if (window.holdQuote && action === "purchase-preview") await new Promise(resolve => { window.finishQuote = resolve; });
         if (window.holdEstimate && action === "purchase-estimate") await new Promise(resolve => { window.finishEstimate = resolve; });
         if (window.quoteFailure) throw Error(window.quoteFailure);
@@ -54,9 +57,10 @@ async function fixture(t, fakeClock = false, previewSupported = true) {
         return { state: "pending" };
       }
       if (action === "purchase-approve") {
+        if (window.autoPaymentProgress !== false) window.emitPurchaseProgress({ operationId: "purchase-" + window.purchaseOperation, stage: "wallet-approval", startedAt: window.purchaseStartedAt || Date.now(), updatedAt: Date.now() });
         if (window.holdApproval) await new Promise(resolve => { window.finishApproval = resolve; });
         if (window.purchaseFailure) throw Error(window.purchaseFailure);
-        return { state: "cancelled" };
+        return window.approvalResult || { state: "cancelled" };
       }
       if (action === "purchase-stop") { if (window.holdStop) await new Promise(resolve => { window.finishStop = resolve; }); if (window.localPurchase) { window.localPurchase.busy = false; window.localPurchase.state = "pending"; } return { state: "stopped" }; }
       throw Error("Unexpected fixture action: " + action);
@@ -541,4 +545,87 @@ test("Stop and changed identity still fence a Retry while availability is recove
     assert.equal(await count("purchase-preview"), 0);
     assert.equal(await count("purchase-approve"), 0);
   }
+});
+
+
+test("purchase progress shows actual stages, elapsed time and confirmation heights without another quote or payment", options, async t => {
+  const { page, buy, count } = await fixture(t, true);
+  const progress = page.locator("#product-payment-progress"), label = page.locator("#product-payment-progress-label"), detail = page.locator("#product-payment-progress-detail");
+  assert.equal(await progress.isVisible(), false);
+  await page.evaluate(() => { window.autoPaymentProgress = false; window.holdQuote = true; window.holdApproval = true; });
+  await buy.click(); await page.waitForFunction(() => !!window.finishQuote);
+  assert.equal(await progress.isVisible(), true); assert.equal(await progress.getAttribute("aria-busy"), "true");
+  assert.equal(await label.textContent(), "Getting the current KOIN price…");
+  await page.evaluate(() => { window.progressStart = Date.now(); window.progressStage = stage => window.emitPurchaseProgress({ operationId: "purchase-visible", stage, startedAt: window.progressStart, updatedAt: Date.now() }); window.progressStage("checking-network"); });
+  assert.equal(await label.textContent(), "Checking the KOIN network…");
+  await page.clock.runFor(16001);
+  assert.equal(await page.locator("#product-payment-progress-elapsed").textContent(), "0:16");
+  assert.match(await detail.textContent(), /taking longer than usual/);
+  assert.equal(await count("purchase-preview"), 1); assert.equal(await count("purchase-approve"), 0);
+  await page.evaluate(() => { window.holdQuote = false; window.finishQuote(); });
+  await page.waitForFunction(() => !!window.finishApproval);
+  await page.evaluate(() => window.progressStage("wallet-approval"));
+  assert.equal(await label.textContent(), "Waiting for your wallet approval…");
+  assert.equal(await buy.textContent(), "Waiting for wallet…");
+  await page.clock.runFor(5001);
+  assert.equal(await page.locator("#product-payment-progress-elapsed").textContent(), "0:21", "elapsed time spans the whole deliberate purchase");
+  for (const [stage, text] of [["rechecking-payment", "Checking the approved payment…"], ["signing", "Signing your payment…"], ["checking-mana", "Checking transaction Mana…"], ["submitting", "Sending your payment…"]]) {
+    await page.evaluate(stage => window.progressStage(stage), stage); assert.equal(await label.textContent(), text);
+  }
+  await page.evaluate(() => window.emitPurchaseProgress({ operationId: "purchase-visible", stage: "awaiting-confirmation", startedAt: window.progressStart, updatedAt: Date.now(), txId: "0x1220" + "a".repeat(64), blockHeight: "40570878", irreversibleHeight: "40570840" }));
+  assert.equal(await label.textContent(), "Waiting for blockchain confirmation…");
+  assert.equal(await detail.textContent(), "Payment included. Waiting for final confirmation (38 blocks remaining).");
+  assert.match(await detail.getAttribute("title"), /Included in block 40570878; irreversible through block 40570840/);
+  if (process.env.KAI_PRODUCT_QA_DIR) { fs.mkdirSync(process.env.KAI_PRODUCT_QA_DIR, { recursive: true }); await page.screenshot({ path: path.join(process.env.KAI_PRODUCT_QA_DIR, "buy-payment-progress.png"), animations: "disabled" }); }
+  await page.evaluate(() => window.progressStage("updating-credits"));
+  assert.equal(await label.textContent(), "Updating your credit balance…");
+  assert.equal(await detail.textContent(), "Checking payment confirmation and updating your credit balance…");
+  assert.doesNotMatch(await progress.textContent(), /payment is confirmed|Credits added/i);
+  await page.evaluate(() => { window.emitPurchaseProgress({ operationId: "purchase-visible", stage: "complete", outcome: "credited", startedAt: window.progressStart, updatedAt: Date.now() }); window.approvalResult = { state: "complete" }; window.finishApproval(); });
+  await page.waitForFunction(() => !document.getElementById("product-quote-refresh").disabled);
+  assert.equal(await label.textContent(), "Credits added"); assert.equal(await progress.getAttribute("aria-busy"), "false");
+  assert.equal(await page.locator("#product-payment-progress-elapsed").textContent(), "");
+  assert.match(await page.locator("#product-quote-state").textContent(), /Payment confirmed/);
+  assert.equal(await count("purchase-preview"), 1); assert.equal(await count("purchase-approve"), 1);
+  assert.equal(await page.locator(".product-payment-spinner").evaluate(node => getComputedStyle(node).animationName), "none");
+});
+
+test("stopped or failed payment progress cannot be revived by late events or another account", options, async t => {
+  const { page, buy, count } = await fixture(t, true), progress = page.locator("#product-payment-progress");
+  await page.evaluate(() => { window.autoPaymentProgress = false; window.holdQuote = true; });
+  await buy.click(); await page.waitForFunction(() => !!window.finishQuote);
+  await page.evaluate(() => { window.oldProgress = { operationId: "old-purchase", stage: "checking-network", startedAt: Date.now(), updatedAt: Date.now() }; window.emitPurchaseProgress(window.oldProgress); });
+  await page.locator("#product-purchase-stop").click(); await page.waitForFunction(() => !document.getElementById("product-quote-refresh").disabled);
+  assert.equal(await progress.isVisible(), false);
+  await page.evaluate(() => { window.emitPurchaseProgress({ ...window.oldProgress, stage: "submitting", updatedAt: Date.now() }); window.holdQuote = false; window.finishQuote(); });
+  assert.equal(await progress.isVisible(), false); assert.equal(await count("purchase-approve"), 0);
+  await page.evaluate(() => { window.holdApproval = true; window.purchaseFailure = "The network could not be reached. No payment was signed."; });
+  await buy.click(); await page.waitForFunction(() => !!window.finishApproval);
+  await page.evaluate(() => { window.oldProgress = { operationId: "second-purchase", stage: "checking-network", startedAt: Date.now(), updatedAt: Date.now() }; window.emitPurchaseProgress(window.oldProgress); window.finishApproval(); });
+  await page.waitForFunction(() => document.getElementById("product-quote-state").getAttribute("role") === "alert");
+  assert.equal(await progress.isVisible(), false); assert.match(await page.locator("#product-quote-state").textContent(), /could not be reached/);
+  await page.evaluate(() => { window.emitPurchaseProgress({ ...window.oldProgress, stage: "complete", outcome: "credited", updatedAt: Date.now() }); window.dispatchEvent(new Event("kai-credit-identity-changed")); window.emitPurchaseProgress({ ...window.oldProgress, operationId: "old-account-progress", stage: "submitting", updatedAt: Date.now() }); });
+  assert.equal(await progress.isVisible(), false);
+});
+
+test("saved payment status restores truthful confirmation progress and distinguishes cancellation from credits", options, async t => {
+  const { page, count, refresh } = await fixture(t, true), progress = page.locator("#product-payment-progress"), label = page.locator("#product-payment-progress-label");
+  const txId = "0x1220" + "a".repeat(64);
+  await page.evaluate(txId => { window.localPurchase = { state: "pending", txId, paymentState: "submitted", detail: "The transaction is included. Checking irreversible confirmation.", recovery: "retry" }; window.purchaseProgress = { operationId: "restored-check", stage: "awaiting-confirmation", startedAt: Date.now() - 20000, updatedAt: Date.now(), txId, blockHeight: "100", irreversibleHeight: "89" }; }, txId);
+  await refresh();
+  assert.equal(await progress.isVisible(), true); assert.equal(await label.textContent(), "Waiting for blockchain confirmation…");
+  assert.equal(await page.locator("#product-payment-progress-detail").textContent(), "Payment included. Waiting for final confirmation (11 blocks remaining).");
+  assert.equal(await count("purchase-preview"), 0); assert.equal(await count("purchase-approve"), 0);
+  await page.evaluate(() => window.emitPurchaseProgress({ ...window.purchaseProgress, operationId: "unrelated-check", stage: "updating-credits", txId: "0x1220" + "b".repeat(64), updatedAt: Date.now() }));
+  assert.equal(await label.textContent(), "Waiting for blockchain confirmation…", "another transaction cannot replace the saved payment's progress");
+  await page.evaluate(() => { window.purchaseProgress = { ...window.purchaseProgress, irreversibleHeight: "100", updatedAt: Date.now() }; });
+  await refresh(); assert.equal(await page.locator("#product-payment-progress-detail").textContent(), "Checking final confirmation…");
+  assert.doesNotMatch(await progress.textContent(), /Credits added/);
+  await page.evaluate(() => { window.purchaseProgress = { ...window.purchaseProgress, stage: "complete", outcome: "cancelled", updatedAt: Date.now() }; });
+  await refresh(); assert.equal(await label.textContent(), "Cancellation confirmed"); assert.equal(await progress.getAttribute("aria-busy"), "false");
+  assert.doesNotMatch(await progress.textContent(), /Credits added/);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.evaluate(() => { window.purchaseProgress = { ...window.purchaseProgress, stage: "cancellation-confirmation", outcome: undefined, updatedAt: Date.now() }; });
+  await refresh(); assert.equal(await label.textContent(), "Waiting for cancellation confirmation…");
+  assert.equal(await page.locator(".product-payment-spinner").evaluate(node => getComputedStyle(node).animationName), "none");
 });

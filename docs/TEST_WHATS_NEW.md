@@ -1,3 +1,16 @@
+## Faster payment review with visible confirmation progress
+
+- Buy credits shares repeated deployment and chain checks within each short preparation phase. Approval starts a new verification phase, so current policy, wallet and nonce checks still run before signing. A slow read endpoint can use the pinned backup sooner; a broadcast is never duplicated by that read fallback.
+- An unused quote that is close to expiry is refreshed for the selected dollar amount before wallet approval. The approval shows the exact current KOIN payment. Already-signed payments retain their original quote, transaction and recovery records.
+- A spinner and progress line show preparation, price, wallet approval, signing, submission, block inclusion, final confirmation and credit reconciliation. Stop and errors end the active spinner; cancellation has its own clearly named steps.
+- Quote expiry no longer tells a buyer to cancel a payment that was already included in a block. Existing successful transactions reconcile automatically after irreversible confirmation. Block inclusion and final credit availability are shown separately.
+- This is an app update. The unlimited-quote Vultr update remains compatible and does not need to be repeated after successful installation.
+
+## Local Gemma 3 conversation compatibility
+
+- Fixed Gemma 3's conversation-role error when persona, memory or research adds multiple instruction messages, or an interrupted conversation leaves consecutive user turns. Local requests retain their content in the alternating format required by the original Gemma template; saved chat history remains intact.
+- The fix applies to the installed Gemma 3 models and requires no model download. Other local models and network requests keep their existing message format.
+
 ## Buy credits reaches payment approval after background refresh failures
 
 - Fixed a reproduced Buy → price check → reset: a background wallet or payment-status read could invalidate the signed quote before it reached payment approval. Read-only refresh failures no longer cancel the user's purchase. Changing the selected amount, wallet or account and pressing Stop still stop that action.

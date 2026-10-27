@@ -517,3 +517,145 @@ test("a disappearing or invalid native approval cannot masquerade as the user ca
     assert.equal(await f.controller.status(f.c, signal), null);
   }
 });
+
+test("an unused aging quote refreshes after payment prechecks and native approval binds the refreshed USD selection", async t => {
+  const f = setup(t, { mainnet: true }), signal = new AbortController().signal, events = [], intents = [], order = [];
+  const priceSigner = Signer.fromSeed("funding-recovery-verifier"); let price = "25000000", detail;
+  f.controller.progress = value => events.push(structuredClone(value));
+  f.c.flow.call = async (route, body) => {
+    if (route === "purchase") return { purchase: { state: "pending" } };
+    assert.equal(route, "quote-usd"); order.push("quote"); intents.push(body.intentId);
+    return Prices.issue({ deployment: f.d, signer: priceSigner, account: f.c.config.owner, amount: USD.nativeForDollars(body.dollars, price), usdPerKoin: price, version: 1, now: f.state.now });
+  };
+  const getRc = f.provider.getAccountRc; f.provider.getAccountRc = async (...args) => { order.push("mana"); return getRc(...args); };
+  f.options.dialog.showMessageBox = async (_w, options) => { order.push("approval"); detail = options.detail; return { response: 1 }; };
+  f.provider.call = async (_method, args) => {
+    if (args.broadcast) f.state.submissions.push(structuredClone(args.transaction));
+    return { receipt: { id: args.transaction.id, payer: f.c.config.owner, rc_used: "1000", reverted: false } };
+  };
+  const initial = await f.controller.preview(f.c, { usd: "1" }, signal);
+  const operationId = events.at(-1).operationId;
+  f.state.now += 280001; price = "50000000";
+  const result = await f.controller.run(f.c, f.window, "purchase-approve", initial.quote.id, signal);
+  assert.equal(result.state, "pending"); assert.equal(f.counts().signatures, 1);
+  assert.equal(f.state.submissions.length, 1); assert.equal(intents.length, 2); assert.notEqual(intents[0], intents[1]);
+  assert.deepEqual(order.slice(0, 4), ["quote", "mana", "quote", "approval"]);
+  assert.match(detail, /You receive: 1000 AI credits/); assert.match(detail, /You pay: 2\.00000000 KOIN/);
+  const saved = savedPayment(f), op = saved.transaction.operations.find(x => x.call_contract?.contract_id === f.d.credits).call_contract;
+  const request = await f.client.serializer.deserialize(op.args, "koin.Request");
+  assert.equal(request.amount, "200000000"); assert.equal(request.purchase_quote.credits, "100000000");
+  assert.ok(events.every(e => e.operationId === operationId), "one user purchase keeps one progress operation");
+  const stages = events.map(e => e.stage);
+  for (const expected of ["getting-price", "checking-payment", "checking-network", "preparing-payment", "wallet-approval", "rechecking-payment", "signing", "checking-mana", "submitting", "awaiting-confirmation", "updating-credits"]) assert.ok(stages.includes(expected), expected);
+  assert.equal(stages.at(-1), "awaiting-confirmation");
+  assert.doesNotMatch(JSON.stringify(events), /private-session|signatures|price_signature|purchase_quote/);
+});
+
+test("payment verification has separate fresh phases around native approval without repeated full policy reads", async t => {
+  const f = setup(t, { mainnet: true }), signal = new AbortController().signal;
+  const metadata = f.provider.invokeGetContractMetadata; let reads = 0, beforeApproval;
+  f.provider.invokeGetContractMetadata = async (...args) => { reads++; return metadata(...args); };
+  f.options.dialog.showMessageBox = async () => { beforeApproval = reads; return { response: 1 }; };
+  f.provider.call = async (_method, args) => ({ receipt: { id: args.transaction.id, payer: f.c.config.owner, rc_used: "1000", reverted: false } });
+  const quote = await f.controller.preview(f.c, { usd: "1" }, signal);
+  await f.controller.run(f.c, f.window, "purchase-approve", quote.quote.id, signal);
+  assert.equal(beforeApproval, 3, "one verified token/credits/rewards set before the prompt");
+  assert.equal(reads, 6, "one new verified set after approval, shared only within that bounded phase");
+  assert.equal(f.counts().signatures, 1);
+});
+
+test("slow preparation refreshes an unused quote once before the only native approval", async t => {
+  for (const delay of [50001, 65001]) {
+    const f = setup(t, { mainnet: true }), signal = new AbortController().signal, intents = [];
+    const signer = Signer.fromSeed("funding-recovery-verifier"); let price = "25000000", prepares = 0, reviews = 0, detail;
+    f.c.flow.call = async (route, body) => {
+      if (route === "purchase") return { purchase: { state: "pending" } };
+      assert.equal(route, "quote-usd"); assert.equal(body.dollars, "1"); intents.push(body.intentId);
+      return Prices.issue({ deployment: f.d, signer, account: f.c.config.owner, amount: USD.nativeForDollars(body.dollars, price), usdPerKoin: price, version: 1, now: f.state.now, ttlMs: 60000 });
+    };
+    const prepare = f.client.prepare.bind(f.client);
+    f.client.prepare = async (...args) => {
+      if (++prepares === 1) { f.state.now += delay; f.state.height++; price = "300000000"; }
+      return prepare(...args);
+    };
+    f.options.dialog.showMessageBox = async (_window, options) => { reviews++; detail = options.detail; return { response: 1 }; };
+    f.provider.call = async (_method, args) => {
+      if (args.broadcast) f.state.submissions.push(structuredClone(args.transaction));
+      return { receipt: { id: args.transaction.id, payer: f.c.config.owner, rc_used: "1000", reverted: false } };
+    };
+    const quote = await f.controller.preview(f.c, { usd: "1" }, signal);
+    const payment = await f.controller.run(f.c, f.window, "purchase-approve", quote.quote.id, signal);
+    assert.equal(payment.state, "pending"); assert.equal(reviews, 1); assert.equal(f.counts().signatures, 1); assert.equal(f.state.submissions.length, 1);
+    assert.equal(intents.length, 2); assert.notEqual(intents[0], intents[1]);
+    assert.match(detail, /You pay: 0\.33333334 KOIN/);
+    const transaction = savedPayment(f).transaction, op = transaction.operations.find(x => x.call_contract?.contract_id === f.d.credits).call_contract;
+    const request = await f.client.serializer.deserialize(op.args, "koin.Request");
+    assert.equal(request.amount, USD.nativeForDollars("1", "300000000"));
+    assert.equal(Number(request.purchase_quote.expires_at) - f.state.now, 60000);
+  }
+});
+
+test("repeatedly slow unused quote preparation stops after one refresh without prompting or signing", async t => {
+  const f = setup(t), signal = new AbortController().signal, signer = Signer.fromSeed("funding-recovery-verifier"); let quotes = 0, prepares = 0;
+  f.c.flow.call = async (route, body) => {
+    assert.equal(route, "quote-usd"); quotes++;
+    return Prices.issue({ deployment: f.d, signer, account: f.c.config.owner, amount: USD.nativeForDollars(body.dollars, "25000000"), usdPerKoin: "25000000", version: 1, now: f.state.now, ttlMs: 60000 });
+  };
+  const prepare = f.client.prepare.bind(f.client);
+  f.client.prepare = async (...args) => { prepares++; f.state.now += 65001; f.state.height++; return prepare(...args); };
+  const quote = await f.controller.preview(f.c, { usd: "1" }, signal);
+  await assert.rejects(f.controller.run(f.c, f.window, "purchase-approve", quote.quote.id, signal), /prepare\/quote-expired/);
+  assert.equal(quotes, 2); assert.equal(prepares, 2); assert.deepEqual(f.counts(), { signatures: 0, reviews: 0 });
+  assert.equal(f.state.submissions.length, 0); assert.equal(await f.controller.status(f.c, signal), null);
+});
+
+test("Stop during automatic quote refresh ignores a late response without approval or a saved payment", async t => {
+  const f = setup(t), signal = new AbortController().signal, signer = Signer.fromSeed("funding-recovery-verifier");
+  let quotes = 0, reached, release;
+  const refreshing = new Promise(resolve => { reached = resolve; }), gate = new Promise(resolve => { release = resolve; });
+  f.c.flow.call = async (route, body) => {
+    assert.equal(route, "quote-usd");
+    if (++quotes === 2) { reached(); await gate; }
+    return Prices.issue({ deployment: f.d, signer, account: f.c.config.owner, amount: USD.nativeForDollars(body.dollars, "25000000"), usdPerKoin: "25000000", version: 1, now: f.state.now, ttlMs: 60000 });
+  };
+  const prepare = f.client.prepare.bind(f.client);
+  f.client.prepare = async (...args) => { f.state.now += 65001; f.state.height++; return prepare(...args); };
+  const quote = await f.controller.preview(f.c, { usd: "1" }, signal);
+  const running = f.controller.run(f.c, f.window, "purchase-approve", quote.quote.id, signal);
+  const stopped = assert.rejects(running, /Purchase stopped/);
+  await refreshing; f.controller.stop(); await stopped;
+  release(); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(quotes, 2); assert.deepEqual(f.counts(), { signatures: 0, reviews: 0 });
+  assert.equal(f.state.submissions.length, 0); assert.equal(await f.controller.status(f.c, signal), null);
+  assert.equal(f.controller.progressSnapshot(f.c).stage, "stopped");
+});
+
+test("an expired native review cannot sign a purchase or leave a payment needing cancellation", async t => {
+  const f = setup(t), signal = new AbortController().signal;
+  const signer = Signer.fromSeed("funding-recovery-verifier");
+  f.c.flow.call = async (route, body) => {
+    assert.equal(route, "quote-usd");
+    return Prices.issue({ deployment: f.d, signer, account: f.c.config.owner, amount: USD.nativeForDollars(body.dollars, "25000000"), usdPerKoin: "25000000", version: 1, now: f.state.now, ttlMs: 60000 });
+  };
+  f.options.dialog.showMessageBox = async () => { f.state.now += 55001; return { response: 1 }; };
+  const quote = await f.controller.preview(f.c, { usd: "1" }, signal);
+  await assert.rejects(f.controller.run(f.c, f.window, "purchase-approve", quote.quote.id, signal), /recheck\/quote-expired/);
+  assert.equal(f.counts().signatures, 0); assert.equal(f.state.submissions.length, 0);
+  assert.equal(await f.controller.status(f.c, signal), null);
+});
+
+test("Stop and account scope keep old purchase progress from reviving or leaking into another account", async t => {
+  const f = setup(t), signal = new AbortController().signal, events = [];
+  f.controller.progress = value => events.push(value);
+  const initial = await f.controller.preview(f.c, { usd: "1" }, signal), old = f.controller.purchaseOperation;
+  f.controller.stop();
+  assert.equal(events.at(-1).stage, "stopped"); const count = events.length;
+  f.controller.report(old, "submitting", { txId: "0x1220" + "1".repeat(64) });
+  assert.equal(events.length, count); assert.equal(f.controller.progressSnapshot({ ...f.c, auth: { ...f.c.auth, accountId: "another" } }), null);
+  assert.equal(new CreditPurchases(f.options).progressSnapshot({}), null);
+  const next = await f.controller.preview(f.c, { usd: "1" }, signal);
+  assert.notEqual(events.at(-1).operationId, old.value.operationId);
+  f.controller.report(old, "complete", { outcome: "credited" }); assert.equal(events.at(-1).stage, "getting-price");
+  await assert.rejects(f.controller.run(f.c, f.window, "purchase-approve", initial.quote.id, signal), /Refresh/);
+  assert.equal(f.counts().signatures, 0); assert.ok(next.quote.id);
+});

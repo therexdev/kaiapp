@@ -1772,9 +1772,10 @@ class Gateway {
     // fits; otherwise refuse cleanly before any engine or wallet is
     // touched. Unknown aliases fall through to ensure(), whose failure is
     // the plain capability-miss overflow below.
-    let localCtx = null;
+    let localCtx = null, localModel = null;
     try {
-      localCtx = this.models.resolveAlias(alias).contextSize || 4096;
+      localModel = this.models.resolveAlias(alias);
+      localCtx = localModel.contextSize || 4096;
     } catch {
       /* not a local alias — ensure() decides */
     }
@@ -1803,7 +1804,12 @@ class Gateway {
       });
     }
 
-    const estTok = estimateMessageTokens(body.messages);
+    // Gemma's original template enforces role alternation. Enrichment from
+    // persona, memory, web and Agent/Research can legitimately add instruction
+    // or user turns; preserve their content in a template-compatible local
+    // request without changing persisted history or any network request.
+    const localMessages = require("./local-chat-messages").localChatMessages(body.messages, localModel);
+    const estTok = Math.max(estimateMessageTokens(body.messages), estimateMessageTokens(localMessages));
     if (localCtx && estTok > localCtx - CTX_HEADROOM_TOKENS) {
       const net = this.network ? this.network.status() : null;
       // A grounded request never overflows to the network: the whole promise
@@ -1850,6 +1856,10 @@ class Gateway {
         return this._chatNetwork(body, req, res, { overflowFrom: alias, localError: String(e.message) });
       }
       return this._json(res, 400, { error: { message: String(e.message), type: "invalid_request_error" } });
+    }
+    if (localMessages !== body.messages) {
+      body.messages = localMessages;
+      raw = Buffer.from(JSON.stringify(body));
     }
     // Some runtimes (Ollama) serve the model under their own registered name
     // — rewrite the body so callers keep using the Koinos alias.

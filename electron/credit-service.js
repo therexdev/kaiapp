@@ -19,9 +19,9 @@ function manifest(value) {
   return { schema: 1, state: "ready", config };
 }
 class CreditService {
-  constructor({ dataDir, account, storage, service, fetchImpl = fetch, progress = () => {}, dialog, marketReader }) {
+  constructor({ dataDir, account, storage, service, fetchImpl = fetch, progress = () => {}, purchaseProgress = () => {}, dialog, marketReader }) {
     Object.assign(this, { dataDir, account, storage, fetchImpl, progress, dialog }); this.service = manifest(service);
-    this.purchases = new (require("./credit-purchases").CreditPurchases)({ dataDir, account, storage, dialog, fetchImpl, marketReader });
+    this.purchases = new (require("./credit-purchases").CreditPurchases)({ dataDir, account, storage, dialog, fetchImpl, marketReader, progress: purchaseProgress });
     this.runs = new (require("./credit-runs").CreditRuns)(this);
   }
   async walletInfo(signal) {
@@ -111,7 +111,7 @@ class CreditService {
     catch { localPurchase = { state: "unavailable", detail: "Saved payment records could not be checked. Check again before starting another purchase." }; }
     let cancelledPurchases = [];
     try { cancelledPurchases = await this.purchases.cancelled(c, signal); } catch { /* Preserve the network purchase history if a local read fails. */ }
-    return { localPurchase, cancelledPurchases };
+    return { localPurchase, cancelledPurchases, purchaseProgress: require("./credit-purchase-progress").purchaseProgress(this.purchases.progressSnapshot?.(c)) };
   }
   async purchaseInfo(signal) {
     if (this.service.state !== "ready") return { enabled: true, configured: true, product: "prepaid-usd-v1", blocked: this.service.reason, activation: "unavailable", recoveryAvailable: false };

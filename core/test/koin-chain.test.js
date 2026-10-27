@@ -175,3 +175,37 @@ test("Stop during the transport chain check prevents a late broadcast", async ()
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(methods, ["chain.get_chain_id"]);
 });
+
+test("explicit verification phases reuse only fresh isolated results and never cross nested approval boundaries", async () => {
+  const { client, provider, d, config } = fixture(); let reads = 0;
+  provider.getChainId = async () => { reads++; return d.chainId; };
+  await client.withVerificationScope(async () => {
+    const [a, b] = await Promise.all([client.verify(), client.verify()]);
+    assert.equal(reads, 1, "simultaneous checks in the same phase share one validated read");
+    a.credits.version = "999";
+    assert.equal(b.credits.version, "1");
+    assert.equal((await client.verify()).credits.version, "1", "returned values cannot mutate the cached policy");
+    await client.withVerificationScope(async () => {
+      await client.verify(); await client.verify(); assert.equal(reads, 2);
+    });
+    await client.verify(); assert.equal(reads, 2, "nested phases do not overwrite another phase's cache");
+    provider.readGeneration = 1; await client.verify(); assert.equal(reads, 3);
+    config.mining = encodedAddress(address(90)); provider.readGeneration = 2;
+    await assert.rejects(client.verify(), /mining/);
+    config.mining = encodedAddress(d.mining); await client.verify(); assert.equal(reads, 5, "a failed verification is never cached");
+  });
+  await client.verify(); await client.verify(); assert.equal(reads, 7, "unscoped calls retain fresh checks");
+});
+
+test("verification phases expire after ten seconds and on a backward clock or changed provider", async t => {
+  t.mock.timers.enable({ apis: ["Date"], now: 100000 });
+  const { client, provider, d } = fixture(); let reads = 0;
+  provider.getChainId = async () => { reads++; return d.chainId; };
+  await client.withVerificationScope(async () => {
+    await client.verify();
+    t.mock.timers.setTime(109999); await client.verify(); assert.equal(reads, 1);
+    t.mock.timers.setTime(110000); await client.verify(); assert.equal(reads, 2);
+    t.mock.timers.setTime(109000); await client.verify(); assert.equal(reads, 3);
+    client.provider = { ...provider }; await client.verify(); assert.equal(reads, 4);
+  });
+});

@@ -11,11 +11,13 @@ const { koin } = require("./koin-review");
 const PriceQuote = require("../core/lib/koin-network/purchase-quote");
 const { fundingFailure } = require("./koin-funding-failure");
 
-function createFundingApproval({ mode, client, journal, dialog, sign, submit, preflight = null, clock = Date.now, timeoutMs = 5000, tr = x => x }) {
+function createFundingApproval({ mode, client, journal, dialog, sign, submit, preflight = null, clock = Date.now, timeoutMs = 5000, tr = x => x, progress = () => {} }) {
   assertPaymentMode(mode, client); const mainnet = mode === "mainnet-pilot";
   if (!(journal instanceof FundingRecovery) || typeof dialog?.showMessageBox !== "function" ||
       typeof sign !== "function" || typeof submit !== "function" || (preflight !== null && typeof preflight !== "function")) throw Error("Explicit isolated funding approval dependencies required");
   journal.assertMode(mode); journal.assertClient(client); integer(timeoutMs, 50, 30000);
+  const scoped = fn => client.withVerificationScope ? client.withVerificationScope(fn) : fn();
+  const report = stage => { try { progress(stage); } catch {} };
   let pending = null;
   const staging = new Set();
   const result = (status, id) => ({ status, mode, paymentsEnabled: mainnet, ...(id ? { deposit: journal.status(id) } : {}) });
@@ -24,7 +26,7 @@ function createFundingApproval({ mode, client, journal, dialog, sign, submit, pr
     pending.stopped = true; pending.abort.abort();
     if (pending.id) journal.hold(pending.id);
   };
-  async function review(window, id, getRequest, resume) {
+  async function review(window, id, getRequest, resume, refreshRequest = null) {
     const visible = () => window && !window.isDestroyed() && window.isVisible() && !window.isMinimized();
     if (pending || !visible()) return { ...result("cancelled"), failure: fundingFailure("request", Error("Funding review changed or expired")) };
     digest(id);
@@ -51,27 +53,55 @@ function createFundingApproval({ mode, client, journal, dialog, sign, submit, pr
     const timer = setTimeout(stop, 180000);
     let ownsFence = false, stage = "request";
     try {
-      const request = intent(await waiting(Promise.resolve().then(getRequest)));
+      let request, saved, draft, config, policyHash;
+      const prepared = await scoped(async () => {
+      report("preparing-payment");
+      request = intent(await waiting(Promise.resolve().then(getRequest)));
       assertCurrentReview();
       stage = "journal";
-      const saved = journal.saved(id);
+      saved = journal.saved(id);
       if (saved && JSON.stringify(saved.intent) !== JSON.stringify(request)) throw Error("Cannot replace the saved deposit");
       if (saved && !resume) return result("recover_existing", id);
       if (resume && (!saved || !saved.signed)) return result(saved ? "recover_signing_envelope" : "unavailable", saved ? id : null);
       if (resume && ["funded", "reverted", "conflicted"].includes(saved.state)) return result("complete", id);
-      stage = "prepare";
-      const draft = resume ? saved.draft : await client.prepare(request.kind, request.method, request.args, { actor: request.actor, rcLimit: request.maxRc });
-      stage = "transaction";
-      await client.verifyTransaction(draft, request);
-      stage = "deployment";
-      const config = await client.verify(), policyHash = hash(JSON.stringify(config));
-      if (config.paused || (resume && saved.policyHash !== policyHash)) throw Error("Funding policy changed or paused");
-      assertCurrentReview();
+      for (let attempt = 0; ; attempt++) {
+        try {
+          stage = "prepare"; report("preparing-payment");
+          draft = resume ? saved.draft : await client.prepare(request.kind, request.method, request.args, { actor: request.actor, rcLimit: request.maxRc });
+          stage = "transaction";
+          await client.verifyTransaction(draft, request);
+          stage = "deployment";
+          config = await client.verify(); policyHash = hash(JSON.stringify(config));
+          if (config.paused || (resume && saved.policyHash !== policyHash)) throw Error("Funding policy changed or paused");
+          assertCurrentReview();
+          const usdPurchase = isUsd(client.d) && request.kind === "credits";
+          stage = "price";
+          if (usdPurchase && !resume) await PriceQuote.verify(client.d, request.args, { now: clock(), version: config.credits.version });
+          if (usdPurchase && !resume && Number(request.args.purchase_quote.expires_at) - clock() < 15000) throw Error("Purchase price expired. Please buy again for a fresh price.");
+          break;
+        } catch (error) {
+          // Slow prechecks may consume an otherwise fresh quote. Refresh once,
+          // before any wallet prompt, nonce reservation or signature. Never
+          // reprice a saved payment or retry a different preparation failure.
+          if (attempt || saved || resume || !isUsd(client.d) || request.kind !== "credits" || typeof refreshRequest !== "function" ||
+              error?.message !== "Purchase price expired. Please buy again for a fresh price.") throw error;
+          assertCurrentReview(); stage = "price"; report("getting-price");
+          const refreshed = intent(await waiting(Promise.resolve().then(refreshRequest)));
+          assertCurrentReview();
+          // The private supplier binds the same selected dollar value using
+          // nativeForDollars; rounding up one native atom may add USD atoms.
+          if (["kind", "method", "actor", "maxRc"].some(key => refreshed[key] !== request[key]) ||
+              refreshed.args.account !== request.args.account)
+            throw Error("Funding review changed or expired");
+          request = refreshed;
+        }
+      }
+      return null;
+      });
+      if (prepared) return prepared;
       const usdPurchase = isUsd(client.d) && request.kind === "credits";
-      stage = "price";
-      if (usdPurchase && !resume) await PriceQuote.verify(client.d, request.args, { now: clock(), version: config.credits.version });
       const line = (name, value) => `${tr(name)}: ${value}`;
-      stage = "dialog";
+      stage = "dialog"; report("wallet-approval");
       const { response } = await waiting(dialog.showMessageBox(window, {
         type: "question", title: tr(usdPurchase ? "Buy AI credits" : mainnet ? "Mainnet KOIN funding — real funds" : mode === "test-deployment" ? "Test KOIN funding" : "Isolated KOIN funding rehearsal"),
         message: tr(isPrepaid(client.d) && request.kind === "credits" ? (resume ? "Retry this saved credit purchase" : "Buy AI credits with KOIN") : resume ? "Review the saved deposit for resubmission" : (mainnet ? "Approve this real KOIN deposit" : mode === "test-deployment" ? "Approve this testnet deposit" : "Approve this fixture-wallet deposit")),
@@ -100,13 +130,14 @@ function createFundingApproval({ mode, client, journal, dialog, sign, submit, pr
       assertCurrentReview();
       if (response === 0) return result("cancelled");
       if (response !== 1) throw Error("Native payment review returned an invalid response");
-      stage = "recheck";
-      if (JSON.stringify(intent(await getRequest())) !== JSON.stringify(request)) throw Error("Funding review changed or expired");
-      assertCurrentReview();
-      const currentConfig = await client.verify(), nextNonce = await client.provider.getNextNonce(request.actor);
+      return await scoped(async () => {
+      stage = "recheck"; report("rechecking-payment");
+      const [nextRequest, currentConfig, nextNonce] = await Promise.all([getRequest(), client.verify(), client.provider.getNextNonce(request.actor)]);
+      if (JSON.stringify(intent(nextRequest)) !== JSON.stringify(request)) throw Error("Funding review changed or expired");
       assertCurrentReview();
       if (JSON.stringify(config) !== JSON.stringify(currentConfig) || nextNonce !== draft.header.nonce) throw Error("Funding review changed or expired");
       if (usdPurchase && !resume) await PriceQuote.verify(client.d, request.args, { now: clock(), version: currentConfig.credits.version });
+      if (usdPurchase && !resume && Number(request.args.purchase_quote.expires_at) - clock() < 10000) throw Error("Purchase price expired. Please buy again for a fresh price.");
       const approval = { txId: draft.id, policyHash, startedAt, expires, holdVersion: saved?.holdVersion };
       stage = "reserve";
       task.id = id;
@@ -117,7 +148,7 @@ function createFundingApproval({ mode, client, journal, dialog, sign, submit, pr
         if (decision.action !== "prepare_funding") { task.id = null; return result("recover_existing", id); }
         ownsFence = true;
         if (!valid() || journal.status(id).held) { journal.hold(id); return result("stopped", id); }
-        stage = "sign";
+        stage = "sign"; report("signing");
         // Stage even a late signature. A timeout/Stop holds the durable envelope;
         // only another native review may submit it. A process exit leaves the
         // signing fence for exact-envelope recovery, never another signature.
@@ -138,7 +169,7 @@ function createFundingApproval({ mode, client, journal, dialog, sign, submit, pr
       }
       if (!valid() || journal.status(id).held) { journal.hold(id); return result("stopped", id); }
       if (preflight) {
-        stage = "preflight";
+        stage = "preflight"; report("checking-mana");
         try {
           await waiting(preflight({ transaction: journal.nonceCoordinator.envelope(id), intent: request }, { signal: task.abort.signal }));
         } catch (error) {
@@ -148,7 +179,7 @@ function createFundingApproval({ mode, client, journal, dialog, sign, submit, pr
         }
         if (!valid() || journal.status(id).held) { journal.hold(id); return result("stopped", id); }
       }
-      stage = "submit";
+      stage = "submit"; report("submitting");
       const runner = new FundingRecoveryRunner({ mode, journal, timeoutMs, sign: () => { throw Error("Resigning is forbidden"); },
         submit: async (value, options) => {
           if (!valid() || journal.status(id).held) { journal.hold(id); throw Error("Funding stopped before transport"); }
@@ -160,7 +191,9 @@ function createFundingApproval({ mode, client, journal, dialog, sign, submit, pr
       journal.hold(id);
       const status = decision.action === "done" ? "complete" : decision.action === "review" ? "review_required" :
         decision.action === "wait" ? "waiting" : "await_finality";
+      report("awaiting-confirmation");
       return { ...result(valid() ? status : "stopped", id), action: decision.action, reason: decision.reason ?? null };
+      });
     } catch (error) {
       if (ownsFence) journal.hold(id);
       return { ...result(valid() ? "unavailable" : ownsFence ? "stopped" : "cancelled", ownsFence ? id : null),
@@ -173,7 +206,7 @@ function createFundingApproval({ mode, client, journal, dialog, sign, submit, pr
       pending = null;
     }
   }
-  return { cancel, drain: () => staging.size ? Promise.allSettled([...staging]) : null, approve: (window, id, supplier) => review(window, id, supplier, false),
+  return { cancel, drain: () => staging.size ? Promise.allSettled([...staging]) : null, approve: (window, id, supplier, refreshRequest) => review(window, id, supplier, false, refreshRequest),
     resume: (window, id, supplier) => review(window, id, supplier, true),
     check: id => journal.advance(id, { allowSubmit: false }) };
 }

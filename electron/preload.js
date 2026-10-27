@@ -37,6 +37,11 @@ contextBridge.exposeInMainWorld("kaiKoinSessionBridge", {
 });
 contextBridge.exposeInMainWorld("kaiKoinTestBridge", {
   run: (action, input) => ipcRenderer.invoke("koin:test-payments", action, input),
+  onPurchaseProgress: callback => {
+    const listener = (_event, value) => callback(value);
+    ipcRenderer.on("koin:purchase-progress", listener);
+    return () => ipcRenderer.removeListener("koin:purchase-progress", listener);
+  },
   onProgress: callback => {
     const listener = (_event, value) => callback(value);
     ipcRenderer.on("koin:chat-progress", listener);

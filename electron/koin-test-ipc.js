@@ -41,6 +41,11 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
   let journal, payments, sessionClient, sessionId, sessionRun, access, chatAbort, sessionAbort, worker, workerAbort, workerTrack, stopVersion = 0, busy = false, disposed = false;
   const creditService = new (require("./credit-service").CreditService)({ dataDir, account: core.creditAccount || core.account, dialog,
     storage: core.account?.safeStorage, service: require("../core/lib/koin-network/credit-service.json"),
+    purchaseProgress: value => {
+      const window = getMainWindow(), progress = require("./credit-purchase-progress").purchaseProgress(value);
+      if (!disposed && progress && trustedMainDocument({ sender: window?.webContents, senderFrame: window?.webContents.mainFrame }, window, origin))
+        window.webContents.send("koin:purchase-progress", progress);
+    },
     progress: value => { const window = getMainWindow(); if (window && !window.isDestroyed()) window.webContents.send("koin:chat-progress", typeof value === "string" ? { text: value } : value); } });
   let creditBusy = false, purchaseSync = null;
   const creditProvider = new (require("./credit-provider").CreditProvider)({ service: creditService, core, dialog });
@@ -200,7 +205,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     }
     if (["purchase-estimate", "purchase-preview"].includes(action)) {
       if (disposed || !window.isVisible() || window.isMinimized()) throw Error("Return to the visible app for the current price");
-      return withChatSignal(window, signal => creditService.run(action, input, AbortSignal.any([signal, AbortSignal.timeout(15000)])), true);
+      return withChatSignal(window, signal => creditService.run(action, input, AbortSignal.any([signal, AbortSignal.timeout(action === "purchase-preview" ? 45000 : 15000)])), true);
     }
     if (["purchase-approve", "credit-purchase-retry"].includes(action)) {
       if (disposed || busy) throw Error("Finish or cancel the open payment approval first");

@@ -36,6 +36,7 @@
       ${head("Your wallet", "Manage the KOIN and VHP held in your wallet.", button("buy-credits", "Buy credits"))}
       <section id="product-wallet-controls" class="product-panel"><p class="product-fine">Your wallet balance is separate from AI credits. Wallet actions use the same local wallet and approval controls.</p></section>
     </section>`);
+  $("product-quote-state").insertAdjacentHTML("beforebegin", '<div id="product-payment-progress" class="product-payment-progress" role="status" aria-live="polite" aria-atomic="true" hidden><span class="product-payment-spinner" aria-hidden="true"></span><div><strong id="product-payment-progress-label"></strong><small id="product-payment-progress-detail"></small></div><span id="product-payment-progress-elapsed" aria-hidden="true"></span></div>');
   $("sidebar").querySelector(".brand").insertAdjacentHTML("afterend", `<section class="product-sidebar-credits"><p class="product-eyebrow">Available to use</p><strong><span data-credit-total>—</span> <small>credits</small></strong><p data-credit-breakdown>Credit account unavailable</p>${button("buy-credits", "+ Buy credits", true)}<button class="product-text-button" data-product-view="credits">Balance &amp; activity ↗</button></section>`);
   const header = main.querySelector(".workspace-header");
   header.insertAdjacentHTML("afterbegin", '<button id="product-sidebar-toggle" aria-label="Toggle sidebar" aria-expanded="true">☰</button>');
@@ -172,11 +173,98 @@
   }
   function purchaseOutcome(text = "", failed = false) {
     purchaseAttemptMessage = text; purchaseAttemptFailed = failed;
+    if (failed) clearPaymentProgress();
     const status = $("product-quote-state");
     status.setAttribute("role", failed ? "alert" : "status");
     status.classList.toggle("product-purchase-error", failed);
     if (text) status.textContent = text;
   }
+  const paymentStages = {
+    "checking-payment": ["Checking your payment…", "Checking the saved payment records and wallet connection."],
+    "checking-network": ["Checking the KOIN network…", "Verifying the payment contract and current network state."],
+    "getting-price": ["Getting the current KOIN price…", "Preparing the exact amount for your wallet approval."],
+    "preparing-payment": ["Preparing your payment…", "Preparing the transaction for your wallet review."],
+    "wallet-approval": ["Waiting for your wallet approval…", "Review the exact KOIN amount in the wallet window."],
+    "rechecking-payment": ["Checking the approved payment…", "Confirming the price and wallet state before signing."],
+    signing: ["Signing your payment…", "Saving the approved transaction before sending it."],
+    "checking-mana": ["Checking transaction Mana…", "Verifying that the approved payment can execute."],
+    submitting: ["Sending your payment…", "Submitting the saved transaction to the KOIN network."],
+    "awaiting-confirmation": ["Waiting for blockchain confirmation…", "Checking the saved transaction automatically."],
+    "updating-credits": ["Updating your credit balance…", "Checking payment confirmation and updating your credit balance…"],
+    "cancellation-approval": ["Waiting for cancellation approval…", "Review the zero-transfer cancellation in your wallet."],
+    "cancellation-signing": ["Signing the cancellation…", "Saving the approved cancellation before sending it."],
+    "cancellation-submitting": ["Sending the cancellation…", "Submitting the saved zero-transfer cancellation."],
+    "cancellation-confirmation": ["Waiting for cancellation confirmation…", "A new purchase becomes available after irreversible confirmation."],
+    complete: ["Payment check complete", ""], stopped: ["Payment check stopped", "Any signed payment remains saved."], failed: ["Payment needs attention", "See the payment message below."]
+  };
+  let paymentProgress = null, paymentProgressStartedAt = 0, paymentProgressCutoff = 0;
+  const ignoredPaymentProgress = new Set();
+  const progressTerminal = stage => ["complete", "stopped", "failed"].includes(stage);
+  function ignorePaymentProgress(id) {
+    if (id) ignoredPaymentProgress.add(id);
+    if (ignoredPaymentProgress.size > 100) ignoredPaymentProgress.delete(ignoredPaymentProgress.values().next().value);
+  }
+  function clearPaymentProgress() {
+    ignorePaymentProgress(paymentProgress?.operationId);
+    paymentProgress = null; paymentProgressStartedAt = 0; paymentProgressCutoff = Date.now();
+    paintPaymentProgress();
+  }
+  function beginPaymentProgress(stage) {
+    clearPaymentProgress(); paymentProgressStartedAt = Date.now();
+    paymentProgress = { stage, startedAt: paymentProgressStartedAt, updatedAt: paymentProgressStartedAt };
+    paintPaymentProgress();
+  }
+  function acceptPaymentProgress(value, fromStatus = false) {
+    if (!value || typeof value.operationId !== "string" || !/^[a-zA-Z0-9-]{1,100}$/.test(value.operationId) || !Object.hasOwn(paymentStages, value.stage) ||
+        !Number.isSafeInteger(value.startedAt) || !Number.isSafeInteger(value.updatedAt) || value.startedAt <= 0 || value.updatedAt < value.startedAt ||
+        value.updatedAt > Date.now() + 5000 || ignoredPaymentProgress.has(value.operationId)) return;
+    const saved = purchaseInfo.localPurchase, foreground = approving || quoting;
+    if (foreground) {
+      if (!paymentProgressStartedAt) return;
+      if (value.startedAt < paymentProgressCutoff || value.startedAt < (paymentProgress?.operationId ? paymentProgress.startedAt : 0)) return;
+    } else {
+      const matchesSaved = saved && value.txId && [saved.txId, saved.cancellation?.txId].includes(value.txId);
+      // A restored status is tied to the current account's verified read. An
+      // unsolicited old operation cannot reopen progress after Stop/sign-out.
+      if (!matchesSaved || (!fromStatus && value.startedAt < paymentProgressCutoff)) return;
+    }
+    if (paymentProgress?.operationId === value.operationId && value.updatedAt < paymentProgress.updatedAt) return;
+    if (paymentProgress?.operationId !== value.operationId) ignorePaymentProgress(paymentProgress?.operationId);
+    paymentProgress = { operationId: value.operationId, stage: value.stage, startedAt: value.startedAt, updatedAt: value.updatedAt,
+      ...(typeof value.txId === "string" && /^0x1220[a-f0-9]{64}$/.test(value.txId) ? { txId: value.txId } : {}),
+      ...Object.fromEntries(["blockHeight", "irreversibleHeight"].filter(k => typeof value[k] === "string" && /^(0|[1-9]\d{0,19})$/.test(value[k])).map(k => [k, value[k]])),
+      ...(["credited", "cancelled", "checked"].includes(value.outcome) ? { outcome: value.outcome } : {}) };
+    if (!paymentProgressStartedAt) paymentProgressStartedAt = value.startedAt;
+    if (value.stage === "wallet-approval" && !purchaseAttemptFailed) $("product-quote-state").textContent = "Approve the exact KOIN payment in your wallet.";
+    paintPurchase();
+  }
+  function paintPaymentProgress() {
+    const host = $("product-payment-progress"), value = paymentProgress;
+    const visible = value && (approving || quoting || purchaseInfo.localPurchase || value.stage === "complete");
+    host.hidden = !visible || value?.stage === "failed" || value?.stage === "stopped";
+    $("product-quote-state").hidden = !host.hidden && !purchaseAttemptFailed && !progressTerminal(value.stage);
+    if (host.hidden) { host.removeAttribute("aria-busy"); return; }
+    const [label, detail] = paymentStages[value.stage], busy = !progressTerminal(value.stage);
+    host.dataset.stage = value.stage; host.setAttribute("aria-busy", String(busy));
+    $("product-payment-progress-label").textContent = value.stage === "complete" && value.outcome === "credited" ? "Credits added" : value.stage === "complete" && value.outcome === "cancelled" ? "Cancellation confirmed" : label;
+    let explanation = detail;
+    const confirmation = ["awaiting-confirmation", "cancellation-confirmation"].includes(value.stage) && value.blockHeight;
+    if (confirmation) {
+      const remaining = value.irreversibleHeight ? BigInt(value.blockHeight) - BigInt(value.irreversibleHeight) : null;
+      const subject = value.stage === "cancellation-confirmation" ? "Cancellation" : "Payment";
+      explanation = remaining !== null && remaining <= 0n ? "Checking final confirmation…" : subject + " included. Waiting for final confirmation" + (remaining !== null ? " (" + remaining + " block" + (remaining === 1n ? "" : "s") + " remaining)." : ".");
+    }
+    if (value.stage === "complete" && value.outcome === "credited") explanation = "Your updated credits are ready to use.";
+    if (value.stage === "complete" && value.outcome === "cancelled") explanation = "The saved cancellation is confirmed. You can start a new purchase.";
+    const elapsed = Math.max(0, Math.floor((Date.now() - (paymentProgressStartedAt || value.startedAt)) / 1000));
+    if (busy && !["wallet-approval", "cancellation-approval"].includes(value.stage) && Date.now() - value.updatedAt >= 15000) explanation += " This step is taking longer than usual; the check is still running.";
+    $("product-payment-progress-detail").textContent = explanation;
+    $("product-payment-progress-detail").title = confirmation ? "Included in block " + value.blockHeight + (value.irreversibleHeight ? "; irreversible through block " + value.irreversibleHeight : "") : "";
+    const elapsedNode = $("product-payment-progress-elapsed");
+    elapsedNode.textContent = busy ? Math.floor(elapsed / 60) + ":" + String(elapsed % 60).padStart(2, "0") : "";
+    elapsedNode.title = "Time since this payment check started";
+  }
+  window.kaiKoinTestBridge?.onPurchaseProgress?.(value => acceptPaymentProgress(value));
   function paintPurchase() {
     const wallet = purchaseWallet, state = purchaseInfo.activation;
     const saved = purchaseInfo.localPurchase, paymentDetail = $("product-local-payment");
@@ -223,7 +311,10 @@
     refresh.disabled = busy || !["ready", "error"].includes(state) || (state === "ready" && !saved && (!walletReady() || walletReading));
     refresh.textContent = quoting ? "Getting current price…" : approving ? "Waiting for wallet…" : state === "loading" ? "Checking availability…" : state === "unavailable" ? "Purchases not activated" : state === "signin-required" ? "Account setup required" : state === "wallet-connection-required" ? "Connect wallet to buy" : state === "wallet-reauthorization-required" ? "Reconnect wallet to buy" : state === "secure-storage-required" ? "Secure storage required" : state === "service-upgrade-required" ? "Service update required" : state === "error" ? "Try again" : state !== "ready" ? "Purchasing unavailable" : saved?.busy ? "Payment review in progress…" : saved ? saved.recovery ? "Continue payment" : "Check payment" : !walletReady() ? "Payment wallet required" : purchaseAttemptFailed ? "Try purchase again" : "Buy credits";
     if (purchaseAttemptMessage && !busy && !saved) $("product-quote-state").textContent = purchaseAttemptMessage;
-
+    if (busy && paymentProgress && !progressTerminal(paymentProgress.stage)) {
+      refresh.textContent = ({ "getting-price": "Getting current price…", "wallet-approval": "Waiting for wallet…" })[paymentProgress.stage] || paymentStages[paymentProgress.stage][0];
+    }
+    paintPaymentProgress();
   }
   async function refreshPurchaseWallet() {
     if (walletRead) return walletRead;
@@ -271,6 +362,8 @@
       if (generation !== purchaseGeneration) return;
       if (!["ready", "unavailable", "signin-required", "wallet-connection-required", "wallet-reauthorization-required", "wallet-required", "wallet-unlock-required", "wallet-changed", "secure-storage-required", "service-upgrade-required", "online-required"].includes(info?.activation)) throw Error("Purchasing availability could not be verified.");
       purchaseInfo = info;
+      if (info.purchaseProgress) acceptPaymentProgress(info.purchaseProgress, true);
+      else if (!info.localPurchase && !approving && !quoting && paymentProgress?.stage !== "complete") clearPaymentProgress();
       if (window.KaiCredits) paintCredits(window.KaiCredits.get());
       if (info.activation !== "ready") invalidateQuote(info.activation === "unavailable" ? "Purchasing will be available when the credit service is activated." : info.blocked);
     }).catch(error => { if (generation === purchaseGeneration) { purchaseInfo = { ...purchaseInfo, activation: "error", blocked: message(error) }; invalidateQuote("Purchasing availability must be verified before payment."); } })
@@ -376,7 +469,7 @@
     previewSelection = { usd, key, revision }; previewRead = pending; return pending;
   }
   function pack() {
-    paymentSelectionRevision++; purchaseOutcome();
+    paymentSelectionRevision++; purchaseOutcome(); if (!approving && !quoting) clearPaymentProgress();
     const raw = selectedAmount();
     invalidateQuote(raw ? previewSupport === true ? "Calculating the current KOIN payment…" : "Choose Buy credits to check the exact KOIN payment in your wallet." : "Choose a positive USD amount with up to two decimal places.");
     $("product-quote-koin").textContent = raw ? "Calculating…" : "—";
@@ -388,7 +481,7 @@
   let paymentOperation = 0;
   $("product-usd-amount").addEventListener("input", pack);
   $("product-purchase-stop").addEventListener("click", async () => {
-    const stop = $("product-purchase-stop"); stop.disabled = true; paymentOperation++;
+    const stop = $("product-purchase-stop"); stop.disabled = true; paymentOperation++; clearPaymentProgress();
     try {
       await window.kaiKoinTestBridge.run("purchase-stop");
       approving = quoting = false;
@@ -399,7 +492,7 @@
   });
   $("product-quote-refresh").addEventListener("click", async () => {
     if (approving || quoting || $("product-quote-refresh").disabled) return;
-    purchaseOutcome();
+    purchaseOutcome(); beginPaymentProgress("checking-payment");
     const operation = ++paymentOperation, generation = purchaseGeneration;
     const current = () => operation === paymentOperation && generation === purchaseGeneration;
     if (purchaseInfo.activation !== "ready") {
@@ -420,25 +513,30 @@
       if (!current()) return;
     }
     const pending = purchaseInfo.localPurchase;
-    if (pending && !pending.recovery) { await refreshPurchaseInfo(); return; }
+    if (pending && !pending.recovery) {
+      await refreshPurchaseInfo();
+      if (current() && !purchaseInfo.purchaseProgress) clearPaymentProgress();
+      return;
+    }
     if (pending) {
       approving = true; invalidateQuote(); paintPurchase();
       const notice = $("product-payment-recovery-status"); notice.hidden = false;
-      notice.textContent = "Continuing the saved payment. Review your wallet prompt if one is needed.";
+      notice.textContent = "Checking the saved transaction before deciding whether a wallet review is needed.";
       try {
         const result = await window.kaiKoinTestBridge.run("credit-purchase-retry");
         if (!current()) return;
         notice.textContent = result.state === "cancelled" ? "Wallet review closed. Your saved payment is unchanged." : result.state === "complete" ? "Payment check complete." : "Waiting for blockchain confirmation. This updates automatically.";
+        if (result.state === "cancelled") clearPaymentProgress();
         await Promise.all([window.KaiCredits.refresh(), refreshPurchases()]);
-      } catch (error) { if (current()) { notice.hidden = false; notice.textContent = message(error); } }
-      finally { if (current()) { approving = false; paintPurchase(); } }
+      } catch (error) { if (current()) { clearPaymentProgress(); notice.hidden = false; notice.textContent = message(error); } }
+      finally { if (current()) { approving = false; if (!paymentProgress?.operationId && !purchaseInfo.purchaseProgress) clearPaymentProgress(); paintPurchase(); } }
       return;
     }
     const usd = selectedAmount();
     if (!usd) { $("product-quote-state").textContent = "Choose a positive USD amount with up to two decimal places."; $("product-usd-amount").focus(); return; }
     clearTimeout(previewTimer); previewRevision++;
     const revision = paymentSelectionRevision, key = verifiedWalletKey, selectedWallet = purchaseWallet;
-    quoting = true; paintPurchase();
+    quoting = true; paymentProgress.stage = "getting-price"; paintPurchase();
     // Display estimates and status reads can fail independently while the
     // signed quote is being fetched. They must not cancel a deliberate Buy.
     // Fence actual amount/account/wallet changes; the private controller then
@@ -460,18 +558,21 @@
       if (Date.now() >= paymentQuote.expiresAt) throw Error("The price expired before payment. Try Buy credits again.");
       const walletBalance = purchaseWallet && walletKey() === key ? purchaseWallet.koin : selectedWallet.koin;
       if (amountAtoms(walletBalance) < amountAtoms(paymentQuote.koin)) throw Error("Not enough KOIN for this amount. Choose a smaller amount or add KOIN to your wallet.");
-      quoting = false; approving = true; paintPurchase();
-      $("product-quote-state").textContent = "Approve the exact KOIN payment in your wallet.";
+      quoting = false; approving = true;
+      if (!paymentProgress?.operationId) paymentProgress.stage = "preparing-payment";
+      paintPurchase();
+      $("product-quote-state").textContent = "Preparing the exact payment for wallet review.";
       const result = await window.kaiKoinTestBridge.run("purchase-approve", paymentQuote.id);
       if (!current()) return;
-      purchaseOutcome(result.state === "cancelled" ? "Payment cancelled. No new purchase was started." : "Checking your payment. Credits appear automatically after confirmation.");
+      purchaseOutcome(result.state === "cancelled" ? "Payment cancelled. No new purchase was started." : paymentProgress?.stage === "complete" && paymentProgress.outcome === "credited" ? "Payment confirmed. Your credits are ready to use." : "Checking your payment. Credits appear automatically after confirmation.");
+      if (result.state === "cancelled") clearPaymentProgress();
       invalidateQuote(); $("product-quote-state").textContent = purchaseAttemptMessage;
       await Promise.all([window.KaiCredits.refresh(), refreshPurchases()]);
     } catch (error) { if (current()) purchaseOutcome(message(error), true); }
     finally { if (current()) { quoting = approving = false; paintPurchase(); } }
   });
   for (const name of ["kai-account-signed-out", "kai-credit-identity-changed"]) window.addEventListener(name, () => {
-    purchaseOutcome();
+    purchaseOutcome(); clearPaymentProgress();
     purchaseGeneration++; paymentOperation++; paymentSelectionRevision++; verifiedWalletKey = null; modelPricingRead = null; $("product-model-pricing-table").hidden = true; $("product-model-pricing-rows").replaceChildren(); $("product-model-pricing-status").textContent = "Loading model prices…"; previewSupport = null; previewSupportError = false; previewSupportRead = null; quoting = approving = false; walletRead = purchaseRead = null; walletReading = purchaseReading = false; purchaseWallet = null;
     purchaseInfo = { activation: "loading" }; invalidateQuote("Account changed. Check your payment wallet before buying."); paintPurchase();
     if (buyVisible()) { refreshPurchases().then(() => schedulePreview(0)); refreshModelPricing(); }
@@ -765,5 +866,5 @@
   new MutationObserver(paintProvider).observe($("koin-test-payments"), { subtree: true, attributes: true, childList: true, characterData: true }); paintProvider();
   window.KaiProduct = { render(view) { if (["credits", "buy-credits", "recovery"].includes(view)) window.KaiCredits?.refresh(); if (view === "buy-credits") { refreshPurchases().then(() => schedulePreview(0)); refreshModelPricing(); } else { clearTimeout(previewTimer); previewRevision++; } if (view === "network-overview") refreshNetwork(); if (view === "earn") { providerCheck.refresh(); refreshPublicProvider(); } } };
   setInterval(() => { if (document.hidden) return; if (!$("view-network-overview").hidden) refreshNetwork(); if (!$("view-earn").hidden) { providerCheck.refresh(); refreshPublicProvider(); } }, 15000);
-  setInterval(() => { if (document.hidden) return; paintNetwork(); paintCredits(window.KaiCredits.get()); if (quote && !approving && !quoting && Date.now() >= quote.expiresAt) { invalidateQuote("The price expired. Refreshing automatically…"); schedulePreview(0); } }, 1000);
+  setInterval(() => { if (document.hidden) return; paintPaymentProgress(); paintNetwork(); paintCredits(window.KaiCredits.get()); if (quote && !approving && !quoting && Date.now() >= quote.expiresAt) { invalidateQuote("The price expired. Refreshing automatically…"); schedulePreview(0); } }, 1000);
 })();

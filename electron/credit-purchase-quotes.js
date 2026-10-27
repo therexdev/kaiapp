@@ -51,7 +51,7 @@ class CreditPurchaseQuotes {
       priceDetails: { usdPerKoin: USD.dollars(price.usdPerKoinAtoms), windowSeconds: price.windowSeconds, referenceKind: price.referenceKind,
         ...(independent ? { source: price.source, anchorHash: price.anchorHash } : {}) } } };
   }
-  async preview(c, input, signal) {
+  async preview(c, input, signal, { fresh = false } = {}) {
     if (!input || Object.keys(input).join() !== "usd") throw Error("Select a USD credit amount");
     // Validate decimal syntax before making a network request.
     USD.nativeForDollars(input.usd, "100000000");
@@ -59,7 +59,7 @@ class CreditPurchaseQuotes {
     if (!wallet) throw Error("Connect a payment wallet to buy credits. Free credits do not require a wallet.");
     if (typeof c.config.pricingPolicyHash !== "string" || !/^[0-9a-f]{64}$/.test(c.config.pricingPolicyHash)) throw Error("Purchasing needs the approved pricing configuration. Existing credits remain usable.");
     const scope = this.scope(c);
-    if (!this.intent || this.intent.scope !== scope || this.intent.usd !== input.usd) this.intent = { scope, usd: input.usd, id: crypto.randomBytes(32).toString("hex") };
+    if (fresh || !this.intent || this.intent.scope !== scope || this.intent.usd !== input.usd) this.intent = { scope, usd: input.usd, id: crypto.randomBytes(32).toString("hex") };
     const intent = this.intent, response = await c.flow.call("quote-usd", { dollars: input.usd, intentId: intent.id }, signal);
     signal?.throwIfAborted();
     if (this.intent !== intent) throw Error("Purchase selection changed. Get a fresh quote.");
@@ -71,18 +71,19 @@ class CreditPurchaseQuotes {
     const id = Buffer.from(q.id, "base64url").toString("hex");
     for (const [key, saved] of this.quotes) if (saved.scope !== scope || Number(saved.args.purchase_quote.expires_at) <= this.clock()) this.quotes.delete(key);
     // One current quote per account scope, with no durable authorization.
-    this.quotes.clear(); this.quotes.set(id, { scope, args: structuredClone(args), provenance, intentId: intent.id });
+    this.quotes.clear(); this.quotes.set(id, { scope, args: structuredClone(args), provenance, intentId: intent.id, usd: input.usd });
     return { quote: { id, koin: USD.dollars(q.amount), credits: USD.credits(q.credits), usd: USD.dollars(q.credits), observedAt: price.marketObservedAt, expiresAt: Number(q.expires_at),
       priceDetails: { usdPerKoin: USD.dollars(price.usdPerKoinAtoms), windowSeconds: price.windowSeconds, referenceKind: price.referenceKind } } };
   }
-  async consume(c, id, signal) {
+  async consumeSelection(c, id, signal, { allowExpired = false } = {}) {
     P.digest(id); const saved = this.quotes.get(id); this.quotes.delete(id);
     if (saved && this.intent?.id === saved.intentId) this.intent = null;
     if (!saved || saved.scope !== this.scope(c)) throw Error("Refresh the exchange quote before reviewing payment");
     signal?.throwIfAborted();
-    const q = await USD.verify(c.config.deployment, saved.args, { now: this.clock(), version: c.config.version });
+    const q = await USD.verify(c.config.deployment, saved.args, { ...(allowExpired ? {} : { now: this.clock() }), version: c.config.version });
     Provenance.verify(q, saved.provenance, { expectedPricingPolicyHash: c.config.pricingPolicyHash });
-    return structuredClone(saved.args);
+    return { args: structuredClone(saved.args), usd: saved.usd };
   }
+  async consume(c, id, signal) { return (await this.consumeSelection(c, id, signal)).args; }
 }
 module.exports = { CreditPurchaseQuotes };

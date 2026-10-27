@@ -24,13 +24,13 @@ async function submissionResponse(promise, signal) {
   } finally { clearTimeout(timer); signal.removeEventListener("abort", aborted); }
 }
 class TestPayments {
-  #config; #client; #journal; #wallet; #dialog; #funding; #task; #clock; #authorizeHost; #purchaseQuote; #syncing = false; #syncAbort; #registeredPurchases = new Set();
-  constructor({ config, client, journal, wallet, dialog, clock = Date.now, authorizeHost = null, purchaseQuote = null }) {
+  #config; #client; #journal; #wallet; #dialog; #funding; #task; #clock; #authorizeHost; #purchaseQuote; #purchaseDollars; #progress; #syncing = false; #syncAbort; #registeredPurchases = new Set();
+  constructor({ config, client, journal, wallet, dialog, clock = Date.now, authorizeHost = null, purchaseQuote = null, purchaseDollars = null, progress = () => {} }) {
     assertPaymentMode(config.mode, client); journal.assertMode(config.mode); journal.assertClient(client);
     if (config.mode !== "isolated-rehearsal" && typeof authorizeHost !== "function") throw Error("Test signing requires a persistent host lease");
-    this.#authorizeHost = authorizeHost; this.#purchaseQuote = purchaseQuote;
+    this.#authorizeHost = authorizeHost; this.#purchaseQuote = purchaseQuote; this.#purchaseDollars = purchaseDollars; this.#progress = progress;
     this.#config = structuredClone(config); this.#client = client; this.#journal = journal; this.#wallet = wallet; this.#dialog = dialog; this.#clock = clock;
-    this.#funding = createFundingApproval({ mode: config.mode, client, journal, dialog, clock, timeoutMs: 30000,
+    this.#funding = createFundingApproval({ mode: config.mode, client, journal, dialog, clock, timeoutMs: 30000, progress: stage => this.#report(stage),
       sign: async d => this.#sign(d.transaction),
       preflight: config.mode === "mainnet-pilot" ? async (d, { signal }) => {
         signal.throwIfAborted(); await simulateFunding(client, d.transaction, d.intent); signal.throwIfAborted();
@@ -43,6 +43,8 @@ class TestPayments {
         return client.submit(d.transaction, d.intent, { signal });
       } });
   }
+  #checked(fn) { return this.#client.withVerificationScope ? this.#client.withVerificationScope(fn) : fn(); }
+  #report(stage, detail = {}) { try { this.#progress(stage, detail); } catch {} }
   #owner() { if (this.#wallet.address !== this.#config.owner) throw Error("Unlock the wallet named in the Test manifest"); return this.#config.owner; }
   async #sign(tx) {
     this.#owner(); const signer = this.#wallet.signer;
@@ -255,7 +257,8 @@ class TestPayments {
   purchaseHistory() { this.#owner(); return this.#journal.list().filter(p => p.kind === "credits"); }
   pendingPurchase() {
     this.#owner();
-    return this.#journal.list().find(p => p.kind === "credits" && !["funded", "reverted", "conflicted"].includes(p.state)) || null;
+    const p = this.#journal.list().find(p => p.kind === "credits" && !["funded", "reverted", "conflicted"].includes(p.state));
+    return p ? { ...p, confirmation: this.#journal.nonceCoordinator.confirmation?.(p.id) || null } : null;
   }
   async syncPurchases(register, signal) {
     if (!isPrepaid(this.#client.d) || this.#syncing || this.#task) return;
@@ -268,12 +271,15 @@ class TestPayments {
         // Discover the winning envelope before consuming any registration slot.
         // This is read-only recovery: no signing or background broadcast.
         if (p.state !== "funded") {
+          this.#report(p.cancellation ? "cancellation-confirmation" : "awaiting-confirmation", { txId: p.txId });
           await this.#journal.nonceCoordinator.reconcile(p.id); combined.throwIfAborted();
+          const confirmation = this.#journal.nonceCoordinator.confirmation?.(p.id);
+          if (confirmation) this.#report(p.cancellation ? "cancellation-confirmation" : "awaiting-confirmation", confirmation);
           // Pending envelopes only need nonce/receipt observation. Full funding
           // proof is required after finality; rereading every contract while
           // waiting cannot confirm a payment and floods public RPC endpoints.
           if (terminal(this.#journal.nonceCoordinator.status(p.id).state)) {
-            await this.#journal.advance(p.id, { allowSubmit: false }); combined.throwIfAborted();
+            await this.#checked(() => this.#journal.advance(p.id, { allowSubmit: false })); combined.throwIfAborted();
             p = this.#journal.status(p.id);
           } else if (p.cancellation) continue;
         }
@@ -284,7 +290,12 @@ class TestPayments {
         // envelope, identifies the purchase that must be registered.
         const txId = p.finality?.state === "finalized" ? p.finality.txId
           : correction?.state === "superseded" ? p.txId : correction?.transaction?.id || p.txId;
-        if (!this.#registeredPurchases.has(txId)) { await register(txId, combined); this.#registeredPurchases.add(txId); }
+        if (!this.#registeredPurchases.has(txId)) {
+          this.#report("updating-credits", { txId });
+          const registration = await register(txId, combined); this.#registeredPurchases.add(txId);
+          if (registration?.purchase?.state === "confirmed") this.#report("complete", { txId, outcome: "credited" });
+          else this.#report("awaiting-confirmation", { txId });
+        }
         combined.throwIfAborted();
 
       }
@@ -308,7 +319,7 @@ class TestPayments {
     signal?.addEventListener("abort", stop, { once: true });
     const execute = async () => {
     try {
-      this.#owner(); guard();
+      this.#owner(); guard(); this.#report("checking-payment");
       if (["purchase", "purchase-retry", "fund-rewards", "reserve", "refund", "revoke", "release", "resume", "correct-mana"].includes(action)) { await this.#authorizeHost?.(); guard(); }
       if (["purchase", "fund-rewards", "reserve", "refund", "revoke", "release"].includes(action) && this.#wallet.signer.getAddress() !== this.#owner()) throw Error("Unlock the configured Test wallet");
       if (["purchase", "purchase-retry"].includes(action) && isPrepaid(this.#client.d)) {
@@ -317,13 +328,20 @@ class TestPayments {
         if (action === "purchase-retry") {
           if (!existing) return { status: "complete" };
           const saved = this.#journal.saved(existing.id);
+          this.#report("awaiting-confirmation", { txId: existing.txId });
+          await this.#journal.nonceCoordinator.reconcile(existing.id); guard();
+          const observed = this.#journal.nonceCoordinator.confirmation?.(existing.id);
+          if (terminal(this.#journal.nonceCoordinator.status(existing.id).state)) {
+            const finished = await this.#checked(() => this.#journal.advance(existing.id, { allowSubmit: false })); guard();
+            if (finished.action === "done") return { status: "complete", deposit: this.#journal.status(existing.id) };
+          }
+          if (observed?.state === "included") { this.#report("awaiting-confirmation", observed); return { status: "await_finality", deposit: { ...existing, confirmation: observed } }; }
           if (this.#journal.nonceCoordinator.cancellation(existing.id) ||
               (isUsd(this.#client.d) && this.#clock() > Number(saved.intent.args.purchase_quote?.expires_at)))
             return await require("./koin-purchase-cancel").cancelExpiredPurchase({ id: existing.id, journal: this.#journal,
               client: this.#client, config: this.#config, window, dialog: this.#dialog, guard,
-              sign: tx => this.#sign(tx), canSign: () => { if (this.#wallet.signer.getAddress() !== this.#owner()) throw Error("Unlock this payment wallet before cancellation"); }, signal: task.abort.signal, clock: this.#clock });
-          await this.#journal.nonceCoordinator.reconcile(existing.id); guard();
-          const checked = await this.#journal.advance(existing.id, { allowSubmit: false }); guard();
+              sign: tx => this.#sign(tx), canSign: () => { if (this.#wallet.signer.getAddress() !== this.#owner()) throw Error("Unlock this payment wallet before cancellation"); }, signal: task.abort.signal, clock: this.#clock, progress: (stage, detail) => this.#report(stage, detail) });
+          const checked = await this.#checked(() => this.#journal.advance(existing.id, { allowSubmit: false })); guard();
           if (checked.action === "done") return { status: "complete", deposit: this.#journal.status(existing.id) };
           if (this.#journal.nonceCoordinator.correction(existing.id) || existing.submissionIssue === "funding_insufficient_rc") {
             const corrected = await this.#correctMana(window, existing.id, guard);
@@ -339,7 +357,10 @@ class TestPayments {
         if (BigInt(amount) > BigInt(this.#config.limits.amount)) throw Error("Deposit exceeds the configured Test limit");
         let maxRc = this.#config.maxRcPerTransaction, purchaseMana;
         if (action === "purchase" && isPrepaid(this.#client.d) && this.#config.mode === "mainnet-pilot") {
-          await this.#client.verify(); guard();
+          this.#report("checking-network");
+          // USD funding approval verifies the deployment in its scoped prepare
+          // phase before showing the wallet. Do not repeat that full read here.
+          if (!isUsd(this.#client.d)) { await this.#client.verify(); guard(); }
           if (isUsd(this.#client.d)) {
             purchaseMana = { client: this.#client, nonces: this.#journal.nonceCoordinator, owner: this.#owner(),
               maxRcPerTransaction: this.#config.maxRcPerTransaction, maxRcPerDay: this.#config.maxRcPerDay, signal: task.abort.signal };
@@ -351,20 +372,26 @@ class TestPayments {
           }
         }
         let args = { account: encodedAddress(this.#owner()), amount };
-        if (kind === "credits" && isUsd(this.#client.d)) {
+        const usdPurchase = kind === "credits" && isUsd(this.#client.d), dollars = this.#purchaseDollars?.();
+        const getPrice = async (fresh = false) => {
           if (typeof this.#purchaseQuote !== "function") throw Error("Credit pricing is unavailable. Your existing credits are still usable.");
-          args = await this.#purchaseQuote(amount, this.#owner(), task.abort.signal); guard();
-          if (args?.account !== encodedAddress(this.#owner()) || args?.amount !== amount) throw Error("Purchase price does not match your request");
+          this.#report("getting-price");
+          args = await this.#purchaseQuote(amount, this.#owner(), task.abort.signal, { fresh }); guard();
+          const expected = dollars === undefined || dollars === null ? amount : require("../core/lib/koin-network/purchase-quote").nativeForDollars(dollars, args?.purchase_quote?.usd_per_koin);
+          if (args?.account !== encodedAddress(this.#owner()) || args?.amount !== expected || BigInt(args.amount) > BigInt(this.#config.limits.amount)) throw Error("Purchase price does not match your request");
           await require("../core/lib/koin-network/purchase-quote").verify(this.#client.d, args, { now: this.#clock(), version: this.#config.version });
-        }
+          guard();
+        };
+        if (usdPurchase) await getPrice();
+        const request = () => ({ kind, method: kind === "credits" ? "purchase" : "fund", actor: this.#owner(), args, maxRc });
         let supplied = false;
         return await this.#funding.approve(window, hash(crypto.randomBytes(32)), async () => {
           // The native review displays one exact ceiling. Recheck its coverage
           // after approval without changing it when Mana regenerates.
           if (purchaseMana && supplied) await require("../core/lib/koin-network/purchase-mana").assertPurchaseMana(purchaseMana, maxRc);
           supplied = true; guard();
-          return { kind, method: kind === "credits" ? "purchase" : "fund", actor: this.#owner(), args, maxRc };
-        });
+          return request();
+        }, usdPurchase && dollars !== undefined && dollars !== null ? async () => { await getPrice(true); return request(); } : null);
       }
       const nonces = this.#journal.nonceCoordinator;
       if (action === "correct-mana") return await this.#correctMana(window, digest(input), guard);

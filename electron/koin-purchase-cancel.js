@@ -19,7 +19,8 @@ async function review(dialog, window, options, signal) {
 
 // Trusted main-process action. The renderer selects recovery, never a target,
 // amount, operation, nonce, resource limit, or signature.
-async function cancel({ id, journal, client, config, window, dialog, guard, sign, canSign, signal, clock }, trace) {
+async function cancel({ id, journal, client, config, window, dialog, guard, sign, canSign, signal, clock, progress = () => {} }, trace) {
+  const report = (stage, detail = {}) => { try { progress(stage, detail); } catch {} };
   const saved = journal.saved(id), nonces = journal.nonceCoordinator;
   if (!isUsd(client.d) || !saved?.signed || saved.intent.kind !== "credits" || saved.intent.method !== "purchase" ||
       saved.intent.actor !== config.owner) throw Error("A saved USD purchase owned by this wallet is required");
@@ -32,7 +33,10 @@ async function cancel({ id, journal, client, config, window, dialog, guard, sign
     const checked = await journal.advance(id, { allowSubmit: false }); guard();
     return checked.action === "done";
   };
+  report("cancellation-confirmation", { txId: saved.txId });
   if (await settled("initial-confirmation")) return result("complete");
+  const observed = nonces.confirmation?.(id);
+  if (observed?.state === "included") { report("awaiting-confirmation", observed); return result("await_finality"); }
   journal.hold(id);
   let cancellation = nonces.cancellation(id);
   if (cancellation && !cancellation.transaction) {
@@ -55,6 +59,7 @@ async function cancel({ id, journal, client, config, window, dialog, guard, sign
     if (!Cancel.matches(client.d, saved.draft, draft)) throw Error("Cancellation transaction changed");
   };
   await unchanged("initial-policy");
+  report("cancellation-approval", { txId: saved.txId });
   const answer = await review(dialog, window, { type: "question", title: "Cancel expired credit purchase",
     message: cancellation ? "Resume this saved payment cancellation?" : "Cancel this expired payment so you can buy credits again?",
     detail: ["KOIN transferred: 0. This transaction only reads your KOIN balance and consumes the old payment's nonce.",
@@ -73,7 +78,7 @@ async function cancel({ id, journal, client, config, window, dialog, guard, sign
     canSign(); guard();
     const decision = await nonces.reserveCancellation(id, draft, () => { try { guard(); return true; } catch { return false; } });
     if (decision.action === "sign_original") {
-      guard(); const signed = await sign(draft);
+      guard(); report("cancellation-signing", { txId: draft.id }); const signed = await sign(draft);
       await nonces.stageCancellation(id, signed); // Preserve a late signature after Stop.
     }
     cancellation = nonces.cancellation(id);
@@ -86,7 +91,7 @@ async function cancel({ id, journal, client, config, window, dialog, guard, sign
       (lookup.transactions !== undefined && !Array.isArray(lookup.transactions)) ||
       (lookup.transactions || []).some(r => r?.transaction?.id !== cancellation.draft.id)) throw Error("Cancellation confirmation is unavailable");
   if (lookup.transactions?.length) return result(await settled("seen-confirmation") ? "complete" : "await_finality");
-  trace.phase = "simulation";
+  trace.phase = "simulation"; report("checking-mana", { txId: cancellation.draft.id });
   try { await simulateCancellation(client, cancellation.transaction, saved.draft); }
   catch (error) {
     guard(); journal.recordCancellationIssue(id, error.code === "funding_insufficient_rc" ? "funding_insufficient_rc" : "funding_simulation_failed");
@@ -96,10 +101,11 @@ async function cancel({ id, journal, client, config, window, dialog, guard, sign
   guard(); if (await settled("submission-confirmation")) return result("complete");
   await unchanged("submission-policy");
   const transaction = nonces.authorizeCancellationSubmission(id, { maxRcPerDay: config.maxRcPerDay }); guard();
+  report("cancellation-submitting", { txId: transaction.id });
   let issue = null;
   try { await client.provider.call("chain.submit_transaction", { transaction, broadcast: true }, { signal }); }
   catch { issue = "funding_submission_uncertain"; }
-  journal.recordCancellationIssue(id, issue);
+  journal.recordCancellationIssue(id, issue); report("cancellation-confirmation", { txId: transaction.id });
   return result("await_finality");
 }
 const rpcCodes = new Set(["koin_rpc_unavailable", "koin_rpc_rate_limited", "koin_rpc_rejected", "koin_rpc_chain_mismatch", "koin_rpc_stopped"]);

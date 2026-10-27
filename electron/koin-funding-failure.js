@@ -27,7 +27,7 @@ const messages = Object.freeze({
   "rpc-rejected": "The KOIN network rejected a required check. Share this message before trying another purchase.",
   "chain-mismatch": "The KOIN network identity did not match. Share this message before trying another purchase.",
   "insufficient-mana": "The KOIN network reported insufficient Mana. Check the wallet's available Mana before trying again.",
-  "quote-expired": "The quote is outside its valid time window. Check the computer's date and time, then get a fresh quote.",
+  "quote-expired": "The price needs refreshing before payment. Buy credits again for a fresh quote.",
   "policy-changed": "The purchase policy changed or is paused. Share this message before trying another purchase.",
   "review-changed": "The reviewed payment changed or expired. Get a fresh quote and review it again.",
   "wallet-busy": "A saved transaction needs attention. Open Balance & activity before trying another purchase.",

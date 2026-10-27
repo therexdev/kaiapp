@@ -317,16 +317,16 @@ test("a privacy abort scopes inherited RPC reads without cancelling unrelated re
   assert.equal(await provider.getChainId(), CHAIN);
 });
 
-test("paced purchase RPC spreads concurrent probes and reads instead of bursting", async t => {
+test("paced purchase RPC shares simultaneous chain probes and spreads the distinct reads", async t => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
   const starts = [];
   const { provider, calls } = fixture(() => { starts.push(Date.now()); }, { requestIntervalMs: 250 });
   const pending = Promise.all([provider.getHeadInfo(), provider.getHeadInfo(), provider.getHeadInfo()]);
   for (let n = 0; n < 6; n++) await advance(t, n ? 250 : 0);
   await pending;
-  assert.equal(calls.length, 6);
+  assert.equal(calls.length, 4);
   for (let n = 1; n < starts.length; n++) assert.ok(starts[n] - starts[n - 1] >= 250);
-  assert.equal(calls.filter(c => c.body.method === "chain.get_chain_id").length, 3);
+  assert.equal(calls.filter(c => c.body.method === "chain.get_chain_id").length, 1);
 });
 test("Stop during a paced broadcast queue prevents its POST and leaves no reserved future slot", async t => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
@@ -364,4 +364,73 @@ test("request deadlines include pacing and expired queued reads never run later"
   assert.equal(await pending, "koin_rpc_unavailable");
   assert.equal(calls.length, 2);
   await advance(t, 1000); assert.equal(calls.length, 2);
+});
+
+test("verification phase chain pins are short lived, endpoint bound and never reused by a broadcast", async t => {
+  t.mock.timers.enable({ apis: ["Date"], now: 100000 });
+  const { provider, calls } = fixture(() => {});
+  await provider.withVerificationScope(async () => {
+    await provider.getHeadInfo(); await provider.getAccountRc("owner");
+    assert.equal(calls.filter(c => c.body.method === "chain.get_chain_id").length, 1);
+    await provider.call("chain.submit_transaction", { transaction: { id: "saved" }, broadcast: true });
+    assert.equal(calls.filter(c => c.body.method === "chain.get_chain_id").length, 2, "broadcast always verifies its endpoint immediately before sending");
+    t.mock.timers.setTime(110000); await provider.getHeadInfo();
+    assert.equal(calls.filter(c => c.body.method === "chain.get_chain_id").length, 3);
+    await provider.withVerificationScope(() => provider.getHeadInfo());
+    assert.equal(calls.filter(c => c.body.method === "chain.get_chain_id").length, 4, "next approval phase has an independent chain pin");
+  });
+  await provider.getHeadInfo();
+  assert.equal(calls.filter(c => c.body.method === "chain.get_chain_id").length, 5, "no global chain-id cache");
+});
+
+test("aborting one simultaneous chain-probe waiter does not abort another action", async () => {
+  let enter, release;
+  const started = new Promise(resolve => { enter = resolve; });
+  const { provider, calls } = fixture(async (_url, body) => {
+    if (body.method === "chain.get_chain_id") { enter(); await new Promise(resolve => { release = resolve; }); }
+  });
+  const stop = new AbortController();
+  const a = provider.call("chain.get_head_info", {}, { signal: stop.signal }).catch(e => e.code);
+  const b = provider.getAccountRc("owner"); await started; stop.abort();
+  assert.equal(await a, "koin_rpc_stopped");
+  assert.equal(calls[0].signal.aborted, false);
+  release(); await b;
+  assert.equal(calls.filter(c => c.body.method === "chain.get_chain_id").length, 1);
+  assert.equal(calls.filter(c => c.body.method === "chain.get_head_info").length, 0);
+});
+
+test("purchase reads can use a healthy pinned backup before a stalled primary deadline", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  let late;
+  const { provider, calls } = fixture(async (url, body) => {
+    if (url === A) return new Promise(resolve => { late = () => resolve(json(body.id, { chain_id: CHAIN })); });
+    return json(body.id, body.method === "chain.get_chain_id" ? { chain_id: CHAIN } : { rc: "42" });
+  }, { readHedgeMs: 750 });
+  const result = provider.getAccountRc("owner");
+  await advance(t, 749); assert.equal(calls.length, 1);
+  await advance(t, 1); assert.equal(await result, "42");
+  assert.equal(calls[0].signal.aborted, true);
+  assert.equal(provider.readGeneration, 1);
+  late(); await advance(t, 0); assert.equal(provider.readGeneration, 1);
+  await provider.getAccountRc("next"); assert.equal(calls.at(-1).url, B);
+});
+
+test("hedged reads retain chain mismatches, total deadlines, Stop and single broadcast behavior", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  const wrong = fixture((url, body) => url === A ? new Promise(() => {}) : json(body.id, { chain_id: "wrong" }), { readHedgeMs: 10 });
+  const mismatch = wrong.provider.getHeadInfo().catch(e => e.code);
+  await advance(t, 10); assert.equal(await mismatch, "koin_rpc_chain_mismatch");
+  assert(wrong.calls.every(c => c.body.method === "chain.get_chain_id"));
+  const deadline = fixture(() => new Promise(() => {}), { readHedgeMs: 750, timeoutMs: 20, attemptTimeoutMs: 10 });
+  const timed = deadline.provider.getHeadInfo().catch(e => e.code);
+  await advance(t, 20); assert.equal(await timed, "koin_rpc_unavailable");
+  await advance(t, 1000); assert.equal(deadline.calls.length, 1, "queued backup never starts beyond the total deadline");
+  const stop = new AbortController(), paused = fixture(() => new Promise(() => {}), { readHedgeMs: 750 });
+  const stoppedRead = paused.provider.call("chain.get_head_info", {}, { signal: stop.signal }).catch(e => e.code);
+  await advance(t, 0); stop.abort(); assert.equal(await stoppedRead, "koin_rpc_stopped");
+  await advance(t, 1000); assert.equal(paused.calls.length, 1);
+  const write = fixture((_url, body) => body.method === "chain.get_chain_id" ? undefined : html(), { readHedgeMs: 750 });
+  await assert.rejects(write.provider.call("chain.submit_transaction", { transaction: { id: "saved" }, broadcast: true }), /unavailable/);
+  assert.equal(write.calls.filter(c => c.body.method === "chain.submit_transaction").length, 1);
+  assert(write.calls.every(c => c.url === A));
 });

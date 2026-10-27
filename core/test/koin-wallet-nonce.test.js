@@ -122,3 +122,33 @@ test("coordinated external import still prevents concurrent broadcasts", async t
   await Promise.allSettled([w.custody.broadcast({ transaction: signed, confirm: true }), w.custody.broadcast({ transaction: signed, confirm: true })]);
   assert.equal(f.walletSubmissions.length, 1);
 });
+
+test("canonical included payment progress remains reversible, expires and is replaced after a fork", async t => {
+  const f = fixture(t), w = wallet(f), sent = await w.send(), id = sent.nonceReservation, tx = f.walletSubmissions[0];
+  await w.nonces.reconcile(id);
+  assert.deepEqual(w.nonces.confirmation(id), { state: "waiting", txId: tx.id, checkedAt: f.state.now });
+  await f.include(tx);
+  const status = await w.nonces.reconcile(id), included = w.nonces.confirmation(id);
+  assert.equal(status.state, "signed", "reversible inclusion does not release the wallet nonce");
+  assert.equal(status.finality, null);
+  assert.equal(included.state, "included"); assert.equal(included.txId, tx.id);
+  assert.equal(included.blockHeight, String(f.state.height)); assert.equal(included.irreversibleHeight, String(f.state.lib));
+  included.state = "finalized";
+  assert.equal(w.nonces.confirmation(id).state, "included", "read-only progress cannot change observer state");
+  f.state.now += 30000; assert.equal(w.nonces.confirmation(id), null, "old observations cannot keep advertising inclusion");
+  f.state.fork = true;
+  await w.nonces.reconcile(id); assert.equal(w.nonces.confirmation(id), null, "a fork discards the former included observation");
+  assert.equal(w.nonces.status(id).state, "signed");
+  f.state.fork = false; f.state.lib = f.state.height;
+  await w.nonces.reconcile(id);
+  assert.equal(w.nonces.confirmation(id).state, "finalized"); assert.equal(w.nonces.status(id).state, "finalized");
+});
+
+test("a malformed reversible receipt is never advertised as a successful included payment", async t => {
+  const f = fixture(t), w = wallet(f), sent = await w.send();
+  await f.include(f.walletSubmissions[0]);
+  f.state.block.receipt.transaction_receipts[0].payer = f.d.admin;
+  await assert.rejects(w.nonces.reconcile(sent.nonceReservation), /Invalid wallet receipt/);
+  assert.equal(w.nonces.confirmation(sent.nonceReservation), null);
+  assert.equal(w.nonces.status(sent.nonceReservation).state, "signed");
+});

@@ -14,6 +14,10 @@ function retryableMethod(method, params) {
       ["get_contract_metadata", "get_contract_address"].includes(params?.name)) ||
     (method === "chain.submit_transaction" && params?.broadcast === false);
 }
+function readOnlyMethod(method, params) {
+  return READS.has(method) || (method === "chain.invoke_system_call" &&
+    ["get_contract_metadata", "get_contract_address"].includes(params?.name));
+}
 class RpcFailure extends Error {
   constructor(message, retryable = false, code = "koin_rpc_unavailable") {
     super(message); this.retryable = retryable; this.code = code;
@@ -48,15 +52,17 @@ class PinnedRpcProvider extends Provider {
   #endpoints; #chainId; #fetch; #timeoutMs; #attemptTimeoutMs; #signals = new AsyncLocalStorage();
   #preferred = 0; #lastAccepted = 0; #generation = 0; #requestId = 0;
   #requestIntervalMs; #nextRequest = new Map();
+  #verificationScopes = new AsyncLocalStorage(); #probes = new Map(); #readHedgeMs;
   // Each endpoint attempt includes a chain-id probe followed by the requested
   // operation. Allow both reads to finish on a slow node, and leave a full
   // backup attempt after a stalled primary without removing the total bound.
-  constructor(rpc, chainId, { fetchImpl = globalThis.fetch, timeoutMs = 45000, attemptTimeoutMs = 20000, requestIntervalMs = 0 } = {}) {
+  constructor(rpc, chainId, { fetchImpl = globalThis.fetch, timeoutMs = 45000, attemptTimeoutMs = 20000, requestIntervalMs = 0, readHedgeMs = 0 } = {}) {
     if (!Array.isArray(rpc) || !rpc.length || rpc.length > 3 || new Set(rpc).size !== rpc.length ||
         typeof chainId !== "string" || !chainId || typeof fetchImpl !== "function" ||
         !Number.isSafeInteger(timeoutMs) || timeoutMs < 10 || timeoutMs > 45000 ||
         !Number.isSafeInteger(attemptTimeoutMs) || attemptTimeoutMs < 10 || attemptTimeoutMs > timeoutMs ||
-        !Number.isSafeInteger(requestIntervalMs) || requestIntervalMs < 0 || requestIntervalMs > 1000)
+        !Number.isSafeInteger(requestIntervalMs) || requestIntervalMs < 0 || requestIntervalMs > 1000 ||
+        !Number.isSafeInteger(readHedgeMs) || readHedgeMs < 0 || readHedgeMs > 5000)
       throw Error("Invalid pinned KOIN RPC settings");
     const endpoints = Object.freeze(rpc.map(value => {
       const url = new URL(value);
@@ -69,9 +75,47 @@ class PinnedRpcProvider extends Provider {
     this.#endpoints = endpoints; this.#chainId = chainId; this.#fetch = fetchImpl;
     this.#timeoutMs = timeoutMs; this.#attemptTimeoutMs = attemptTimeoutMs;
     this.#requestIntervalMs = requestIntervalMs;
+    this.#readHedgeMs = readHedgeMs;
   }
   withSignal(signal, run) { return this.#signals.run(signal, run); }
+  withVerificationScope(run) { return this.#verificationScopes.run(new Map(), run); }
+  get pinnedChainId() { return this.#chainId; }
   get readGeneration() { return this.#generation; }
+  async #chain(endpoint, signal) {
+    const scope = this.#verificationScopes.getStore(), cached = scope?.get(endpoint), now = Date.now();
+    if (cached && cached.generation === this.#generation && now >= cached.checkedAt && now - cached.checkedAt < 10000) {
+      signal.throwIfAborted(); return cached.value;
+    }
+    let probe = this.#probes.get(endpoint);
+    if (!probe) {
+      probe = { controller: new AbortController(), users: 0, done: false };
+      this.#probes.set(endpoint, probe);
+      probe.promise = this.#request(endpoint, "chain.get_chain_id", {}, probe.controller.signal).then(value => {
+        if (value?.chain_id !== this.#chainId) throw new RpcFailure("Deployment chain mismatch", false, "koin_rpc_chain_mismatch");
+        return value;
+      }).finally(() => {
+        probe.done = true; if (this.#probes.get(endpoint) === probe) this.#probes.delete(endpoint);
+      });
+    }
+    probe.users++;
+    let aborted;
+    try {
+      const value = await Promise.race([probe.promise, new Promise((_, reject) => {
+        aborted = () => reject(stopped());
+        signal.addEventListener("abort", aborted, { once: true });
+        if (signal.aborted) aborted();
+      })]);
+      signal.throwIfAborted();
+      scope?.set(endpoint, { value, checkedAt: Date.now(), generation: this.#generation });
+      return value;
+    } finally {
+      signal.removeEventListener("abort", aborted); probe.users--;
+      if (!probe.users && !probe.done) {
+        if (this.#probes.get(endpoint) === probe) this.#probes.delete(endpoint);
+        probe.controller.abort();
+      }
+    }
+  }
   async #pace(endpoint, signal) {
     while (this.#requestIntervalMs) {
       signal.throwIfAborted();
@@ -126,7 +170,10 @@ class PinnedRpcProvider extends Provider {
     const controller = new AbortController();
     let timer, onAbort;
     const task = async () => {
-      const chain = await this.#request(endpoint, "chain.get_chain_id", {}, controller.signal);
+      // Only read-only operations share a short, explicit verification phase.
+      // Broadcasts and simulations always obtain their own fresh chain pin.
+      const chain = readOnlyMethod(method, params) ? await this.#chain(endpoint, controller.signal)
+        : await this.#request(endpoint, "chain.get_chain_id", {}, controller.signal);
       if (chain?.chain_id !== this.#chainId)
         throw new RpcFailure("Deployment chain mismatch", false, "koin_rpc_chain_mismatch");
       if (method === "chain.get_chain_id") return chain;
@@ -153,6 +200,7 @@ class PinnedRpcProvider extends Provider {
     if (scoped) signal = signal ? AbortSignal.any([signal, scoped]) : scoped;
     if (signal?.aborted) throw stopped();
     const captured = structuredClone(params), retry = retryableMethod(method, captured);
+    if (this.#readHedgeMs && this.#endpoints.length > 1 && readOnlyMethod(method, captured)) return this.#hedgedRead(method, captured, signal);
     const preferred = this.#preferred, deadline = Date.now() + this.#timeoutMs;
     const count = retry ? this.#endpoints.length : 1;
     for (let attempt = 0; attempt < count; attempt++) {
@@ -174,6 +222,47 @@ class PinnedRpcProvider extends Provider {
       }
     }
     throw unavailable();
+  }
+  async #hedgedRead(method, params, signal) {
+    const preferred = this.#preferred, deadline = Date.now() + this.#timeoutMs;
+    const controller = new AbortController(), combined = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+    let completed = 0, settled = false, deadlineTimer;
+    const startNext = [];
+    try {
+      return await new Promise((resolve, reject) => {
+        deadlineTimer = setTimeout(() => { if (!settled) { settled = true; reject(unavailable()); } }, this.#timeoutMs);
+        const finish = (error, value, index, attempt) => {
+          if (settled) return;
+          if (error && error.retryable && ++completed < this.#endpoints.length) return;
+          settled = true;
+          if (error) { reject(error); return; }
+          if (signal?.aborted) { reject(stopped()); return; }
+          if (index !== this.#lastAccepted) { this.#lastAccepted = index; this.#generation++; }
+          if (attempt > 0) this.#preferred = index;
+          resolve(value);
+        };
+        for (let attempt = 0; attempt < this.#endpoints.length; attempt++) {
+          const index = (preferred + attempt) % this.#endpoints.length;
+          (async () => {
+            if (attempt) await new Promise((done, fail) => {
+              const abort = () => { clearTimeout(timer); combined.removeEventListener("abort", abort); fail(stopped()); };
+              const start = () => { clearTimeout(timer); combined.removeEventListener("abort", abort); done(); };
+              const timer = setTimeout(start, this.#readHedgeMs * attempt); startNext[attempt] = start;
+              combined.addEventListener("abort", abort, { once: true }); if (combined.aborted) abort();
+            });
+            combined.throwIfAborted();
+            const remaining = Math.min(this.#attemptTimeoutMs, deadline - Date.now());
+            if (remaining <= 0) throw unavailable();
+            const value = await this.#attempt(this.#endpoints[index], method, params, remaining, combined);
+            finish(null, value, index, attempt);
+          })().catch(error => {
+            const failure = signal?.aborted ? stopped() : error instanceof RpcFailure ? error : unavailable();
+            if (failure.retryable) startNext[attempt + 1]?.();
+            finish(failure);
+          });
+        }
+      });
+    } finally { clearTimeout(deadlineTimer); controller.abort(); }
   }
 }
 module.exports = { PinnedRpcProvider };
