@@ -71,8 +71,12 @@ test("Earn setup clicks acknowledge pending checks, show current blockers and re
   assert.equal(await page.locator("#view-settings").isVisible(), true);
   await navClick(page, '#nav [data-view="earn"]');
   await page.waitForFunction(() => !document.getElementById("product-provider-reload").hasAttribute("aria-busy"));
-  // Pause timers: exercise the real deadline without a 15-second wall wait.
-  await page.clock.install(); await page.clock.pauseAt(new Date());
+  // pauseAt installs and pauses the clock in one call. Starting a running
+  // clock first can overtake a separately sampled host time on loaded CI.
+  // Exercise the actual deadline without a 15-second wall wait.
+  const frozenAt = new Date();
+  await page.clock.pauseAt(frozenAt);
+  assert.equal(await page.evaluate(() => Date.now()), frozenAt.getTime());
   await page.evaluate(() => { window.holdInfo = true; window.finishInfo = null; });
   await reload.click(); await page.waitForFunction(() => !!window.finishInfo);
   await page.clock.runFor(15001);

@@ -1,6 +1,13 @@
 "use strict";
 const { test } = require("node:test"), assert = require("node:assert/strict"), fs = require("node:fs"), os = require("node:os"), path = require("node:path");
 const CHROMIUM = process.env.KAI_TEST_CHROMIUM || "/opt/pw-browsers/chromium", options = { skip: !fs.existsSync(CHROMIUM), timeout: 90000 };
+async function freezeClock(page) {
+  // pauseAt installs and pauses together; a prior install() lets real time
+  // overtake the separately sampled pause target under CI load.
+  const frozenAt = new Date();
+  await page.clock.pauseAt(frozenAt);
+  assert.equal(await page.evaluate(() => Date.now()), frozenAt.getTime());
+}
 async function fixture(t, fakeClock = false, previewSupported = true) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-buy-wallet-"));
   const core = await require("../server").createCore({ dataDir: dir, port: 0, onEvent() {} });
@@ -53,7 +60,7 @@ async function fixture(t, fakeClock = false, previewSupported = true) {
     await route.fulfill(response);
   });
   await page.route("**/core/earn", route => route.fulfill({ json: { wallet: { exists: true, unlocked: true, address: wallet.address }, worker: { running: false } } }));
-  if (fakeClock) { await page.clock.install(); await page.clock.pauseAt(new Date()); }
+  if (fakeClock) await freezeClock(page);
   await page.goto(`http://127.0.0.1:${await core.start()}`);
   await page.locator('.product-sidebar-credits [data-product-view="buy-credits"]').click();
   const buy = page.locator("#product-quote-refresh"), status = page.locator("#product-quote-state");
@@ -138,7 +145,7 @@ test("saved payment stays actionable during checks, stops a real review and conf
   await page.waitForFunction(() => !document.getElementById("product-quote-refresh").disabled);
   assert.equal(await buy.textContent(), "Continue payment"); assert.match(await page.locator("#product-local-payment").textContent(), /Cancellation: 0x1220b{64}/);
   assert.equal(await count("credit-purchase-retry"), 1); assert.equal(await count("purchase-preview"), previews);
-  await page.clock.install(); await page.clock.pauseAt(new Date(Date.now() + 1000));
+  await freezeClock(page);
   await page.evaluate(() => { window.localPurchase = null; window.cancelledPurchases = [{ txId: "0x1220" + "a".repeat(64) }]; });
   await page.clock.runFor(5001); await page.waitForFunction(() => document.getElementById("product-quote-refresh").textContent === "Buy credits");
   await page.evaluate(() => window.KaiCredits.accept({ product: "prepaid-usd-v1", owner: "payment-wallet-a", credits: { available: "0", purchased: { available: "0" }, free: { available: "0", state: "available" }, version: "1", unit: "USD-1e-8" }, purchases: [{ id: "0x1220" + "a".repeat(64), state: "pending", createdAt: Date.now() }], usage: [] }));
@@ -150,7 +157,7 @@ test("saved payment stays actionable during checks, stops a real review and conf
 
 test("lost payment-status reply times out and permits a fresh read without accepting the late reply", options, async t => {
   const { page, buy } = await fixture(t);
-  await page.clock.install(); await page.clock.pauseAt(new Date(Date.now() + 1000));
+  await freezeClock(page);
   await page.evaluate(() => { window.holdInfo = true; }); await page.locator("#product-purchase-check").click();
   await page.waitForFunction(() => !!window.finishInfo); await page.clock.runFor(12001);
   await page.waitForFunction(() => !document.getElementById("product-purchase-check").disabled);
