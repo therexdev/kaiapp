@@ -25,12 +25,14 @@ class CreditRuns {
     return run;
   }
   flow(c, run, callId) {
+    if (c.auth?.sessionOnly) throw Error("Temporary network access supports free chat only. Reconnect with secure storage for advanced runs");
     P.digest(callId);
     return new PrepaidChat({ config: c.config, file: path.join(this.directory(c, run.id), callId + ".json"), storage: this.service.storage,
       access: { authorize: (pin, signal) => { signal?.throwIfAborted(); this.service.account.assertCreditAuthorization(c.auth, pin); return c.auth; } },
       fetchImpl: this.service.fetchImpl, progress: value => this.service.progress(typeof value === "object" ? { ...value, runId: run.id, callId } : value) });
   }
   async open(c, input, signal) {
+    if (c.auth?.sessionOnly) throw Error("Temporary network access supports free chat only. Reconnect with secure storage for advanced runs");
     if (!input || Object.keys(input).filter(k => !["model", "paidFirst"].includes(k)).sort().join() !== "budget,freeOnly,mode" || !["research", "agent", "team", "agents"].includes(input.mode) || typeof input.freeOnly !== "boolean") throw Error("Choose a supported mode, total run budget and paid-continuation preference");
     if ((input.paidFirst !== undefined && typeof input.paidFirst !== "boolean") || (input.paidFirst && input.freeOnly)) throw Error("Invalid paid-first preference");
     if (input.paidFirst) await c.flow.requireCreditPriority(signal);
@@ -48,6 +50,7 @@ class CreditRuns {
     return { run: result.run };
   }
   async chat(c, input, signal) {
+    if (c.auth?.sessionOnly) throw Error("Temporary network access supports free chat only. Reconnect with secure storage for advanced runs");
     if (!input || Object.keys(input).sort().join() !== "callId,request,runId") throw Error("Exact advanced model call required");
     const run = this.read(c, input.runId), flow = this.flow(c, run, input.callId);
     if (input.request?.model !== "koinos-network" && input.request?.model !== "koinos-network:" + run.model) throw Error("Run model changed");

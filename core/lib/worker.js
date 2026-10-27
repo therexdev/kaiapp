@@ -42,9 +42,11 @@ class Worker {
     return crypto.createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 16);
   }
 
-  constructor({ schedulerUrl, wallet, runtime, hardware, models, modelPins = null, idlePollMs = 45000, producer, onEvent, fundedOnly = false, qualificationTarget = null, koinMainnetPilotJobs = false, koinMainnetTarget = null, koinShadowJobs = process.env.KAI_KOIN_SHADOW_JOBS === "1", koinFundedRehearsalJobs = process.env.KAI_KOIN_FUNDED_REHEARSAL_JOBS === "1" }) {
+  constructor({ schedulerUrl, wallet, providerSigner = null, runtime, hardware, models, modelPins = null, idlePollMs = 45000, producer, onEvent, fundedOnly = false, qualificationTarget = null, koinMainnetPilotJobs = false, koinMainnetTarget = null, koinShadowJobs = process.env.KAI_KOIN_SHADOW_JOBS === "1", koinFundedRehearsalJobs = process.env.KAI_KOIN_FUNDED_REHEARSAL_JOBS === "1" }) {
     this.schedulerUrl = String(schedulerUrl || "").replace(/\/$/, "");
-    this.wallet = wallet; // WalletService (unlocked)
+    if (providerSigner && (wallet || !fundedOnly || !qualificationTarget || ["register", "presence", "assign", "qualification", "chunk", "result", "release"].some(k => typeof providerSigner[k] !== "function"))) throw Error("A scoped provider signer and pinned funded deployment are required");
+    this.providerSigner = providerSigner;
+    this.wallet = providerSigner ? null : wallet; // Legacy wallet signing remains isolated from delegated earning.
     this.runtime = runtime; // RuntimeManager
     this.hardware = hardware;
     this.models = models || null; // ModelManager — advertises what this machine can serve
@@ -185,6 +187,8 @@ class Worker {
     };
   }
 
+  get address() { return this.providerSigner?.address || this.wallet?.address; }
+
   async _register(signal) {
     // Single-flight, and the poll in the air is aborted afterward. The
     // scheduler keeps ONE token per address, so a register invalidates
@@ -198,7 +202,7 @@ class Worker {
     const requestSignal = AbortSignal.any([controller.signal, AbortSignal.timeout(10000), ...(signal ? [signal] : [])]);
     this._registerGate = (async () => {
       requestSignal.throwIfAborted();
-      const address = this.wallet.address;
+      const address = this.address;
       // Advertise the models actually on disk so the scheduler only hands
       // this machine jobs it can serve — a job for a missing model would
       // trigger a mid-lease gigabyte download and time out. Private models
@@ -319,8 +323,8 @@ class Worker {
        * what happened, and the scheduler's own refusal is what will say so
        * unmissably once proofs are required.
        */
-      let proof = null;
-      try {
+      let proof = this.providerSigner ? { ts: Date.now() } : null;
+      if (!this.providerSigner) try {
         const ts = Date.now();
         const hash = crypto.createHash("sha256").update(`register|${address}|${ts}`).digest();
         proof = { ts, signature: await this.wallet.signHash(hash) };
@@ -331,11 +335,7 @@ class Worker {
         });
       }
       requestSignal.throwIfAborted();
-      const r = await fetch(`${this.schedulerUrl}/worker/register`, {
-        method: "POST",
-        signal: requestSignal,
-        headers: { "content-type": "application/json", connection: "close" },
-        body: JSON.stringify({
+      const registration = {
           address,
           ...(proof || {}),
           // RAM rides along so the scheduler can apply the same fit rule
@@ -358,7 +358,12 @@ class Worker {
           // Block-producer snapshot, when this machine also runs a Koinos node.
           // Never blocks or fails registration: earning must not depend on it.
           producer: await this._producerSnapshot(),
-        }),
+      };
+      if (this.providerSigner) registration.signature = await this.providerSigner.register(registration);
+      requestSignal.throwIfAborted();
+      const r = await fetch(`${this.schedulerUrl}/worker/register`, {
+        method: "POST", signal: requestSignal,
+        headers: { "content-type": "application/json", connection: "close" }, body: JSON.stringify(registration),
       });
       const j = await r.json();
       requestSignal.throwIfAborted();
@@ -379,7 +384,7 @@ class Worker {
   async start(signal) {
     if (this.running) return this.status();
     if (!this.schedulerUrl) throw new Error("No scheduler URL configured (KAI_SCHEDULER_URL)");
-    if (!this.wallet.address) throw new Error("Earning needs a wallet — create one first");
+    if (!this.address) throw new Error("Earning needs a wallet — create one first");
 
     const generation = ++this._startGeneration;
     await this._register(signal);
@@ -528,12 +533,12 @@ class Worker {
       const report = { schema: 1, session: this._koinSession, sequence: ++this._koinSequence,
         at: Date.now(), model: allowed ? alias : "", modelHash: allowed ? pack.sha256 : "",
         ready: !!(allowed && status.runtime?.running && !status.loading && !this._backoff && !this.runtime.networkWorkPaused?.()) };
-      const signature = await this.wallet.signHash(presenceHash(this.wallet.address, this.schedulerUrl, report));
+      const signature = this.providerSigner ? await this.providerSigner.presence(report) : await this.wallet.signHash(presenceHash(this.address, this.schedulerUrl, report));
       if (!this.running) return;
       await fetch(`${this.schedulerUrl}/koin/presence`, {
         method: "POST", headers: { "content-type": "application/json", connection: "close" },
         signal: AbortSignal.any([this._koinAbort.signal, AbortSignal.timeout(4000)]),
-        body: JSON.stringify({ address: this.wallet.address, report, signature }),
+        body: JSON.stringify({ address: this.address, report, signature }),
       });
     } finally {
       this._koinSending = false;
@@ -626,6 +631,7 @@ class Worker {
           }
         }, 25000);
         try {
+          this.providerSigner?.assign(job);
           if (job.type === "koin-provider-qualification") {
             if (!this.qualificationTarget) throw Error("Automatic qualification is not enabled for this connection");
             this._assertModelOffered(job.challenge);
@@ -634,7 +640,7 @@ class Worker {
             this._executing = true; this._shadowAbort = new AbortController();
             const result = await require("./koin-network/shadow-worker").executeShadow({ job: checked.challenge, catalog: this.models?.catalog, runtime: this.runtime, signal: this._shadowAbort.signal });
             this._shadowAbort.signal.throwIfAborted(); if (!this.running) throw Error("Provider qualification stopped");
-            const signature = await this.wallet.signHash(qualification.resultHash(checked, P.hash(result.output)));
+            const signature = this.providerSigner ? await this.providerSigner.qualification(job, P.hash(result.output)) : await this.wallet.signHash(qualification.resultHash(checked, P.hash(result.output)));
             this._shadowAbort.signal.throwIfAborted(); if (!this.running) throw Error("Provider qualification stopped");
             const response = await fetch(`${this.schedulerUrl}/koin/provider/qualification/result?token=${this.token}`, { method: "POST", redirect: "error",
               headers: { "content-type": "application/json", connection: "close" }, signal: AbortSignal.any([this._shadowAbort.signal, AbortSignal.timeout(10000)]),
@@ -673,7 +679,7 @@ class Worker {
           const postPrefix = async output => {
             if (!funded || !job.stream || !this.running) throw Error("Metered stream stopped");
             const next = sequence + 1;
-            const signature = await this.wallet.signHash(require("./koin-network/funded-protocol").fundedChunkHash(job.target, job, output, next));
+            const signature = this.providerSigner ? await this.providerSigner.chunk(job, output, next) : await this.wallet.signHash(require("./koin-network/funded-protocol").fundedChunkHash(job.target, job, output, next));
             const response = await fetch(`${this.schedulerUrl}${wire.prefix}chunk?token=${this.token}`, {
               method: "POST", headers: { "content-type": "application/json", connection: "close" },
               body: JSON.stringify({ jobId: job.id, output, signature, sequence: next }),
@@ -695,7 +701,7 @@ class Worker {
             ? require("./koin-network/job-protocol").resultHash(job.quote.domain, job.id, job.attempt, job.quote.hash, output)
             : crypto.createHash("sha256").update(`${job.id}|${output}`).digest();
           if (shadow && !this.running) throw Error("Shadow worker stopped");
-          const signature = await this.wallet.signHash(hash);
+          const signature = this.providerSigner ? await this.providerSigner.result(job, output) : await this.wallet.signHash(hash);
           const resultRoute = funded ? wire.prefix + "result" : shadow ? "/koin/shadow/jobs/result" : "/worker/result";
           const res = await fetch(`${this.schedulerUrl}${resultRoute}?token=${this.token}`, {
             method: "POST",
@@ -719,6 +725,7 @@ class Worker {
           this.stats.lastError = `last job failed: ${String(e.message)}`;
           this.onEvent({ type: "worker:job-failed", jobId: job.id, message: String(e.message) });
         } finally {
+          this.providerSigner?.release();
           this._executing = false;
           this._shadowAbort = null;
           clearInterval(beat);

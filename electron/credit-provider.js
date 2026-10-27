@@ -11,8 +11,9 @@ function modelSelection(value) {
 }
 // Public account setup, scoped to this deployment and device. No custody migration.
 class CreditProvider {
-  constructor({ service, core, createWorker = options => new Worker(options), readStatus = require("./koin-provider-status").readProviderStatus }) {
-    Object.assign(this, { service, core, createWorker, readStatus }); this.worker = null; this.busy = false; this.closed = false; this.error = ""; this.generation = 0; this.modelHint = null;
+  constructor({ service, core, device, dialog, createWorker = options => new Worker(options), readStatus = require("./koin-provider-status").readProviderStatus }) {
+    Object.assign(this, { service, core, createWorker, readStatus });
+    this.device = device || (service.service ? new (require("./provider-device").ProviderDevice)({ service, core, dialog }) : null); this.worker = null; this.busy = false; this.closed = false; this.error = ""; this.generation = 0; this.modelHint = null;
   }
   savedPreference(c) {
     const file = path.join(c.directory, "provider-preference.json");
@@ -42,9 +43,33 @@ class CreditProvider {
     if (this.core.gateway.network.status?.().privacyMode === "local-only" || this.core.settings?.get?.("network.privacyMode") === "local-only")
       throw Error("Local-Only is on. Choose Network or Local-First before starting earning.");
   }
+  providerContext(signal) { return this.device ? this.device.context(signal) : this.service.context(signal); }
+  providerAccess(c) { return c.access || { authorize: pin => { this.service.account.assertCreditAuthorization(c.auth, pin); return c.auth; } }; }
+  async authorize(window, input, signal) {
+    if (!this.device) throw Error("Wallet-first earning is unavailable on this service");
+    if (this.busy || this.closed) throw Error("Provider setup is already in progress");
+    this.busy = true; const generation = this.generation;
+    try {
+      const result = await this.device.authorize(window, input, signal);
+      if (generation !== this.generation || this.closed) return { state: "cancelled" };
+      if (result.state === "authorized") this.error = "";
+      return result;
+    } finally { this.busy = false; }
+  }
+  async revoke(window, signal) {
+    if (!this.device) throw Error("Device authorization is unavailable on this service");
+    if (this.busy || this.closed) throw Error("Provider setup is already in progress");
+    this.busy = true;
+    try {
+      const result = await this.device.revoke(window, signal);
+      if (result.state === "revoked") await this.stop(true);
+      return result;
+    } finally { this.busy = false; }
+  }
   guard(c, signal) {
     signal?.throwIfAborted(); if (this.closed) throw Error("Provider is closing");
     this.networkAllowed();
+    if (this.device) { this.device.assert(c, signal); return; }
     this.service.account.assertCreditAuthorization(c.auth, c.config.schedulerUrl);
     const wallet = this.core.account.wallet;
     if (!wallet.address) throw Error("Open Reward wallet to set up or unlock your existing wallet.");
@@ -92,7 +117,7 @@ class CreditProvider {
     // computer whose Smart capacity is already qualified.
     try {
       const status = await this.readStatus({ config: c.config, approvedModels: c.providerModels,
-        access: { authorize: pin => { this.service.account.assertCreditAuthorization(c.auth, pin); return c.auth; } },
+        access: this.providerAccess(c),
         fetchImpl: this.service.fetchImpl, signal: AbortSignal.any([signal, AbortSignal.timeout(3000)]) });
       for (const state of ["online", "qualifying", "preparing", "connecting", "qualification-expired", "network-paused"]) {
         for (const row of [status, ...(status.models || [])]) {
@@ -119,20 +144,20 @@ class CreditProvider {
   async info() {
     try {
       this.networkAllowed();
-      const signal = AbortSignal.timeout(10000), c = await this.service.context(signal), models = await this.models(c, signal), enabled = this.preference(c);
+      const signal = AbortSignal.timeout(10000), c = await this.providerContext(signal), models = await this.models(c, signal), enabled = this.preference(c);
       let model, selectionError = "";
       try { model = await this.model(c, signal, models); } catch (e) { selectionError = e.message; }
       this.preferenceContext = c;
-      let blocked = ""; try { this.guard(c); } catch (e) { blocked = e.message; }
+      let blocked = "", blockedState = ""; try { this.guard(c); } catch (e) { blocked = e.message; blockedState = e.code || "wallet-required"; }
       const progress = this.downloading ? this.core.models.downloadProgress() : null;
       // A successful read while Off supersedes earlier connection failures.
       // Current setup requirements always take priority over a saved error.
       if (!blocked && !enabled && !this.busy) this.error = "";
-      return { state: blocked ? "wallet-required" : selectionError ? "model-required" : this.downloading ? "downloading" : !model.installed ? "download-required" : this.busy ? "starting" : "ready", blocked,
+      return { ...(this.device?.describe() || {}), state: blocked ? blockedState : selectionError ? "model-required" : this.downloading ? "downloading" : !model.installed ? "download-required" : this.busy ? "starting" : "ready", blocked,
         model, models, automatic: true, selection: this.selection(c), modelAvailability: c.modelAvailability,
         offeredModels: this.selected(c, models).filter(m => m.installed).map(m => m.id), enabled, running: !!this.worker?.running, progress: progress ? { pct: progress.pct } : null,
         detail: blocked || selectionError || this.error || (!model.installed ? "Download an approved model to this computer, then start earning." : "Ready to connect. Start earning offers your selected installed models and loads them automatically when needed. The network checks each model before paid work.") };
-    } catch (e) { return { state: "unavailable", enabled: !!this.context && this.preference(this.context), running: !!this.worker?.running, detail: e.message }; }
+    } catch (e) { return { ...(this.device?.describe() || {}), state: e.code || "unavailable", canAuthorize: ["authorization-required", "authorization-expired", "authorization-revoked", "secure-storage-required"].includes(e.code), enabled: !!this.context && this.preference(this.context), running: !!this.worker?.running, detail: e.message }; }
   }
   async selectModel(id, signal) {
     if (typeof id !== "string" || !/^[a-zA-Z0-9._-]{1,100}$/.test(id)) throw Error("Choose an approved provider model");
@@ -140,7 +165,7 @@ class CreditProvider {
     this.busy = true; const generation = this.generation;
     try {
       this.networkAllowed();
-      const c = await this.service.context(signal); this.guard(c, signal);
+      const c = await this.providerContext(signal); this.guard(c, signal);
       const models = await this.models(c, signal); this.guard(c, signal);
       if (generation !== this.generation) throw Error("Provider model selection cancelled");
       if (this.preference(c)) throw Error("Turn sharing off before changing the provider model");
@@ -158,7 +183,7 @@ class CreditProvider {
     let hold, changed = false;
     try {
       this.networkAllowed();
-      const c = await this.service.context(signal); current(c);
+      const c = await this.providerContext(signal); current(c);
       const models = await this.models(c, signal); current(c);
       if (selection.mode === "selected" && selection.models.some(id => !models.some(m => m.id === id && m.installed)))
         throw Error("Choose only compatible installed models to share");
@@ -195,7 +220,7 @@ class CreditProvider {
     const stop = () => { if (this.downloading) this.core.models.cancelDownload(); };
     try {
       this.networkAllowed();
-      const c = await this.service.context(signal); this.guard(c, signal); const model = await this.model(c, signal); this.guard(c, signal);
+      const c = await this.providerContext(signal); this.guard(c, signal); const model = await this.model(c, signal); this.guard(c, signal);
       if (!model.installed) {
         if (this.core.models.downloadProgress()) throw Error("Finish the current model download first");
         this.downloading = true; signal.addEventListener("abort", stop, { once: true }); signal.throwIfAborted();
@@ -215,19 +240,21 @@ class CreditProvider {
   async connect(signal, resume, generation, context = null) {
     const current = () => { signal.throwIfAborted(); if (generation !== this.generation) throw Error("Provider startup cancelled"); };
       this.networkAllowed();
-      const c = context ?? await this.service.context(signal); current(); this.guard(c, signal); const model = await this.model(c, signal); current(); this.guard(c, signal);
+      const c = context ?? await this.providerContext(signal); current(); this.guard(c, signal); const model = await this.model(c, signal); current(); this.guard(c, signal);
       if (!model.installed) throw Error("Download the approved model before turning on sharing");
       if (resume && !this.preference(c)) return { state: "offline" };
       this.context = c; this.preference(c, true, model.id); this.error = "";
       // The host lease coordinates the existing wallet; it creates no credential.
+      if (!this.device) {
       const access = require("./credit-purchase-access"), id = access.installation({ dataDir: this.service.dataDir, directory: c.directory, config: c.config, storage: this.core.account.safeStorage });
       await access.claimHost({ c, account: this.service.account, wallet: this.core.account.wallet, installation: id, fetchImpl: this.service.fetchImpl, signal }); current(); this.guard(c, signal);
+      }
       await this.core.gateway.earn?.stop?.({ userIntent: true });
       current();
       const cfg = c.config, target = { chainId: cfg.deployment.chainId, credits: cfg.deployment.credits, creditsHash: cfg.deployment.creditsHash,
         policyHash: cfg.policyHash, domain: require("../core/lib/koin-network/payment-mode").testDomain(cfg.deployment, cfg.schedulerUrl) };
       this.abort = new AbortController(); this.release = this.core.gateway.network.trackShadowRequest(this.abort);
-      this.worker = this.createWorker({ schedulerUrl: cfg.schedulerUrl, wallet: this.core.account.wallet, runtime: this.core.runtime, hardware: this.core.hardware, models: this.core.models, modelPins: c.providerModelPins, idlePollMs: 5000,
+      this.worker = this.createWorker({ schedulerUrl: cfg.schedulerUrl, ...(this.device ? { providerSigner: c.signer } : { wallet: this.core.account.wallet }), runtime: this.core.runtime, hardware: this.core.hardware, models: this.core.models, modelPins: c.providerModelPins, idlePollMs: 5000,
         fundedOnly: true, qualificationTarget: target, koinShadowJobs: false, koinFundedRehearsalJobs: cfg.mode === "test-deployment", koinMainnetPilotJobs: cfg.mode === "mainnet-pilot", koinMainnetTarget: target });
       this.registeredModelPins = { ...c.offeredModelPins };
       const worker = this.worker;
@@ -245,7 +272,7 @@ class CreditProvider {
     this.abort?.abort(); await this.stopWorker(); this.release?.(); this.release = null;
   }
   async stop(user = true) {
-    this.generation++; this.downloadAbort?.abort(); this.selectionAbort?.abort();
+    this.generation++; this.device?.cancelPending(); this.downloadAbort?.abort(); this.selectionAbort?.abort();
     if (user) for (const c of new Set([this.context, this.preferenceContext].filter(Boolean))) this.preference(c, false);
     await this.disconnect();
     return { state: "offline" };
@@ -256,19 +283,19 @@ class CreditProvider {
     const c = this.context; this.guard(c);
     if (this.worker.status().backoff) return { state: "paused", label: "PAUSED", detail: this.worker.status().backoffReason || "This computer is busy." };
     const worker = this.worker, generation = this.generation;
-    const result = await this.readStatus({ config: c.config, approvedModels: c.providerModels, access: { authorize: pin => { this.service.account.assertCreditAuthorization(c.auth, pin); return c.auth; } }, fetchImpl: this.service.fetchImpl, signal: AbortSignal.timeout(10000) });
+    const result = await this.readStatus({ config: c.config, approvedModels: c.providerModels, access: this.providerAccess(c), fetchImpl: this.service.fetchImpl, signal: AbortSignal.timeout(10000) });
     if (this.selectionAbort || generation !== this.generation || worker !== this.worker || !worker.running) return { state: "checking", label: "CHECKING CONNECTION", detail: "Waiting for the current model selection to connect." };
     const offered = Object.keys(this.registeredModelPins || {}), rows = (result.models || [result]).filter(row => offered.includes(row.model));
     const primary = rows.find(row => row.state === "online") || rows.find(row => row.model === result.model) || rows.find(row => row.state === "qualifying") || rows[0];
     if (!primary) return { state: "checking", label: "CHECKING CONNECTION", detail: "Waiting for the network to check your selected models.", models: [], readyModels: [] };
     const ready = rows.filter(row => row.state === "online");
-    return { ...primary, ...(ready.length ? { validUntil: Math.min(...ready.map(row => row.validUntil)) } : {}), models: rows, readyModels: ready.map(row => row.model) };
+    return { ...primary, ...(this.device && ready.length && !this.core.account.wallet.status().unlocked ? { walletLocked: true, detail: "Wallet locked — earning continues. " + (primary.detail || "") } : {}), ...(ready.length ? { validUntil: Math.min(...ready.map(row => row.validUntil)) } : {}), models: rows, readyModels: ready.map(row => row.model) };
   }
   async earnings() {
     this.networkAllowed();
-    const c = await this.service.context(AbortSignal.timeout(10000));
+    const c = await this.providerContext(AbortSignal.timeout(10000));
     const value = await require("./koin-provider-status").readProviderAccount({ config: c.config,
-      access: { authorize: pin => { this.service.account.assertCreditAuthorization(c.auth, pin); return c.auth; } }, fetchImpl: this.service.fetchImpl, signal: AbortSignal.timeout(10000) });
+      access: this.providerAccess(c), fetchImpl: this.service.fetchImpl, signal: AbortSignal.timeout(10000) });
     if (!Number.isSafeInteger(value.observedAt) || Math.abs(Date.now() - value.observedAt) > 30000 || !Array.isArray(value.payouts) || value.payouts.length > 4096) throw Error("Reward history observation is unavailable or stale");
     const payouts = value.payouts.filter(p => p.account === c.config.owner).slice(0, 64).map(p => {
       if (typeof p.epoch !== "string" || !/^(0|[1-9]\d{0,9})$/.test(p.epoch) || typeof p.state !== "string" || !/^[a-z_]{1,40}$/.test(p.state) ||
@@ -283,7 +310,7 @@ class CreditProvider {
     const current = () => generation === this.generation && !this.busy && !this.closed;
     try {
       this.networkAllowed();
-      const c = await this.service.context(AbortSignal.timeout(10000)); if (!current()) return; this.guard(c);
+      const c = await this.providerContext(AbortSignal.timeout(10000)); if (!current()) return; this.guard(c);
       if (this.context && (this.context.directory !== c.directory || this.context.auth.sessionToken !== c.auth.sessionToken)) {
         const stopping = this.stop(false); generation = this.generation; await stopping; if (!current()) return;
       }
@@ -295,6 +322,6 @@ class CreditProvider {
       if (current() && !this.worker?.running && this.preference(c)) await this.start(AbortSignal.timeout(60000), true);
     } catch (e) { if (current()) { this.error = String(e.message); await this.stop(false); } }
   }
-  dispose() { this.closed = true; return this.stop(false); }
+  dispose() { this.closed = true; this.device?.dispose(); return this.stop(false); }
 }
 module.exports = { CreditProvider };

@@ -88,7 +88,7 @@ test("normal account routes and native credit IPC use the credit service while C
   const info = await handle(event, "purchase-info");
   assert.equal(info.activation, "ready");
   assert.equal((await request("/core/account/logout", true)).ok, true);
-  assert.equal((await handle(event, "purchase-info")).activation, "signin-required");
+  assert.equal((await handle(event, "purchase-info")).activation, "wallet-connection-required");
   assert.deepEqual(fs.readFileSync(core.account.file), old);
   assert.equal(core.settings.get("earn.schedulerUrl"), "https://website.invalid/scheduler");
 });

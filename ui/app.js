@@ -488,8 +488,8 @@ window.addEventListener("kai-network-use", async event => {
   await updateModelPick((await coreGet("/core/models")).aliases);
   if (!networkEligible && !KaiNetwork.info.blocked) { activateView("api"); $("privacy-pick")?.focus(); return; }
   if (KaiNetwork.info.blocked) {
-    if (KaiNetwork.info.activation === "signin-required") { void selectAccountScope(false); activateView("settings"); $("btn-account-signin").scrollIntoView({ block: "center" }); }
-    else if (KaiNetwork.info.product === "prepaid-usd-v1") { activateView("credits"); }
+    if (KaiNetwork.info.product === "prepaid-usd-v1") { activateView("credits"); window.KaiWalletAccess?.open(); }
+    else if (KaiNetwork.info.activation === "signin-required") { void selectAccountScope(false); activateView("settings"); $("btn-account-signin").scrollIntoView({ block: "center" }); }
     else activateView("earn");
     return;
   }
@@ -1970,7 +1970,7 @@ async function renderAccount(force) {
   }
   $("account-heading").textContent = j.scope === "credits" ? "AI credit account" : "Koinos AI account";
   $("account-hint").textContent = j.scope === "credits"
-    ? "Sign in at credits.koinosai.com to buy AI credits and share models. Approve the app's short code in your browser. This service has its own account; your website and Connections sign-in stays saved separately."
+    ? "Connect your existing credit account using its browser sign-in. Wallet connection in Credits and device setup in Earn also work without this sign-in. Your website and Connections sign-in stays saved separately."
     : "Sign in to your website account for Connections and web access. Approve the app's short code in your browser, then link this wallet if needed.";
   $("btn-account-scope").hidden = !j.separateCreditAccount;
   $("btn-account-scope").textContent = websiteAccount ? "Open AI credit account" : "Website account and Connections";

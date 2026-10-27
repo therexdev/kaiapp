@@ -53,7 +53,7 @@ test("Earn setup clicks acknowledge pending checks, show current blockers and re
   await page.evaluate(() => { window.holdInfo = true; });
   const before = await page.evaluate(() => window.providerCalls.filter(x => x === "provider-public-info").length);
   await reload.click(); await page.waitForFunction(() => !!window.finishInfo);
-  assert.equal(await reload.textContent(), "Checking setup…"); assert.match(await notice.textContent(), /Checking account/);
+  assert.equal(await reload.textContent(), "Checking setup…"); assert.match(await notice.textContent(), /Checking wallet/);
   await reload.click();
   assert.equal(await page.evaluate(() => window.providerCalls.filter(x => x === "provider-public-info").length), before + 1, "clicks join the pending read");
   await page.evaluate(() => { window.holdInfo = false; window.finishInfo(); });
@@ -67,9 +67,7 @@ test("Earn setup clicks acknowledge pending checks, show current blockers and re
   await page.locator("#earn-unlock").waitFor({ state: "visible" });
   assert.equal(await page.locator("#view-payment-wallet").isVisible(), true);
   await navClick(page, '#nav [data-view="earn"]');
-  await page.locator('#view-earn [data-product-action="signin"]').click();
-  assert.equal(await page.locator("#view-settings").isVisible(), true);
-  await navClick(page, '#nav [data-view="earn"]');
+  assert.equal(await page.locator('#view-earn [data-product-action="signin"]').count(), 0, "earning no longer routes setup through a buyer account");
   await page.waitForFunction(() => !document.getElementById("product-provider-reload").hasAttribute("aria-busy"));
   // pauseAt installs and pauses the clock in one call. Starting a running
   // clock first can overtake a separately sampled host time on loaded CI.

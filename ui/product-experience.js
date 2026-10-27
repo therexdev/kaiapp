@@ -19,7 +19,7 @@
       ${head("Buy credits", "Pay with KOIN. Your credits keep their USD service value.", button("chat", "Back to Chat"))}
       <ol class="product-steps"><li class="active">Choose credits</li><li>Approve payment</li><li>Credits added</li></ol>
       <div class="product-two"><section class="product-panel"><h2>How much would you like to add?</h2><p>1,000 credits = $1 of AI usage.</p><div class="product-packs">${[1, 5, 10].map(n => `<button data-credit-pack="${n}"${n === 1 ? ' class="selected"' : ""}><strong>$${n}</strong><small>${(n * 1000).toLocaleString()} credits</small></button>`).join("")}</div><label for="product-usd-amount">Or choose an amount</label><div class="product-input"><span>$</span><input id="product-usd-amount" inputmode="decimal" autocomplete="off" value="1" placeholder="Enter USD amount" maxlength="12" /><span>USD</span></div><p>Your wallet shows the exact KOIN amount before you approve.</p></section>
-      <section class="product-panel product-order"><p class="product-eyebrow">You receive</p><div class="product-balance"><span id="product-pack-credits">1,000</span> <small>credits</small></div><div class="product-detail"><span id="product-quote-label">Estimated KOIN payment</span><strong id="product-quote-koin">Calculating…</strong></div><p id="product-price-preview-support" class="product-fine" role="status" hidden></p><p id="product-price-limit" class="product-fine" role="status" hidden></p><details id="product-quote-details" hidden><summary>Price details</summary><div class="product-detail"><span>Price source</span><strong>Uniswap v4 · vKOIN/USDT</strong></div><div class="product-detail"><span>Exchange observation</span><strong id="product-quote-time">—</strong></div><div class="product-detail"><span>Valid until</span><strong id="product-quote-expiry">—</strong></div><div class="product-detail"><span>Purchase rate</span><strong id="product-quote-rate"></strong></div><p id="product-quote-reference" class="product-fine"></p><p id="product-quote-window" class="product-fine"></p></details><p id="product-quote-state" role="status">Choose an amount. You’ll approve the exact KOIN payment in your wallet.</p><p id="product-local-payment" role="status" hidden></p><p id="product-payment-recovery-status" role="status" hidden></p><div id="product-purchase-notice" class="product-purchase-notice" role="status" hidden><p id="product-purchase-detail"></p><div class="product-actions"><button id="product-purchase-check" hidden>Try again</button><button data-product-action="signin" id="product-purchase-signin" hidden>Open account</button><button data-product-action="payment-wallet" id="product-purchase-wallet" hidden>Open wallet</button></div></div><button id="product-quote-refresh" class="primary" disabled>Checking availability…</button><button id="product-purchase-stop" hidden>Stop payment check</button><p class="product-fine">Purchased credits: nonrefundable · nontransferable · no expiry</p><div id="product-pending-purchases"></div></section></div>
+      <section class="product-panel product-order"><p class="product-eyebrow">You receive</p><div class="product-balance"><span id="product-pack-credits">1,000</span> <small>credits</small></div><div class="product-detail"><span id="product-quote-label">Estimated KOIN payment</span><strong id="product-quote-koin">Calculating…</strong></div><p id="product-price-preview-support" class="product-fine" role="status" hidden></p><p id="product-price-limit" class="product-fine" role="status" hidden></p><details id="product-quote-details" hidden><summary>Price details</summary><div class="product-detail"><span>Price source</span><strong>Uniswap v4 · vKOIN/USDT</strong></div><div class="product-detail"><span>Exchange observation</span><strong id="product-quote-time">—</strong></div><div class="product-detail"><span>Valid until</span><strong id="product-quote-expiry">—</strong></div><div class="product-detail"><span>Purchase rate</span><strong id="product-quote-rate"></strong></div><p id="product-quote-reference" class="product-fine"></p><p id="product-quote-window" class="product-fine"></p></details><p id="product-quote-state" role="status">Choose an amount. You’ll approve the exact KOIN payment in your wallet.</p><p id="product-local-payment" role="status" hidden></p><p id="product-payment-recovery-status" role="status" hidden></p><div id="product-purchase-notice" class="product-purchase-notice" role="status" hidden><p id="product-purchase-detail"></p><div class="product-actions"><button id="product-purchase-check" hidden>Try again</button><button data-product-action="signin" id="product-purchase-signin" hidden>Open account</button><button data-product-action="wallet-connect" id="product-purchase-connect" hidden>Connect wallet</button><button data-product-action="payment-wallet" id="product-purchase-wallet" hidden>Open wallet</button></div></div><button id="product-quote-refresh" class="primary" disabled>Checking availability…</button><button id="product-purchase-stop" hidden>Stop payment check</button><p class="product-fine">Purchased credits: nonrefundable · nontransferable · no expiry</p><div id="product-pending-purchases"></div></section></div>
       <section id="product-model-pricing" class="product-panel product-model-pricing" aria-labelledby="product-model-pricing-title"><h2 id="product-model-pricing-title">Model pricing</h2><p>Prices per 1 million tokens. Input includes your messages and context; output is the model’s reply.</p><p id="product-model-pricing-status" class="product-fine" role="status">Loading model prices…</p><div id="product-model-pricing-table" class="product-table-wrap" hidden><table><thead><tr><th scope="col">Model</th><th scope="col">Input / 1M tokens</th><th scope="col">Output / 1M tokens</th></tr></thead><tbody id="product-model-pricing-rows"></tbody></table></div></section>
     </section>
     <section id="view-network-overview" class="view product-page" hidden>
@@ -73,14 +73,15 @@
   $("earn-setup").querySelector("h2").textContent = "Create your wallet";
   $("earn-unlock").querySelector("h2").textContent = "Unlock your wallet";
   oldEarn.insertAdjacentHTML("beforeend", '<p id="product-legacy-error" class="error" role="status" hidden></p>');
-  $("view-earn").insertAdjacentHTML("afterbegin", `<div class="product-earn">${head("Share your AI. Earn KOIN.", "Contribute this computer’s spare AI capacity to the network.")}<div class="product-two"><section class="product-panel product-provider"><div class="product-row"><span>Share AI capacity</span><button id="product-provider-toggle" aria-describedby="product-provider-start-hint product-provider-readiness" disabled role="switch" aria-checked="false" aria-label="Share AI capacity">Start earning</button></div><p id="product-provider-start-hint" class="product-fine">Click the button to start earning.</p><div class="product-provider-state"><span class="product-live-dot"></span><h2 id="product-provider-label">OFFLINE</h2><p id="product-provider-detail">Sharing is off. Turn it on when you’re ready.</p></div><div class="product-divider"></div><strong id="product-provider-model">Model not confirmed</strong><p id="product-provider-readiness" class="product-fine">Waiting for current model and network confirmation.</p></section><div><section class="product-panel"><p class="product-eyebrow">AI provider earnings</p><p id="product-provider-earnings">No verified earnings loaded.</p><p class="product-fine">KOIN rewards are separate from chat credits.</p><button data-product-action="payouts">Refresh earnings</button></section><section class="product-panel"><h2>Connection</h2><details id="product-provider-options"><summary>Models and diagnostics</summary><div id="product-provider-model-choice"><label for="product-provider-model-pick">Startup model</label><select id="product-provider-model-pick" disabled aria-describedby="product-provider-model-help"><option value="">Checking models…</option></select><p id="product-provider-model-help" class="product-fine">Sharing prepares installed models automatically. This optional choice only changes the startup model.</p></div><div id="product-provider-check"><h3 data-check-model>Local model check</h3><p data-check-detail role="status">Check the model currently running locally. No account or credits needed.</p><progress data-check-progress aria-label="Local model check progress" hidden></progress><p data-check-summary class="product-fine"></p><div class="product-actions"><button data-check-start data-check-action="start" class="primary">Check this computer</button><button data-check-cancel data-check-action="cancel" hidden>Cancel check</button><button data-check-copy data-check-action="copy" hidden>Copy report</button><button data-check-save data-check-action="save" hidden>Save report</button></div><p data-check-export class="product-fine" role="status"></p><p class="product-fine">This local check is diagnostic only. The network check runs automatically while earning is on.</p></div></details><div class="product-divider"></div><p id="product-provider-setup" role="status">Start earning to prepare the installed models and connect.</p><p id="product-provider-refresh" class="product-fine" role="status" hidden></p><div class="product-actions"><button id="product-provider-reload" data-product-action="provider-reload">Reload setup</button><button data-product-action="signin">Open AI credit account</button><button id="product-provider-download" data-product-action="provider-download" hidden>Download approved model</button><button id="product-provider-cancel" data-product-action="provider-cancel" hidden>Cancel setup</button><button data-product-action="payment-wallet">Reward wallet</button></div></section></div></div></div>`);
+  $("view-earn").insertAdjacentHTML("afterbegin", `<div class="product-earn">${head("Share your AI. Earn KOIN.", "Contribute this computer’s spare AI capacity to the network.")}<div class="product-two"><section class="product-panel product-provider"><div class="product-row"><span>Share AI capacity</span><button id="product-provider-toggle" aria-describedby="product-provider-start-hint product-provider-readiness" disabled role="switch" aria-checked="false" aria-label="Share AI capacity">Start earning</button></div><p id="product-provider-start-hint" class="product-fine">Click the button to start earning.</p><div class="product-provider-state"><span class="product-live-dot"></span><h2 id="product-provider-label">OFFLINE</h2><p id="product-provider-detail">Sharing is off. Turn it on when you’re ready.</p></div><div class="product-divider"></div><strong id="product-provider-model">Model not confirmed</strong><p id="product-provider-readiness" class="product-fine">Waiting for current model and network confirmation.</p></section><div><section class="product-panel"><p class="product-eyebrow">AI provider earnings</p><p id="product-provider-earnings">No verified earnings loaded.</p><p class="product-fine">KOIN rewards are separate from chat credits.</p><button data-product-action="payouts">Refresh earnings</button></section><section class="product-panel"><h2>Connection</h2><details id="product-provider-options"><summary>Models and diagnostics</summary><div id="product-provider-model-choice"><label for="product-provider-model-pick">Startup model</label><select id="product-provider-model-pick" disabled aria-describedby="product-provider-model-help"><option value="">Checking models…</option></select><p id="product-provider-model-help" class="product-fine">Sharing prepares installed models automatically. This optional choice only changes the startup model.</p></div><div id="product-provider-check"><h3 data-check-model>Local model check</h3><p data-check-detail role="status">Check the model currently running locally. No account or credits needed.</p><progress data-check-progress aria-label="Local model check progress" hidden></progress><p data-check-summary class="product-fine"></p><div class="product-actions"><button data-check-start data-check-action="start" class="primary">Check this computer</button><button data-check-cancel data-check-action="cancel" hidden>Cancel check</button><button data-check-copy data-check-action="copy" hidden>Copy report</button><button data-check-save data-check-action="save" hidden>Save report</button></div><p data-check-export class="product-fine" role="status"></p><p class="product-fine">This local check is diagnostic only. The network check runs automatically while earning is on.</p></div></details><div class="product-divider"></div><p id="product-provider-setup" role="status">Start earning to prepare the installed models and connect.</p><p id="product-provider-refresh" class="product-fine" role="status" hidden></p><div class="product-actions"><button id="product-provider-reload" data-product-action="provider-reload">Reload setup</button><button id="product-provider-revoke" data-product-action="provider-revoke" hidden>Remove device authorization</button><button id="product-provider-download" data-product-action="provider-download" hidden>Download approved model</button><button id="product-provider-cancel" data-product-action="provider-cancel" hidden>Cancel setup</button><button data-product-action="payment-wallet">Reward wallet</button></div></section></div></div></div>`);
+  $("product-provider-setup").insertAdjacentHTML("afterend", '<p id="product-provider-authorization" class="product-fine" hidden></p><p id="product-provider-action-notice" role="status" hidden></p>');
   $("product-provider-readiness").insertAdjacentHTML("afterend", '<button id="product-provider-models-open" hidden>Choose shared models</button>');
   $("view-earn").querySelector(".product-earn").insertAdjacentHTML("beforeend", `<section id="product-provider-models" class="product-panel product-provider-models" hidden><h2>Models you share</h2><label class="product-share-all"><input type="checkbox" id="product-provider-share-all" checked /> <span>Share all compatible installed models</span></label><p class="product-fine">Models load as needed. Each model must pass its network check and be approved before it can earn from paid work.</p><p id="product-provider-model-summary" role="status"></p><div id="product-provider-model-list"></div><p id="product-provider-selection-status" class="product-fine" role="status" hidden></p><div id="product-provider-selection-actions" class="product-actions" hidden><button id="product-provider-models-apply" class="primary">Apply selection</button><button id="product-provider-models-reset">Cancel changes</button></div></section>`);
   $("product-provider-detail").insertAdjacentHTML("afterend", '<p id="product-provider-qualification" role="status" hidden></p>');
   const onboarding = $("view-onboarding"), oldOnboarding = onboarding.firstElementChild;
   oldOnboarding.classList.add("product-local-setup"); oldOnboarding.hidden = true;
   oldOnboarding.insertAdjacentHTML("afterbegin", '<button data-product-action="first-back">← Back to choices</button>');
-  onboarding.insertAdjacentHTML("afterbegin", `<div class="product-first">${emblem}<h1>Start with what you want to do.</h1><p>Use the network with free credits when available, or run AI on this computer.<br>You’re in control of where your work happens.</p><div class="product-two"><section class="product-panel"><h2>Try network AI</h2><p>Get started without buying KOIN or connecting a payment wallet. A verified account keeps your daily free usage consistent across devices.</p><button class="primary" data-product-action="start-free">Start free →</button></section><section class="product-panel"><h2>Use this computer</h2><p>Run a model locally. We’ll check your computer and help you choose a good fit. No credits needed.</p><button data-product-action="setup-local">Set up local AI →</button></section></div><p id="product-first-status" role="status">Free-credit availability depends on the network’s published policy.</p><button data-product-action="signin">Your account</button></div>`);
+  onboarding.insertAdjacentHTML("afterbegin", `<div class="product-first">${emblem}<h1>Start with what you want to do.</h1><p>Use the network with free credits when available, or run AI on this computer.<br>You’re in control of where your work happens.</p><div class="product-two"><section class="product-panel"><h2>Try network AI</h2><p>Connect your wallet to check your daily free credits. No email or password account is required. Existing account sign-in remains available.</p><button class="primary" data-product-action="start-free">Start free →</button></section><section class="product-panel"><h2>Use this computer</h2><p>Run a model locally. We’ll check your computer and help you choose a good fit. No credits needed.</p><button data-product-action="setup-local">Set up local AI →</button></section></div><p id="product-first-status" role="status">Free-credit availability depends on the network’s published policy.</p><button data-product-action="signin">Your account</button></div>`);
   let filter = "all", network, networkError = "", networkPending = false, quote, quoteRevision = 0, approving = false, quoting = false;
   function paintCredits(state) {
     const display = window.KaiCreditPresentation(state), { usd, stale } = display;
@@ -152,7 +153,7 @@
     } catch (e) { networkError = message(e); } finally { networkPending = false; paintNetwork(); }
   }
   let purchaseInfo = { activation: "loading" }, purchaseWallet = null, walletError = "", walletReading = false, purchaseReading = false;
-  let previousLocalPurchase = false, modelPricingRead = null;
+  let previousLocalPurchase = false, modelPricingRead = null, purchaseAttemptMessage = "";
   let walletRead, purchaseRead, purchaseGeneration = 0, quoteWalletKey = null;
   let previewTimer, previewRead = null, previewSelection = null, previewRevision = 0, previewSupport = null, previewSupportRead = null, previewSupportError = false;
   const buyVisible = () => !document.hidden && !$("view-buy-credits").hidden;
@@ -166,7 +167,7 @@
     $("product-price-limit").hidden = true; $("product-price-limit").textContent = "";
     $("product-quote-koin").textContent = "Calculating…"; $("product-quote-time").textContent = "—"; $("product-quote-expiry").textContent = "—";
     $("product-quote-details").hidden = true; $("product-quote-details").open = false;
-    if (text) $("product-quote-state").textContent = text;
+    if (text && !purchaseAttemptMessage) $("product-quote-state").textContent = text;
   }
   function paintPurchase() {
     const wallet = purchaseWallet, state = purchaseInfo.activation;
@@ -195,7 +196,9 @@
     // blocker here; a healthy purchase needs no separate readiness panel.
     const walletIssue = !saved && !walletReading && state === "ready"
       ? walletError || (!wallet?.address ? "Set up or restore your wallet to pay with KOIN." : wallet.network !== "mainnet" ? "Credit purchases use KOIN on Mainnet. Change the wallet network before buying." : "") : "";
-    const detail = state === "unavailable" ? "Credit purchases are not activated yet. Please try again later."
+    const connectionRequired = ["wallet-connection-required", "wallet-reauthorization-required", "wallet-required", "wallet-unlock-required", "wallet-changed", "secure-storage-required", "online-required"].includes(state);
+    const detail = state === "unavailable" ? purchaseInfo.blocked || "Credit purchases are not activated yet. Please try again later."
+      : connectionRequired || state === "service-upgrade-required" ? purchaseInfo.blocked || "Connect your wallet to the credit service before buying."
       : state === "signin-required" ? purchaseInfo.blocked || "Sign in to your credit account."
       : state === "error" ? purchaseInfo.blocked || "Purchasing availability could not be checked. Try again."
       : walletIssue;
@@ -205,10 +208,13 @@
     check.hidden = !walletError && state !== "unavailable";
     check.disabled = purchaseReading || walletReading;
     $("product-purchase-signin").hidden = state !== "signin-required";
+    $("product-purchase-connect").hidden = !connectionRequired;
+    $("product-purchase-connect").textContent = state === "secure-storage-required" ? "Secure storage options" : state === "wallet-reauthorization-required" ? "Reconnect wallet" : "Connect wallet";
     $("product-purchase-wallet").hidden = !walletIssue || !!walletError;
     const refresh = $("product-quote-refresh");
     refresh.disabled = busy || !["ready", "error"].includes(state) || (state === "ready" && !saved && (!walletReady() || walletReading));
-    refresh.textContent = state === "loading" ? "Checking availability…" : state === "unavailable" ? "Purchases not activated" : state === "signin-required" ? "Account setup required" : state === "error" ? "Try again" : state !== "ready" ? "Purchasing unavailable" : quoting ? "Getting current price…" : approving ? "Waiting for wallet…" : saved?.busy ? "Payment review in progress…" : saved ? saved.recovery ? "Continue payment" : "Check payment" : !walletReady() ? "Payment wallet required" : "Buy credits";
+    refresh.textContent = state === "loading" ? "Checking availability…" : state === "unavailable" ? "Purchases not activated" : state === "signin-required" ? "Account setup required" : state === "wallet-connection-required" ? "Connect wallet to buy" : state === "wallet-reauthorization-required" ? "Reconnect wallet to buy" : state === "secure-storage-required" ? "Secure storage required" : state === "service-upgrade-required" ? "Service update required" : state === "error" ? "Try again" : state !== "ready" ? "Purchasing unavailable" : quoting ? "Getting current price…" : approving ? "Waiting for wallet…" : saved?.busy ? "Payment review in progress…" : saved ? saved.recovery ? "Continue payment" : "Check payment" : !walletReady() ? "Payment wallet required" : "Buy credits";
+    if (purchaseAttemptMessage && !busy && !saved) $("product-quote-state").textContent = purchaseAttemptMessage;
 
   }
   async function refreshPurchaseWallet() {
@@ -253,7 +259,7 @@
       return purchaseReadOnly("purchase-info");
     }).then(info => {
       if (generation !== purchaseGeneration) return;
-      if (!["ready", "unavailable", "signin-required"].includes(info?.activation)) throw Error("Purchasing availability could not be verified.");
+      if (!["ready", "unavailable", "signin-required", "wallet-connection-required", "wallet-reauthorization-required", "wallet-required", "wallet-unlock-required", "wallet-changed", "secure-storage-required", "service-upgrade-required", "online-required"].includes(info?.activation)) throw Error("Purchasing availability could not be verified.");
       purchaseInfo = info;
       if (window.KaiCredits) paintCredits(window.KaiCredits.get());
       if (info.activation !== "ready") invalidateQuote(info.activation === "unavailable" ? "Purchasing will be available when the credit service is activated." : info.blocked);
@@ -342,20 +348,21 @@
     }
     const revision = previewRevision, generation = purchaseGeneration, key = walletKey();
     const current = () => revision === previewRevision && generation === purchaseGeneration && key === walletKey() && usd === selectedAmount() && canPreview();
-    if (!quote) $("product-quote-state").textContent = "Calculating the current KOIN payment…";
+    if (!quote && !purchaseAttemptMessage) $("product-quote-state").textContent = "Calculating the current KOIN payment…";
     const pending = Promise.resolve().then(() => window.kaiKoinTestBridge.run("purchase-estimate", { usd })).then(result => {
       if (!current()) return;
       showQuote(result?.estimate, key, true);
-      $("product-quote-state").textContent = result.estimate.priceDetails.referenceKind === "market-estimate" ? "Market estimate updates every 30 seconds. The exact payment is shown in your wallet before approval." : "Price updates every 30 seconds. You’ll approve the exact KOIN payment in your wallet.";
+      if (!purchaseAttemptMessage) $("product-quote-state").textContent = result.estimate.priceDetails.referenceKind === "market-estimate" ? "Market estimate updates every 30 seconds. The exact payment is shown in your wallet before approval." : "Price updates every 30 seconds. You’ll approve the exact KOIN payment in your wallet.";
     }).catch(error => {
       if (!current()) return;
       // Do not leave an old price looking current after a failed refresh.
       invalidateQuote(); $("product-quote-koin").textContent = "Price unavailable";
-      $("product-quote-state").textContent = message(error) + " Price refresh retries automatically; Buy credits also checks again.";
+      if (!purchaseAttemptMessage) $("product-quote-state").textContent = message(error) + " Price refresh retries automatically; Buy credits also checks again.";
     }).finally(() => { if (previewRead === pending) previewRead = null; });
     previewSelection = { usd, key, revision }; previewRead = pending; return pending;
   }
   function pack() {
+    purchaseAttemptMessage = "";
     const raw = selectedAmount();
     invalidateQuote(raw ? previewSupport === true ? "Calculating the current KOIN payment…" : "Choose Buy credits to check the exact KOIN payment in your wallet." : "Choose a positive USD amount with up to two decimal places.");
     $("product-quote-koin").textContent = raw ? "Calculating…" : "—";
@@ -378,6 +385,7 @@
   });
   $("product-quote-refresh").addEventListener("click", async () => {
     if (approving || quoting || $("product-quote-refresh").disabled) return;
+    purchaseAttemptMessage = "";
     const operation = ++paymentOperation, generation = purchaseGeneration;
     const current = () => operation === paymentOperation && generation === purchaseGeneration;
     if (purchaseInfo.activation !== "ready") { await refreshPurchases(); return; }
@@ -406,23 +414,27 @@
       // quote and the native approval always uses that exact verified price.
       const r = await window.kaiKoinTestBridge.run("purchase-preview", { usd });
       if (!selectionCurrent()) return;
-      showQuote(r?.quote, key);
-      // Refresh read-only state before handing the same exact quote to native
-      // review. A changed account, wallet, amount or saved payment cancels it.
-      await refreshPurchases();
-      if (!selectionCurrent() || purchaseInfo.localPurchase || purchaseInfo.activation !== "ready" || !walletReady()) return;
-      if (Date.now() >= quote.expiresAt) throw Error("The price expired before payment. Try Buy credits again.");
-      if (amountAtoms(purchaseWallet.koin) < amountAtoms(quote.koin)) throw Error("Not enough KOIN for this amount. Choose a smaller amount or add KOIN to your wallet.");
+      const paymentQuote = r?.quote;
+      showQuote(paymentQuote, key);
+      // Hand the verified quote directly to the private payment controller.
+      // It checks current account/wallet identity, pending journals, nonce and
+      // chain policy again before native review/signing. Repeating the sidebar
+      // balance RPC here could discard a good quote on an unrelated VHP/Mana
+      // read failure and silently return the button to Buy credits.
+      if (Date.now() >= paymentQuote.expiresAt) throw Error("The price expired before payment. Try Buy credits again.");
+      if (amountAtoms(purchaseWallet.koin) < amountAtoms(paymentQuote.koin)) throw Error("Not enough KOIN for this amount. Choose a smaller amount or add KOIN to your wallet.");
       quoting = false; approving = true; paintPurchase();
       $("product-quote-state").textContent = "Approve the exact KOIN payment in your wallet.";
-      const result = await window.kaiKoinTestBridge.run("purchase-approve", quote.id);
+      const result = await window.kaiKoinTestBridge.run("purchase-approve", paymentQuote.id);
       if (!current()) return;
-      invalidateQuote(result.state === "cancelled" ? "Payment cancelled. No new purchase was started." : "Checking your payment. Credits appear automatically after confirmation.");
+      purchaseAttemptMessage = result.state === "cancelled" ? "Payment cancelled. No new purchase was started." : "Checking your payment. Credits appear automatically after confirmation.";
+      invalidateQuote(); $("product-quote-state").textContent = purchaseAttemptMessage;
       await Promise.all([window.KaiCredits.refresh(), refreshPurchases()]);
-    } catch (error) { if (current()) $("product-quote-state").textContent = message(error); }
+    } catch (error) { if (current()) { purchaseAttemptMessage = message(error); $("product-quote-state").textContent = purchaseAttemptMessage; } }
     finally { if (current()) { quoting = approving = false; paintPurchase(); } }
   });
   for (const name of ["kai-account-signed-out", "kai-credit-identity-changed"]) window.addEventListener(name, () => {
+    purchaseAttemptMessage = "";
     purchaseGeneration++; paymentOperation++; modelPricingRead = null; $("product-model-pricing-table").hidden = true; $("product-model-pricing-rows").replaceChildren(); $("product-model-pricing-status").textContent = "Loading model prices…"; previewSupport = null; previewSupportError = false; previewSupportRead = null; quoting = approving = false; walletRead = purchaseRead = null; walletReading = purchaseReading = false; purchaseWallet = null;
     purchaseInfo = { activation: "loading" }; invalidateQuote("Account changed. Check your payment wallet before buying."); paintPurchase();
     if (buyVisible()) { refreshPurchases().then(() => schedulePreview(0)); refreshModelPricing(); }
@@ -444,6 +456,7 @@
     if (action === "provider-reload") { await refreshPublicProvider(true); }
     if (action === "provider-download") { await providerAction("download"); }
     if (action === "provider-cancel") { await providerAction("stop"); }
+    if (action === "provider-revoke") { await providerAction("revoke"); }
     if (action === "purchase-retry") {
       const target = event.target.closest("button"); target.disabled = true;
       try { const result = await window.kaiKoinTestBridge.run("credit-purchase-retry"); $("product-recovery-purchase").textContent = result.state === "cancelled" ? "Review cancelled. Any saved transaction remains preserved." : result.state === "complete" ? "No unfinished local payment remains. Refreshing your credit account." : "The saved payment is awaiting confirmation. Existing credits remain available."; await window.KaiCredits.refresh(); }
@@ -469,6 +482,7 @@
   });
   const providerCheck = window.KaiProviderCheckUI.create({ root: $("product-provider-check"), bridge: window.kaiProviderCheckBridge });
   let providerBusy = false, providerInfoPending = false, providerExpiry, providerManualRefresh = false, providerGeneration = 0, providerReadRevision = 0, providerActionRevision = 0;
+  let providerSetup = null;
   let providerModelInfo = null, providerModelStatus = null, providerSelectionDraft = null, providerSelectionSaved = null, providerSelectionNotice = "", providerModelsStale = true;
   const selectionKey = selection => JSON.stringify([selection.mode, [...selection.models].sort()]);
   const selectedProviderModels = (selection, models) => new Set(selection?.mode === "all" ? models.filter(model => model.compatible).map(model => model.id) : selection?.models || []);
@@ -577,7 +591,7 @@
   async function refreshPublicProvider(manual = false) {
     const reload = $("product-provider-reload"), notice = $("product-provider-refresh");
     if (manual) {
-      providerManualRefresh = true; notice.hidden = false; notice.textContent = "Checking account, wallet and model setup…";
+      providerManualRefresh = true; notice.hidden = false; notice.textContent = "Checking wallet, device authorization and model setup…";
     }
     if (providerInfoPending) return;
     if (!window.kaiKoinTestBridge) {
@@ -589,10 +603,20 @@
     providerInfoPending = true; reload.textContent = "Checking setup…"; reload.setAttribute("aria-busy", "true");
     let failed = false;
     try {
-      const info = await providerRead("provider-public-info"); if (!current()) return; publicProvider = true; acceptProviderModels(info);
+      const info = await providerRead("provider-public-info"); if (!current()) return; publicProvider = true; providerSetup = info; acceptProviderModels(info);
       const on = info.enabled === true, toggle = $("product-provider-toggle");
       toggle.textContent = on ? "Stop earning" : "Start earning"; toggle.setAttribute("aria-checked", String(on)); $("product-provider-start-hint").hidden = on;
-      toggle.disabled = on ? false : providerBusy || info.state !== "ready";
+      const enrollment = !info.deviceAuthorized && info.canAuthorize === true && ["authorization-required", "authorization-expired", "authorization-revoked", "secure-storage-required", "wallet-required"].includes(info.state);
+      const walletSetup = info.walletReady === false || enrollment && info.walletLocked === true;
+      toggle.dataset.action = on ? "stop" : walletSetup ? "wallet" : enrollment ? "authorize" : "start";
+      if (!on && walletSetup) toggle.textContent = info.walletReady === false ? "Set up earning" : "Unlock to enable earning";
+      else if (!on && enrollment) toggle.textContent = info.secureStorage?.available === false ? "Enable for this session" : "Enable earning";
+      toggle.disabled = on ? false : providerBusy || !(info.state === "ready" || walletSetup || enrollment);
+      $("product-provider-revoke").hidden = info.deviceAuthorized !== true;
+      $("product-provider-revoke").disabled = providerBusy;
+      const authorization = $("product-provider-authorization");
+      authorization.hidden = info.deviceAuthorized !== true;
+      authorization.textContent = info.sessionOnly ? "This device is enabled for this session. Enable earning again after closing the app." : info.expiresAt ? `Device authorized until ${new Date(info.expiresAt).toLocaleString()}.` : "This device is authorized to earn.";
       $("product-provider-model").textContent = Array.isArray(info.offeredModels) && info.offeredModels.length ? "Installed: " + (info.models || []).filter(m => info.offeredModels.includes(m.id)).map(m => m.label || m.id).join(" · ") : info.model?.label || "Checking installed models";
       $("product-provider-model-choice").hidden = info.automatic === true;
       const choices = info.models || (info.model ? [info.model] : []), picker = $("product-provider-model-pick");
@@ -614,7 +638,7 @@
       clearTimeout(providerExpiry);
       const paint = value => {
         $("product-provider-label").textContent = value.label; $("product-provider-label").dataset.state = value.state;
-        $("product-provider-detail").textContent = value.detail;
+        $("product-provider-detail").textContent = value.detail + (value.state === "online" && info.deviceAuthorized && info.walletLocked ? " Wallet locked — earning continues." : "");
         const progress = $("product-provider-qualification"), q = value.qualification;
         progress.hidden = !q; progress.textContent = "";
         if (q) {
@@ -659,6 +683,7 @@
   async function providerAction(action, input) {
     if (providerBusy && action !== "stop") return;
     if (action !== "stop") providerBusy = true;
+    const actionNotice = $("product-provider-action-notice"); actionNotice.hidden = true; actionNotice.textContent = "";
     const generation = providerGeneration, operation = ++providerActionRevision;
     const current = () => generation === providerGeneration && operation === providerActionRevision;
     providerReadRevision++; providerInfoPending = false;
@@ -669,10 +694,15 @@
     if (action === "start") { const toggle = $("product-provider-toggle"); toggle.textContent = "Stop earning"; toggle.setAttribute("aria-checked", "true"); $("product-provider-start-hint").hidden = true; toggle.disabled = false; $("product-provider-label").textContent = "STARTING"; }
     $("product-provider-setup").textContent = action === "models" ? "Applying your shared model selection…" : action === "model" ? "Saving the provider model…" : action === "download" ? "Downloading the approved model. You can cancel and resume later." : action === "stop" ? "Stopping new work and cancelling active inference. Verified delivered text remains saved and metered." : "Preparing the model and connecting for qualification…";
     try {
-      await window.kaiKoinTestBridge.run("provider-public-" + action, input);
+      const result = await window.kaiKoinTestBridge.run("provider-public-" + action, input);
       if (!current()) return;
+      if (["authorize", "revoke"].includes(action) && result?.state === "cancelled") { actionNotice.textContent = "Review cancelled. This device authorization is unchanged."; actionNotice.hidden = false; }
+      if (action === "authorize" && result?.state === "authorized") {
+        await window.kaiKoinTestBridge.run("provider-public-start");
+        if (!current()) return;
+      }
       if (action === "models") { providerSelectionNotice = "Model selection saved. Network readiness updates automatically."; providerSelectionSaved = null; providerSelectionDraft = null; }
-    } catch (e) { if (current()) { $("product-provider-detail").textContent = e.message; if (action === "models") providerSelectionNotice = providerMessage(e); } }
+    } catch (e) { if (current()) { actionNotice.textContent = providerMessage(e); actionNotice.hidden = false; $("product-provider-detail").textContent = e.message; if (action === "models") providerSelectionNotice = providerMessage(e); } }
     finally { if (current()) { providerBusy = false; providerReadRevision++; providerInfoPending = false; await refreshPublicProvider(); paintProviderModels(); } }
   }
   for (const name of ["kai-account-signed-out", "kai-credit-identity-changed"]) window.addEventListener(name, () => {
@@ -684,7 +714,11 @@
     $("product-provider-toggle").disabled = true; $("product-provider-qualification").hidden = true;
     if (!$("view-earn").hidden) refreshPublicProvider();
   });
-  $("product-provider-toggle").addEventListener("click", () => providerAction($("product-provider-toggle").getAttribute("aria-checked") === "true" ? "stop" : "start"));
+  $("product-provider-toggle").addEventListener("click", () => {
+    const toggle = $("product-provider-toggle"), action = toggle.getAttribute("aria-checked") === "true" ? "stop" : toggle.dataset.action || "start";
+    if (action === "wallet") { void openPaymentWallet(); return; }
+    void providerAction(action, action === "authorize" ? { sessionOnly: providerSetup?.secureStorage?.available === false } : undefined);
+  });
   $("product-provider-model-pick").addEventListener("change", event => providerAction("model", event.target.value));
   for (const host of [document.querySelector(".product-sidebar-credits"), document.querySelector("#view-credits .product-panel")]) {
     host.querySelector("[data-credit-breakdown]").insertAdjacentHTML("afterend", '<p data-credit-status role="status"></p><div class="product-credit-actions"><button type="button" class="product-text-button" data-credit-refresh>Refresh</button><button type="button" class="product-text-button" data-credit-help data-product-action="legacy" hidden>Account help</button></div>');

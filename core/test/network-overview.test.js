@@ -85,7 +85,10 @@ test("native and browser overview read the configured public scheduler with inac
   await assert.rejects(handle({ ...event, senderFrame: { url: window.webContents.mainFrame.url } }, "network-overview"), /access denied/);
   assert.equal(hits, before); assert.deepEqual(fs.readFileSync(path.join(legacy, "deployment.json")), saved);
   let liveHandle;
+  require.cache[manifestPath].exports = { schema: 1, state: "unavailable", reason: "Activation pending in this fixture" };
+  try {
   liveRegistration = require("../../electron/koin-test-ipc").registerTestPaymentIPC({ core, dataDir: root, isTest: false, dialog: {}, origin: "http://127.0.0.1:9000", getMainWindow: () => window, ipcMain: { handle: (_name, fn) => { liveHandle = fn; } } });
+  } finally { require.cache[manifestPath].exports = original; }
   assert.equal((await liveHandle(event, "network-overview")).network.providersOnline, 2);
   assert.equal((await liveHandle(event, "purchase-info")).enabled, false);
   assert.equal((await liveHandle(event, "purchase", "1")).enabled, false);

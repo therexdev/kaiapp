@@ -103,7 +103,7 @@ async function start() {
     bounds: { width: 1100, height: 760 },
   });
 
-  const creditService = release.isTest ? require("./credit-service").manifest(require("../core/lib/koin-network/credit-service.json")) : null;
+  const creditService = require("./credit-service").manifest(require("../core/lib/koin-network/credit-service.json"));
   const creditAccountOrigin = creditService?.state === "ready" ? new URL(creditService.config.schedulerUrl).origin : null;
   core = await createCore({ dataDir, sessionSecret: machineSecret(dataDir), creditAccountOrigin });
   const port = await core.start();

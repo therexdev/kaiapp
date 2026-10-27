@@ -23,7 +23,7 @@
       }
       await pending; return structuredClone(value);
     }
-    return { accept, refresh, clear() { generation++; pending = null; value = { status: "unavailable", snapshot: null, error: "Sign in to check your credit account.", refreshing: false }; notify(); }, get: () => structuredClone(value), subscribe(listener) { listeners.add(listener); listener(structuredClone(value)); return () => listeners.delete(listener); } };
+    return { accept, refresh, clear() { generation++; pending = null; value = { status: "unavailable", snapshot: null, error: "Connect your wallet or sign in to check your credits.", refreshing: false }; notify(); }, get: () => structuredClone(value), subscribe(listener) { listeners.add(listener); listener(structuredClone(value)); return () => listeners.delete(listener); } };
   }
   const credits = value => { const n = BigInt(value), fraction = String(n % 100000n).padStart(5, "0").replace(/0+$/, ""); return (n / 100000n).toLocaleString() + (fraction ? "." + fraction : ""); };
   function creditPresentation(state, now = Date.now()) {
@@ -35,7 +35,7 @@
     const compactStatus = !status ? "" : usd ? "Last verified balance. Refresh to update." : s ? "Earlier balance: Account help."
       : loading ? "Checking your credit account…" : /not activated|activation is pending/i.test(status) ? "Credit service not activated yet."
       : /earlier KOIN account/i.test(status) ? "Earlier balance: Account help."
-      : /Open the desktop app/i.test(status) ? "Open desktop to check your credits." : /sign in/i.test(status) ? "Sign in to check your credits." : "Could not refresh. Retry or view details.";
+      : /Open the desktop app/i.test(status) ? "Open desktop to check your credits." : /connect.*wallet/i.test(status) ? "Connect wallet in Credits." : /sign in/i.test(status) ? "Sign in to check your credits." : "Could not refresh. Retry or view details.";
     return {
       usd, stale, total: usd ? credits(s.available) : loading ? "…" : "—",
       breakdown: usd ? `${s.free.state === "unavailable" ? "Free allowance unavailable" : s.free.state === "ineligible" ? "Free allowance not eligible" : credits(s.free.available) + " free"} · ${credits(s.purchased.available)} purchased${stale ? " · last known" : ""}`

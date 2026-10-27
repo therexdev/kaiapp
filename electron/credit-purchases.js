@@ -106,7 +106,10 @@ class CreditPurchases {
         const args = action === "purchase-approve" ? await this.quotes.consume(c, input, signal) : null;
         setApproved(args);
         const result = await payments.run(window, args ? "purchase" : "purchase-retry", args ? USD.dollars(args.amount) : undefined, signal);
-        if (!result.deposit && !["cancelled", "complete"].includes(result.status)) throw Error(purchaseFailureMessage(result.failure, !args));
+        // A timeout or window lifecycle failure can be labelled cancelled by
+        // the guarded funding controller. Only an explicit native Cancel has
+        // no failure: never turn a failed pre-review check into silent success.
+        if (!result.deposit && (result.failure || !["cancelled", "complete"].includes(result.status))) throw Error(purchaseFailureMessage(result.failure, !args));
         // If confirmation registration is interrupted, the durable original
         // transaction is registered again on the next read-only synchronization.
         if (result.deposit?.txId && !["conflicted", "reverted"].includes(result.deposit.state)) try { await c.flow.call("purchase", { txId: result.registrationTxId || result.deposit.finality?.txId || result.deposit.txId }, signal); } catch {}

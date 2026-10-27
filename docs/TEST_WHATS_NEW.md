@@ -1,3 +1,13 @@
+## Wallet-first network flow — coordinated release candidate
+
+This candidate requires the matching wallet-credit and provider-device server update. It has not been published to Test or Live. Desktop and server verification must pass together before activation.
+
+- Buy takes its exact verified quote straight to native payment approval. An unrelated sidebar balance refresh can no longer cancel that handoff, and automatic price updates no longer hide a payment failure. Account, wallet, quote, saved-payment, balance and Mana checks remain in the payment controller before submission.
+- Credits offers **Connect wallet** without mandatory email or password signup. Existing linked account identity, purchased balances and the service's free-credit policy remain authoritative. Opening a page never enrolls a wallet or grants credits.
+- Earn offers **Set up earning**, **Enable earning**, then **Start/Stop earning**. One native wallet review authorizes a separate device key for provider work; ordinary wallet Lock does not stop an authorized device. The key cannot spend KOIN, purchase credits or change the reward wallet. Expiry, revocation, privacy settings and fresh model qualification are enforced by both client and server.
+- Windows, macOS and supported Linux packages use the same flow. Raspberry Pi/Linux without protected credential storage offers an explicit session-only choice. Temporary buyer access is free-only, and the app shows the actual service allowance. It does not store plaintext credentials or promise restart access.
+- Current USD credit actions work in both release channels; historical custody and deployment controls remain Test-only. Live/Test profile identity, payment journals and updater separation are preserved.
+
 ## Reliable Linux update restarts
 
 - Restarting after an AppImage update waits for the running app to exit before opening its replacement. Live and Test retain their shared profile lock throughout shutdown.

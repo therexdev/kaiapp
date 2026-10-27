@@ -8,6 +8,7 @@ class CreditRunExecutor {
     return { accepted: this.active.get(runId)?.runner?.provideInput(inputId, text) === true };
   }
   async execute(c, input, outerSignal) {
+    if (c.auth?.sessionOnly) throw Error("Temporary network access supports free chat only. Reconnect with secure storage for advanced runs");
     if (!input || Object.keys(input).sort().join() !== "body,kind,runId" || !["team", "agents"].includes(input.kind)) throw Error("Exact supported advanced run required");
     const run = this.service.runs.read(c, input.runId), body = input.body;
     if (run.mode !== input.kind || !body || body.model !== "koinos-network" && body.model !== "koinos-network:" + run.model) throw Error("Approved run mode or model changed");

@@ -86,7 +86,7 @@ test("model pricing never presents legacy KOIN tariffs as USD credits and respec
   assert.equal(reads, 0);
 });
 
-test("model pricing IPC preserves exact main-document, Test and no-arguments guards", async t => {
+test("model pricing IPC serves both channels with exact main-document and no-arguments guards", async t => {
   const fs = require("node:fs"), path = require("node:path"), os = require("node:os"), { EventEmitter } = require("node:events");
   const { CreditService } = require("../../electron/credit-service"), { registerTestPaymentIPC } = require("../../electron/koin-test-ipc");
   const f = fixture(), directory = fs.mkdtempSync(path.join(os.tmpdir(), "kai-model-prices-"));
@@ -103,7 +103,7 @@ test("model pricing IPC preserves exact main-document, Test and no-arguments gua
     ipcMain: { handle: (_channel, fn) => { handler = fn; } } };
   t.after(() => { registration?.dispose(); fs.rmSync(directory, { recursive: true, force: true }); });
   registration = registerTestPaymentIPC({ ...options, isTest: false });
-  assert.equal((await handler(event, "model-pricing")).enabled, false); assert.equal(reads, 0); registration.dispose();
+  assert.equal((await handler(event, "model-pricing")).models.length, 15); assert.equal(reads, 1); registration.dispose(); reads = 0;
   registration = registerTestPaymentIPC({ ...options, isTest: true });
   await assert.rejects(handler({ ...event, senderFrame: { url: event.senderFrame.url } }, "model-pricing"), /access denied/);
   for (const input of [{}, "1", null]) await assert.rejects(handler(event, "model-pricing", input), /takes no arguments/);

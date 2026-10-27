@@ -3,6 +3,8 @@
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
+const { isProtectedStorage, storageState } = require("./protected-storage");
+const authError = (code, message) => Object.assign(Error(message), { code });
 
 /*
  * Koinos AI account client (task #49, app side). One person <-> one account
@@ -14,8 +16,9 @@ const path = require("path");
  *
  * The session token is a credential, so it's stored exactly like email
  * credentials (core/lib/email.js): OS-keychain-encrypted via Electron
- * safeStorage when available, 0600 plain file with the mode SAID out loud
- * otherwise. Never in settings.json.
+ * safeStorage. Legacy website accounts retain their explicitly reported
+ * fallback; new credit sessions require protected storage or explicit
+ * memory-only access. Never in settings.json.
  *
  * Wallet linking signs sha256(`link|address|accountId|ts`) with the wallet's
  * own key — the §17 proof shape the scheduler already trusts. It moves no
@@ -29,7 +32,7 @@ const path = require("path");
 const POLL_MIN_MS = 2000;
 
 class AccountService {
-  constructor({ dataDir, settings, wallet, safeStorage = null, onEvent = () => {}, accountOrigin = null }) {
+  constructor({ dataDir, settings, wallet, safeStorage = null, onEvent = () => {}, accountOrigin = null, fetchImpl = null }) {
     if (accountOrigin !== null) {
       const url = new URL(accountOrigin);
       if (url.protocol !== "https:" || url.origin !== accountOrigin) throw Error("Account origin must be a canonical HTTPS origin");
@@ -41,6 +44,9 @@ class AccountService {
     this.wallet = wallet;
     this.safeStorage = safeStorage;
     this.onEvent = onEvent;
+    this.fetchImpl = fetchImpl;
+    this._memorySession = null;
+    this._ignoreStoredSession = false;
     this._pending = null; // in-flight device link {userCode, deviceSecret, verifyUrl, expiresAt}
     this._lastPoll = 0;
   }
@@ -60,22 +66,38 @@ class AccountService {
 
   /* ------------------------------------------------- token at rest ---- */
   _encrypted() {
-    return Boolean(this.safeStorage?.isEncryptionAvailable?.());
+    return isProtectedStorage(this.safeStorage);
   }
 
-  _saveToken(token) {
-    const payload = JSON.stringify({ token });
-    fs.mkdirSync(path.dirname(this.file), { recursive: true });
+  _saveToken(token, metadata = {}, { sessionOnly = false } = {}) {
+    const record = { ...metadata, token };
+    if (sessionOnly) { this._memorySession = record; return; }
+    const payload = JSON.stringify(record);
+    fs.mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
+    if (this.accountOrigin && !this._encrypted()) throw authError("secure-storage-required", storageState(this.safeStorage).detail);
+    const temporary = this.file + "." + crypto.randomBytes(8).toString("hex") + ".tmp";
+    let bytes;
     if (this._encrypted()) {
-      fs.writeFileSync(this.file, Buffer.concat([Buffer.from("ENC1"), this.safeStorage.encryptString(payload)]), { mode: 0o600 });
+      bytes = Buffer.concat([Buffer.from("ENC1"), this.safeStorage.encryptString(payload)]);
     } else {
-      fs.writeFileSync(this.file, Buffer.concat([Buffer.from("PLN1"), Buffer.from(payload)]), { mode: 0o600 });
+      bytes = Buffer.concat([Buffer.from("PLN1"), Buffer.from(payload)]);
     }
+    const fd = fs.openSync(temporary, "wx", 0o600);
+    try { fs.writeFileSync(fd, bytes); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+    try { fs.renameSync(temporary, this.file); } finally { fs.rmSync(temporary, { force: true }); }
+    this._memorySession = null;
+    this._ignoreStoredSession = false;
   }
 
-  _token() {
+  _tokenRecord() {
+    if (this._memorySession) return { ...this._memorySession, sessionOnly: true };
+    if (this._ignoreStoredSession) return null;
+    return this._storedTokenRecord();
+  }
+  _storedTokenRecord() {
     let raw;
     try {
+      if (fs.statSync(this.file).size > 65536) return null;
       raw = fs.readFileSync(this.file);
     } catch {
       return null;
@@ -83,15 +105,42 @@ class AccountService {
     const tag = raw.slice(0, 4).toString();
     const body = raw.slice(4);
     try {
-      if (tag === "ENC1") return JSON.parse(this.safeStorage.decryptString(body)).token;
-      if (tag === "PLN1") return JSON.parse(body.toString()).token;
+      if (tag === "ENC1") return { ...JSON.parse(this.safeStorage.decryptString(body)), encrypted: true, sessionOnly: false };
+      if (tag === "PLN1") return { ...JSON.parse(body.toString()), encrypted: false, sessionOnly: false };
     } catch {
       /* corrupted or wrong keychain — treated as signed out */
     }
     return null;
   }
+  _token() { return this._tokenRecord()?.token || null; }
+  _sessionProtected() {
+    const record = this._tokenRecord();
+    return Boolean(record?.sessionOnly || this._encrypted() && record?.encrypted !== false);
+  }
+  walletCapabilities(config, signal) { return require("./wallet-credit-account").capabilities(this, config, signal); }
+  connectWallet(config, options, signal) { return require("./wallet-credit-account").connect(this, config, options, signal); }
 
   _clearToken() {
+    if (this._memorySession) {
+      const preserved = fs.existsSync(this.file);
+      if (preserved) {
+        // A temporary login can mask a different saved account. Retire its
+        // exact encrypted bytes instead of deleting them or silently restoring
+        // that hidden login after an explicit sign-out/restart.
+        const archive = this.file + ".saved-" + crypto.randomBytes(12).toString("hex") + ".cfg";
+        if (!fs.lstatSync(this.file).isFile()) throw Error("The saved credential path needs recovery before sign-out can archive it");
+        fs.chmodSync(this.file, 0o600);
+        fs.renameSync(this.file, archive);
+        if (process.platform !== "win32") {
+          const directory = fs.openSync(path.dirname(this.file), "r");
+          try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); }
+        }
+      }
+      this._memorySession = null;
+      this._ignoreStoredSession = preserved;
+      return;
+    }
+    this._memorySession = null;
     fs.rmSync(this.file, { force: true });
   }
 
@@ -102,7 +151,7 @@ class AccountService {
       const t = this._token();
       if (t) headers.authorization = `Bearer ${t}`;
     }
-    const r = await fetch(this.origin() + pathname, {
+    const r = await (this.fetchImpl || fetch)(this.origin() + pathname, {
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -118,6 +167,10 @@ class AccountService {
       site: this.origin(),
       tokenStored: Boolean(this._token()),
       credsEncrypted: this._encrypted(),
+      secureStorage: storageState(this.safeStorage),
+      sessionOnly: Boolean(this._memorySession),
+      authScope: this._tokenRecord()?.scope || "account",
+      savedConnectionPreserved: this._ignoreStoredSession,
       pendingCode: this._pending && this._pending.expiresAt > Date.now() ? this._pending.userCode : null,
       verifyUrl: this._pending && this._pending.expiresAt > Date.now() ? this._pending.verifyUrl : null,
     };
@@ -218,7 +271,7 @@ class AccountService {
   }
 
   async signOut() {
-    await this._call("/auth/logout", { method: "POST", body: {} }).catch(() => {});
+    await this._call(this._tokenRecord()?.scope === "wallet-credits" ? "/auth/wallet-credit/logout" : "/auth/logout", { method: "POST", body: {} }).catch(() => {});
     this._clearToken();
     this.onEvent({ type: "account:signed-out" });
   }
@@ -251,24 +304,36 @@ class AccountService {
   async creditAuthorization(pinnedScheduler, signal) {
     const { scheduler } = require("./koin-network/grant-chat"), pinned = scheduler(pinnedScheduler);
     const token = this._token();
-    if (!token || !this._encrypted()) throw Error("Sign in and unlock secure account storage to use network credits");
+    if (!token) {
+      if (fs.existsSync(this.file) && !this._encrypted()) throw authError("secure-storage-required", storageState(this.safeStorage).detail);
+      throw authError("signin-required", "Connect your wallet to use network credits, or sign in to your existing credit account");
+    }
+    if (!this._sessionProtected()) throw authError("secure-storage-required", storageState(this.safeStorage).detail);
+    const saved = this._tokenRecord();
+    if (saved?.expiresAt && saved.expiresAt <= Date.now()) throw authError("wallet-reauthorization-required", "Your wallet connection expired. Connect your wallet again; your credits are preserved");
+    if (saved?.scope === "wallet-credits" && saved.wallet !== this.wallet?.address) throw authError("wallet-changed", "Choose the wallet connected to this credit balance, or connect the selected wallet");
     if (this.settings.get("network.privacyMode", "local-only") === "local-only") throw Error("Choose an online route to use network credits");
     if (new URL(pinned).origin !== this.origin()) throw Error("Sign in to the account service for this network");
-    const response = await fetch(new URL(pinned).origin + "/auth/session", { redirect: "error", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10000)]) : AbortSignal.timeout(10000), headers: { authorization: "Bearer " + token } });
+    const response = await (this.fetchImpl || fetch)(new URL(pinned).origin + "/auth/session", { redirect: "error", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10000)]) : AbortSignal.timeout(10000), headers: { authorization: "Bearer " + token } });
     const chunks = []; let size = 0;
     for await (const part of response.body) { size += part.length; if (size > 65536) throw Error("Account response too large"); chunks.push(part); }
     const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    if (!response.ok || value.ok !== true || typeof value.account?.id !== "string" || !value.account.id || value.account.id.length > 200 || !Array.isArray(value.account.wallets) || value.account.wallets.length > 64 || value.account.wallets.some(w => !require("koilib").utils.isChecksumAddress(w?.address))) throw Error("Sign in to your credit account");
+    if ([401, 403].includes(response.status)) throw authError(saved?.scope === "wallet-credits" ? "wallet-reauthorization-required" : "signin-required", saved?.scope === "wallet-credits" ? "Reconnect your wallet to network credits; your balance is preserved" : "Sign in to your credit account");
+    if (!response.ok) throw authError("service-unavailable", "The credit service is temporarily unavailable. Your connection and balance are preserved");
+    if (value.ok !== true || typeof value.account?.id !== "string" || !value.account.id || value.account.id.length > 200 || !Array.isArray(value.account.wallets) || value.account.wallets.length > 64 || value.account.wallets.some(w => !require("koilib").utils.isChecksumAddress(w?.address))) throw authError("identity-unverified", "The credit service did not return a verifiable account identity. Your saved connection is preserved");
+    if (saved?.scope === "wallet-credits" && (value.scope !== "wallet-credits" || value.freeOnly !== saved.freeOnly || value.account.freeOnly !== saved.freeOnly || value.account.id !== saved.accountId || value.account.wallets.length !== 1 || value.account.wallets[0].address !== saved.wallet)) throw authError("identity-changed", "The network credit identity changed; your existing balances are preserved");
     const accountId = value.account.id, localWallet = this.wallet?.address || null;
     // With several linked wallets, use only the wallet explicitly loaded on
     // this device. No arbitrary first-wallet selection or balance transfer.
     const wallet = value.account.wallets.length === 1 ? value.account.wallets[0].address : value.account.wallets.find(w => w.address === localWallet)?.address;
-    const auth = { sessionToken: token, accountId, localWallet, owner: wallet || "account-" + crypto.createHash("sha256").update("verified-account:" + accountId).digest("hex"), schedulerUrl: pinned };
+    const auth = { sessionToken: token, accountId, localWallet, owner: wallet || "account-" + crypto.createHash("sha256").update("verified-account:" + accountId).digest("hex"), schedulerUrl: pinned,
+      ...(saved?.sessionOnly ? { sessionOnly: true } : {}), ...(saved?.scope ? { scope: saved.scope } : {}) };
     this.assertCreditAuthorization(auth, pinned); return auth;
   }
   assertCreditAuthorization(auth, pinned) {
     if (auth.schedulerUrl !== pinned || new URL(pinned).origin !== this.origin() || auth.sessionToken !== this._token() ||
-        (Object.hasOwn(auth, "localWallet") && auth.localWallet !== (this.wallet?.address || null)) || !this._encrypted() || this.settings.get("network.privacyMode", "local-only") === "local-only") throw Error("Account or privacy settings changed");
+        (Object.hasOwn(auth, "localWallet") && auth.localWallet !== (this.wallet?.address || null)) || !this._sessionProtected() ||
+        (this._tokenRecord()?.expiresAt && this._tokenRecord().expiresAt <= Date.now()) || this.settings.get("network.privacyMode", "local-only") === "local-only") throw Error("Account or privacy settings changed");
   }
   // Private Core-to-scheduler credential handoff for the explicitly pinned
   // rehearsal. Never returned by status(), IPC, a tool or a public API.

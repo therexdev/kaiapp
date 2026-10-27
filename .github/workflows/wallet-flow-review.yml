@@ -1,0 +1,161 @@
+name: Wallet flow candidate verification
+
+# Review only. No release creation, installer publication, feed updates, remote
+# service access or server credentials. A passing run is not deployment.
+on:
+  push:
+    branches: [work/wallet-first-purchase-20261027]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wallet-flow-review-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Exact reviewed backend paired with this desktop candidate.
+  KAI_WALLET_BACKEND_COMMIT: 11474a9d851769bccfb56008b2a3d4cbd6521ff3
+  KAI_SCHEDULER_URL: http://127.0.0.1:9/scheduler
+  KAI_RELAY_URL: http://127.0.0.1:9
+  KAI_FEEDBACK_URL: http://127.0.0.1:9/feedback
+
+jobs:
+  unix-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Require an exact reviewed backend revision
+        run: node -e 'if (!/^[a-f0-9]{40}$/.test(process.env.KAI_WALLET_BACKEND_COMMIT)) throw Error("Pin the reviewed backend commit before candidate verification")'
+      - uses: actions/checkout@v4
+        with:
+          repository: therexdev/kai
+          ref: ${{ env.KAI_WALLET_BACKEND_COMMIT }}
+          path: verification-wallet-backend
+          persist-credentials: false
+      - run: npm ci
+      - run: npm ci --ignore-scripts --prefix verification-wallet-backend
+      - name: Audit shipped dependencies
+        run: npm audit --omit=dev --audit-level=high
+      - name: Install the pinned browser
+        shell: bash
+        run: |
+          export PLAYWRIGHT_BROWSERS_PATH="$RUNNER_TEMP/pw-browsers"
+          npx playwright-core install chromium
+          echo "PLAYWRIGHT_BROWSERS_PATH=$PLAYWRIGHT_BROWSERS_PATH" >> "$GITHUB_ENV"
+          echo "KAI_TEST_CHROMIUM=$(node -e 'process.stdout.write(require("playwright-core").chromium.executablePath())')" >> "$GITHUB_ENV"
+          echo "KAI_WALLET_BACKEND=$GITHUB_WORKSPACE/verification-wallet-backend" >> "$GITHUB_ENV"
+      - name: Verify wallet sessions, device authority and preserving server updater
+        working-directory: verification-wallet-backend
+        run: node --test scripts/probe-wallet-credit-auth.js scripts/probe-wallet-credit-router.js scripts/probe-koin-provider-devices.js scripts/probe-koin-model-catalog.js scripts/probe-koin-credit-priority.js scripts/probe-koin-purchase-journal.js deploy/koin-mainnet/update-wallet-access.test.js
+      - name: Run the Linux application suite
+        if: runner.os == 'Linux'
+        run: npm test
+        env:
+          KAI_MASCOT_QA_DIR: wallet-flow-qa
+          KAI_PREPAID_QA_DIR: wallet-flow-qa
+      - name: Run the macOS application suite
+        if: runner.os == 'macOS'
+        # Browser fixtures share native audio devices on macOS.
+        run: node --test --test-concurrency=1 "core/test/*.test.js"
+        env:
+          KAI_MASCOT_QA_DIR: wallet-flow-qa
+          KAI_PREPAID_QA_DIR: wallet-flow-qa
+      - name: Exercise actual desktop and backend enrollment, purchase and earning together
+        run: node --test core/test/wallet-first-integration.test.js
+      - name: Verify Linux relaunch and shared profile exclusion
+        if: runner.os == 'Linux'
+        run: xvfb-run -a node scripts/verify-linux-relaunch.js
+      - name: Record candidate source identities
+        shell: bash
+        run: |
+          mkdir -p wallet-flow-qa
+          node -e 'require("fs").writeFileSync("wallet-flow-qa/candidate.json",JSON.stringify({desktop:process.env.GITHUB_SHA,backend:process.env.KAI_WALLET_BACKEND_COMMIT,run:process.env.GITHUB_RUN_ID,platform:process.platform,published:false},null,2)+"\n")'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wallet-flow-review-${{ runner.os }}
+          path: wallet-flow-qa/*
+          if-no-files-found: ignore
+          retention-days: 7
+
+  windows-native:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Require an exact reviewed backend revision
+        run: node -e 'if (!/^[a-f0-9]{40}$/.test(process.env.KAI_WALLET_BACKEND_COMMIT)) throw Error("Pin the reviewed backend commit before candidate verification")'
+      - uses: actions/checkout@v4
+        with:
+          repository: therexdev/kai
+          ref: ${{ env.KAI_WALLET_BACKEND_COMMIT }}
+          path: verification-wallet-backend
+          persist-credentials: false
+      - run: npm ci
+      - run: npm ci --ignore-scripts --prefix verification-wallet-backend
+      - name: Install the pinned browser and set isolated integration source
+        shell: pwsh
+        run: |
+          npx playwright-core install chromium
+          $kaiChromium = node -e 'process.stdout.write(require("playwright-core").chromium.executablePath())'
+          "KAI_TEST_CHROMIUM=$kaiChromium" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "KAI_WALLET_BACKEND=$env:GITHUB_WORKSPACE\verification-wallet-backend" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Verify Windows credit, purchase and earning behavior
+        run: node --test --test-concurrency=1 core/test/wallet-credit-account.test.js core/test/provider-device.test.js core/test/credit-provider.test.js core/test/credit-purchases.test.js core/test/purchase-wallet.browser.test.js core/test/wallet-first-integration.test.js core/test/wallet-first-ui.browser.test.js core/test/credit-wallet-ipc.test.js core/test/session-free-chat.test.js core/test/koin-prepaid-chat.test.js core/test/koin-provider-status.test.js core/test/worker-proof.test.js core/test/worker-advertise.test.js core/test/worker-model-selection.test.js core/test/worker-start-stop.test.js core/test/worker-registration-retirement.test.js
+      - name: Verify real Windows profile exclusion and encrypted credential reuse
+        run: node scripts/verify-shared-profile.js
+      - name: Test signing rejection paths
+        run: node --test core/test/windows-signing.test.js core/test/windows-signing-preparation.test.js
+      - name: Build the native private helpers
+        run: |
+          node scripts/build-windows-voice.js
+          node scripts/build-windows-computer.js
+      - name: Set separate Test identity for the candidate package
+        run: node scripts/prepare-test-build.js ${{ github.run_number }} ${{ github.run_attempt }}
+      - name: Prepare native signing module
+        run: ./scripts/prepare-windows-signing.ps1
+      - name: Require the existing publisher and signing configuration
+        run: node scripts/configure-windows-signing.js
+        env:
+          AZ_ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          AZ_PROFILE: ${{ secrets.AZURE_SIGNING_PROFILE }}
+          AZ_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      - name: Build the review candidate without publication
+        run: npm run dist -- --win --publish never
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      - name: Verify packaged identity, content and native signatures
+        run: |
+          node scripts/verify-test-package.js
+          node scripts/verify-windows-signatures.js dist
+      - name: Verify packaged wallet and device credentials across a native restart
+        run: node scripts/verify-wallet-device-storage.js --app-dir dist/win-unpacked
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wallet-flow-review-Windows-evidence
+          path: dist/windows-signatures-*.json
+          if-no-files-found: ignore
+          retention-days: 7

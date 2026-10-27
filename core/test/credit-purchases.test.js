@@ -456,3 +456,24 @@ test("pending purchase polling reads receipt evidence without repeatedly reading
   assert.equal(f.counts().signatures, 1); assert.equal(f.state.submissions.length, 1);
   assert.equal((await f.controller.status(f.c, signal)).state, "pending");
 });
+
+test("the private payment controller rejects a wallet changed after its quote without review or signing", async t => {
+  const f = setup(t), signal = new AbortController().signal;
+  const quote = await f.controller.preview(f.c, { usd: "1" }, signal);
+  f.options.account.wallet.address = Signer.fromSeed("a-different-payment-wallet").getAddress();
+  await assert.rejects(f.controller.run(f.c, f.window, "purchase-approve", quote.quote.id, signal), /payment wallet linked/);
+  assert.deepEqual(f.counts(), { signatures: 0, reviews: 0 });
+  assert.equal(f.state.submissions.length, 0);
+});
+
+test("a pre-review failure at the action deadline reports the failure instead of pretending native Cancel", async t => {
+  const f = setup(t), signal = new AbortController().signal;
+  f.client.prepare = async () => {
+    f.state.now += 180001;
+    throw Object.assign(Error("private RPC response"), { code: "koin_rpc_unavailable" });
+  };
+  const quote = await f.controller.preview(f.c, { usd: "1" }, signal);
+  await assert.rejects(f.controller.run(f.c, f.window, "purchase-approve", quote.quote.id, signal), /prepare\/rpc-unavailable/);
+  assert.deepEqual(f.counts(), { signatures: 0, reviews: 0 });
+  assert.equal(f.state.submissions.length, 0);
+});

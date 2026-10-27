@@ -10,19 +10,21 @@
     const toggle = document.getElementById("network-paid-first"), help = document.getElementById("network-credit-priority-help");
     if (!toggle || !help) return;
     const supported = info.product === "prepaid-usd-v1" && info.creditPriority === true && !info.blocked;
-    toggle.checked = paidFirstPreference();
+    toggle.checked = info.freeOnlySession === true ? false : paidFirstPreference();
     // A saved preference can always be turned off, even during an outage.
-    toggle.disabled = !supported && !toggle.checked;
-    help.textContent = supported ? (toggle.checked
+    toggle.disabled = info.freeOnlySession === true || !supported && !toggle.checked;
+    help.textContent = info.freeOnlySession === true ? "This temporary connection uses free credits only. Your saved credit priority applies again when you reconnect with protected storage."
+      : supported ? (toggle.checked
       ? "Purchased credits are used first. Eligible free credits cover the rest when needed. Your choice is saved on this computer."
       : "Free credits are used first on eligible models, then purchased credits. Your choice is saved on this computer.")
       : toggle.checked ? "Paid-first is saved, but network support is unavailable. Turn it off to use free credits first."
-      : info.activation === "signin-required" ? "Free credits are used first. Sign in to your AI credit account to check paid-first support."
+      : ["signin-required", "wallet-connection-required", "wallet-reauthorization-required", "secure-storage-required"].includes(info.activation) ? "Free credits are used first. Connect your wallet in Credits to check your available credit options."
       : "Free credits are used first. Paid-first will be available after the network service update.";
     const chatHelp = document.getElementById("network-chat-help");
-    if (chatHelp && info.maxRequestCredits) chatHelp.textContent = `Send a message to use your credits. ${toggle.checked ? "Purchased credits are used first." : "Free credits are used first."} Up to ${info.maxRequestCredits} credits per message.`;
+    if (chatHelp && info.maxRequestCredits) chatHelp.textContent = `Send a message to use your credits. ${info.freeOnlySession ? "This temporary connection uses free credits only." : toggle.checked ? "Purchased credits are used first." : "Free credits are used first."} Up to ${info.maxRequestCredits} credits per message.`;
   }
   function paidFirst() {
+    if (info.freeOnlySession === true) return false;
     const selected = paidFirstPreference();
     if (selected && (info.creditPriority !== true || info.blocked)) throw Error("Paid-first is unavailable on this network. Turn it off in Settings to use free credits first.");
     return selected;
@@ -73,7 +75,7 @@
       const model = selectedModel(body.model);
       if (!model?.available) throw Error("This network model is unavailable. Choose an available model; your credits have not been charged.");
     }
-    if (current.product === "prepaid-usd-v1") body = { ...body, freeOnly: false, paidFirst: paidFirst() };
+    if (current.product === "prepaid-usd-v1") body = { ...body, freeOnly: current.freeOnlySession === true, paidFirst: paidFirst() };
     if (body.stream !== false && ["prepaid-v1", "prepaid-usd-v1"].includes(current.product)) return streamFetch(body, init);
     const signal = init.signal, stop = () => { bridge.run("stop").catch(() => {}); };
     signal?.throwIfAborted(); signal?.addEventListener("abort", stop, { once: true });

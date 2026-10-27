@@ -46,7 +46,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: therexdev/kai
-          ref: 9d4ad205cf06fe54cc1a38f7088e87443eb7e87b
+          ref: 11474a9d851769bccfb56008b2a3d4cbd6521ff3
           path: verification-backend
           persist-credentials: false
       - name: Verify purchase, provider and paid reply together
@@ -54,6 +54,7 @@ jobs:
           npm ci --ignore-scripts --prefix verification-backend
           node scripts/verify-credit-flow.js verification-backend
           node scripts/verify-provider-qualification.js verification-backend
+          KAI_WALLET_BACKEND="$GITHUB_WORKSPACE/verification-backend" node --test core/test/wallet-first-integration.test.js
         env:
           KAI_SCHEDULER_URL: http://127.0.0.1:9/scheduler
           KAI_RELAY_URL: http://127.0.0.1:9
@@ -243,6 +244,8 @@ jobs:
         run: node scripts/verify-neural-voice.js --packaged
       - name: Verify Windows signatures, timestamps and publisher before upload
         run: node scripts/verify-windows-signatures.js dist
+      - name: Verify packaged wallet and device credentials across a native restart
+        run: node scripts/verify-wallet-device-storage.js --app-dir dist/win-unpacked
       - uses: actions/upload-artifact@v4
         with:
           name: kai-test-windows

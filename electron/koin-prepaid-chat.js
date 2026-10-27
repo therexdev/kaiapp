@@ -48,6 +48,7 @@ class PrepaidChat extends ChatFlow {
     this.access.authorize(this.config.schedulerUrl, signal);
     if (value.product !== this.product || value.mode !== wire.mode || value.paymentsEnabled !== wire.paymentsEnabled || value.owner && value.owner !== this.config.owner) throw Error("Credit account identity changed");
     if (!response.ok || value.ok !== true) throw Error(value.error || "The network is unavailable. Please try again.");
+    if (action === "capabilities") this.providerDeviceProof = value.capabilities?.providerDeviceProof === 1;
     return value;
   }
   input(value, record) {
@@ -89,7 +90,11 @@ class PrepaidChat extends ChatFlow {
         r.usage.inputTokens !== q.inputTokens || !Number.isSafeInteger(r.usage.outputTokens) || r.usage.outputTokens < 1 || r.usage.outputTokens > q.maxOutput ||
         r.usage.amount !== price(q.tariff, r.usage.inputTokens, r.usage.outputTokens) || BigInt(r.usage.amount) > BigInt(q.maxCharge)) throw Error("The answer differs from the approved credit price");
     const job = { id, session: k.session, attempt: r.attempt, quote: q };
-    P.signatureMatches(r.sequence === undefined ? fundedResultHash(this.target, job, output) : require("../core/lib/koin-network/funded-protocol").fundedChunkHash(this.target, job, output, r.sequence), r.signature, r.provider);
+    const proofHash = r.sequence === undefined ? fundedResultHash(this.target, job, output) : require("../core/lib/koin-network/funded-protocol").fundedChunkHash(this.target, job, output, r.sequence);
+    if (typeof r.signature === "string" && r.signature.startsWith("pd1.")) {
+      require("../core/lib/koin-network/provider-device-protocol").verifyAction(r.signature, r.sequence === undefined ? "result" : "chunk", proofHash,
+        { schedulerUrl: this.config.schedulerUrl, target: this.target, wallet: r.provider, now: this.clock(), historical: true, completedAt: r.completedAt });
+    } else P.signatureMatches(proofHash, r.signature, r.provider);
     return { id, object: "chat.completion", model: "koinos-network", servedModel: input.model,
       choices: [{ index: 0, message: { role: "assistant", content: output }, finish_reason: k.state === "streaming" ? null : "stop" }],
       usage: { prompt_tokens: r.usage.inputTokens, completion_tokens: r.usage.outputTokens, total_tokens: r.usage.inputTokens + r.usage.outputTokens }, costUsd: isUsd(this.product) ? Number(r.usage.amount) / 1e8 : 0,
@@ -169,7 +174,14 @@ class PrepaidChat extends ChatFlow {
         this.save({ ...record, state: "answered", answer: this.storage.encryptString(JSON.stringify(answer)).toString("base64") });
         if (delta) this.progress({ requestId: record.id, delta, servedModel: input.model, creditsAtoms: receipt.usage.amount });
       };
-      const response = await this.call("chat", { billing: "koin-" + this.product, requestId: record.id, model: input.model, messages: input.messages, max_tokens: input.maxOutput,
+      // Older credit services reject unknown request fields. Advertise delegated
+      // receipt support only after this exact service announces the protocol.
+      if (isUsd(this.product) && this.providerDeviceProof === undefined) {
+        try { await this.call("capabilities", {}, signal); }
+        catch { signal.throwIfAborted(); this.providerDeviceProof = false; }
+      }
+      const providerDeviceProof = this.providerDeviceProof === true;
+      const response = await this.call("chat", { ...(providerDeviceProof ? { providerDeviceProof: 1 } : {}), billing: "koin-" + this.product, requestId: record.id, model: input.model, messages: input.messages, max_tokens: input.maxOutput,
         stream: value.stream !== false, ...(record.maxPaid !== undefined ? { maxPaid: record.maxPaid } : {}), ...(input.freeOnly !== undefined ? { freeOnly: input.freeOnly } : {}), ...(input.paidFirst ? { paidFirst: true } : {}), ...(input.runId ? { runId: input.runId } : {}) }, signal, delivered);
       const answer = this.verify(response.completion, input, record.id);
       // Persist the verified answer before displaying it. The service has already

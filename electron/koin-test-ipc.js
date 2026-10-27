@@ -10,6 +10,17 @@ const { TestPayments } = require("./koin-test-payments");
 const { TestAccess } = require("./koin-test-access");
 const P = require("../core/lib/koin-network/job-protocol");
 const crypto = require("crypto");
+// Current USD credits use the same reviewed service on both release channels.
+// Historical custody, funding and imported pilot controls remain Test-only.
+const PUBLIC_CREDIT_ACTIONS = new Set([
+  "wallet-info", "wallet-connect", "purchase-info", "purchase-capabilities", "model-pricing",
+  "purchase-estimate", "purchase-preview", "purchase-approve", "credit-purchase-retry", "purchase-stop",
+  "chat-info", "credit-status", "chat-estimate", "chat-completion", "chat-recover", "chat-ack",
+  "run-input", "run-open", "run-chat", "run-execute", "run-list", "run-status", "run-stop", "stop",
+  "provider-public-info", "provider-public-status", "provider-public-earnings", "provider-public-stop",
+  "provider-public-start", "provider-public-download", "provider-public-model", "provider-public-models",
+  "provider-public-authorize", "provider-public-revoke"
+]);
 const { FundedSessionClient } = require("./koin-session-client");
 const { createSessionReview } = require("./koin-session-review");
 const { ChatFlow } = require("./koin-chat-flow");
@@ -32,7 +43,7 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     storage: core.account?.safeStorage, service: require("../core/lib/koin-network/credit-service.json"),
     progress: value => { const window = getMainWindow(); if (window && !window.isDestroyed()) window.webContents.send("koin:chat-progress", typeof value === "string" ? { text: value } : value); } });
   let creditBusy = false, purchaseSync = null;
-  const creditProvider = new (require("./credit-provider").CreditProvider)({ service: creditService, core });
+  const creditProvider = new (require("./credit-provider").CreditProvider)({ service: creditService, core, dialog });
   const creditRunExecutor = new (require("./credit-run-executor").CreditRunExecutor)({ service: creditService, core });
   const activeRequests = new Set(), paymentRequests = new Set();
   const open = () => {
@@ -91,12 +102,10 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     if (!trustedMainDocument(event, window, origin)) throw Error("Desktop window access denied");
     if (action === "network-overview") {
       if (input !== undefined || disposed) throw Error("Network overview takes no arguments and requires an open app");
-      // Public browsing is also available in Live. Payment APIs below retain
-      // their separate Test guard and are never enabled by this read.
-      if (!isTest) return { network: await core.gateway.network.overview(AbortSignal.timeout(10000)) };
       // An activated credit network owns its model/qualification/receipt view.
       // Never replace a failed read of it with an unrelated public network.
       if (creditService.service.state === "ready") return creditService.run(action, input, AbortSignal.timeout(10000));
+      if (!isTest) return { network: await core.gateway.network.overview(AbortSignal.timeout(10000)) };
       if ([usdRoot, prepaidRoot].includes(root) && fs.existsSync(configFile)) {
         const config = readConfig(configFile);
         if (isPrepaid(config.deployment)) { open(); access.authorize(config.schedulerUrl); return flow(window).call("network"); }
@@ -105,8 +114,17 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
       // without opening a payment journal or waiting for credit activation.
       return { network: await core.gateway.network.overview(AbortSignal.timeout(10000)) };
     }
-    if (!isTest) return { enabled: false, mode: "test-deployment" };
+    if (!isTest && (!PUBLIC_CREDIT_ACTIONS.has(action) || creditService.service.state !== "ready")) return { enabled: false, mode: "test-deployment" };
     if (typeof action !== "string" || Buffer.byteLength(JSON.stringify(input ?? null)) > (["chat-completion", "chat-estimate", "run-chat", "run-execute", "run-input"].includes(action) ? 28000 : 16384)) throw Error("Invalid Test payment action");
+    if (action === "wallet-info") {
+      if (input !== undefined || disposed) throw Error("Wallet connection status takes no arguments and requires an open app");
+      return creditService.walletInfo(AbortSignal.timeout(10000));
+    }
+    if (action === "wallet-connect") {
+      if (disposed || !window.isVisible() || window.isMinimized()) throw Error("Return to the visible app to connect your wallet");
+      if (input !== undefined && (!input || Array.isArray(input) || Object.keys(input).some(k => k !== "sessionOnly") || typeof input.sessionOnly !== "boolean")) throw Error("Invalid wallet connection option");
+      return withChatSignal(window, signal => creditService.connectWallet(window, input || {}, signal));
+    }
     // Purchases use the public USD service, independently of any earlier
     // wallet deployment that still supports balance reads or recovery.
     if (action === "purchase-info") {
@@ -122,6 +140,15 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
       return require("./credit-model-pricing").modelPricing(creditService, AbortSignal.timeout(10000));
     }
     if (action.startsWith("provider-public-")) {
+      if (action === "provider-public-authorize") {
+        if (disposed || !window.isVisible() || window.isMinimized()) throw Error("Return to the visible app to enable earning");
+        if (input !== undefined && (!input || Array.isArray(input) || Object.keys(input).some(k => k !== "sessionOnly") || typeof input.sessionOnly !== "boolean")) throw Error("Invalid earning authorization option");
+        return withChatSignal(window, signal => creditProvider.authorize(window, input || {}, signal), false, true);
+      }
+      if (action === "provider-public-revoke") {
+        if (input !== undefined || disposed || !window.isVisible() || window.isMinimized()) throw Error("Return to the visible app to remove this device's earning authorization");
+        return withChatSignal(window, signal => creditProvider.revoke(window, signal), false, true);
+      }
       if (action === "provider-public-models") {
         if (disposed || !window.isVisible() || window.isMinimized()) throw Error("Return to the visible app to choose models to share");
         return withChatSignal(window, signal => creditProvider.selectModels(input, signal), false, true);
@@ -434,6 +461,6 @@ function registerTestPaymentIPC({ ipcMain, dialog, core, getMainWindow, origin, 
     if (disposed || providerTick || creditService.service.state !== "ready") return;
     providerTick = true; try { await creditProvider.tick(); } finally { providerTick = false; }
   }, 15000); providerTimer.unref();
-  return { isProviding: () => !!worker?.running || !!creditProvider.worker?.running, dispose() { disposed = true; clearInterval(purchaseTimer); purchaseSync?.abort.abort(); clearInterval(providerTimer); creditProvider.dispose().catch(() => {}); payments?.stop(); creditService.purchases.stop(); for (const controller of activeRequests) controller.abort(); chatAbort?.abort(); sessionAbort?.abort(); workerAbort?.abort(); workerTrack?.(); /* In-flight signed bytes must finish staging before process exit. */ } };
+  return { isProviding: () => !!worker?.running || !!creditProvider.worker?.running, dispose() { disposed = true; clearInterval(purchaseTimer); purchaseSync?.abort.abort(); clearInterval(providerTimer); creditProvider.dispose().catch(() => {}); creditService.dispose(); payments?.stop(); creditService.purchases.stop(); for (const controller of activeRequests) controller.abort(); chatAbort?.abort(); sessionAbort?.abort(); workerAbort?.abort(); workerTrack?.(); /* In-flight signed bytes must finish staging before process exit. */ } };
 }
 module.exports = { registerTestPaymentIPC, readConfig };

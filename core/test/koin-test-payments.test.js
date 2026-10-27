@@ -18,7 +18,7 @@ function setup(t, extra = {}) {
     clock: () => f.state.now, dialog: { showMessageBox: async () => ({ response: 1 }) }, ...extra });
   return { ...f, config, wallet, controller };
 }
-test("Test payment IPC rejects other documents and keeps stable builds disabled", async t => {
+test("Payment IPC rejects other documents and keeps historical custody disabled in stable builds", async t => {
   const fs = require("fs"), path = require("path"), os = require("os"), { registerTestPaymentIPC } = require("../../electron/koin-test-ipc");
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "kai-test-ipc-")); t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const w = window(); w.webContents.mainFrame = { url: "http://127.0.0.1:9000/" };
@@ -26,7 +26,7 @@ test("Test payment IPC rejects other documents and keeps stable builds disabled"
     ipcMain: { handle: (_name, h) => { handler = h; } } };
   const stable = registerTestPaymentIPC({ ...options, isTest: false }), event = { sender: w.webContents, senderFrame: w.webContents.mainFrame };
   assert.equal((await handler(event, "purchase", "1")).enabled, false);
-  assert.equal((await handler(event, "purchase-info")).enabled, false);
+  assert.equal((await handler(event, "purchase-info")).enabled, true, "current USD credit setup is shared by Live and Test");
   await assert.rejects(handler({ ...event, senderFrame: { url: w.webContents.mainFrame.url } }, "status"), /access denied/); stable.dispose();
   const manifestPath = require.resolve("../lib/koin-network/credit-service.json"), original = require(manifestPath);
   let testBuild;

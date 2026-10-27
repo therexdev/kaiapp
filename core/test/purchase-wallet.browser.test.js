@@ -105,14 +105,15 @@ test("Buy credits uses one action for fresh pricing and wallet review, while gua
   assert.match(await page.locator("#product-quote-window").textContent(), /30 minutes/);
   setWallet({ koin: "10" }); await refresh();
   await page.evaluate(() => { window.holdQuote = true; }); await buy.click(); await page.waitForFunction(() => !!window.finishQuote);
-  setWallet({ address: "payment-wallet-b" }); await page.evaluate(() => { window.holdQuote = false; window.finishQuote(); });
+  setWallet({ address: "payment-wallet-b" }); await page.evaluate(() => { window.holdQuote = false; window.dispatchEvent(new Event("kai-credit-identity-changed")); window.finishQuote(); });
   await page.waitForFunction(() => !document.getElementById("product-quote-refresh").disabled);
   assert.equal(await count("purchase-approve"), 0, "changed wallet prevents the review");
   const failure = require("../../electron/koin-funding-failure").purchaseFailureMessage({ stage: "prepare", code: "rpc-unavailable" });
   await page.evaluate(value => { window.purchaseFailure = value; }, failure);
   await buy.click(); await page.waitForFunction(value => document.getElementById("product-quote-state").textContent === value, failure);
   assert.equal(await count("purchase-approve"), 1); const quotes = await count("purchase-estimate");
-  await refresh(); await page.waitForFunction(() => document.getElementById("product-quote-state").textContent.includes("Price updates")); assert.equal(await count("purchase-estimate"), quotes + 1);
+  await refresh(); await page.waitForFunction(() => document.getElementById("product-quote-koin").textContent === "2 KOIN"); assert.equal(await count("purchase-estimate"), quotes + 1);
+  assert.equal(await status.textContent(), failure, "read-only refresh must not erase the failed purchase outcome");
   await page.evaluate(() => { window.purchaseFailure = null; window.holdApproval = true; });
   await page.evaluate(() => { const b = document.getElementById("product-quote-refresh"); b.click(); b.click(); });
   await page.waitForFunction(() => !!window.finishApproval);
@@ -375,4 +376,54 @@ test("above-limit market prices remain visible while the real purchase ceiling s
   assert.equal(await page.locator("#product-price-limit").isVisible(), false);
   await buy.click(); await page.waitForFunction(() => window.purchaseCalls.some(call => call.action === "purchase-approve"));
   assert.equal(await count("purchase-approve"), 1);
+});
+
+test("a verified quote reaches native approval without repeating sidebar balance reads", options, async t => {
+  const { page, buy, setOffline, count } = await fixture(t);
+  // The sidebar balance was already displayed. Its next RPC read now fails,
+  // reproducing the former quote -> re-read -> silent reset path.
+  setOffline(true);
+  await page.evaluate(() => { window.holdApproval = true; });
+  await buy.click();
+  await page.waitForFunction(() => !!window.finishApproval, null, { timeout: 5000 });
+  assert.equal(await count("purchase-preview"), 1);
+  assert.equal(await count("purchase-approve"), 1);
+  assert.match(await page.locator("#product-quote-state").textContent(), /Approve the exact KOIN payment/);
+  await page.evaluate(() => { window.holdApproval = false; window.finishApproval(); });
+  await page.waitForFunction(() => document.getElementById("product-quote-state").textContent.includes("Payment cancelled"));
+});
+
+test("purchase failures stay visible while automatic estimates update and clear only on an explicit new attempt", options, async t => {
+  const { page, buy, status, count } = await fixture(t, true);
+  const failure = "Payment could not reach native approval. No payment was signed.";
+  await page.evaluate(value => { window.purchaseFailure = value; }, failure);
+  await buy.click(); await page.waitForFunction(value => document.getElementById("product-quote-state").textContent === value, failure);
+  const estimates = await count("purchase-estimate");
+  await page.clock.runFor(30001);
+  await page.waitForFunction(n => window.purchaseCalls.filter(c => c.action === "purchase-estimate").length > n, estimates);
+  assert.equal(await status.textContent(), failure);
+  assert.equal(await count("purchase-approve"), 1, "background refresh cannot repeat a purchase");
+  await page.evaluate(() => { window.purchaseFailure = null; window.holdApproval = true; });
+  await buy.click(); await page.waitForFunction(() => !!window.finishApproval);
+  assert.match(await status.textContent(), /Approve the exact KOIN payment/);
+  assert.equal(await count("purchase-approve"), 2);
+  await page.evaluate(() => window.finishApproval());
+});
+
+test("wallet connection and secure-storage blockers expose the matching setup action without enabling payment", options, async t => {
+  const { page, buy, count, refresh } = await fixture(t);
+  for (const [state, label] of [["wallet-connection-required", "Connect wallet"], ["wallet-reauthorization-required", "Reconnect wallet"], ["secure-storage-required", "Secure storage options"]]) {
+    await page.evaluate(value => { window.purchaseState = value; }, state); await refresh();
+    const action = page.locator("#product-purchase-connect");
+    assert.equal(await action.isVisible(), true);
+    assert.equal(await action.textContent(), label);
+    assert.equal(await action.getAttribute("data-product-action"), "wallet-connect");
+    assert.equal(await page.locator("#product-purchase-signin").isVisible(), false);
+    assert.equal(await buy.isDisabled(), true);
+  }
+  await page.evaluate(() => { window.purchaseState = "service-upgrade-required"; }); await refresh();
+  assert.equal(await page.locator("#product-purchase-connect").isVisible(), false);
+  assert.equal(await buy.textContent(), "Service update required");
+  assert.equal(await buy.isDisabled(), true);
+  assert.equal(await count("purchase-preview"), 0); assert.equal(await count("purchase-approve"), 0);
 });

@@ -5,12 +5,12 @@ const labels = { online: "ONLINE", offline: "OFFLINE", connecting: "CONNECTING",
   "model-required": "MODEL REQUIRED", "network-paused": "NETWORK RECONNECTING" };
 async function readProviderAccount({ config, access, signal, fetchImpl = fetch }) {
   const auth = access.authorize(config.schedulerUrl);
-  const response = await fetchImpl(config.schedulerUrl + "/koin/test/status", { redirect: "error", signal,
+  const response = access.readStatus ? null : await fetchImpl(config.schedulerUrl + "/koin/test/status", { redirect: "error", signal,
     headers: { authorization: "Bearer " + auth.sessionToken } });
   const chunks = []; let size = 0;
-  for await (const part of response.body) { size += part.length; if (size > 65536) throw Error("Provider status response too large"); chunks.push(part); }
-  const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-  if (!response.ok || value.mode !== config.mode || value.mainnetPaymentsEnabled !== (config.mode === "mainnet-pilot")) throw Error("Provider status could not be verified");
+  for await (const part of response?.body || []) { size += part.length; if (size > 65536) throw Error("Provider status response too large"); chunks.push(part); }
+  const value = access.readStatus ? await access.readStatus(signal) : JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  if ((response && !response.ok) || value.mode !== config.mode || value.mainnetPaymentsEnabled !== (config.mode === "mainnet-pilot")) throw Error("Provider status could not be verified");
   access.authorize(config.schedulerUrl); signal.throwIfAborted(); return value;
 }
 async function readProviderStatus(options) {
