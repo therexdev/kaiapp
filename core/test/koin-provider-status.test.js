@@ -33,3 +33,39 @@ test("aggregate provider readiness recognizes a ready non-default model and reje
   provider.models[1] = { ...smart, model: "private" };
   await assert.rejects(readProviderStatus(options), /identity/);
 });
+
+test("network qualification progress survives both status mappings without copying evidence or implying ONLINE", async () => {
+  const now = Date.now(), config = { schedulerUrl: "https://test.example", owner: "provider", model: "smart", mode: "mainnet-pilot" };
+  const qualification = { state: "failed", passed: 0, completed: 12, total: 12, retryAt: now + 300000, evidence: "private fixture evidence" };
+  const row = { address: config.owner, model: config.model, state: "qualification-failed", detail: "Quality or latency failed", asOf: now, validUntil: now + 15000, qualification };
+  const value = { mode: config.mode, mainnetPaymentsEnabled: true, providers: [{ ...row, models: [row], readyModels: [] }] };
+  const options = { config, access: { authorize: () => ({ sessionToken: "private" }) }, signal: new AbortController().signal, clock: () => now, fetchImpl: async () => Response.json(value) };
+  let status = await readProviderStatus(options);
+  assert.equal(status.label, "NETWORK CHECK FAILED"); assert.equal(status.state, "qualification-failed");
+  const expected = { state: "failed", passed: 0, completed: 12, total: 12, retryAt: now + 300000 };
+  assert.deepEqual(status.qualification, expected); assert.deepEqual(status.models[0].qualification, expected);
+  assert.match(status.detail, /automatically/); assert.doesNotMatch(status.detail, /quality|latency/i);
+  assert.equal(JSON.stringify(status).includes("private"), false);
+  delete value.providers[0].qualification; delete row.qualification;
+  status = await readProviderStatus(options);
+  assert.equal(status.label, "NETWORK CHECK FAILED"); assert.equal(status.qualification, undefined, "older servers may omit progress");
+});
+
+test("network qualification rejects malformed, inconsistent and overflowing progress and stale observations", async () => {
+  const now = Date.now(), config = { schedulerUrl: "https://test.example", owner: "provider", model: "smart", mode: "mainnet-pilot" };
+  const good = { state: "failed", passed: 0, completed: 12, total: 12, retryAt: now + 300000 };
+  const row = { address: config.owner, model: config.model, state: "qualification-failed", asOf: now, validUntil: now + 15000, qualification: good };
+  const value = { mode: config.mode, mainnetPaymentsEnabled: true, providers: [row] };
+  const options = { config, access: { authorize: () => ({ sessionToken: "private" }) }, signal: new AbortController().signal, clock: () => now, fetchImpl: async () => Response.json(value) };
+  for (const bad of [null, { passed: -1 }, { passed: 13 }, { completed: 13 }, { completed: "12" }, { total: 0 }, { total: 33 },
+    { total: Number.MAX_SAFE_INTEGER + 1 }, { retryAt: Number.MAX_SAFE_INTEGER + 1 }, { retryAt: now + 86400001 }, { retryAt: -1 }, { state: "qualified" }]) {
+    row.qualification = bad === null ? null : { ...good, ...bad };
+    await assert.rejects(readProviderStatus(options), /qualification progress/);
+  }
+  row.qualification = good; row.validUntil = now;
+  await assert.rejects(readProviderStatus(options), /stale/);
+  row.validUntil = now + 15000; row.state = "qualifying";
+  await assert.rejects(readProviderStatus(options), /qualification progress/);
+  row.qualification = { state: "testing", passed: 3, completed: 4, total: 12, retryAt: null };
+  assert.deepEqual((await readProviderStatus(options)).qualification, row.qualification);
+});

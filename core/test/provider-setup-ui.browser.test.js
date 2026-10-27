@@ -107,3 +107,65 @@ test("Earn setup clicks acknowledge pending checks, show current blockers and re
   assert.equal(await page.evaluate(() => window.providerCalls.some(x => ["chat-completion", "run-chat"].includes(x))), false);
   assert.deepEqual(errors, []);
 });
+
+test("Earn distinguishes a passing local diagnostic from failed network checks and shows actual progress and retry time", { skip: !fs.existsSync(CHROMIUM), timeout: 60000 }, async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-provider-progress-ui-"));
+  const core = await require("../server").createCore({ dataDir: dir, port: 0, onEvent() {} });
+  let browser; t.after(async () => { await browser?.close(); await core.stop(); fs.rmSync(dir, { recursive: true, force: true }); });
+  browser = await require("playwright-core").chromium.launch({ executablePath: CHROMIUM, args: ["--no-sandbox", "--disable-gpu"] });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 820 } }), errors = [];
+  page.on("pageerror", e => errors.push(e.message));
+  await page.addInitScript(() => {
+    localStorage.setItem("kai-interface-language", "en"); window.providerCalls = [];
+    const model = { id: "koinos-smart", label: "Koinos Smart", installed: true, requiredRamGb: 8 };
+    const local = { state: "complete", stage: "complete", detail: "Local candidate answers matched.", completed: 12, total: 12, passed: 12, reportAvailable: true, model };
+    window.kaiProviderCheckBridge = { status: async () => local, start: async () => { throw Error("No new local check should run"); }, cancel: async () => local,
+      copy: async () => ({}), save: async () => ({}), onProgress: () => () => {} };
+    window.networkQualification = { state: "failed", passed: 0, completed: 12, total: 12, retryAt: Date.now() + 300000 };
+    window.networkState = "qualification-failed";
+    window.kaiKoinTestBridge = { onProgress: () => () => {}, run: async action => {
+      window.providerCalls.push(action);
+      if (action === "status") return { enabled: true, configured: false, mode: "test-deployment" };
+      if (action === "chat-info") return { enabled: true, configured: false, blocked: "Fixture" };
+      if (action === "provider-public-info") return { state: "ready", enabled: true, running: true, automatic: true, model, models: [model], offeredModels: [model.id], detail: "Sharing is on." };
+      if (action === "provider-public-status") {
+        if (window.statusUnavailable) throw Error("Provider status unavailable");
+        return { state: window.networkState, model: model.id, label: window.networkState === "qualification-failed" ? "NETWORK CHECK FAILED" : window.networkState === "online" ? "ONLINE" : "CHECKING MODEL",
+          detail: "The network check has not passed. Keep earning on; another check runs automatically.", qualification: window.networkQualification, validUntil: Date.now() + 15000 };
+      }
+      throw Error("Fixture unavailable");
+    } };
+  });
+  await page.goto(`http://127.0.0.1:${await core.start()}`);
+  await navClick(page, '#nav [data-view="earn"]');
+  const progress = page.locator("#product-provider-qualification"), reload = page.locator("#product-provider-reload");
+  await page.waitForFunction(() => document.getElementById("product-provider-label").textContent === "NETWORK CHECK FAILED");
+  await page.locator("#product-provider-options > summary").click();
+  assert.match(await page.locator("[data-check-summary]").textContent(), /12 candidate answers matched/);
+  assert.match(await progress.textContent(), /Network check: 0\/12 passed · 12\/12 completed.*Koinos Smart/);
+  const retryTime = await page.evaluate(() => new Date(window.networkQualification.retryAt).toLocaleTimeString());
+  assert.ok((await progress.textContent()).includes("Automatic retry scheduled for " + retryTime));
+  assert.equal(await page.locator("#product-provider-label").getAttribute("data-state"), "qualification-failed");
+  assert.match(await page.locator("#product-provider-readiness").textContent(), /local check is diagnostic/);
+  assert.match(await page.locator("#product-provider-setup").textContent(), /Sharing is on/);
+  assert.doesNotMatch(await page.locator("#product-provider-setup").textContent(), /Ready to connect/);
+  assert.doesNotMatch(await page.locator("#product-provider-detail").textContent(), /quality|latency|run.*local/i);
+  if (process.env.KAI_PREPAID_QA_DIR) { fs.mkdirSync(process.env.KAI_PREPAID_QA_DIR, { recursive: true }); await page.screenshot({ path: path.join(process.env.KAI_PREPAID_QA_DIR, "provider-network-progress.png"), animations: "disabled" }); }
+  await page.evaluate(() => { window.networkState = "qualifying"; window.networkQualification = { state: "testing", passed: 3, completed: 4, total: 12, retryAt: null }; });
+  await reload.click(); await page.waitForFunction(() => document.getElementById("product-provider-qualification").textContent.includes("3/12 passed"));
+  assert.match(await progress.textContent(), /4\/12 completed/); assert.doesNotMatch(await progress.textContent(), /retry scheduled/);
+  assert.notEqual(await page.locator("#product-provider-label").getAttribute("data-state"), "online");
+  await page.evaluate(() => { window.networkQualification = undefined; }); await reload.click();
+  await page.waitForFunction(() => document.getElementById("product-provider-qualification").hidden);
+  assert.equal(await page.locator("#product-provider-label").textContent(), "CHECKING MODEL", "older backend without counters remains readable");
+  await page.evaluate(() => { window.networkState = "online"; }); await reload.click();
+  await page.waitForFunction(() => document.getElementById("product-provider-label").textContent === "ONLINE");
+  assert.match(await page.locator("#product-provider-readiness").textContent(), /qualification current.*fresh network confirmation/);
+  await page.evaluate(() => { window.statusUnavailable = true; }); await reload.click();
+  await page.waitForFunction(() => document.getElementById("product-provider-label").textContent === "CONNECTION UNCONFIRMED");
+  assert.equal(await progress.isVisible(), false);
+  assert.match(await page.locator("#product-provider-readiness").textContent(), /Readiness is not confirmed/);
+  assert.doesNotMatch(await page.locator("#product-provider-readiness").textContent(), /qualification current|fresh network confirmation/);
+  assert.equal(await page.evaluate(() => window.providerCalls.some(x => /start|stop|purchase|sign/.test(x))), false);
+  assert.deepEqual(errors, []);
+});

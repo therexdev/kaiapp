@@ -53,6 +53,7 @@ jobs:
         run: |
           npm ci --ignore-scripts --prefix verification-backend
           node scripts/verify-credit-flow.js verification-backend
+          node scripts/verify-provider-qualification.js verification-backend
         env:
           KAI_SCHEDULER_URL: http://127.0.0.1:9/scheduler
           KAI_RELAY_URL: http://127.0.0.1:9

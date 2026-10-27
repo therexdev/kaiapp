@@ -6,7 +6,7 @@ const hash = value => crypto.createHash("sha256").update(value).digest("hex");
 const digest = value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 const fail = code => Object.assign(new Error(code), { code });
 const TEXT = {
-  model_not_running: "This check could not see an active local engine. In Chat, send a message with an installed local model and wait for its reply before checking again.",
+  model_not_running: "No local model is running. Start earning prepares an installed model automatically; no chat message is needed.",
   model_loading: "The local model is still loading. Let loading finish before checking again.",
   model_load_failed: "The local model could not finish loading. Open Chat to see the model's loading error.",
   model_identity_unavailable: "The local engine is running, but the app could not identify its active model. This state has been kept in the report for review.",
@@ -132,7 +132,7 @@ class LocalProviderCheck {
   cancel() { this.controller?.abort(fail("cancelled")); return this.status(); }
   dispose() { this.cancel(); }
   async run(signal) {
-    let hold, timer, snapshot, completed = 0;
+    let hold, networkPause, timer, snapshot, completed = 0;
     const report = this.report = { schema: 1, kind: "local-provider-candidate-check", status: "candidate-not-approved", signed: false, providerEligibilityCreated: false,
       networkReady: false, startedAt: this.clock(), completedAt: null, app: this.app, publicWallet: wallet(this.core), hardware: hardware(this.core.hardware),
       model: null, runtime: null, modelFile: null, calibration: { complete: false, vectors: [] }, measurement: { complete: false, results: [] },
@@ -144,7 +144,14 @@ class LocalProviderCheck {
       const loaded = this.packInput ? { value: validatePack(this.packInput), sha256: hash(JSON.stringify(this.packInput)) } : loadPack(), pack = loaded.value;
       report.source = { backendCommit: pack.source.backendCommit, packSha256: loaded.sha256 };
       for (const key of ["suiteSha256", "catalogSha256", "indexSha256", "generatorSha256", "tokenizerSourceSha256"]) if (digest(pack.source[key])) report.source[key] = pack.source[key];
-      signal.throwIfAborted(); snapshot = this.core.runtime.status();
+      signal.throwIfAborted();
+      if (typeof this.core.runtime.pauseNetworkWork === "function") {
+        this.update({ stage: "Waiting for network work", detail: "Finishing assigned network work before the local check. Sharing resumes automatically afterward." });
+        const deadline = AbortSignal.timeout(120000);
+        try { networkPause = await this.core.runtime.pauseNetworkWork(AbortSignal.any([signal, deadline])); }
+        catch (error) { if (deadline.aborted && !signal.aborted) throw fail("model_busy"); throw error; }
+      }
+      snapshot = this.core.runtime.status();
       report.localState = { initial: localState(this.core, pack, snapshot), current: null, waitedForLoad: false };
       // A click during an existing warm start or Chat load must not instantly
       // become "model not running". Observe that load without ensuring,
@@ -237,7 +244,7 @@ class LocalProviderCheck {
       const detail = code === "model_not_running" && installed > 0 ? `${installed} approved local model${installed === 1 ? " is" : "s are"} installed. ${TEXT[code]}` : TEXT[code];
       this.update({ state: report.outcome.state, stage: code === "cancelled" ? "Check cancelled" : "Check incomplete", detail });
     } finally {
-      clearTimeout(timer); hold?.release(); report.completedAt = this.clock();
+      clearTimeout(timer); hold?.release(); networkPause?.release(); report.completedAt = this.clock();
       try { this.reportText(); } catch {
         this.report = { schema: 1, kind: report.kind, status: report.status, signed: false, providerEligibilityCreated: false, networkReady: false,
           app: this.app, startedAt: report.startedAt, completedAt: report.completedAt, outcome: { state: "incomplete", code: "report_too_large" }, resultsOmitted: true };

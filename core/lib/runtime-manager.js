@@ -28,6 +28,11 @@ class RuntimeManager {
     this._inflight = 0; // generations currently streaming from the active runtime
     this._drainWaiters = []; // switches parked until the count reaches zero
     this.drainMaxMs = 120000; // a switch never waits longer than this on a stream
+    this._networkWork = 0;
+    this._localCheckRequests = 0;
+    this._localCheckActive = false;
+    this._admissionWaiters = new Set();
+    this._networkPauseListeners = new Set();
   }
 
   /** Name the active runtime serves the model under (null = passthrough). */
@@ -40,6 +45,71 @@ class RuntimeManager {
    *  during our own work is ours, and never a reason to back off. */
   busy() {
     return this._inflight > 0 || !!this._loading;
+  }
+
+  networkWorkPaused() { return this._localCheckRequests > 0; }
+
+  onNetworkWorkPause(listener) {
+    this._networkPauseListeners.add(listener);
+    return () => this._networkPauseListeners.delete(listener);
+  }
+
+  _notifyNetworkPause() {
+    for (const listener of this._networkPauseListeners) { try { listener(); } catch {} }
+  }
+
+  _wakeAdmissions() { for (const wake of [...this._admissionWaiters]) wake(); }
+
+  async _waitAdmission(ready, signal) {
+    signal?.throwIfAborted();
+    while (!ready()) {
+      await new Promise((resolve, reject) => {
+        const clean = () => { this._admissionWaiters.delete(wake); signal?.removeEventListener("abort", aborted); };
+        const wake = () => { clean(); resolve(); };
+        const aborted = () => { clean(); reject(signal.reason); };
+        this._admissionWaiters.add(wake);
+        signal?.addEventListener("abort", aborted, { once: true });
+        if (signal?.aborted) aborted();
+      });
+      signal?.throwIfAborted();
+    }
+  }
+
+  // Admission covers the poll AND any assigned job through its signed result.
+  // A diagnostic must not abort a poll whose response may already contain work.
+  async acquireNetworkWork(signal) {
+    do {
+      await this._waitAdmission(() => !this.networkWorkPaused(), signal);
+      signal?.throwIfAborted();
+    } while (this.networkWorkPaused());
+    this._networkWork++;
+    let released = false;
+    return { release: () => {
+      if (released) return;
+      released = true; this._networkWork--; this._wakeAdmissions();
+    } };
+  }
+
+  async pauseNetworkWork(signal) {
+    signal?.throwIfAborted();
+    this._localCheckRequests++;
+    if (this._localCheckRequests === 1) this._notifyNetworkPause();
+    const finished = () => {
+      this._localCheckRequests--; this._wakeAdmissions();
+      if (!this._localCheckRequests) this._notifyNetworkPause();
+    };
+    try {
+      do {
+        await this._waitAdmission(() => !this._networkWork && !this._localCheckActive, signal);
+        signal?.throwIfAborted();
+      } while (this._networkWork || this._localCheckActive);
+      this._localCheckActive = true;
+    } catch (error) { finished(); throw error; }
+    let released = false;
+    return { release: () => {
+      if (released) return;
+      released = true; this._localCheckActive = false; finished();
+    } };
   }
 
   status() {

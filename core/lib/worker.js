@@ -109,7 +109,7 @@ class Worker {
     } else {
       this.stats.backoffSince = null;
       this.onEvent({ type: "worker:backoff-cleared" });
-      if (this.running) this._register().catch(() => {}); // watchdog retries on failure
+      if (this.running && !this.runtime.networkWorkPaused?.()) this._register().catch(() => {}); // watchdog retries on failure
     }
   }
 
@@ -386,8 +386,10 @@ class Worker {
     signal?.throwIfAborted();
     if (generation !== this._startGeneration) throw Error("Provider startup cancelled");
     this.running = true;
+    this._workAbort = new AbortController();
     this._koinSession = crypto.randomBytes(16).toString("hex");
     this._koinSequence = 0;
+    this._networkPauseRelease = this.runtime.onNetworkWorkPause?.(() => this._koinPresence().catch(() => {}));
     this._koinPresence().catch(() => {});
     this._koinTimer = setInterval(() => this._koinPresence().catch(() => {}), 25000);
     this._koinTimer.unref?.();
@@ -413,7 +415,7 @@ class Worker {
         this.stats.lastStandbyAt = new Date().toISOString();
         this.onEvent({ type: "worker:resumed-from-standby", suspendedSecs: Math.round(gap / 1000) });
         try {
-          if (!this._backoff) await this._register();
+          if (!this._backoff && !this.runtime.networkWorkPaused?.()) await this._register();
         } catch { /* next tick retries */ }
         return;
       }
@@ -452,7 +454,7 @@ class Worker {
       // Backoff makes polls silent ON PURPOSE — the watchdog re-registering
       // through it would put the machine straight back on the roster the
       // guard just took it off.
-      if (!this._executing && !this._backoff && Date.now() - last > 150000) {
+      if (!this._executing && !this._backoff && !this.runtime.networkWorkPaused?.() && Date.now() - last > 150000) {
         try {
           await this._register();
           this.onEvent({ type: "worker:watchdog-reregistered" });
@@ -476,7 +478,7 @@ class Worker {
    *  the native wake signal long before any timer notices). */
   async nudge() {
     if (!this.running) return { running: false };
-    if (this._backoff) return { running: true }; // quiet on purpose — stay quiet
+    if (this._backoff || this.runtime.networkWorkPaused?.()) return { running: true }; // quiet on purpose — stay quiet
     try {
       await this._register();
       this.onEvent({ type: "worker:nudged-reregistered" });
@@ -488,6 +490,8 @@ class Worker {
     this._startGeneration++;
     this._registerAbort?.abort();
     this.running = false;
+    this._workAbort?.abort();
+    this._networkPauseRelease?.(); this._networkPauseRelease = null;
     this._shadowAbort?.abort();
     clearInterval(this._koinTimer);
     this._koinAbort?.abort();
@@ -499,7 +503,8 @@ class Worker {
   }
 
   async _koinPresence() {
-    if (!this.running || !this._koinAvailable || this._koinSending) return;
+    if (!this.running || !this._koinAvailable) return;
+    if (this._koinSending) { this._koinPresencePending = true; return; }
     this._koinSending = true;
     this._koinAbort = new AbortController();
     try {
@@ -510,7 +515,7 @@ class Worker {
       const allowed = !!definition && !definition.custom && !definition.dev && !alias.startsWith("dev-") && /^[a-f0-9]{64}$/.test(pack?.sha256 || "");
       const report = { schema: 1, session: this._koinSession, sequence: ++this._koinSequence,
         at: Date.now(), model: allowed ? alias : "", modelHash: allowed ? pack.sha256 : "",
-        ready: !!(allowed && status.runtime?.running && !status.loading && !this._backoff) };
+        ready: !!(allowed && status.runtime?.running && !status.loading && !this._backoff && !this.runtime.networkWorkPaused?.()) };
       const signature = await this.wallet.signHash(presenceHash(this.wallet.address, this.schedulerUrl, report));
       if (!this.running) return;
       await fetch(`${this.schedulerUrl}/koin/presence`, {
@@ -518,7 +523,13 @@ class Worker {
         signal: AbortSignal.any([this._koinAbort.signal, AbortSignal.timeout(4000)]),
         body: JSON.stringify({ address: this.wallet.address, report, signature }),
       });
-    } finally { this._koinSending = false; }
+    } finally {
+      this._koinSending = false;
+      if (this._koinPresencePending) {
+        this._koinPresencePending = false;
+        queueMicrotask(() => this._koinPresence().catch(() => {}));
+      }
+    }
   }
 
   async _run() {
@@ -531,167 +542,175 @@ class Worker {
         await new Promise((res) => setTimeout(res, 5000));
         continue;
       }
-      let job = null, idleTimer, idleExpired = false;
+      // Diagnostic admission drains existing assigned work without cancelling
+      // it, and blocks this next poll until the local check has released it.
+      let admission;
       try {
-        this._pollAbort = new AbortController();
-        // Public prepaid jobs do not wake the older scheduler's parked legacy
-        // poll. Refresh that idle request without waiting its full twenty
-        // seconds. Once headers arrive, keep the normal body deadline so an
-        // assigned job's response is never cut short by the idle timer.
-        const idle = new AbortController();
-        if (this.idlePollMs < 45000) idleTimer = setTimeout(() => { idleExpired = true; idle.abort(); }, this.idlePollMs);
-        const r = await fetch(`${this.schedulerUrl}/worker/next-job?token=${this.token}`, {
-          // Fresh TCP per request: NAT/routers silently drop idle pooled
-          // connections and Node's pool then serves the corpse to every
-          // later request — the node "goes offline" on an awake machine
-          // and never heals (field finding, the day's final boss).
-          headers: { connection: "close" },
-          signal: AbortSignal.any([AbortSignal.timeout(45000), this._pollAbort.signal, idle.signal]),
-        });
-        clearTimeout(idleTimer);
-        if (r.status === 200) {
-          this.stats.lastPollOkAt = new Date().toISOString();
-          this.stats.lastError = null;
-          job = (await r.json()).job;
-        } else if (r.status === 401) {
-          // The scheduler restarted (redeploy) and forgot our token: register
-          // again and carry on — earning must survive scheduler restarts.
-          await this._register();
-          this.onEvent({ type: "worker:reregistered", scheduler: this.schedulerUrl });
-          continue;
-        } else if (r.status !== 204) {
-          // Unexpected status (5xx, proxy error page): don't hot-spin on it.
-          this.stats.lastError = `scheduler answered ${r.status} — retrying`;
+        try { admission = await this.runtime.acquireNetworkWork?.(this._workAbort?.signal); }
+        catch (error) { if (!this.running || this._workAbort?.signal.aborted) break; throw error; }
+        if (!this.running || this._backoff) continue;
+        let job = null, idleTimer, idleExpired = false;
+        try {
+          this._pollAbort = new AbortController();
+          // Public prepaid jobs do not wake the older scheduler's parked legacy
+          // poll. Refresh that idle request without waiting its full twenty
+          // seconds. Once headers arrive, keep the normal body deadline so an
+          // assigned job's response is never cut short by the idle timer.
+          const idle = new AbortController();
+          if (this.idlePollMs < 45000) idleTimer = setTimeout(() => { idleExpired = true; idle.abort(); }, this.idlePollMs);
+          const r = await fetch(`${this.schedulerUrl}/worker/next-job?token=${this.token}`, {
+            // Fresh TCP per request: NAT/routers silently drop idle pooled
+            // connections and Node's pool then serves the corpse to every
+            // later request — the node "goes offline" on an awake machine
+            // and never heals (field finding, the day's final boss).
+            headers: { connection: "close" },
+            signal: AbortSignal.any([AbortSignal.timeout(45000), this._pollAbort.signal, idle.signal]),
+          });
+          clearTimeout(idleTimer);
+          if (r.status === 200) {
+            this.stats.lastPollOkAt = new Date().toISOString();
+            this.stats.lastError = null;
+            job = (await r.json()).job;
+          } else if (r.status === 401) {
+            // The scheduler restarted (redeploy) and forgot our token: register
+            // again and carry on — earning must survive scheduler restarts.
+            await this._register();
+            this.onEvent({ type: "worker:reregistered", scheduler: this.schedulerUrl });
+            continue;
+          } else if (r.status !== 204) {
+            // Unexpected status (5xx, proxy error page): don't hot-spin on it.
+            this.stats.lastError = `scheduler answered ${r.status} — retrying`;
+            await new Promise((res) => setTimeout(res, 3000));
+            continue;
+          } else {
+            this.stats.lastPollOkAt = new Date().toISOString();
+            this.stats.lastError = null;
+          }
+        } catch {
+          // Stop aborts the idle poll; anything else is the scheduler being
+          // unreachable — back off, keep trying while enabled.
+          if (!this.running) break;
+          if (idleExpired && !this._pollAbort.signal.aborted) continue;
+          this.stats.lastError = "scheduler unreachable — retrying";
           await new Promise((res) => setTimeout(res, 3000));
           continue;
-        } else {
-          this.stats.lastPollOkAt = new Date().toISOString();
-          this.stats.lastError = null;
-        }
-      } catch {
-        // Stop aborts the idle poll; anything else is the scheduler being
-        // unreachable — back off, keep trying while enabled.
-        if (!this.running) break;
-        if (idleExpired && !this._pollAbort.signal.aborted) continue;
-        this.stats.lastError = "scheduler unreachable — retrying";
-        await new Promise((res) => setTimeout(res, 3000));
-        continue;
-      } finally { clearTimeout(idleTimer); }
-      if (!job || !this.running) continue;
+        } finally { clearTimeout(idleTimer); }
+        if (!job || !this.running) continue;
 
-      // Heartbeat while executing: generation and model switching take
-      // minutes, no polls happen meanwhile, and a silent worker used to
-      // fall off the scheduler's live roster mid-job — consumers saw
-      // "no providers" precisely when the provider was working hardest.
-      const beat = setInterval(async () => {
+        // Heartbeat while executing: generation and model switching take
+        // minutes, no polls happen meanwhile, and a silent worker used to
+        // fall off the scheduler's live roster mid-job — consumers saw
+        // "no providers" precisely when the provider was working hardest.
+        const beat = setInterval(async () => {
+          try {
+            const r = await fetch(`${this.schedulerUrl}/worker/heartbeat?token=${this.token}`, { method: "POST", headers: { connection: "close" } });
+            // Scheduler restarted mid-job and forgot us: re-register NOW so
+            // the machine stays on the roster while it finishes generating
+            // (field finding: a busy provider went invisible for the whole
+            // job after a deploy — its heartbeats were failing silently).
+            if (r.status === 401) await this._register();
+          } catch {
+            /* unreachable — next beat retries */
+          }
+        }, 25000);
         try {
-          const r = await fetch(`${this.schedulerUrl}/worker/heartbeat?token=${this.token}`, { method: "POST", headers: { connection: "close" } });
-          // Scheduler restarted mid-job and forgot us: re-register NOW so
-          // the machine stays on the roster while it finishes generating
-          // (field finding: a busy provider went invisible for the whole
-          // job after a deploy — its heartbeats were failing silently).
-          if (r.status === 401) await this._register();
-        } catch {
-          /* unreachable — next beat retries */
-        }
-      }, 25000);
-      try {
-        if (job.type === "koin-provider-qualification") {
-          if (!this.qualificationTarget) throw Error("Automatic qualification is not enabled for this connection");
-          const qualification = require("./koin-network/qualification-protocol"), P = require("./koin-network/job-protocol");
-          const checked = qualification.validate(job, this.models?.catalog, this.qualificationTarget);
-          this._executing = true; this._shadowAbort = new AbortController();
-          const result = await require("./koin-network/shadow-worker").executeShadow({ job: checked.challenge, catalog: this.models?.catalog, runtime: this.runtime, signal: this._shadowAbort.signal });
-          this._shadowAbort.signal.throwIfAborted(); if (!this.running) throw Error("Provider qualification stopped");
-          const signature = await this.wallet.signHash(qualification.resultHash(checked, P.hash(result.output)));
-          this._shadowAbort.signal.throwIfAborted(); if (!this.running) throw Error("Provider qualification stopped");
-          const response = await fetch(`${this.schedulerUrl}/koin/provider/qualification/result?token=${this.token}`, { method: "POST", redirect: "error",
-            headers: { "content-type": "application/json", connection: "close" }, signal: AbortSignal.any([this._shadowAbort.signal, AbortSignal.timeout(10000)]),
-            body: JSON.stringify({ jobId: checked.challenge.id, output: result.output, signature }) });
-          const value = await require("./koin-network/shadow-worker").readJson(response, 4096);
-          if (value.accepted !== true || !["testing", "qualified", "failed"].includes(value.qualification?.state)) throw Error("Qualification result was not acknowledged");
-          this.stats.qualification = value.qualification;
-          this.onEvent({ type: "worker:qualification", qualification: value.qualification });
-          continue;
-        }
-        const t0 = Date.now();
-        const funded = ["koin-funded-rehearsal-chat", "koin-mainnet-pilot-chat"].includes(job.type);
-        const wire = funded && require("./koin-network/payment-network").protocol(job.target);
-        const shadow = funded || job.type === "koin-shadow-chat";
-        // Post generation deltas as they're produced — the consumer's
-        // words appear live instead of arriving as one block. Batched
-        // (~4/s) so a fast model doesn't turn into HTTP spam.
-        let deltaBuf = "";
-        let lastPost = 0;
-        const postDelta = (text, force) => {
-          if (shadow) return;
-          deltaBuf += text;
-          const now = Date.now();
-          if (!deltaBuf || (!force && now - lastPost < 250)) return;
-          const chunk = deltaBuf;
-          deltaBuf = "";
-          lastPost = now;
-          fetch(`${this.schedulerUrl}/worker/chunk?token=${this.token}`, {
+          if (job.type === "koin-provider-qualification") {
+            if (!this.qualificationTarget) throw Error("Automatic qualification is not enabled for this connection");
+            const qualification = require("./koin-network/qualification-protocol"), P = require("./koin-network/job-protocol");
+            const checked = qualification.validate(job, this.models?.catalog, this.qualificationTarget);
+            this._executing = true; this._shadowAbort = new AbortController();
+            const result = await require("./koin-network/shadow-worker").executeShadow({ job: checked.challenge, catalog: this.models?.catalog, runtime: this.runtime, signal: this._shadowAbort.signal });
+            this._shadowAbort.signal.throwIfAborted(); if (!this.running) throw Error("Provider qualification stopped");
+            const signature = await this.wallet.signHash(qualification.resultHash(checked, P.hash(result.output)));
+            this._shadowAbort.signal.throwIfAborted(); if (!this.running) throw Error("Provider qualification stopped");
+            const response = await fetch(`${this.schedulerUrl}/koin/provider/qualification/result?token=${this.token}`, { method: "POST", redirect: "error",
+              headers: { "content-type": "application/json", connection: "close" }, signal: AbortSignal.any([this._shadowAbort.signal, AbortSignal.timeout(10000)]),
+              body: JSON.stringify({ jobId: checked.challenge.id, output: result.output, signature }) });
+            const value = await require("./koin-network/shadow-worker").readJson(response, 4096);
+            if (value.accepted !== true || !["testing", "qualified", "failed"].includes(value.qualification?.state)) throw Error("Qualification result was not acknowledged");
+            this.stats.qualification = value.qualification;
+            this.onEvent({ type: "worker:qualification", qualification: value.qualification });
+            continue;
+          }
+          const t0 = Date.now();
+          const funded = ["koin-funded-rehearsal-chat", "koin-mainnet-pilot-chat"].includes(job.type);
+          const wire = funded && require("./koin-network/payment-network").protocol(job.target);
+          const shadow = funded || job.type === "koin-shadow-chat";
+          // Post generation deltas as they're produced — the consumer's
+          // words appear live instead of arriving as one block. Batched
+          // (~4/s) so a fast model doesn't turn into HTTP spam.
+          let deltaBuf = "";
+          let lastPost = 0;
+          const postDelta = (text, force) => {
+            if (shadow) return;
+            deltaBuf += text;
+            const now = Date.now();
+            if (!deltaBuf || (!force && now - lastPost < 250)) return;
+            const chunk = deltaBuf;
+            deltaBuf = "";
+            lastPost = now;
+            fetch(`${this.schedulerUrl}/worker/chunk?token=${this.token}`, {
+              method: "POST",
+              headers: { "content-type": "application/json", connection: "close" },
+              body: JSON.stringify({ jobId: job.id, delta: chunk }),
+            }).catch(() => {});
+          };
+          this._executing = true;
+          let sequence = 0;
+          const postPrefix = async output => {
+            if (!funded || !job.stream || !this.running) throw Error("Metered stream stopped");
+            const next = sequence + 1;
+            const signature = await this.wallet.signHash(require("./koin-network/funded-protocol").fundedChunkHash(job.target, job, output, next));
+            const response = await fetch(`${this.schedulerUrl}${wire.prefix}chunk?token=${this.token}`, {
+              method: "POST", headers: { "content-type": "application/json", connection: "close" },
+              body: JSON.stringify({ jobId: job.id, output, signature, sequence: next }),
+              signal: AbortSignal.any([AbortSignal.timeout(10000), this._shadowAbort.signal]),
+            });
+            const value = await response.json();
+            if (!response.ok || value.accepted !== true || value.sequence !== next || value.mode !== wire.mode || value.paymentsEnabled !== wire.paymentsEnabled)
+              throw Error(value.error || "Metered stream was not accepted");
+            sequence = next;
+          };
+          const { output, usage } = await this._execute(job, (d) => postDelta(d, false), postPrefix);
+          postDelta("", true); // flush the tail
+          // §51 CU groundwork: generation speed is the capability signal —
+          // completion tokens over wall time (prefill is folded in; the
+          // scheduler treats it as provider-reported, like usage).
+          const ms = Math.max(1, Date.now() - t0);
+          const perf = { ms, tokPerSec: +((usage.completion_tokens / (ms / 1000)) || 0).toFixed(2) };
+          const hash = funded ? require("./koin-network/funded-protocol").fundedResultHash(job.target, job, output) : shadow
+            ? require("./koin-network/job-protocol").resultHash(job.quote.domain, job.id, job.attempt, job.quote.hash, output)
+            : crypto.createHash("sha256").update(`${job.id}|${output}`).digest();
+          if (shadow && !this.running) throw Error("Shadow worker stopped");
+          const signature = await this.wallet.signHash(hash);
+          const resultRoute = funded ? wire.prefix + "result" : shadow ? "/koin/shadow/jobs/result" : "/worker/result";
+          const res = await fetch(`${this.schedulerUrl}${resultRoute}?token=${this.token}`, {
             method: "POST",
             headers: { "content-type": "application/json", connection: "close" },
-            body: JSON.stringify({ jobId: job.id, delta: chunk }),
-          }).catch(() => {});
-        };
-        this._executing = true;
-        let sequence = 0;
-        const postPrefix = async output => {
-          if (!funded || !job.stream || !this.running) throw Error("Metered stream stopped");
-          const next = sequence + 1;
-          const signature = await this.wallet.signHash(require("./koin-network/funded-protocol").fundedChunkHash(job.target, job, output, next));
-          const response = await fetch(`${this.schedulerUrl}${wire.prefix}chunk?token=${this.token}`, {
-            method: "POST", headers: { "content-type": "application/json", connection: "close" },
-            body: JSON.stringify({ jobId: job.id, output, signature, sequence: next }),
-            signal: AbortSignal.any([AbortSignal.timeout(10000), this._shadowAbort.signal]),
+            body: JSON.stringify({ jobId: job.id, output, usage, perf, signature }),
+            ...(shadow ? { signal: AbortSignal.any([AbortSignal.timeout(10000), this._shadowAbort.signal]) } : {}),
           });
-          const value = await response.json();
-          if (!response.ok || value.accepted !== true || value.sequence !== next || value.mode !== wire.mode || value.paymentsEnabled !== wire.paymentsEnabled)
-            throw Error(value.error || "Metered stream was not accepted");
-          sequence = next;
-        };
-        const { output, usage } = await this._execute(job, (d) => postDelta(d, false), postPrefix);
-        postDelta("", true); // flush the tail
-        // §51 CU groundwork: generation speed is the capability signal —
-        // completion tokens over wall time (prefill is folded in; the
-        // scheduler treats it as provider-reported, like usage).
-        const ms = Math.max(1, Date.now() - t0);
-        const perf = { ms, tokPerSec: +((usage.completion_tokens / (ms / 1000)) || 0).toFixed(2) };
-        const hash = funded ? require("./koin-network/funded-protocol").fundedResultHash(job.target, job, output) : shadow
-          ? require("./koin-network/job-protocol").resultHash(job.quote.domain, job.id, job.attempt, job.quote.hash, output)
-          : crypto.createHash("sha256").update(`${job.id}|${output}`).digest();
-        if (shadow && !this.running) throw Error("Shadow worker stopped");
-        const signature = await this.wallet.signHash(hash);
-        const resultRoute = funded ? wire.prefix + "result" : shadow ? "/koin/shadow/jobs/result" : "/worker/result";
-        const res = await fetch(`${this.schedulerUrl}${resultRoute}?token=${this.token}`, {
-          method: "POST",
-          headers: { "content-type": "application/json", connection: "close" },
-          body: JSON.stringify({ jobId: job.id, output, usage, perf, signature }),
-          ...(shadow ? { signal: AbortSignal.any([AbortSignal.timeout(10000), this._shadowAbort.signal]) } : {}),
-        });
-        const jr = await res.json();
-        if (shadow) {
-          if (!res.ok || jr.mode !== (funded ? wire.mode : "shadow") || jr.paymentsEnabled !== (funded ? wire.paymentsEnabled : false) || jr.accepted !== true) throw Error(jr.error || "Shadow result was not accepted");
-          const counter = funded ? (wire.paymentsEnabled ? "mainnetPilotJobsDone" : "fundedRehearsalJobsDone") : "shadowJobsDone";
-          this.stats[counter] = (this.stats[counter] || 0) + 1;
-          this.onEvent({ type: funded ? (wire.paymentsEnabled ? "worker:mainnet-pilot-job-done" : "worker:funded-rehearsal-job-done") : "worker:shadow-job-done", jobId: job.id });
-          continue;
+          const jr = await res.json();
+          if (shadow) {
+            if (!res.ok || jr.mode !== (funded ? wire.mode : "shadow") || jr.paymentsEnabled !== (funded ? wire.paymentsEnabled : false) || jr.accepted !== true) throw Error(jr.error || "Shadow result was not accepted");
+            const counter = funded ? (wire.paymentsEnabled ? "mainnetPilotJobsDone" : "fundedRehearsalJobsDone") : "shadowJobsDone";
+            this.stats[counter] = (this.stats[counter] || 0) + 1;
+            this.onEvent({ type: funded ? (wire.paymentsEnabled ? "worker:mainnet-pilot-job-done" : "worker:funded-rehearsal-job-done") : "worker:shadow-job-done", jobId: job.id });
+            continue;
+          }
+          this.stats.jobsDone += 1;
+          this.stats.lastJobAt = new Date().toISOString();
+          if (jr.accepted) this.stats.receiptsAccepted += 1;
+          this.onEvent({ type: "worker:job-done", jobId: job.id, accepted: !!jr.accepted });
+        } catch (e) {
+          this.stats.lastError = `last job failed: ${String(e.message)}`;
+          this.onEvent({ type: "worker:job-failed", jobId: job.id, message: String(e.message) });
+        } finally {
+          this._executing = false;
+          this._shadowAbort = null;
+          clearInterval(beat);
         }
-        this.stats.jobsDone += 1;
-        this.stats.lastJobAt = new Date().toISOString();
-        if (jr.accepted) this.stats.receiptsAccepted += 1;
-        this.onEvent({ type: "worker:job-done", jobId: job.id, accepted: !!jr.accepted });
-      } catch (e) {
-        this.stats.lastError = `last job failed: ${String(e.message)}`;
-        this.onEvent({ type: "worker:job-failed", jobId: job.id, message: String(e.message) });
-      } finally {
-        this._executing = false;
-        this._shadowAbort = null;
-        clearInterval(beat);
-      }
+      } finally { admission?.release(); }
     }
   }
 

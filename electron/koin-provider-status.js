@@ -1,6 +1,6 @@
 "use strict";
 const labels = { online: "ONLINE", offline: "OFFLINE", connecting: "CONNECTING", preparing: "PREPARING MODEL",
-  qualifying: "CHECKING MODEL", "qualification-failed": "MODEL CHECK REQUIRED",
+  qualifying: "CHECKING MODEL", "qualification-failed": "NETWORK CHECK FAILED",
   "qualification-expired": "RENEWAL REQUIRED", "review-required": "REVIEW REQUIRED", "update-required": "UPDATE REQUIRED",
   "model-required": "MODEL REQUIRED", "network-paused": "NETWORK RECONNECTING" };
 async function readProviderAccount({ config, access, signal, fetchImpl = fetch }) {
@@ -26,7 +26,22 @@ async function readProviderStatus(options) {
   const check = row => {
     if (row?.address !== config.owner || !approved.includes(row.model) || !labels[row.state] || !Number.isSafeInteger(row.asOf) || !Number.isSafeInteger(row.validUntil) ||
         row.asOf > now + 5000 || now - row.asOf > 30000 || row.validUntil <= now || row.validUntil <= row.asOf || row.validUntil > row.asOf + 15000) throw Error("Provider status is stale or its model identity changed");
-    return { model: row.model, state: row.state, label: labels[row.state], detail: String(row.detail || "").slice(0, 400), validUntil: row.validUntil };
+    const result = { model: row.model, state: row.state, label: labels[row.state], detail: row.state === "qualification-failed"
+      ? "The network check has not passed. Keep earning on; another check runs automatically."
+      : String(row.detail || "").slice(0, 400), validUntil: row.validUntil };
+    if (row.qualification !== undefined) {
+      const q = row.qualification;
+      if (!q || !["testing", "failed", "qualified"].includes(q.state) ||
+          ![q.passed, q.completed, q.total].every(Number.isSafeInteger) || q.total < 1 || q.total > 32 ||
+          q.passed < 0 || q.completed < q.passed || q.completed > q.total ||
+          !(q.retryAt === null || Number.isSafeInteger(q.retryAt) && q.retryAt >= 0 && q.retryAt <= row.asOf + 86400000) ||
+          row.state === "qualifying" && q.state !== "testing" || row.state === "qualification-failed" && q.state !== "failed")
+        throw Error("Invalid provider qualification progress");
+      // Only these bounded observations cross into the renderer. Evidence,
+      // prompts, signatures and arbitrary server fields are not UI metadata.
+      result.qualification = { state: q.state, passed: q.passed, completed: q.completed, total: q.total, retryAt: q.retryAt };
+    }
+    return result;
   };
   const result = check(p);
   if (p.models !== undefined) {

@@ -1,3 +1,9 @@
+## Keep local diagnostics from interrupting network qualification
+
+- A local provider check waits for an in-flight network request to finish, pauses new network work while it checks the model, and resumes sharing automatically afterward. Cancelling or failing the diagnostic also releases the pause. The earning preference stays on.
+- The Earn page shows the network check's passed and completed counts and its scheduled retry time separately from the local diagnostic result. A local 12/12 result does not imply that the signed network check passed its delivery deadline.
+- Release verification now runs the actual desktop worker against the scheduler's reviewed twelve-case Smart qualification policy. It checks both successful signed qualification and rejection of a correct answer delivered after the deadline, using controlled inference responses.
+
 ## Buy credits, start earning and use Network chat
 
 - **Buy credits** fetches the current price and opens one wallet approval showing the exact KOIN payment and credits. Confirmation continues automatically. An existing payment uses the same button to continue its saved transaction; background checks no longer lock the purchase screen.
