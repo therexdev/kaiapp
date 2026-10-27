@@ -235,14 +235,17 @@ class ChainService {
   // Opt-in isolated adapter. Normal wallet construction does not install it.
   // Reserve before signing, persist the exact signature before transport, and
   // retain uncertain requests. There is no automatic retry or new signature.
-  async _coordinatedSend(tx, purpose) {
+  async _coordinatedSend(tx, purpose, assertContext = () => {}) {
     const nonces = this.nonceCoordinator; nonces.assertProvider(tx.provider);
     await tx.prepare();
+    assertContext();
     const id = hash("wallet:" + purpose + ":" + tx.transaction.id);
     const decision = await nonces.reserve(id, purpose, tx.transaction);
     if (decision.action === "sign_original") {
+      assertContext();
       await tx.sign(); await nonces.stage(id, tx.transaction);
       nonces.assertReservation(id, tx.transaction);
+      assertContext();
       await tx.send();
     }
     const status = await nonces.reconcile(id);
@@ -309,12 +312,16 @@ class ChainService {
     }
   }
 
-  async transfer(signer, { to, amountSat, token = "koin" }) {
+  async transfer(signer, { to, amountSat, token = "koin", assertContext: reviewedContext }) {
+    if (reviewedContext !== undefined && typeof reviewedContext !== "function") throw new Error("Invalid wallet transfer context");
+    const assertContext = reviewedContext || (() => {});
+    assertContext();
     const address = signer.getAddress();
     if (!["koin", "vhp"].includes(token)) throw new Error(`Unknown token: ${token}`);
     if (!this.isValidAddress(to)) throw new Error("Invalid recipient address");
     if (cmpSats(amountSat, "0") <= 0) throw new Error("Amount must be positive");
     const balances = await this.balances(address);
+    assertContext();
     if (cmpSats(amountSat, balances[token]) > 0) {
       throw new Error(`Insufficient ${token.toUpperCase()} balance`);
     }
@@ -322,12 +329,19 @@ class ChainService {
     if (token === "koin") this._assertMana(amountSat, balances.mana, "send");
     const provider = this.provider();
     const rcLimit = await this._rcLimit(provider, address);
+    assertContext();
     const contract = await this._contract(token, { signer, provider });
+    assertContext();
     try {
-      if (this.nonceCoordinator) {
+      if (this.nonceCoordinator || reviewedContext) {
         const tx = new Transaction({ signer, provider, options: { rcLimit } });
         await tx.pushOperation(contract.functions.transfer, { from: address, to: String(to).trim(), value: String(amountSat) });
-        return await this._coordinatedSend(tx, "send");
+        assertContext();
+        if (this.nonceCoordinator) return await this._coordinatedSend(tx, "send", assertContext);
+        await tx.prepare(); assertContext();
+        await tx.sign(); assertContext();
+        await tx.send();
+        return await this._finalizeTx(tx);
       }
       const { transaction } = await contract.functions.transfer(
         { from: address, to: String(to).trim(), value: String(amountSat) },

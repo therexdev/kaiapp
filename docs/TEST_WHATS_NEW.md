@@ -1,3 +1,9 @@
+## A clearer wallet with native transaction history
+
+- The app wallet uses the node wallet's address card and separate KOIN, VHP and Mana balance boxes, followed by native transaction history. It does not include the node's Ethereum funding wallet or token controls.
+- Incoming and outgoing KOIN/VHP activity, burns and block rewards are read from the selected network's account history. Confirmation is checked against irreversible history; missing dates or unavailable history are shown honestly. Older activity can be loaded without changing the wallet.
+- Balances and history remain readable while locked. Send, Lock, Copy address, Explorer and password-protected backup access stay together. A send review is tied to the displayed address and network, and changing either requires review again.
+
 ## Automatic price previews, credit preferences and clearer earning controls
 
 - Buy credits calculates the KOIN estimate when an amount is entered, refreshes it every 30 seconds while the page is visible, and discards expired or out-of-date responses. Display-only price reads never create signed purchase quotes or use the quote allowance. Buy still opens one wallet approval for the exact current payment.

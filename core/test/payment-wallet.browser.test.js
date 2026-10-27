@@ -1,0 +1,166 @@
+"use strict";
+const { test } = require("node:test"), assert = require("node:assert/strict"), fs = require("node:fs"), os = require("node:os"), path = require("node:path");
+const CHROMIUM = process.env.KAI_TEST_CHROMIUM || "/opt/pw-browsers/chromium";
+const A = "1H7QvaYveeG4oBM7krKSpEMXwREv1RFjvK", B = "1EXvuuW5HMrYRPdkraSi5Z4TBd4djyMj6E";
+const hash = n => "0x1220" + String(n).repeat(64);
+const entry = (n, overrides = {}) => ({ id: hash(n), kind: "transaction", type: "received", label: "Received", status: "confirmed", timestamp: Date.now() - 60000, height: "40210000", changes: [{ asset: "KOIN", direction: "in", amount: "100000000", formatted: "1" }], counterparty: B, ...overrides });
+async function fixture(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-payment-wallet-ui-")), core = await require("../server").createCore({ dataDir: dir, port: 0, onEvent() {} });
+  let browser; t.after(async () => { await browser?.close(); await core.stop(); fs.rmSync(dir, { recursive: true, force: true }); });
+  browser = await require("playwright-core").chromium.launch({ executablePath: CHROMIUM, args: ["--no-sandbox", "--disable-gpu"] });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, locale: "en-US" }), errors = [], calls = [];
+  page.on("pageerror", e => errors.push(e.message));
+  await page.addInitScript(() => { localStorage.setItem("kai-interface-language", "en"); });
+  await page.route("**/*", route => ["127.0.0.1", "localhost"].includes(new URL(route.request().url()).hostname) ? route.continue() : route.abort());
+  const state = { exists: true, unlocked: true, address: A, network: "mainnet", koin: "1234.50000001", vhp: "9876", mana: "1220.75000000", rows: [entry(1), entry(2, { type: "sent", label: "Sent", status: "confirming", changes: [{ asset: "KOIN", direction: "out", amount: "250000000", formatted: "2.5" }] })], nextCursor: null, historyError: false, holdHistory: null, holdReveal: null };
+  const summary = () => ({ address: state.address, network: state.network, tokenSymbol: state.network === "mainnet" ? "KOIN" : "tKOIN", koin: state.koin, vhp: state.vhp, mana: state.mana, observedAt: Date.now(), usd: null });
+  await page.route("**/core/models", route => route.fulfill({ json: { aliases: [{ alias: "fast", label: "Koinos Fast", status: "ready" }], runtime: { runtime: { running: true }, activeAlias: "fast" } } }));
+  await page.route("**/core/earn", route => route.fulfill({ json: { wallet: { exists: state.exists, unlocked: state.unlocked, address: state.address }, worker: { running: false } } }));
+  await page.route("**/core/earn/lock", route => { state.unlocked = false; return route.fulfill({ json: { ok: true } }); });
+  await page.route("**/core/earn/unlock", route => { state.unlocked = true; return route.fulfill({ json: { ok: true } }); });
+  await page.route("**/core/earn/wallet/reveal", async route => {
+    if (state.holdReveal) await state.holdReveal();
+    return route.fulfill({ json: { ok: true, wif: "fixture-private-key-must-not-survive-navigation" } }).catch(() => {});
+  });
+  await page.route("**/core/koinos/rpc", async route => {
+    const request = route.request().postDataJSON(); calls.push(request);
+    if (request.channel === "wallet:summary") return route.fulfill({ json: { ok: true, data: summary() } });
+    if (request.channel === "wallet:history") {
+      const snapshot = structuredClone({ address: state.address, network: state.network, tokenSymbol: state.network === "mainnet" ? "KOIN" : "tKOIN", available: true, rows: state.rows, nextCursor: state.nextCursor, observedAt: Date.now() });
+      if (state.holdHistory) await state.holdHistory();
+      return route.fulfill({ json: state.historyError ? { ok: false, error: "History RPC unavailable" } : { ok: true, data: snapshot } }).catch(() => {});
+    }
+    if (request.channel === "wallet:import") {
+      if (state.exists) return route.fulfill({ json: { ok: false, error: "A wallet already exists. Back it up before importing." } });
+      state.exists = true; state.unlocked = true; state.address = B;
+      return route.fulfill({ json: { ok: true, data: { address: B } } });
+    }
+    if (request.channel === "chain:send") return route.fulfill({ json: { ok: true, data: { txId: hash(9) } } });
+    return route.fulfill({ json: { ok: false, error: "Fixture channel unavailable" } });
+  });
+  await page.goto("http://127.0.0.1:" + await core.start());
+  await page.locator("#sidebar-wallet").click(); await page.locator("#view-payment-wallet").waitFor({ state: "visible" });
+  return { page, state, calls, errors };
+}
+test("wallet shows native balances then on-chain history, preserves locked reads and handles failed refresh and account changes", { skip: !fs.existsSync(CHROMIUM), timeout: 60000 }, async t => {
+  const { page, state, calls, errors } = await fixture(t);
+  await page.waitForFunction(() => document.getElementById("payment-wallet-history-rows").children.length === 2);
+  assert.equal(await page.locator("#payment-wallet-koin").textContent(), "1,234.50000001");
+  assert.equal(await page.locator("#payment-wallet-vhp").textContent(), "9,876");
+  assert.equal(await page.locator("#payment-wallet-mana").textContent(), "1,220.75");
+  assert.match(await page.locator("#payment-wallet-history-rows").textContent(), /Received.*\+1 KOIN.*Confirmed.*Sent.*−2.5 KOIN.*Confirming/);
+  assert.equal(await page.locator("#payment-wallet-explorer").getAttribute("href"), "https://koinosblocks.com/address/" + A);
+  assert.equal(await page.locator("#wallet-send-pass").isVisible(), false);
+  assert.doesNotMatch(await page.locator("#view-payment-wallet").textContent(), /Ethereum|USDT|vKOIN/);
+  assert.equal(await page.evaluate(() => document.querySelector(".payment-wallet-history").getBoundingClientRect().top > document.getElementById("wallet-balances").getBoundingClientRect().bottom), true);
+  assert.equal(calls.some(c => /^(node:|producer:|fund:|chain:send|wallet:reveal)/.test(c.channel)), false);
+  if (process.env.KAI_WALLET_QA_DIR) { fs.mkdirSync(process.env.KAI_WALLET_QA_DIR, { recursive: true }); await page.screenshot({ path: path.join(process.env.KAI_WALLET_QA_DIR, "wallet-desktop.png"), animations: "disabled" }); }
+  await page.locator("#btn-earn-lock").click(); await page.locator("#earn-unlock").waitFor({ state: "visible" });
+  assert.equal(await page.locator("#payment-wallet-open-send").isDisabled(), true);
+  assert.equal(await page.locator("#payment-wallet-history-rows tr").count(), 2, "locking preserves public transaction history");
+  if (process.env.KAI_WALLET_QA_DIR) {
+    await page.setViewportSize({ width: 480, height: 900 });
+    await page.locator("#product-sidebar-close").click();
+    await page.screenshot({ path: path.join(process.env.KAI_WALLET_QA_DIR, "wallet-mobile-locked.png"), animations: "disabled" });
+    await page.locator(".payment-wallet-history").scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(process.env.KAI_WALLET_QA_DIR, "wallet-mobile-history.png"), animations: "disabled" });
+    await page.setViewportSize({ width: 1280, height: 900 });
+  }
+  await page.locator("#payment-wallet-history-refresh").click();
+  await page.waitForFunction(() => document.getElementById("payment-wallet-history-status").textContent.startsWith("On-chain"));
+  state.historyError = true; await page.locator("#payment-wallet-history-refresh").click();
+  await page.waitForFunction(() => document.getElementById("payment-wallet-history-status").textContent.includes("previously loaded"));
+  assert.equal(await page.locator("#payment-wallet-history-rows tr").count(), 2);
+  assert.doesNotMatch(await page.locator("#payment-wallet-history-status").textContent(), /No transactions/);
+  state.historyError = false;
+  let releaseOld; state.holdHistory = () => new Promise(resolve => { releaseOld = resolve; });
+  await page.locator("#payment-wallet-history-refresh").click();
+  while (!releaseOld) await new Promise(resolve => setTimeout(resolve, 10));
+  state.holdHistory = null; state.address = B; state.rows = [entry(3, { label: '<img src=x onerror="alert(1)">', counterparty: A })]; state.koin = "5";
+  await page.evaluate(() => renderEarn());
+  await page.waitForFunction(() => document.getElementById("payment-wallet-koin").textContent === "5"); releaseOld();
+  await page.waitForFunction(() => document.getElementById("payment-wallet-history-rows").textContent.includes("<img"));
+  assert.equal(await page.locator("#payment-wallet-history-rows img").count(), 0);
+  assert.equal(await page.locator("#payment-wallet-history-rows tr").count(), 1);
+  assert.equal(await page.locator("#payment-wallet-history-rows").textContent().then(s => s.includes(hash(1))), false);
+  assert.equal(await page.inputValue("#wallet-address"), B);
+  state.rows = []; await page.locator("#payment-wallet-history-refresh").click();
+  await page.waitForFunction(() => document.getElementById("payment-wallet-history-status").textContent.startsWith("No transactions"));
+  await page.setViewportSize({ width: 480, height: 820 });
+  assert.equal(await page.locator("#view-payment-wallet").evaluate(el => el.scrollWidth <= el.clientWidth), true);
+  if (process.env.KAI_WALLET_QA_DIR) await page.screenshot({ path: path.join(process.env.KAI_WALLET_QA_DIR, "wallet-empty.png"), animations: "disabled" });
+  assert.deepEqual(errors, []);
+});
+test("wallet send binds wallet and network context; leaving clears private fields and ignores a late backup reveal", { skip: !fs.existsSync(CHROMIUM), timeout: 60000 }, async t => {
+  const { page, state, calls, errors } = await fixture(t);
+  await page.waitForFunction(() => !document.getElementById("payment-wallet-open-send").disabled);
+  await page.locator("#payment-wallet-open-send").click();
+  await page.fill("#wallet-send-to", B); await page.fill("#wallet-send-amt", "1"); await page.fill("#wallet-send-pass", "fixture-password");
+  await page.locator("#btn-wallet-send").click();
+  assert.match(await page.locator("#wallet-msg").textContent(), new RegExp("from " + A + " on MAINNET"));
+  assert.equal(calls.filter(c => c.channel === "chain:send").length, 0);
+  state.network = "harbinger"; state.rows = [];
+  await page.evaluate(() => KaiPaymentWallet.refresh());
+  await page.waitForFunction(() => document.getElementById("payment-wallet-koin-label").textContent === "tKOIN (liquid)");
+  assert.equal(await page.inputValue("#wallet-send-pass"), "", "network change clears password and previous confirmation");
+  await page.fill("#wallet-send-pass", "fixture-password"); await page.locator("#btn-wallet-send").click();
+  assert.match(await page.locator("#wallet-msg").textContent(), /1 tKOIN.*HARBINGER TESTNET/);
+  assert.equal(calls.filter(c => c.channel === "chain:send").length, 0);
+  await page.locator("#btn-wallet-send").click();
+  await page.waitForFunction(() => document.getElementById("wallet-msg").textContent.startsWith("Submitted."));
+  assert.deepEqual(calls.find(c => c.channel === "chain:send").payload, { to: B, amount: "1", token: "koin", password: "fixture-password", expectedAddress: A, expectedNetwork: "harbinger" });
+  assert.equal(await page.inputValue("#wallet-send-pass"), "");
+  let releaseReveal; state.holdReveal = () => new Promise(resolve => { releaseReveal = resolve; });
+  await page.locator("#btn-earn-reveal").click(); await page.fill("#earn-reveal-pass", "fixture-password"); await page.locator("#btn-earn-reveal-go").click();
+  while (!releaseReveal) await new Promise(resolve => setTimeout(resolve, 10));
+  await page.locator('#nav [data-view="chat"]').click(); releaseReveal();
+  await page.locator("#sidebar-wallet").click(); await page.locator("#view-payment-wallet").waitFor({ state: "visible" });
+  assert.equal(await page.locator("#earn-wif-value").textContent(), "");
+  assert.equal(await page.inputValue("#earn-reveal-pass"), "");
+  assert.equal(await page.locator("#earn-wif").isVisible(), false);
+  assert.equal(await page.locator("#payment-wallet-send-panel").getAttribute("open"), null);
+  state.holdReveal = null;
+  await page.locator("#btn-earn-reveal").click(); await page.fill("#earn-reveal-pass", "fixture-password"); await page.locator("#btn-earn-reveal-go").click();
+  await page.locator("#earn-wif").waitFor({ state: "visible" });
+  assert.equal(await page.locator("#payment-wallet-open-send").isDisabled(), true, "Send cannot open a form hidden by the backup display");
+  await page.locator("#btn-earn-wif-done").click();
+  await page.waitForFunction(() => !document.getElementById("payment-wallet-open-send").disabled);
+  assert.equal(await page.locator("#earn-wif-value").textContent(), "");
+  assert.deepEqual(errors, []);
+});
+test("wallet import stays open through polling and refuses an existing wallet; older history remains during automatic refresh", { skip: !fs.existsSync(CHROMIUM), timeout: 60000 }, async t => {
+  const { page, state, calls, errors } = await fixture(t);
+  await page.waitForFunction(() => document.getElementById("payment-wallet-history-rows").children.length === 2);
+  state.nextCursor = "fixture-older"; await page.evaluate(() => KaiPaymentWallet.refresh());
+  state.rows = [entry(3)]; state.nextCursor = null;
+  await page.locator("#payment-wallet-history-more").click();
+  await page.waitForFunction(() => document.getElementById("payment-wallet-history-rows").children.length === 3);
+  const before = calls.filter(c => c.channel === "wallet:history").length;
+  state.rows = [entry(4)]; state.koin = "10";
+  await page.evaluate(() => KaiPaymentWallet.refresh(false, true));
+  assert.equal(calls.filter(c => c.channel === "wallet:history").length, before, "automatic balance refresh leaves the older history page intact");
+  assert.equal(await page.locator("#payment-wallet-history-rows tr").count(), 3);
+  assert.equal(await page.locator("#payment-wallet-koin").textContent(), "10");
+  await page.locator("#payment-wallet-history-refresh").click();
+  await page.waitForFunction(() => document.getElementById("payment-wallet-history-rows").children.length === 1);
+  assert.match(await page.locator("#payment-wallet-history-rows").textContent(), new RegExp(hash(4)));
+  state.exists = false; state.unlocked = false; state.address = null; await page.evaluate(() => renderEarn());
+  await page.locator("#earn-setup").waitFor({ state: "visible" });
+  assert.equal(await page.locator("#payment-wallet-account").isVisible(), false);
+  await page.locator("#payment-wallet-import").click();
+  await page.fill("#payment-wallet-import-key", "fixture-key"); await page.fill("#payment-wallet-import-pass", "fixture-password"); await page.fill("#payment-wallet-import-confirm", "fixture-password");
+  await page.evaluate(() => renderEarn());
+  assert.equal(await page.locator("#payment-wallet-import-panel").isVisible(), true);
+  assert.equal(await page.inputValue("#payment-wallet-import-key"), "fixture-key");
+  state.exists = true; state.address = A; // Another surface created a wallet before Import was clicked.
+  await page.locator("#payment-wallet-import-go").click();
+  await page.waitForFunction(() => document.getElementById("payment-wallet-import-error").textContent.includes("already exists"));
+  assert.equal(state.address, A);
+  state.exists = false; state.address = null; state.rows = [];
+  await page.locator("#payment-wallet-import-go").click();
+  await page.waitForFunction(address => document.getElementById("wallet-address").value === address, B);
+  assert.equal(await page.inputValue("#payment-wallet-import-key"), "");
+  assert.equal(await page.inputValue("#payment-wallet-import-pass"), "");
+  assert.equal(calls.filter(c => c.channel === "wallet:import").length, 2);
+  assert.deepEqual(errors, []);
+});

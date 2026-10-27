@@ -20,6 +20,7 @@ test("sidebar values only liquid KOIN in the earning wallet, without a signer or
   assert.deepEqual(f.reads, ["earning-wallet"]);
   assert.equal(value.koin, "1234.56789");
   assert.equal(value.vhp, "900000");
+  assert.equal(value.mana, "900000"); assert.ok(Number.isSafeInteger(value.observedAt));
   assert.ok(Math.abs(value.usd - 61.7283945) < 1e-10);
   f.balance("0"); assert.equal((await f.summary()).usd, 0);
   f.wallet.address = null;
@@ -33,6 +34,7 @@ test("missing VHP is unknown while verified zero and exact native amounts stay d
   f.chain.balances = async () => ({ koin: "18446744073709551615" });
   let value = await f.summary();
   assert.equal(value.koin, "184467440737.09551615"); assert.equal(value.vhp, null);
+  assert.equal(value.mana, null);
   f.chain.balances = async () => ({ koin: "0", vhp: "0" });
   value = await f.summary(); assert.equal(value.koin, "0"); assert.equal(value.vhp, "0");
 });

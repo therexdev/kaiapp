@@ -153,3 +153,53 @@
 .product-v2 #view-recovery #credit-run-results{padding:18px 0;border-top:1px solid var(--border);margin-top:24px}.product-v2 #credit-run-results>summary{font-size:13px;font-weight:600;cursor:pointer}.product-v2 #credit-run-history summary{cursor:pointer;font-size:12px}.product-v2 #credit-run-history{overflow-wrap:anywhere}
 
 .product-v2 #network-paid-first{width:auto;flex:none}.product-v2 .setting-toggle{display:flex;align-items:flex-start;gap:10px;line-height:1.6}
+
+/* Main wallet follows the node wallet's address, native balances and activity layout. */
+.product-v2 #view-payment-wallet{padding-bottom:40px}
+.product-v2 #view-payment-wallet .product-head{max-width:1000px;margin-bottom:20px}
+.product-v2 #product-wallet-controls{max-width:1000px}
+.product-v2 .payment-wallet-actions,.product-v2 .payment-wallet-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.product-v2 .payment-wallet-actions{justify-content:flex-end}
+.product-v2 .payment-wallet-row{justify-content:space-between}
+.product-v2 .payment-wallet-card{background:var(--bg-raised);border:1px solid var(--border);border-radius:12px;padding:18px;margin-bottom:16px}
+.product-v2 #product-wallet-controls .payment-wallet-card h2{font-size:15px;margin:0 0 10px}
+.product-v2 .payment-wallet-card .hint,.product-v2 #payment-wallet-balance-note{font-size:12px;color:var(--text-dim);line-height:1.5;margin:6px 0 12px}
+.product-v2 #payment-wallet-receive{flex-wrap:nowrap;justify-content:flex-start}
+.product-v2 #payment-wallet-receive input{flex:1;min-width:0;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;background:var(--bg-input);border:1px solid var(--border);padding:11px 12px;border-radius:8px}
+.product-v2 #payment-wallet-receive button,.product-v2 #payment-wallet-explorer{flex:none}
+.product-v2 #payment-wallet-explorer{font-size:12px;color:var(--violet);text-decoration:none;padding:9px 10px}
+.product-v2 .payment-wallet-badge{font-size:11px;color:var(--text-dim);padding:4px 9px;border:1px solid var(--border);border-radius:99px}
+.product-v2 #wallet-balances.payment-wallet-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;background:none;border:0;padding:0;margin:0}
+.product-v2 .payment-wallet-stat{border:1px solid var(--border);border-radius:10px;padding:16px;background:#edf3fc;min-width:0}
+.product-v2 .payment-wallet-stat .label{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--text-dim)}
+.product-v2 .payment-wallet-stat .value{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:23px;line-height:1.35;margin-top:8px;overflow-wrap:anywhere;color:var(--text)}
+.product-v2 .payment-wallet-stat .sub{font-size:11px;line-height:1.5;color:var(--text-dim);margin-top:5px}
+.product-v2 #btn-wallet-balances{font-size:11px;margin-bottom:16px;padding:6px 10px}
+.product-v2 .payment-wallet-history .payment-wallet-row h2{margin:0!important}
+.product-v2 .payment-wallet-table{overflow:auto;max-width:100%;margin-top:8px}
+.product-v2 .payment-wallet-table table{width:100%;border-collapse:collapse;text-align:left;font-size:12px}
+.product-v2 .payment-wallet-table th{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-dim);font-weight:500}
+.product-v2 .payment-wallet-table th,.product-v2 .payment-wallet-table td{padding:14px 10px;border-bottom:1px solid var(--border);vertical-align:top}
+.product-v2 .payment-wallet-table th:first-child,.product-v2 .payment-wallet-table td:first-child{padding-left:0;max-width:330px;min-width:140px}
+.product-v2 .payment-wallet-table td:nth-child(2){white-space:nowrap}
+.product-v2 .payment-wallet-table td:nth-child(3){min-width:125px}
+.product-v2 .payment-wallet-table small{display:block;font-size:10px;line-height:1.55;margin-top:4px;overflow-wrap:anywhere;color:var(--text-dim)}
+.product-v2 .payment-wallet-table a{color:var(--violet);text-decoration:none}
+.product-v2 .payment-wallet-table a small{color:inherit}
+.product-v2 .payment-wallet-in{color:#147650}.product-v2 .payment-wallet-out{color:var(--text)}
+.product-v2 .payment-wallet-table td[data-status="confirming"]{color:#8a5b14}
+.product-v2 .payment-wallet-table td[data-status="failed"]{color:#ad2d3b}
+.product-v2 #payment-wallet-history-more{margin-top:14px}
+.product-v2 #payment-wallet-send-panel>summary{font-size:14px;font-weight:600;cursor:pointer}
+.product-v2 #payment-wallet-send-panel[open]>summary{margin-bottom:14px}
+.product-v2 #payment-wallet-send-panel .form-row{display:flex;gap:10px}
+.product-v2 #payment-wallet-send-panel input{flex:1;min-width:100px;padding:10px}
+.product-v2 #wallet-msg{overflow-wrap:anywhere}
+.product-v2 #payment-wallet-address-note:empty{display:none}
+.product-v2 .payment-wallet-backup{margin-top:16px}
+.product-v2 .payment-wallet-backup #earn-reveal-row{margin-bottom:0}
+@media(max-width:700px){.product-v2 #wallet-balances.payment-wallet-stats{grid-template-columns:1fr}.product-v2 #payment-wallet-receive{flex-wrap:wrap}.product-v2 #payment-wallet-receive input{flex-basis:100%}.product-v2 .payment-wallet-stat .value{font-size:24px}.product-v2 #payment-wallet-send-panel .form-row{flex-wrap:wrap}}
+.product-v2 #payment-wallet-import-panel{margin-top:20px;border-top:1px solid var(--border);padding-top:20px;max-width:480px}
+.product-v2 #payment-wallet-import-panel label{display:block;font-size:12px;color:var(--text-dim);margin:12px 0}
+.product-v2 #payment-wallet-import-panel input{display:block;width:100%;margin-top:6px;padding:10px}
+@media(max-width:700px){.product-v2 .payment-wallet-table table,.product-v2 .payment-wallet-table tbody{display:block}.product-v2 .payment-wallet-table thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}.product-v2 .payment-wallet-table tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 12px;border-top:1px solid var(--border);padding:14px 0}.product-v2 .payment-wallet-table td{display:block;padding:0!important;border:0;min-width:0!important;max-width:none!important}.product-v2 .payment-wallet-table td:first-child{grid-column:1 / -1}.product-v2 .payment-wallet-table td:nth-child(3){grid-column:1;grid-row:3;font-size:11px;color:var(--text-dim)}.product-v2 .payment-wallet-table td:last-child{grid-column:2;grid-row:2;font-size:11px}.product-v2 .payment-wallet-table small{overflow-wrap:anywhere}}

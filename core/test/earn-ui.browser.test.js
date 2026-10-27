@@ -69,7 +69,7 @@ test("earn wallet UI: create -> lock -> unlock -> restore -> unlock (real browse
     assert.match(await page.textContent("#product-provider-earnings"), /No verified earnings loaded|Refresh to check your rewards/);
     assert.equal(await page.locator("#earn-legacy").getAttribute("open"), null);
     assert.equal(await page.locator("#earn-deposit-amt").count(), 0);
-    assert.equal(await page.locator("#wallet-send-pass").isVisible(), true);
+    assert.equal(await page.locator("#wallet-send-pass").isVisible(), false, "sending opens only from its explicit button");
     if (process.env.KAI_MASCOT_QA_DIR) {
       const qa = path.resolve(process.env.KAI_MASCOT_QA_DIR); fs.mkdirSync(qa, { recursive: true });
       await page.screenshot({ path: path.join(qa, "koin-earn-wallet.png"), fullPage: true });
@@ -134,6 +134,12 @@ test("wallet card: receive address shown, sends demand a password and a second c
   const browser = await chromium.launch({ executablePath: CHROMIUM });
   try {
     const page = await browser.newPage();
+    await page.route("**/core/koinos/rpc", route => {
+      const action = route.request().postDataJSON().channel;
+      if (action === "wallet:summary") return route.fulfill({ json: { ok: true, data: { address: made.address, network: "mainnet", tokenSymbol: "KOIN", koin: "100", vhp: "0", mana: "100", observedAt: Date.now() } } });
+      if (action === "wallet:history") return route.fulfill({ json: { ok: true, data: { address: made.address, network: "mainnet", tokenSymbol: "KOIN", available: true, rows: [], nextCursor: null, observedAt: Date.now() } } });
+      return route.continue();
+    });
     await page.goto(base);
     await page.waitForSelector("#view-chat:not([hidden])");
     await page.locator("#sidebar-wallet").click();
@@ -146,6 +152,7 @@ test("wallet card: receive address shown, sends demand a password and a second c
       made.address
     );
 
+    await page.locator("#payment-wallet-open-send").click();
     // Sending without a password is refused client-side, with words.
     await page.type("#wallet-send-to", "1K1AUovu5NjjPcaTxmde6wPB8Y8PQGFV3E");
     await page.type("#wallet-send-amt", "1");

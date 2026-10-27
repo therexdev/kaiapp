@@ -1519,6 +1519,14 @@ renderCodeSwitch();
 // ---------- earn view (M2 alpha) ----------
 
 let earnTimer = null;
+let walletUiEpoch = 0;
+function resetWalletUiSecrets() {
+  walletUiEpoch++; walletSendArmed = null;
+  for (const id of ["earn-pass", "earn-pass2", "earn-unlock-pass", "earn-reveal-pass", "earn-restore-wif", "earn-restore-pass", "earn-restore-pass2", "wallet-send-pass", "payment-wallet-import-key", "payment-wallet-import-pass", "payment-wallet-import-confirm"]) if ($(id)) $(id).value = "";
+  $("earn-wif-value").textContent = ""; $("earn-wif").hidden = true; $("earn-reveal-row").hidden = true;
+  walletMsg("");
+}
+window.KaiWalletPrivacy = { reset: resetWalletUiSecrets, get version() { return walletUiEpoch; } };
 
 async function renderEarn() {
   clearTimeout(earnTimer);
@@ -1529,6 +1537,7 @@ async function renderEarn() {
     earnErr("Core unreachable");
     return;
   }
+  window.KaiPaymentWallet?.observe(s.wallet);
   const wifShowing = !$("earn-wif").hidden;
   $("earn-setup").hidden = s.wallet.exists && !wifShowing;
   $("earn-unlock").hidden = !s.wallet.exists || s.wallet.unlocked;
@@ -1710,6 +1719,7 @@ document.addEventListener("click", (e) => {
 });
 
 $("btn-earn-create").addEventListener("click", async () => {
+  const viewEpoch = walletUiEpoch;
   if ($("earn-pass").value !== $("earn-pass2").value) {
     return earnErr("Passwords don't match — type the same password in both fields");
   }
@@ -1717,6 +1727,7 @@ $("btn-earn-create").addEventListener("click", async () => {
     const j = await earnPost("/core/earn/wallet", { password: $("earn-pass").value });
     $("earn-pass").value = "";
     $("earn-pass2").value = "";
+    if (viewEpoch !== walletUiEpoch) return;
     $("earn-wif-value").textContent = j.wif; // shown once, never stored by the UI
     $("earn-wif").hidden = false;
   } catch { /* error shown */ }
@@ -1767,12 +1778,14 @@ $("btn-earn-reveal").addEventListener("click", () => {
 });
 
 $("btn-earn-reveal-go").addEventListener("click", async () => {
+  const viewEpoch = walletUiEpoch;
   const pw = $("earn-reveal-pass").value;
   if (!pw) return earnErr("Type your wallet password to reveal the backup code.");
   try {
     const j = await earnPost("/core/earn/wallet/reveal", { password: pw });
     $("earn-reveal-pass").value = "";
     $("earn-reveal-row").hidden = true;
+    if (viewEpoch !== walletUiEpoch) return;
     // Reuse the one-time backup panel — same warning copy, same dismiss.
     $("earn-wif-value").textContent = j.wif;
     $("earn-wif").hidden = false;
@@ -1873,8 +1886,7 @@ async function openPaymentWallet() {
   await renderEarn();
   if ($("view-payment-wallet").hidden) return;
   const target = !$("earn-setup").hidden ? $("earn-setup") : !$("earn-unlock").hidden ? $("earn-unlock") : $("wallet-address");
-  target.scrollIntoView({ block: "center" });
-  (target.matches("input") ? target : target.querySelector("input,button"))?.focus({ preventScroll: true });
+  if (!target.matches("input")) { target.scrollIntoView({ block: "nearest" }); target.querySelector("input,button")?.focus({ preventScroll: true }); }
   refreshSidebarWallet();
 }
 $("sidebar-wallet").addEventListener("click", openPaymentWallet);
@@ -1891,33 +1903,17 @@ refreshSidebarWallet();
 $("btn-wallet-copy").addEventListener("click", async () => {
   const addr = $("wallet-address").value;
   if (!addr) return;
+  const notify = text => { const note = $("payment-wallet-address-note"); if (note) note.textContent = text; else walletMsg(text, true); };
   try {
     await navigator.clipboard.writeText(addr);
-    walletMsg("Address copied — share it to receive KOIN or VHP.", true);
+    notify("Address copied — share it to receive KOIN or VHP.");
   } catch {
     $("wallet-address").select();
-    walletMsg("Copy blocked by the browser — the address is selected, press Ctrl/Cmd-C.");
+    notify("Copy blocked by the browser — the address is selected, press Ctrl/Cmd-C.");
   }
 });
 
-$("btn-wallet-balances").addEventListener("click", async () => {
-  walletMsg("");
-  $("btn-wallet-balances").disabled = true;
-  try {
-    const b = await walletRpc("chain:balances");
-    refreshSidebarWallet();
-    const rows = [
-      ["KOIN", b.formatted?.koin ?? "0"],
-      ["VHP", b.formatted?.vhp ?? "0"],
-      ["Mana", b.formatted?.mana ?? "0"],
-    ];
-    $("wallet-balances").innerHTML = rows.map(([k, v]) => KaiI18n.html`<span class="k">${k}</span><span>${esc(v)}</span>`).join("");
-  } catch (e) {
-    walletMsg(e.message);
-  } finally {
-    $("btn-wallet-balances").disabled = false;
-  }
-});
+$("btn-wallet-balances").addEventListener("click", () => window.KaiPaymentWallet?.refresh());
 
 /* ---- Koinos AI account (task #49): device-link sign-in + wallet attach.
  * The app never shows a login form: Sign in fetches a short code, the user
@@ -2208,22 +2204,27 @@ $("btn-wallet-send").addEventListener("click", async () => {
   walletMsg("");
   if (!to || !amount) return walletMsg("Fill in the recipient address and the amount.");
   if (!password) return walletMsg("Your wallet password is required to send.");
-  const key = `${token}|${to}|${amount}`;
+  const context = window.KaiPaymentWallet?.context();
+  if (!context) return walletMsg("Refresh your wallet balance and unlock your wallet before sending.");
+  const viewEpoch = walletUiEpoch;
+  const key = `${context.address}|${context.network}|${token}|${to}|${amount}`;
   if (walletSendArmed !== key) {
     walletSendArmed = key;
-    walletMsg(`About to send ${amount} ${token.toUpperCase()} to ${to} on MAINNET. Click Send again to confirm.`, true);
+    walletMsg(`About to send ${amount} ${token === "koin" ? context.tokenSymbol : "VHP"} to ${to} from ${context.address} on ${context.network === "mainnet" ? "MAINNET" : "HARBINGER TESTNET"}. Click Send again to confirm.`, true);
     return;
   }
   walletSendArmed = null;
   const btn = $("btn-wallet-send");
   btn.disabled = true;
   try {
-    const r = await walletRpc("chain:send", { to, amount, token, password });
+    const r = await walletRpc("chain:send", { to, amount, token, password, expectedAddress: context.address, expectedNetwork: context.network });
+    if (viewEpoch !== walletUiEpoch) return;
     $("wallet-send-to").value = "";
     $("wallet-send-amt").value = "";
-    walletMsg(`Sent. Transaction ${r.txId || "submitted"} — balances update once the block settles.`, true);
+    walletMsg(`Submitted. Transaction ${r.txId || "pending"} — check transaction history for confirmation.`, true);
+    window.KaiPaymentWallet?.refresh();
   } catch (e) {
-    walletMsg(e.message);
+    if (viewEpoch === walletUiEpoch) walletMsg(e.message);
   } finally {
     $("wallet-send-pass").value = "";
     btn.disabled = false;

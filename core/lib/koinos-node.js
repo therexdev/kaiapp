@@ -177,14 +177,17 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
   handle("wallet:summary", async () => {
     const address = wallet.address || null;
     const net = chain.network();
-    const out = { address, network: net.id, tokenSymbol: net.tokenSymbol, koin: null, vhp: null, usd: null, price: null };
+    const rpcIdentity = JSON.stringify(chain.rpcUrls?.() || []);
+    const out = { address, network: net.id, tokenSymbol: net.tokenSymbol, koin: null, vhp: null, mana: null, usd: null, price: null, observedAt: null };
     if (!address) return out;
     if (net.id === "mainnet") priceCache.snapshot(); // warm the shared quote without blocking balances
     const balances = await chain.balances(address);
-    if (wallet.address !== address || chain.network().id !== net.id) throw new Error("Wallet or network changed; retry the balance.");
+    if (wallet.address !== address || chain.network().id !== net.id || JSON.stringify(chain.rpcUrls?.() || []) !== rpcIdentity) throw new Error("Wallet or network changed; retry the balance.");
     if (balances.error || !/^\d+$/.test(String(balances.koin ?? ""))) throw new Error("Wallet balance unavailable.");
     out.koin = formatAmount(balances.koin, { grouping: false });
     if (/^\d+$/.test(String(balances.vhp ?? ""))) out.vhp = formatAmount(balances.vhp, { grouping: false });
+    if (/^\d+$/.test(String(balances.mana ?? ""))) out.mana = formatAmount(balances.mana, { grouping: false });
+    out.observedAt = Date.now();
     out.price = net.id === "mainnet" ? priceCache.snapshot() : null;
     const price = out.price;
     if (price && !price.stale && Number.isFinite(price.usdPerKoin) && price.usdPerKoin > 0) {
@@ -192,6 +195,8 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
     }
     return out;
   });
+  const walletHistory = new (require("./koinos/wallet-history").WalletHistory)({ chain, wallet });
+  handle("wallet:history", input => walletHistory.read(input));
 
   // ----- chain -----
   handle("producer:balances", async () => {
@@ -225,14 +230,22 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
     return { ...res, amountSat, amountFormatted: formatAmount(amountSat) };
   });
 
-  handle("chain:send", async ({ to, amount, token, password }) => {
+  handle("chain:send", async ({ to, amount, token, password, expectedAddress, expectedNetwork }) => {
     // Wallet sends spend only the local earning wallet, independently of
     // producer custody. External producer transfers use producer:prepare.
     const amountSat = parseAmount(amount);
+    const address = wallet.address, network = chain.network().id, rpcIdentity = JSON.stringify(chain.rpcUrls?.() || []);
+    const reviewed = expectedAddress !== undefined || expectedNetwork !== undefined;
+    if (reviewed && (expectedAddress !== address || expectedNetwork !== network)) throw new Error("Wallet or network changed. Review this transfer again.");
+    const assertContext = () => {
+      if (wallet.address !== address || chain.network().id !== network || JSON.stringify(chain.rpcUrls?.() || []) !== rpcIdentity)
+        throw new Error("Wallet or network changed. Review this transfer again.");
+    };
     // Sending moves value to somebody else: the password is proved HERE,
     // on this call, because the wallet auto-unlocks at start-up and being
     // unlocked is not evidence a person is present.
-    const res = await chain.transfer(wallet.signerFor(password), { to, amountSat, token });
+    assertContext();
+    const res = await chain.transfer(wallet.signerFor(password), { to, amountSat, token, ...(reviewed ? { assertContext } : {}) });
     onEvent({
       type: "send",
       message: `Sent ${formatAmount(amountSat)} ${String(token).toUpperCase()} to ${to}`,
