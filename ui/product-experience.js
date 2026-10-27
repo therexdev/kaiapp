@@ -269,14 +269,16 @@
   }
   async function refreshPurchaseCapabilities() {
     if (previewSupportRead) return previewSupportRead;
-    const generation = purchaseGeneration;
+    const generation = purchaseGeneration, alreadySupported = previewSupport === true;
     const pending = purchaseReadOnly("purchase-capabilities").then(result => {
       if (generation !== purchaseGeneration) return;
       previewSupport = result?.purchasePricePreview === true; previewSupportError = false;
     }).catch(() => { if (generation === purchaseGeneration) { previewSupport = null; previewSupportError = true; } })
       .finally(() => {
         if (previewSupportRead === pending) previewSupportRead = null;
-        if (generation === purchaseGeneration) { paintPurchase(); schedulePreview(0); }
+        // A normal page/periodic refresh schedules one estimate when its reads
+        // finish. Only newly available preview support needs this early wakeup.
+        if (generation === purchaseGeneration) { paintPurchase(); if (!alreadySupported) schedulePreview(0); }
       });
     previewSupportRead = pending; return pending;
   }
@@ -330,7 +332,9 @@
     $("product-quote-window").textContent = marketEstimate ? "The estimate uses the exchange price at a finalized Ethereum block and a verified USDT/USD feed." : `Exchange averaging window: ${price.windowSeconds % 60 === 0 ? `${price.windowSeconds / 60} minutes` : `${price.windowSeconds} seconds`}. USDT is converted to USD using the pricing service’s verified feed.`;
     $("product-quote-details").hidden = false;
   }
-  const canPreview = () => previewSupport === true && buyVisible() && !approving && !quoting && !purchaseInfo.localPurchase && purchaseInfo.activation === "ready" && walletReady() && !walletReading;
+  // Display-only pricing does not depend on the sidebar balance RPC. Payment
+  // readiness and native approval still verify the wallet separately.
+  const canPreview = () => previewSupport === true && buyVisible() && !approving && !quoting && !purchaseInfo.localPurchase && purchaseInfo.activation === "ready";
   function schedulePreview(delay = 350) {
     clearTimeout(previewTimer);
     if (!canPreview() || !selectedAmount()) return;

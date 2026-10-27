@@ -13,7 +13,7 @@ private Windows package check; it does not publish installers or update feeds.
 
 ## Release requirements
 
-1. Pass the candidate workflow on Linux, macOS and Windows, including the actual
+1. Pass the candidate workflow on Linux x64, Linux ARM64, macOS and Windows, including the actual
    desktop/backend integration and native credential checks. Review any skipped
    platform/hardware checks separately; fixture inference does not establish
    model quality or Pi hardware acceptance.
@@ -56,3 +56,20 @@ private Windows package check; it does not publish installers or update feeds.
 
 The separate Master producer application does not contain this prepaid stack;
 its producer custody, distribution configuration and profile were not changed.
+
+## Native ARM64 verification scope
+
+The candidate workflow uses `ubuntu-24.04-arm` to execute ARM64 Electron directly.
+It checks the Linux launcher and shared-profile relaunch, builds an ARM64 Test
+AppImage without publishing it, verifies its packaged content and ELF architecture,
+and exercises the packaged wallet/device code in a disposable D-Bus session.
+A generated test keyring verifies native `gnome_libsecret` encryption across
+process restart with the payment wallet locked. A separate `basic_text` profile
+must refuse persistence, allow only explicitly approved temporary access, and
+retain no session or device secret after restart. No real accounts, keys, service
+requests or production transactions participate in this fixture.
+
+These checks establish Ubuntu ARM64 compatibility. They do not establish physical
+Raspberry Pi performance, Raspberry Pi OS/Wayland desktop integration, model
+inference quality or the user's installed keyring state. Candidate artifacts
+contain evidence only; AppImages and update feeds are not published by this job.

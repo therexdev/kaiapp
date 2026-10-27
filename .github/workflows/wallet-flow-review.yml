@@ -12,7 +12,7 @@ permissions:
 
 concurrency:
   group: wallet-flow-review-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   # Exact reviewed backend paired with this desktop candidate.
@@ -90,6 +90,61 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  linux-arm64-native:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Require native Linux ARM64 and the reviewed backend
+        run: node -e 'if (process.platform !== "linux" || process.arch !== "arm64" || !/^[a-f0-9]{40}$/.test(process.env.KAI_WALLET_BACKEND_COMMIT)) throw Error("Native ARM64 and an exact backend revision are required")'
+      - uses: actions/checkout@v4
+        with:
+          repository: therexdev/kai
+          ref: ${{ env.KAI_WALLET_BACKEND_COMMIT }}
+          path: verification-wallet-backend
+          persist-credentials: false
+      - name: Install native display and disposable keyring dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y gnome-keyring libsecret-1-0 xvfb xauth dbus-x11 libglib2.0-bin xdg-user-dirs libgtk-3-0t64 libnss3 libasound2t64 libgbm1
+      - run: npm ci
+      - run: npm ci --ignore-scripts --prefix verification-wallet-backend
+      - name: Verify ARM64 wallet, earning, launcher and backend integration
+        run: node --test core/test/wallet-credit-account.test.js core/test/provider-device.test.js core/test/session-free-chat.test.js core/test/credit-wallet-ipc.test.js core/test/linux-shortcut.test.js core/test/update-restart.test.js core/test/wallet-first-integration.test.js
+        env:
+          KAI_WALLET_BACKEND: ${{ github.workspace }}/verification-wallet-backend
+      - name: Verify native ARM64 relaunch and shared profile exclusion
+        run: xvfb-run -a node scripts/verify-linux-relaunch.js
+      - name: Prepare separate Test package identity
+        run: node scripts/prepare-test-build.js ${{ github.run_number }} ${{ github.run_attempt }}
+      - name: Build ARM64 AppImage without publication
+        run: npm run dist -- --linux --arm64 --publish never
+      - name: Verify ARM64 package content and architecture
+        run: |
+          node scripts/verify-test-package.js
+          node -e 'const b=require("fs").readFileSync("dist/linux-arm64-unpacked/koinos-ai-test"); if(b.subarray(0,4).toString("hex")!=="7f454c46" || b[4]!==2 || b[5]!==1 || b.readUInt16LE(18)!==183) throw Error("Packaged executable is not little-endian ELF64 AArch64")'
+      - name: Verify packaged Secret Service and temporary sessions on ARM64
+        timeout-minutes: 5
+        run: xvfb-run -a node scripts/verify-linux-wallet-storage.js --app-dir dist/linux-arm64-unpacked
+        env:
+          KAI_NATIVE_QA_DIR: wallet-flow-qa
+      - name: Record ARM64 candidate identities
+        run: |
+          mkdir -p wallet-flow-qa
+          node -e 'require("fs").writeFileSync("wallet-flow-qa/candidate-arm64.json",JSON.stringify({desktop:process.env.GITHUB_SHA,backend:process.env.KAI_WALLET_BACKEND_COMMIT,run:process.env.GITHUB_RUN_ID,platform:process.platform,arch:process.arch,published:false,physicalPi:false},null,2)+"\n")'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wallet-flow-review-Linux-ARM64-evidence
+          path: wallet-flow-qa/*.json
+          if-no-files-found: ignore
+          retention-days: 7
+
   windows-native:
     runs-on: windows-latest
     timeout-minutes: 40
@@ -118,6 +173,7 @@ jobs:
           "KAI_TEST_CHROMIUM=$kaiChromium" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "KAI_WALLET_BACKEND=$env:GITHUB_WORKSPACE\verification-wallet-backend" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Verify Windows credit, purchase and earning behavior
+        timeout-minutes: 12
         run: node --test --test-concurrency=1 core/test/wallet-credit-account.test.js core/test/provider-device.test.js core/test/credit-provider.test.js core/test/credit-purchases.test.js core/test/purchase-wallet.browser.test.js core/test/wallet-first-integration.test.js core/test/wallet-first-ui.browser.test.js core/test/credit-wallet-ipc.test.js core/test/session-free-chat.test.js core/test/koin-prepaid-chat.test.js core/test/koin-provider-status.test.js core/test/worker-proof.test.js core/test/worker-advertise.test.js core/test/worker-model-selection.test.js core/test/worker-start-stop.test.js core/test/worker-registration-retirement.test.js
       - name: Verify real Windows profile exclusion and encrypted credential reuse
         run: node scripts/verify-shared-profile.js

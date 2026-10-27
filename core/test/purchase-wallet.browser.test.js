@@ -427,3 +427,25 @@ test("wallet connection and secure-storage blockers expose the matching setup ac
   assert.equal(await buy.isDisabled(), true);
   assert.equal(await count("purchase-preview"), 0); assert.equal(await count("purchase-approve"), 0);
 });
+
+test("read-only KOIN estimates continue while the sidebar wallet balance is pending or unavailable without enabling Buy", options, async t => {
+  const { page, buy, setOffline, holdWallet, finishWallet, reopen, count } = await fixture(t, true);
+  setOffline(true); const started = holdWallet(); await reopen(); await started;
+  assert.equal(await buy.isDisabled(), true);
+  await page.fill("#product-usd-amount", "5"); await page.clock.runFor(351);
+  await page.waitForFunction(() => document.getElementById("product-quote-koin").textContent === "10 KOIN");
+  assert.equal(await buy.isDisabled(), true, "a price preview does not bypass pending wallet checks");
+  finishWallet(); await page.waitForFunction(() => !document.getElementById("product-purchase-check").disabled);
+  assert.match(await page.locator("#product-purchase-detail").textContent(), /RPC unavailable/);
+  assert.equal(await buy.isDisabled(), true);
+  await page.fill("#product-usd-amount", "10"); await page.clock.runFor(351);
+  await page.waitForFunction(() => document.getElementById("product-quote-koin").textContent === "20 KOIN");
+  assert.equal(await page.locator("#product-model-pricing-table").isVisible(), true);
+  await page.evaluate(() => { window.quoteMultiplier = 3; }); await page.clock.runFor(30001);
+  await page.waitForFunction(() => document.getElementById("product-quote-koin").textContent === "30 KOIN");
+  assert.equal(await buy.isDisabled(), true); assert.equal(await count("purchase-preview"), 0); assert.equal(await count("purchase-approve"), 0);
+  await page.evaluate(() => { window.quoteFailure = "Price source unavailable"; });
+  await page.fill("#product-usd-amount", "5"); await page.clock.runFor(351);
+  await page.waitForFunction(() => document.getElementById("product-quote-koin").textContent === "Price unavailable");
+  assert.match(await page.locator("#product-quote-state").textContent(), /Price source unavailable/);
+});
