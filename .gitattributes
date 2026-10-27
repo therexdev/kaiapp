@@ -1,2 +1,4 @@
 # Preserve the exact evidence-pack bytes in Windows and Unix installers.
 core/provider-check/candidates.json text eol=lf
+# Keep the pinned GGUF chat template byte-identical on Windows checkouts.
+core/test/fixtures/gemma3-original-chat-template.jinja text eol=lf
