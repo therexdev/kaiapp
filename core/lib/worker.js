@@ -2,6 +2,7 @@
 
 const crypto = require("crypto");
 const { presenceHash } = require("./koin-network/presence");
+const ProviderDiagnostics = require("./koin-network/provider-diagnostics");
 
 /*
  * Earn worker (M2 step 3, §5.7): started by the Earn toggle. Connects
@@ -78,6 +79,8 @@ class Worker {
     // Health fields exist so "Earning" in the UI can never silently mean
     // "talking to nobody": the Earn tab renders last contact and last error.
     this.stats = { jobsDone: 0, receiptsAccepted: 0, since: null, lastPollOkAt: null, lastJobAt: null, lastError: null };
+    this._modelDiagnostics = new Map();
+    this._diagnosticAddress = this.address;
     this._loop = null;
     this._pollAbort = null; // aborts the idle long-poll so stop is immediate (§10)
     /*
@@ -159,6 +162,7 @@ class Worker {
   }
 
   status() {
+    if (this._diagnosticAddress !== this.address) { this._modelDiagnostics.clear(); this._diagnosticAddress = this.address; }
     return {
       running: this.running,
       scheduler: this.schedulerUrl || null,
@@ -184,6 +188,7 @@ class Worker {
       backoff: this._backoff,
       backoffReason: this.backoffReason,
       ...this.stats,
+      modelDiagnostics: ProviderDiagnostics.sanitize([...this._modelDiagnostics.values()], Object.keys(this.modelPins || {})),
     };
   }
 
@@ -498,6 +503,7 @@ class Worker {
     this._startGeneration++;
     this._registerAbort?.abort();
     this.running = false;
+    this._modelDiagnostics.clear();
     this._workAbort?.abort();
     this._networkPauseRelease?.(); this._networkPauseRelease = null;
     this._shadowAbort?.abort();
@@ -553,7 +559,7 @@ class Worker {
     }
   }
 
-  async _prepareQualification(job) {
+  async _prepareQualification(job, onStage = () => {}) {
     if (!this.providerSigner || !this.qualificationTarget || !this.modelPins) throw Error("Scoped model preparation is unavailable");
     this._assertModelOffered(job);
     const checked = require("./koin-network/qualification-protocol").validatePreparation(job, this.models?.catalog, this.qualificationTarget);
@@ -562,7 +568,7 @@ class Worker {
     const signal = AbortSignal.any([this._shadowAbort.signal, this._workAbort?.signal || new AbortController().signal,
       AbortSignal.timeout(Math.max(1, checked.expiresAt - Date.now()))]);
     const current = () => { signal.throwIfAborted(); if (!this.running || this._backoff) throw Error("Provider preparation stopped"); this._assertModelOffered(checked); };
-    current(); this.onEvent({ type: "worker:model-warming", model: checked.model });
+    current(); onStage("preparing"); this.onEvent({ type: "worker:model-warming", model: checked.model });
     let hold, accepting = true, aborted;
     const cancelled = new Promise((_, reject) => { aborted = () => reject(signal.reason); signal.addEventListener("abort", aborted, { once: true }); });
     // Runtime loading is shared with local Chat. Stop must release any late
@@ -611,6 +617,7 @@ class Worker {
         let job = null, idleTimer, idleExpired = false;
         try {
           this._pollAbort = new AbortController();
+          const pollStarted = performance.now();
           // Public prepaid jobs do not wake the older scheduler's parked legacy
           // poll. Refresh that idle request without waiting its full twenty
           // seconds. Once headers arrive, keep the normal body deadline so an
@@ -645,6 +652,23 @@ class Worker {
             this.stats.lastPollOkAt = new Date().toISOString();
             this.stats.lastError = null;
           }
+          if (!job) {
+            // Scoped providers return an immediate 204 when no paid or
+            // qualification work is due; older replies may return a null job.
+            // Space these successful idle requests by one second;
+            // a real long poll already supplies that wait. Release admission
+            // so a local check or model-selection drain is not held by idle.
+            const remaining = Math.max(0, Math.min(1000, 1000 - (performance.now() - pollStarted)));
+            if (remaining > 0 && this.running && !this._backoff) {
+              admission?.release(); admission = null;
+              await new Promise(resolve => {
+                const signal = this._pollAbort.signal;
+                const done = () => { clearTimeout(timer); signal.removeEventListener("abort", done); resolve(); };
+                const timer = setTimeout(done, remaining);
+                signal.addEventListener("abort", done, { once: true }); if (signal.aborted) done();
+              });
+            }
+          }
         } catch {
           // Stop aborts the idle poll; anything else is the scheduler being
           // unreachable — back off, keep trying while enabled.
@@ -655,6 +679,7 @@ class Worker {
           continue;
         } finally { clearTimeout(idleTimer); }
         if (!job || !this.running) continue;
+        let qualificationStage = ["koin-provider-prepare", "koin-provider-qualification"].includes(job.type) ? "validating" : null;
 
         // Heartbeat while executing: generation and model switching take
         // minutes, no polls happen meanwhile, and a silent worker used to
@@ -673,7 +698,7 @@ class Worker {
           }
         }, 25000);
         try {
-          if (job.type === "koin-provider-prepare") { await this._prepareQualification(job); continue; }
+          if (job.type === "koin-provider-prepare") { await this._prepareQualification(job, stage => { qualificationStage = stage; }); continue; }
           this.providerSigner?.assign(job);
           if (job.type === "koin-provider-qualification") {
             if (!this.qualificationTarget) throw Error("Automatic qualification is not enabled for this connection");
@@ -681,8 +706,10 @@ class Worker {
             const qualification = require("./koin-network/qualification-protocol"), P = require("./koin-network/job-protocol");
             const checked = qualification.validate(job, this.models?.catalog, this.qualificationTarget);
             this._executing = true; this._shadowAbort = new AbortController();
-            const result = await require("./koin-network/shadow-worker").executeShadow({ job: checked.challenge, catalog: this.models?.catalog, runtime: this.runtime, signal: this._shadowAbort.signal });
+            const result = await require("./koin-network/shadow-worker").executeShadow({ job: checked.challenge, catalog: this.models?.catalog, runtime: this.runtime, signal: this._shadowAbort.signal,
+              onStage: stage => { qualificationStage = stage; } });
             this._shadowAbort.signal.throwIfAborted(); if (!this.running) throw Error("Provider qualification stopped");
+            qualificationStage = "reporting";
             const signature = this.providerSigner ? await this.providerSigner.qualification(job, P.hash(result.output)) : await this.wallet.signHash(qualification.resultHash(checked, P.hash(result.output)));
             this._shadowAbort.signal.throwIfAborted(); if (!this.running) throw Error("Provider qualification stopped");
             const response = await fetch(`${this.schedulerUrl}/koin/provider/qualification/result?token=${this.token}`, { method: "POST", redirect: "error",
@@ -690,6 +717,7 @@ class Worker {
               body: JSON.stringify({ jobId: checked.challenge.id, output: result.output, signature }) });
             const value = await require("./koin-network/shadow-worker").readJson(response, 4096);
             if (value.accepted !== true || !["testing", "qualified", "failed"].includes(value.qualification?.state)) throw Error("Qualification result was not acknowledged");
+            this._modelDiagnostics.delete(checked.challenge.model);
             this.stats.qualification = value.qualification;
             this.onEvent({ type: "worker:qualification", qualification: value.qualification });
             continue;
@@ -765,6 +793,11 @@ class Worker {
           if (jr.accepted) this.stats.receiptsAccepted += 1;
           this.onEvent({ type: "worker:job-done", jobId: job.id, accepted: !!jr.accepted });
         } catch (e) {
+          const model = job.type === "koin-provider-prepare" ? job.model : job.challenge?.model;
+          if (qualificationStage && this.running && !this._backoff && this.modelPins?.[model] && this._modelOffered(model) && this._diagnosticAddress === this.address) {
+            this._modelDiagnostics.set(model, { model, code: ProviderDiagnostics.code(qualificationStage, e,
+              job.type === "koin-provider-prepare" ? job.expiresAt : job.challenge?.deadline), at: Date.now() });
+          }
           this.stats.lastError = `last job failed: ${String(e.message)}`;
           this.onEvent({ type: "worker:job-failed", jobId: job.id, message: String(e.message) });
         } finally {

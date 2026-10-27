@@ -1,3 +1,11 @@
+## Earning stays available while other models are checked
+
+- Fixed a scheduler loop in which repeated failed model checks could keep replacing an already-qualified model. Qualified selected capacity returns between checks, failed models retry fairly after a bounded pause, and paid requests can run between benchmark answers. A live assigned check is never interrupted or replaced.
+- Idle providers wait between empty polls, keeping network traffic bounded while Stop stays responsive.
+- Earn now shows each model's qualification score and the available failure details. Loading, tokenizer, runtime and reporting errors remain visible across idle polls instead of disappearing behind a generic retry message. Local diagnostics never grant network eligibility.
+- Models still need their own fresh signed passing checks. An actual run of the pinned Fast model completed quickly with matching token IDs but passed 10 of the required 12 cases; the two failures were JSON formatting and instruction priority. Installation alone does not mean every selected model has qualified.
+- This fix includes a narrow Vultr service update followed by the app update. The service updater preserves the existing configuration, keys, balances, payments, reward records and qualification evidence, and verifies the new scheduler on both loopback and HTTPS.
+
 ## Faster payment review with visible confirmation progress
 
 - Buy credits shares repeated deployment and chain checks within each short preparation phase. Approval starts a new verification phase, so current policy, wallet and nonce checks still run before signing. A slow read endpoint can use the pinned backup sooner; a broadcast is never duplicated by that read fallback.

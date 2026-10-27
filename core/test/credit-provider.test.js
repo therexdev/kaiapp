@@ -61,6 +61,17 @@ test("current wallet requirements replace a stale connection error and a success
   f.c.flow.models = async () => { throw Error("Catalog is unavailable"); };
   info = await p.info(); assert.equal(info.state, "unavailable"); assert.equal(info.detail, "Catalog is unavailable");
 });
+test("provider info forwards only bounded current-model diagnostics and removes them for changed identity or Off", async t => {
+  const f = fixture(t), p = f.controller; f.installed = true; await p.start(AbortSignal.timeout(5000));
+  const now = Date.now(), diagnostic = { model: "fixture", code: "tokenizer_mismatch", at: now };
+  p.worker.status = () => ({ lastError: "private raw runtime error", modelDiagnostics: [{ ...diagnostic, message: "private prompt" },
+    { model: "unselected", code: "inference_failed", at: now }, { model: "fixture", code: "secret-error", at: now }] });
+  let info = await p.info(); assert.deepEqual(info.modelDiagnostics, [diagnostic]);
+  assert.equal(JSON.stringify(info).includes("private"), false); assert.equal(info.running, true);
+  const current = p.context; p.context = { ...current, auth: { sessionToken: "different-session" } };
+  assert.deepEqual((await p.info()).modelDiagnostics, []); p.context = current;
+  await p.stop(); info = await p.info(); assert.deepEqual(info.modelDiagnostics, []); assert.equal(info.enabled, false);
+});
 test("Stop during startup prevents a delayed runtime acquisition from turning sharing back on", async t => {
   const f = fixture(t); f.installed = true;
   let ready, release; const entered = new Promise(r => { ready = r; });

@@ -654,6 +654,35 @@
     return { ...status, state: "checking", label: "WAITING FOR NETWORK", qualification: undefined,
       detail: "Sharing is on. None of your selected models is ready for paid work yet. See each model’s network status below." };
   }
+  function qualificationDetail(q, model = "") {
+    if (!q) return "";
+    let detail = `Network check: ${q.passed}/${q.total} passed · ${q.completed}/${q.total} completed${model ? ` · ${model}` : ""}.`;
+    detail += Number.isSafeInteger(q.required) ? ` Required: ${q.required}/${q.total}.` : " Required score was not reported by this server.";
+    if (q.phase === "preparing") detail += " Preparing the model before timed checks.";
+    if (q.state === "failed") {
+      const f = q.failure;
+      if (f?.code === "preparation_timeout") detail += " Model preparation did not finish before its deadline.";
+      if (f?.wrongAnswers > 0) detail += ` ${f.wrongAnswers} answer${f.wrongAnswers === 1 ? "" : "s"} did not match the required output.`;
+      if (f?.deadlines > 0) detail += ` ${f.deadlines} check${f.deadlines === 1 ? "" : "s"} did not finish before the deadline.`;
+      if (!f || f.code === "unknown") detail += " The network did not report a complete failure reason.";
+      if (Number.isSafeInteger(q.retryAt)) {
+        const at = new Date(q.retryAt).toLocaleTimeString();
+        detail += q.retryAt > Date.now() ? ` Automatic retry scheduled for ${at}.` : ` Retry was scheduled for ${at}; waiting for the next network check.`;
+      }
+    }
+    return detail;
+  }
+  function localProviderDetail(info, model) {
+    const messages = { preparation_timeout: "Model loading did not finish before the check deadline.", model_load_failed: "The local engine could not load this model.",
+      runtime_unavailable: "The required local engine was not ready.", tokenizer_mismatch: "The local tokenizer did not match the network's pinned tokenizer.",
+      tokenizer_unavailable: "The local engine could not verify the prompt's tokens.", inference_timeout: "The local check did not finish before its deadline.",
+      inference_failed: "The local engine could not complete the check.", result_unconfirmed: "The network did not acknowledge the signed check result.",
+      check_invalid: "The assigned check could not be verified on this computer." };
+    if (!Array.isArray(info.modelDiagnostics) || info.modelDiagnostics.length > 64) return "";
+    const d = info.modelDiagnostics.find(d => d?.model === model && Object.hasOwn(messages, d.code) && Number.isSafeInteger(d.at) &&
+      d.at >= 0 && d.at <= Date.now() + 5000 && Date.now() - d.at <= 86400000);
+    return d ? `Last local check error (${new Date(d.at).toLocaleTimeString()}): ${messages[d.code]}` : "";
+  }
   function paintProviderModels() {
     const info = providerModelInfo; if (!info?.selection || !providerSelectionDraft) return;
     const models = providerModelRows(), selected = selectedProviderModels(info.selection, models), draft = selectedProviderModels(providerSelectionDraft, models);
@@ -681,11 +710,14 @@
       else if (row?.state === "online") { label = "Available for paid work"; state = "online"; }
       else if (row?.state === "review-required") { label = "Network approval needed"; detail = row.detail || "The network has not approved this model for paid work."; state = "blocked"; }
       else if (row?.state === "update-required") { label = "App update needed"; detail = row.detail; state = "blocked"; }
-      else if (row?.state === "qualification-failed") { label = "Network check not passed"; detail = "Another network check runs automatically."; state = "blocked"; }
-      else if (row?.state === "qualifying") { label = "Checking model"; detail = row.qualification ? `${row.qualification.passed}/${row.qualification.total} checks passed` : "The network is checking this model."; state = "checking"; }
+      else if (row?.state === "qualification-failed") { label = "Network check not passed"; detail = row.qualification ? qualificationDetail(row.qualification) : "The server did not provide check results or a failure reason. Another network check runs automatically."; state = "blocked"; }
+      else if (row?.state === "qualifying") { label = row.qualification?.phase === "preparing" ? "Preparing model" : "Checking model"; detail = row.qualification ? qualificationDetail(row.qualification) : "The network is checking this model."; state = "checking"; }
       else if (row?.state === "preparing") { label = "Preparing model"; state = "checking"; }
       else if (row?.state === "network-paused") { label = "Network reconnecting"; state = "checking"; }
       else { label = "Waiting for network qualification"; state = "checking"; }
+      if (!dirty && !providerBusy && !providerModelsStale && info.enabled && info.running && selected.has(model.id) && offered.has(model.id) && row?.state !== "online") {
+        detail = [detail, localProviderDetail(info, model.id)].filter(Boolean).join(" ");
+      }
       return `<div class="product-provider-model-row" data-shared-model="${esc(model.id)}"><label><input type="checkbox" data-provider-shared-model="${esc(model.id)}" ${draft.has(model.id) && model.compatible ? "checked" : ""} ${providerBusy || !model.compatible ? "disabled" : ""} /><span>${esc(model.label || model.id)}</span></label><div><span class="product-model-status" data-state="${state}">${esc(label)}</span>${detail ? `<small>${esc(detail)}</small>` : ""}</div></div>`;
     }).join("") || '<p class="product-fine">No compatible installed models found.</p>';
     if (active) $("product-provider-model-list").querySelector(`[data-provider-shared-model="${CSS.escape(active)}"]`)?.focus({ preventScroll: true });
@@ -781,11 +813,7 @@
         progress.hidden = !q; progress.textContent = "";
         if (q) {
           const model = info.models?.find(m => m.id === value.model)?.label || value.model;
-          progress.textContent = `Network check: ${q.passed}/${q.total} passed · ${q.completed}/${q.total} completed${model ? ` · ${model}` : ""}.`;
-          if (q.state === "failed" && Number.isSafeInteger(q.retryAt)) {
-            const at = new Date(q.retryAt).toLocaleTimeString();
-            progress.textContent += q.retryAt > Date.now() ? ` Automatic retry scheduled for ${at}.` : ` Retry was scheduled for ${at}; waiting for the next network check.`;
-          }
+          progress.textContent = qualificationDetail(q, model);
         }
         $("product-provider-readiness").textContent = value.state === "online" ? "Model ready · qualification current · fresh network confirmation" : q
           ? "The local check is diagnostic. Paid work needs a passing network check."

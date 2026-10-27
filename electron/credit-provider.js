@@ -153,9 +153,12 @@ class CreditProvider {
       // A successful read while Off supersedes earlier connection failures.
       // Current setup requirements always take priority over a saved error.
       if (!blocked && !enabled && !this.busy) this.error = "";
+      const modelDiagnostics = !blocked && enabled && this.worker?.running && this.context?.directory === c.directory &&
+        this.context?.auth.sessionToken === c.auth.sessionToken
+        ? require("../core/lib/koin-network/provider-diagnostics").sanitize(this.worker.status?.()?.modelDiagnostics, Object.keys(c.offeredModelPins || {})) : [];
       return { ...(this.device?.describe() || {}), state: blocked ? blockedState : selectionError ? "model-required" : this.downloading ? "downloading" : !model.installed ? "download-required" : this.busy ? "starting" : "ready", blocked,
         model, models, automatic: true, selection: this.selection(c), modelAvailability: c.modelAvailability,
-        offeredModels: this.selected(c, models).filter(m => m.installed).map(m => m.id), enabled, running: !!this.worker?.running, progress: progress ? { pct: progress.pct } : null,
+        offeredModels: this.selected(c, models).filter(m => m.installed).map(m => m.id), modelDiagnostics, enabled, running: !!this.worker?.running, progress: progress ? { pct: progress.pct } : null,
         detail: blocked || selectionError || this.error || (!model.installed ? "Download an approved model to this computer, then start earning." : "Ready to connect. Start earning offers your selected installed models and loads them automatically when needed. The network checks each model before paid work.") };
     } catch (e) { return { ...(this.device?.describe() || {}), state: e.code || "unavailable", canAuthorize: ["authorization-required", "authorization-expired", "authorization-revoked", "secure-storage-required"].includes(e.code), enabled: !!this.context && this.preference(this.context), running: !!this.worker?.running, detail: e.message }; }
   }

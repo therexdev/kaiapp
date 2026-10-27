@@ -69,3 +69,29 @@ test("network qualification rejects malformed, inconsistent and overflowing prog
   row.qualification = { state: "testing", passed: 3, completed: 4, total: 12, retryAt: null };
   assert.deepEqual((await readProviderStatus(options)).qualification, row.qualification);
 });
+
+test("qualification failure reasons and required scores are bounded, truthful, and never carry answer content", async () => {
+  const now = Date.now(), config = { schedulerUrl: "https://test.example", owner: "provider", model: "fast", mode: "mainnet-pilot" };
+  const good = { state: "failed", passed: 10, completed: 12, total: 12, required: 12, retryAt: now + 300000,
+    failure: { code: "quality", wrongAnswers: 2, deadlines: 0, unknown: 0, output: "private answer" }, prompt: "private prompt" };
+  const row = { address: config.owner, model: config.model, state: "qualification-failed", asOf: now, validUntil: now + 15000, qualification: good };
+  const value = { mode: config.mode, mainnetPaymentsEnabled: true, providers: [row] };
+  const options = { config, access: { authorize: () => ({ sessionToken: "private" }) }, signal: new AbortController().signal, clock: () => now, fetchImpl: async () => Response.json(value) };
+  const status = await readProviderStatus(options);
+  assert.equal(status.state, "qualification-failed"); assert.equal(status.qualification.required, 12);
+  assert.deepEqual(status.qualification.failure, { code: "quality", wrongAnswers: 2, deadlines: 0, unknown: 0 });
+  assert.equal(JSON.stringify(status).includes("private"), false);
+  for (const patch of [{ required: 0 }, { required: 13 }, { required: "12" }, { phase: "answering" },
+    { failure: null }, { failure: { code: "untrusted" } }, { failure: { code: "quality", wrongAnswers: 1, deadlines: 0, unknown: 0 } },
+    { failure: { code: "quality", wrongAnswers: 0, deadlines: 2, unknown: 0 } }, { failure: { code: "deadline", wrongAnswers: 2, deadlines: 0, unknown: 0 } },
+    { failure: { code: "quality_and_deadline", wrongAnswers: 2, deadlines: 0, unknown: 0 } }, { failure: { code: "unknown", wrongAnswers: -1, deadlines: 3, unknown: 0 } },
+    { failure: { code: "preparation_timeout", wrongAnswers: 2, deadlines: 0, unknown: 0 } }]) {
+    row.qualification = { ...good, ...patch }; await assert.rejects(readProviderStatus(options), /qualification/);
+  }
+  for (const code of ["preparation_timeout", "unknown"]) {
+    row.qualification = { ...good, passed: 3, completed: 3, failure: { code, wrongAnswers: 0, deadlines: 0, unknown: 0 } };
+    assert.equal((await readProviderStatus(options)).qualification.failure.code, code, "partial completed answers may all pass before preparation fails");
+  }
+  row.state = "qualifying"; row.qualification = { state: "testing", passed: 3, completed: 3, total: 12, required: 12, phase: "preparing", retryAt: null };
+  assert.equal((await readProviderStatus(options)).qualification.phase, "preparing");
+});

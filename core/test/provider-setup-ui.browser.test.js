@@ -228,6 +228,60 @@ async function sharingFixture(t) {
     row: id => page.locator(`[data-shared-model="${id}"]`), check: id => page.locator(`[data-provider-shared-model="${id}"]`) };
 }
 
+test("Earn explains each failed model with verified counts and bounded local errors without inventing readiness", { skip: !fs.existsSync(CHROMIUM), timeout: 90000 }, async t => {
+  const { page, reload, toggle, row } = await sharingFixture(t);
+  await page.evaluate(() => {
+    const original = window.kaiKoinTestBridge.run;
+    window.kaiKoinTestBridge.run = async (action, input) => {
+      const result = await original(action, input);
+      if (action === "provider-public-info") result.modelDiagnostics = [
+        { model: "koinos-smart", code: "inference_failed", at: Date.now() },
+        { model: "koinos-vision", code: "tokenizer_mismatch", at: Date.now(), message: "private runtime path" },
+        { model: "koinos-think", code: "private server text", at: Date.now() }];
+      if (action === "provider-public-status") {
+        const fail = (model, qualification) => ({ model, state: "qualification-failed", label: "NETWORK CHECK FAILED", validUntil: Date.now() + 15000, qualification });
+        result.models = [result.models[0],
+          fail("koinos-fast", { state: "failed", passed: 10, completed: 12, total: 12, required: 12, retryAt: Date.now() + 300000,
+            failure: { code: "quality", wrongAnswers: 2, deadlines: 0, unknown: 0 } }),
+          fail("koinos-coder", { state: "failed", passed: 0, completed: 12, total: 12, required: 12, retryAt: Date.now() + 300000,
+            failure: { code: "deadline", wrongAnswers: 0, deadlines: 12, unknown: 0 } }),
+          fail("koinos-vision", { state: "failed", passed: 0, completed: 0, total: 12, retryAt: Date.now() + 300000 }),
+          fail("koinos-think"),
+          fail("koinos-pro", { state: "failed", passed: 3, completed: 3, total: 12, required: 12, retryAt: Date.now() + 300000,
+            failure: { code: "preparation_timeout", wrongAnswers: 0, deadlines: 0, unknown: 0 } }),
+          { model: "koinos-plus", state: "qualifying", label: "CHECKING MODEL", validUntil: Date.now() + 15000,
+            qualification: { state: "testing", passed: 0, completed: 0, total: 12, required: 12, phase: "preparing", retryAt: null } }];
+      }
+      return result;
+    };
+  });
+  await reload.click();
+  await page.waitForFunction(() => document.querySelector('[data-shared-model="koinos-fast"]').textContent.includes("10/12 passed"));
+  assert.match(await row("koinos-fast").textContent(), /10\/12 passed · 12\/12 completed.*Required: 12\/12.*2 answers did not match.*Automatic retry scheduled/);
+  assert.match(await row("koinos-coder").textContent(), /12 checks did not finish before the deadline/);
+  assert.doesNotMatch(await row("koinos-coder").textContent(), /did not match the required output/);
+  assert.match(await row("koinos-vision").textContent(), /0\/12 completed.*Required score was not reported.*did not report a complete failure reason.*Last local check error.*tokenizer/);
+  assert.doesNotMatch(await row("koinos-vision").textContent(), /Model preparation did not finish/);
+  assert.match(await row("koinos-think").textContent(), /did not provide check results or a failure reason/);
+  assert.match(await row("koinos-pro").textContent(), /3\/12 passed · 3\/12 completed.*Model preparation did not finish/);
+  assert.match(await row("koinos-plus").textContent(), /Preparing model.*Preparing the model before timed checks/);
+  assert.doesNotMatch(await row("koinos-smart").textContent(), /Last local check error/);
+  assert.equal(await page.locator('.product-model-status[data-state="online"]').count(), 1);
+  assert.doesNotMatch(await page.locator("#product-provider-model-list").textContent(), /private runtime path|private server text/);
+  if (process.env.KAI_PREPAID_QA_DIR) {
+    fs.mkdirSync(process.env.KAI_PREPAID_QA_DIR, { recursive: true });
+    await page.locator("#product-provider-models-open").click();
+    await page.screenshot({ path: path.join(process.env.KAI_PREPAID_QA_DIR, "provider-failure-details.png"), animations: "disabled" });
+    await page.setViewportSize({ width: 780, height: 560 });
+    await page.locator("#product-provider-models").evaluate(node => node.scrollIntoView({ block: "start" }));
+    assert.equal(await page.locator("#view-earn").evaluate(node => node.scrollWidth <= node.clientWidth), true);
+    await page.screenshot({ path: path.join(process.env.KAI_PREPAID_QA_DIR, "provider-failure-details-narrow.png"), animations: "disabled" });
+  }
+  await toggle.click(); await page.waitForFunction(() => document.getElementById("product-provider-toggle").textContent === "Start earning");
+  assert.doesNotMatch(await page.locator("#product-provider-model-list").textContent(), /Last local check error/);
+  assert.equal(await page.locator('.product-model-status[data-state="online"]').count(), 0);
+});
+
 test("Earn exposes all installed models and applies a subset without confusing selection with network readiness", { skip: !fs.existsSync(CHROMIUM), timeout: 90000 }, async t => {
   const { page, reload, toggle, all, apply, row, check } = await sharingFixture(t);
   assert.equal(await all.isChecked(), true);
@@ -236,7 +290,7 @@ test("Earn exposes all installed models and applies a subset without confusing s
   assert.equal(await apply.isVisible(), false);
   assert.match(await row("koinos-smart").textContent(), /Available for paid work/);
   assert.match(await row("koinos-fast").textContent(), /Network approval needed/);
-  assert.match(await row("koinos-coder").textContent(), /Checking model.*2\/12 checks passed/);
+  assert.match(await row("koinos-coder").textContent(), /Checking model.*2\/12 passed/);
   assert.match(await row("koinos-vision").textContent(), /Waiting for network qualification/);
   assert.equal(await check("koinos-large").isDisabled(), true); assert.match(await row("koinos-large").textContent(), /Needs 64 GB/);
   assert.equal(await page.locator('.product-model-status[data-state="online"]').count(), 1);

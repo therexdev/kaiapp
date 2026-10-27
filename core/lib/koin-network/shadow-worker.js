@@ -11,11 +11,12 @@ async function readJson(response, max = 1500000) {
   }
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
-async function executeShadow({ job, catalog, runtime, signal, onChunk }) {
+async function executeShadow({ job, catalog, runtime, signal, onChunk, onStage = () => {} }) {
   const j = ["koin-funded-rehearsal-chat", "koin-mainnet-pilot-chat"].includes(job?.type) ? require("./funded-protocol").validateJob(job, catalog) : validateJob(job, catalog), q = j.quote;
   const abort = AbortSignal.any([signal || new AbortController().signal, AbortSignal.timeout(Math.max(1, j.deadline - Date.now()))]);
   abort.throwIfAborted();
   if (typeof runtime.acquireFor !== "function") throw Error("Shadow work requires a managed runtime lease");
+  onStage("loading");
   const hold = await runtime.acquireFor(j.model);
   try {
     abort.throwIfAborted();
@@ -25,6 +26,7 @@ async function executeShadow({ job, catalog, runtime, signal, onChunk }) {
         endpoint.username || endpoint.password || endpoint.search || endpoint.hash || endpoint.pathname !== "/") throw Error("Local runtime endpoint required");
     const post = (route, body) => fetch(endpoint.origin + route, { method: "POST", redirect: "error",
       headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: abort });
+    onStage("tokenizing");
     const tokenized = await readJson(await post("/tokenize", { content: j.prompt, add_special: false, parse_special: true }));
     if (!Array.isArray(tokenized.tokens) || tokenized.tokens.length !== q.inputTokens ||
         tokenized.tokens.some((v) => !Number.isSafeInteger(v) || v < 0) ||
@@ -32,6 +34,7 @@ async function executeShadow({ job, catalog, runtime, signal, onChunk }) {
     // Execute the verified IDs, not a string that llama.cpp tokenizes again
     // with add_special=true (which can insert an extra BOS/EOS token).
     // Only text inference parameters cross this boundary.
+    onStage("answering");
     const response = await post("/completion", { prompt: tokenized.tokens, n_predict: q.maxOutput,
       temperature: 0, stream: j.stream === true, cache_prompt: false });
     let result;
