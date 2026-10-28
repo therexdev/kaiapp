@@ -74,10 +74,11 @@
   $("earn-setup").querySelector("h2").textContent = "Create your wallet";
   $("earn-unlock").querySelector("h2").textContent = "Unlock your wallet";
   oldEarn.insertAdjacentHTML("beforeend", '<p id="product-legacy-error" class="error" role="status" hidden></p>');
-  $("view-earn").insertAdjacentHTML("afterbegin", `<div class="product-earn">${head("Share your AI. Earn KOIN.", "Contribute this computer’s spare AI capacity to the network.")}<div class="product-two"><section class="product-panel product-provider"><div class="product-row"><span>Share AI capacity</span><button id="product-provider-toggle" aria-describedby="product-provider-start-hint product-provider-readiness" disabled role="switch" aria-checked="false" aria-label="Share AI capacity">Start earning</button></div><p id="product-provider-start-hint" class="product-fine">Click the button to start earning.</p><div class="product-provider-state"><span class="product-live-dot"></span><h2 id="product-provider-label">OFFLINE</h2><p id="product-provider-detail">Sharing is off. Turn it on when you’re ready.</p></div><div class="product-divider"></div><strong id="product-provider-model">Model not confirmed</strong><p id="product-provider-readiness" class="product-fine">Waiting for current model and network confirmation.</p></section><div><section class="product-panel"><p class="product-eyebrow">AI provider earnings</p><p id="product-provider-earnings">No verified earnings loaded.</p><p class="product-fine">KOIN rewards are separate from chat credits.</p><button data-product-action="payouts">Refresh earnings</button></section><section class="product-panel"><h2>Connection</h2><details id="product-provider-options"><summary>Models and diagnostics</summary><div id="product-provider-model-choice"><label for="product-provider-model-pick">Startup model</label><select id="product-provider-model-pick" disabled aria-describedby="product-provider-model-help"><option value="">Checking models…</option></select><p id="product-provider-model-help" class="product-fine">Sharing prepares installed models automatically. This optional choice only changes the startup model.</p></div><div id="product-provider-check"><h3 data-check-model>Local model check</h3><p data-check-detail role="status">Check the model currently running locally. No account or credits needed.</p><progress data-check-progress aria-label="Local model check progress" hidden></progress><p data-check-summary class="product-fine"></p><div class="product-actions"><button data-check-start data-check-action="start" class="primary">Check this computer</button><button data-check-cancel data-check-action="cancel" hidden>Cancel check</button><button data-check-copy data-check-action="copy" hidden>Copy report</button><button data-check-save data-check-action="save" hidden>Save report</button></div><p data-check-export class="product-fine" role="status"></p><p class="product-fine">This local check is diagnostic only. The network check runs automatically while earning is on.</p></div></details><div class="product-divider"></div><p id="product-provider-setup" role="status">Start earning to prepare the installed models and connect.</p><p id="product-provider-refresh" class="product-fine" role="status" hidden></p><div class="product-actions"><button id="product-provider-reload" data-product-action="provider-reload">Reload setup</button><button id="product-provider-revoke" data-product-action="provider-revoke" hidden>Remove device authorization</button><button id="product-provider-download" data-product-action="provider-download" hidden>Download approved model</button><button id="product-provider-cancel" data-product-action="provider-cancel" hidden>Cancel setup</button><button data-product-action="payment-wallet">Reward wallet</button></div></section></div></div></div>`);
-  $("product-provider-setup").insertAdjacentHTML("afterend", '<p id="product-provider-authorization" class="product-fine" hidden></p><p id="product-provider-action-notice" role="status" hidden></p>');
+  $("view-earn").insertAdjacentHTML("afterbegin", `<div class="product-earn">${head("Share your AI. Earn KOIN.", "Contribute this computer’s spare AI capacity to the network.")}<div class="product-two"><section class="product-panel product-provider"><div class="product-row"><span>Share AI capacity</span><button id="product-provider-toggle" aria-describedby="product-provider-start-hint product-provider-readiness" disabled role="switch" aria-checked="false" aria-label="Share AI capacity">Start earning</button></div><p id="product-provider-start-hint" class="product-fine">Click the button to start earning.</p><div class="product-provider-state"><span class="product-live-dot"></span><h2 id="product-provider-label">OFFLINE</h2><p id="product-provider-detail">Sharing is off. Turn it on when you’re ready.</p></div><div class="product-divider"></div><strong id="product-provider-model">Model not confirmed</strong><p id="product-provider-readiness" class="product-fine">Waiting for current model and network confirmation.</p></section><section id="product-provider-rewards" class="product-panel product-rewards" aria-labelledby="product-reward-title"><div class="product-row"><h2 id="product-reward-title">Reward activity</h2><span id="product-reward-auto" class="product-reward-auto" data-state="waiting"><i aria-hidden="true"></i><span>Auto updates</span></span></div><p class="product-reward-intro">Your KOIN rewards, as they are recorded and paid.</p><p id="product-reward-status" class="product-fine" role="status" aria-live="polite">Reward history loads automatically when you open Earn.</p><ol id="product-provider-earnings" class="product-reward-feed" aria-label="Reward activity" tabindex="0"><li class="product-reward-empty"><strong>Your rewards will appear here</strong><span>Recorded rewards and payment updates are shown automatically.</span></li></ol><p id="product-reward-updated" class="product-fine product-reward-updated">KOIN rewards are separate from chat credits.</p></section></div></div>`);
   $("product-provider-readiness").insertAdjacentHTML("afterend", '<button id="product-provider-models-open" hidden>Choose shared models</button>');
   $("view-earn").querySelector(".product-earn").insertAdjacentHTML("beforeend", `<section id="product-provider-models" class="product-panel product-provider-models" hidden><h2>Models you share</h2><label class="product-share-all"><input type="checkbox" id="product-provider-share-all" checked /> <span>Share all compatible installed models</span></label><p class="product-fine">Models load as needed. Each model must pass its network check and be approved before it can earn from paid work.</p><p id="product-provider-model-summary" role="status"></p><div id="product-provider-model-list"></div><p id="product-provider-selection-status" class="product-fine" role="status" hidden></p><div id="product-provider-selection-actions" class="product-actions" hidden><button id="product-provider-models-apply" class="primary">Apply selection</button><button id="product-provider-models-reset">Cancel changes</button></div></section>`);
+  $("product-provider-models").insertAdjacentHTML("afterend", `<details id="product-provider-advanced" class="product-panel product-provider-advanced"><summary>Connection and diagnostics</summary><div class="product-provider-advanced-content"><details id="product-provider-options"><summary>Models and diagnostics</summary><div id="product-provider-model-choice"><label for="product-provider-model-pick">Startup model</label><select id="product-provider-model-pick" disabled aria-describedby="product-provider-model-help"><option value="">Checking models…</option></select><p id="product-provider-model-help" class="product-fine">Sharing prepares installed models automatically. This optional choice only changes the startup model.</p></div><div id="product-provider-check"><h3 data-check-model>Local model check</h3><p data-check-detail role="status">Check the model currently running locally. No account or credits needed.</p><progress data-check-progress aria-label="Local model check progress" hidden></progress><p data-check-summary class="product-fine"></p><div class="product-actions"><button data-check-start data-check-action="start" class="primary">Check this computer</button><button data-check-cancel data-check-action="cancel" hidden>Cancel check</button><button data-check-copy data-check-action="copy" hidden>Copy report</button><button data-check-save data-check-action="save" hidden>Save report</button></div><p data-check-export class="product-fine" role="status"></p><p class="product-fine">This local check is diagnostic only. The network check runs automatically while earning is on.</p></div></details><div class="product-divider"></div><p id="product-provider-setup" role="status">Start earning to prepare the installed models and connect.</p><p id="product-provider-refresh" class="product-fine" role="status" hidden></p><div class="product-actions"><button id="product-provider-reload" data-product-action="provider-reload">Reload setup</button><button id="product-provider-revoke" data-product-action="provider-revoke" hidden>Remove device authorization</button><button id="product-provider-download" data-product-action="provider-download" hidden>Download approved model</button><button id="product-provider-cancel" data-product-action="provider-cancel" hidden>Cancel setup</button><button data-product-action="payment-wallet">Reward wallet</button></div></div></details>`);
+  $("product-provider-setup").insertAdjacentHTML("afterend", '<p id="product-provider-authorization" class="product-fine" hidden></p><p id="product-provider-action-notice" role="status" hidden></p>');
   $("product-provider-detail").insertAdjacentHTML("afterend", '<p id="product-provider-qualification" role="status" hidden></p>');
   const onboarding = $("view-onboarding"), oldOnboarding = onboarding.firstElementChild;
   oldOnboarding.classList.add("product-local-setup"); oldOnboarding.hidden = true;
@@ -108,7 +109,6 @@
     const start = document.querySelector('[data-koin-test="worker-start"]'), stop = document.querySelector('[data-koin-test="worker-stop"]'), on = !stop.hidden;
     const toggle = $("product-provider-toggle"); toggle.textContent = on ? "Stop earning" : "Start earning"; toggle.setAttribute("aria-checked", String(on)); $("product-provider-start-hint").hidden = on; toggle.disabled = !window.kaiKoinTestBridge || (on ? stop.disabled : start.disabled);
     $("product-provider-label").dataset.state = $("koin-provider-state").dataset.state;
-    $("product-provider-earnings").textContent = $("koin-payout-summary").textContent;
     $("product-provider-model").textContent = $("koin-model-label").textContent;
     $("product-provider-readiness").textContent = $("koin-provider-state").dataset.state === "online" ? "Model ready · qualification current · fresh network confirmation" : "Readiness is not confirmed. " + $("koin-provider-detail").textContent;
   }
@@ -693,16 +693,6 @@
       catch (e) { $("product-recovery-purchase").textContent = e.message; }
       finally { target.disabled = false; }
     }
-    if (action === "payouts") {
-      const node = $("product-provider-earnings"); node.textContent = "Checking reward history…";
-      try {
-        const result = await window.kaiKoinTestBridge.run("provider-public-earnings");
-        const koin = atoms => { const n = BigInt(atoms); return `${n / 100000000n}.${(n % 100000000n).toString().padStart(8, "0")}`; };
-        node.textContent = result.payouts.length ? result.payouts.map(p => `Day ${p.epoch} · ${koin(String(BigInt(p.availability) + BigInt(p.work)))} KOIN · ${p.state.replaceAll("_", " ")}`).join(" · ") : "No recorded payouts for this reward wallet yet.";
-        node.textContent += ` Observed ${new Date(result.observedAt).toLocaleString()}.`;
-        if (!result.lastCycleCheck || Date.now() - result.lastCycleCheck > 60000) node.textContent += " Reward processing is not freshly confirmed.";
-      } catch (e) { node.textContent = "Reward history unavailable. " + e.message; }
-    }
     if (action === "recover") { go("chat"); window.dispatchEvent(new Event("kai-network-recover")); }
     if (action === "first-back") { oldOnboarding.hidden = true; onboarding.querySelector(".product-first").scrollIntoView({ block: "start" }); }
     if (action === "setup-local") { oldOnboarding.hidden = false; oldOnboarding.scrollIntoView({ block: "start" }); }
@@ -710,6 +700,100 @@
     if (action === "start-free") { go("chat"); window.dispatchEvent(new Event("kai-network-use")); }
     if (action === "local") { go("chat"); $("src-pick").value = "local"; $("src-pick").dispatchEvent(new Event("change")); }
   });
+  // Public, read-only reward history. A page visit never signs or claims a payout.
+  const rewardView = $("view-earn"), rewardList = $("product-provider-earnings");
+  const rewardStates = {
+    queued: ["Queued", "pending"], signing: ["Preparing payment", "pending"], staged: ["Ready to submit", "pending"],
+    unknown: ["Checking payment", "pending"], pending: ["Payment pending", "pending"], reversible: ["Awaiting finality", "pending"],
+    needs_review: ["Needs attention", "attention"], paid: ["Paid", "paid"], paid_elsewhere: ["Paid", "paid"]
+  };
+  let rewardRevision = 0, rewardPending = false, rewardTimer, rewardSnapshot = null, rewardFailures = 0, rewardMarkup = "", rewardActive = false;
+  const rewardsVisible = () => !document.hidden && !rewardView.hidden && rewardView.isConnected;
+  const rewardAmount = value => { const n = BigInt(value), fraction = (n % 100000000n).toString().padStart(8, "0"); return `${(n / 100000000n).toLocaleString()}.${fraction}`; };
+  function rewardStatus(message, state) {
+    if ($("product-reward-status").textContent !== message) $("product-reward-status").textContent = message;
+    $("product-reward-auto").dataset.state = state;
+    $("product-reward-auto").lastElementChild.textContent = state === "updating" ? "Updating…" : state === "stale" ? "Reconnecting" : "Auto updates";
+  }
+  function resetRewards() {
+    rewardRevision++; clearTimeout(rewardTimer); rewardSnapshot = null; rewardFailures = 0; rewardMarkup = "";
+    rewardList.innerHTML = '<li class="product-reward-empty"><strong>Your rewards will appear here</strong><span>Recorded rewards and payment updates are shown automatically.</span></li>';
+    rewardList.scrollTop = 0;
+    $("product-reward-updated").textContent = "KOIN rewards are separate from chat credits.";
+    $("product-reward-updated").removeAttribute("title");
+    rewardStatus("Checking the current reward wallet…", "waiting");
+    if (rewardsVisible()) refreshRewards();
+  }
+  function paintRewards(value) {
+    const sorted = [...value.payouts].sort((a, b) => Number(BigInt(b.epoch) - BigInt(a.epoch)));
+    const markup = sorted.length ? sorted.map(row => {
+      const [status, tone] = rewardStates[row.state], date = new Date(Number(row.epoch) * 86400000);
+      const day = Number.isFinite(date.getTime()) ? date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }) : `Reward day ${row.epoch}`;
+      const key = /^[a-f0-9]{64}$/.test(row.id || "") ? row.id : row.epoch;
+      return `<li class="product-reward-item" data-epoch="${esc(row.epoch)}" data-key="${esc(key)}" data-state="${esc(row.state)}"><div class="product-reward-main"><div><strong class="product-reward-day">${esc(day)}</strong><span class="product-reward-period">Daily reward · UTC</span></div><strong class="product-reward-amount">${esc(rewardAmount(String(BigInt(row.availability) + BigInt(row.work))))} <small>KOIN</small></strong></div><div class="product-reward-meta"><span class="product-reward-state" data-tone="${tone}">${status}</span><span class="product-reward-breakdown">Availability ${esc(rewardAmount(row.availability))} · Work ${esc(rewardAmount(row.work))}</span></div></li>`;
+    }).join("") : '<li class="product-reward-empty"><span class="product-reward-empty-mark" aria-hidden="true">↗</span><strong>No rewards recorded yet</strong><span>Keep sharing your AI. Your recorded rewards and payment updates will appear here automatically.</span></li>';
+    // Preserve the reader's position when an existing payment changes state.
+    if (markup !== rewardMarkup) {
+      const top = rewardList.scrollTop, bounds = rewardList.getBoundingClientRect();
+      const anchor = top > 4 ? [...rewardList.querySelectorAll(".product-reward-item")].find(row => row.getBoundingClientRect().bottom > bounds.top) : null;
+      const anchorKey = anchor?.dataset.key, offset = anchor ? anchor.getBoundingClientRect().top - bounds.top : 0;
+      rewardList.innerHTML = markup; rewardMarkup = markup;
+      const nextAnchor = anchorKey && [...rewardList.querySelectorAll(".product-reward-item")].find(row => row.dataset.key === anchorKey);
+      rewardList.scrollTop = nextAnchor ? rewardList.scrollTop + nextAnchor.getBoundingClientRect().top - rewardList.getBoundingClientRect().top - offset : top;
+    }
+    const checked = new Date(value.observedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
+    const address = value.walletAddress, shortAddress = address.length > 16 ? `${address.slice(0, 7)}…${address.slice(-6)}` : address;
+    $("product-reward-updated").textContent = `Updated ${checked} · Wallet ${shortAddress}`;
+    $("product-reward-updated").title = `Reward history observed ${new Date(value.observedAt).toLocaleString()} for ${address}. KOIN rewards are separate from chat credits.`;
+    const processingFresh = Number.isSafeInteger(value.lastCycleCheck) && value.lastCycleCheck <= Date.now() + 5000 && Date.now() - value.lastCycleCheck <= 60000;
+    rewardStatus(processingFresh ? "Updates automatically every 15 seconds." : "History updated. Waiting for a fresh reward-processing check.", "ready");
+  }
+  function verifiedRewards(value) {
+    if (!value || typeof value.walletAddress !== "string" || !value.walletAddress || value.walletAddress.length > 128 ||
+        typeof value.scope !== "string" || !/^[a-f0-9]{64}$/.test(value.scope) || !Number.isSafeInteger(value.observedAt) ||
+        value.observedAt > Date.now() + 5000 || Date.now() - value.observedAt > 30000 || !Array.isArray(value.payouts) || value.payouts.length > 64 ||
+        value.payouts.some(row => !row || typeof row.epoch !== "string" || !/^(0|[1-9]\d{0,9})$/.test(row.epoch) ||
+          !Object.hasOwn(rewardStates, row.state) || [row.availability, row.work].some(n => typeof n !== "string" || !/^(0|[1-9]\d{0,19})$/.test(n))))
+      throw Error("Reward history is unavailable");
+    return value;
+  }
+  function rewardUnavailable() {
+    rewardStatus(rewardSnapshot ? "Connection interrupted. Showing the last recorded rewards; retrying automatically." : "Reward history is unavailable. Retrying automatically.", "stale");
+  }
+  async function refreshRewards() {
+    if (!rewardsVisible() || rewardPending) return;
+    clearTimeout(rewardTimer); rewardPending = true;
+    const revision = rewardRevision, current = () => revision === rewardRevision && rewardsVisible();
+    if (!rewardSnapshot) rewardStatus("Loading reward history…", "updating");
+    else { $("product-reward-auto").dataset.state = "updating"; $("product-reward-auto").lastElementChild.textContent = "Updating…"; }
+    // The main-process request is bounded. Keep its single-flight lock even if
+    // a slow IPC response outlasts this UI notice, rather than issuing duplicates.
+    const slow = setTimeout(() => { if (current()) rewardUnavailable(); }, 25000);
+    try {
+      const result = verifiedRewards(await window.kaiKoinTestBridge.run("provider-public-earnings"));
+      if (!current()) return;
+      if (rewardSnapshot?.scope === result.scope && result.observedAt < rewardSnapshot.observedAt) throw Error("Reward history observation moved backwards");
+      if (rewardSnapshot && rewardSnapshot.scope !== result.scope) {
+        rewardSnapshot = null; rewardMarkup = ""; rewardList.replaceChildren(); rewardList.scrollTop = 0;
+      }
+      rewardSnapshot = result; rewardFailures = 0; paintRewards(result);
+    } catch {
+      if (!current()) return;
+      rewardFailures = Math.min(2, rewardFailures + 1); rewardUnavailable();
+    } finally {
+      clearTimeout(slow); rewardPending = false;
+      if (rewardsVisible()) rewardTimer = setTimeout(refreshRewards, revision !== rewardRevision ? 0 : rewardFailures ? 15000 * 2 ** rewardFailures : 15000);
+    }
+  }
+  function rewardsVisibility() {
+    const active = rewardsVisible();
+    if (active === rewardActive) return;
+    rewardActive = active; rewardRevision++; clearTimeout(rewardTimer);
+    if (active) refreshRewards();
+  }
+  new MutationObserver(rewardsVisibility).observe(rewardView, { attributes: true, attributeFilter: ["hidden"] });
+  document.addEventListener("visibilitychange", rewardsVisibility);
+  for (const name of ["kai-account-signed-out", "kai-credit-identity-changed"]) window.addEventListener(name, resetRewards);
   const providerCheck = window.KaiProviderCheckUI.create({ root: $("product-provider-check"), bridge: window.kaiProviderCheckBridge });
   let providerBusy = false, providerInfoPending = false, providerExpiry, providerManualRefresh = false, providerGeneration = 0, providerReadRevision = 0, providerActionRevision = 0;
   let providerSetup = null;
@@ -988,7 +1072,8 @@
   document.addEventListener("click", event => { if (event.target.closest("[data-credit-refresh]")) window.KaiCredits.refresh(); });
   window.KaiCredits?.subscribe(paintCredits);
   new MutationObserver(paintProvider).observe($("koin-test-payments"), { subtree: true, attributes: true, childList: true, characterData: true }); paintProvider();
-  window.KaiProduct = { render(view) { if (["credits", "buy-credits", "recovery"].includes(view)) window.KaiCredits?.refresh(); if (view === "buy-credits") { refreshPurchases().then(() => schedulePreview(0)); refreshModelPricing(); } else { if (connectingPurchase) $("product-purchase-stop").click(); clearTimeout(previewTimer); previewRevision++; } if (view === "network-overview") refreshNetwork(); if (view === "earn") { providerCheck.refresh(); refreshPublicProvider(); } } };
+  window.KaiProduct = { render(view) { if (["credits", "buy-credits", "recovery"].includes(view)) window.KaiCredits?.refresh(); if (view === "buy-credits") { refreshPurchases().then(() => schedulePreview(0)); refreshModelPricing(); } else { if (connectingPurchase) $("product-purchase-stop").click(); clearTimeout(previewTimer); previewRevision++; } if (view === "network-overview") refreshNetwork(); if (view === "earn") { providerCheck.refresh(); refreshPublicProvider(); } rewardsVisibility(); } };
+  rewardsVisibility();
   setInterval(() => { if (document.hidden) return; if (!$("view-network-overview").hidden) refreshNetwork(); if (!$("view-earn").hidden) { providerCheck.refresh(); refreshPublicProvider(); } }, 15000);
   setInterval(() => { if (document.hidden) return; paintPaymentProgress(); paintNetwork(); paintCredits(window.KaiCredits.get()); if (quote && !approving && !quoting && Date.now() >= quote.expiresAt) { invalidateQuote("The price expired. Refreshing automatically…"); schedulePreview(0); } }, 1000);
 })();

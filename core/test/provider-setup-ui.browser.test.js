@@ -40,6 +40,7 @@ test("Earn setup clicks acknowledge pending checks, show current blockers and re
   await page.route("**/core/earn", route => route.fulfill({ json: { wallet: { exists: true, unlocked: false, address: "fixture-wallet" }, worker: { running: false } } }));
   await page.goto(`http://127.0.0.1:${await core.start()}`);
   await navClick(page, '#nav [data-view="earn"]');
+  await page.locator("#product-provider-advanced > summary").click();
   const reload = page.locator("#product-provider-reload"), toggle = page.locator("#product-provider-toggle"), notice = page.locator("#product-provider-refresh");
   await page.waitForFunction(() => document.getElementById("product-provider-detail").textContent.includes("Unlock"));
   assert.equal(await page.locator("#product-provider-start-hint").isVisible(), true);
@@ -147,6 +148,7 @@ test("Earn distinguishes a passing local diagnostic from failed network checks a
   });
   await page.goto(`http://127.0.0.1:${await core.start()}`);
   await navClick(page, '#nav [data-view="earn"]');
+  await page.locator("#product-provider-advanced > summary").click();
   const progress = page.locator("#product-provider-qualification"), reload = page.locator("#product-provider-reload");
   await page.waitForFunction(() => document.getElementById("product-provider-label").textContent === "NETWORK CHECK FAILED");
   await page.locator("#product-provider-options > summary").click();
@@ -224,6 +226,7 @@ async function sharingFixture(t) {
   await page.route("**/core/earn", route => route.fulfill({ json: { wallet: { exists: true, unlocked: true, address: "fixture-wallet" }, worker: { running: false } } }));
   await page.goto(`http://127.0.0.1:${await core.start()}`); await navClick(page, '#nav [data-view="earn"]');
   await page.waitForFunction(() => document.getElementById("product-provider-model-summary").textContent.includes("10 selected · 1 ready"));
+  await page.locator("#product-provider-advanced > summary").click();
   return { page, reload: page.locator("#product-provider-reload"), toggle: page.locator("#product-provider-toggle"), all: page.locator("#product-provider-share-all"), apply: page.locator("#product-provider-models-apply"),
     row: id => page.locator(`[data-shared-model="${id}"]`), check: id => page.locator(`[data-provider-shared-model="${id}"]`) };
 }

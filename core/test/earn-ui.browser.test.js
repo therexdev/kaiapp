@@ -66,7 +66,9 @@ test("earn wallet UI: create -> lock -> unlock -> restore -> unlock (real browse
     assert.match(await page.textContent("#view-earn h1"), /KOIN/);
     assert.equal(await page.locator("#koin-stats, #btn-koin-purchase").count(), 0, "obsolete simulated balances and disabled purchase placeholder are removed");
     assert.equal(await page.locator("#btn-koin-claim").count(), 0);
-    assert.match(await page.textContent("#product-provider-earnings"), /No verified earnings loaded|Refresh to check your rewards/);
+    assert.match(await page.textContent("#product-provider-earnings"), /Your rewards will appear here/);
+    assert.equal(await page.locator("#product-provider-earnings .product-reward-item").count(), 0, "an unopened reward feed does not invent payouts");
+    assert.equal(await page.locator('[data-product-action="payouts"]').count(), 0, "reward history no longer requires a manual refresh button");
     assert.equal(await page.locator("#earn-legacy").getAttribute("open"), null);
     assert.equal(await page.locator("#earn-deposit-amt").count(), 0);
     assert.equal(await page.locator("#wallet-send-pass").isVisible(), false, "sending opens only from its explicit button");

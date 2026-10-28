@@ -23,7 +23,7 @@ test("Revision 2 free entry, unified credits, unavailable quote, stale network a
       if (action === "worker-start") { window.productSharing = true; return { state: "test_worker_running" }; }
       if (action === "worker-stop") { window.productSharing = false; return { state: "test_worker_stopped" }; }
       if (action === "provider-public-info") return { state: "ready", enabled: window.productSharing, running: window.productSharing, model: { id: "fixture", label: "Fixture", installed: true, requiredRamGb: 4 }, detail: "Fixture model is installed" };
-      if (action === "provider-public-earnings") return { observedAt: Date.now(), lastCycleCheck: null, payouts: [{ epoch: "20742", state: "needs_review", availability: "10000000", work: "0" }] };
+      if (action === "provider-public-earnings") return { walletAddress: "fixture-owner", scope: "a".repeat(64), observedAt: Date.now(), lastCycleCheck: null, payouts: [{ epoch: "20742", state: "needs_review", availability: "10000000", work: "0" }] };
       if (action === "provider-public-start") { window.productSharing = true; return { state: "running" }; }
       if (action === "provider-public-stop") { window.productSharing = false; return { state: "offline" }; }
       if (["provider-status", "provider-public-status"].includes(action)) return { state: window.productSharing ? "online" : "offline", label: window.productSharing ? "ONLINE" : "OFFLINE", detail: "Fixture qualification and serving evidence are current", validUntil: Date.now() + 15000 };
@@ -130,9 +130,11 @@ test("Revision 2 free entry, unified credits, unavailable quote, stale network a
   await page.waitForFunction(() => !document.getElementById("btn-send").disabled);
   assert.match(await page.locator("#messages").textContent(), /Stopped/);
   await page.locator('#nav [data-view="earn"]').click();
-  await page.locator('[data-product-action="payouts"]').click();
-  await page.waitForFunction(() => document.getElementById("product-provider-earnings").textContent.includes("needs review"));
-  assert.match(await page.locator("#product-provider-earnings").textContent(), /20742.*0\.10000000 KOIN.*needs review/);
+  assert.equal(await page.locator('[data-product-action="payouts"]').count(), 0);
+  const reward = page.locator('.product-reward-item[data-epoch="20742"]');
+  await reward.waitFor();
+  assert.match(await reward.textContent(), /0\.10* KOIN/);
+  assert.equal(await reward.getAttribute("data-state"), "needs_review");
  await page.locator("#product-provider-toggle").click();
   await page.waitForFunction(() => document.getElementById("product-provider-label").textContent === "ONLINE");
   await page.locator("#nav-network").click();

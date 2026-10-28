@@ -2,6 +2,11 @@
 const fs = require("fs"), path = require("path");
 const { Worker } = require("../core/lib/worker");
 const modelId = id => typeof id === "string" && /^[a-zA-Z0-9._-]{1,100}$/.test(id);
+const rewardStates = new Set(["queued", "signing", "staged", "unknown", "pending", "reversible", "needs_review", "paid", "paid_elsewhere"]);
+const rewardScope = config => require("node:crypto").createHash("sha256").update(JSON.stringify([
+  config.schedulerUrl, config.mode, config.deployment?.chainId, config.deployment?.credits, config.deployment?.creditsHash,
+  config.deployment?.rewards, config.deployment?.rewardsHash, config.owner
+])).digest("hex");
 function modelSelection(value) {
   if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).sort().join() !== "mode,models" ||
       !["all", "selected"].includes(value.mode) || !Array.isArray(value.models) || value.models.length > 64 ||
@@ -296,16 +301,36 @@ class CreditProvider {
   }
   async earnings() {
     this.networkAllowed();
-    const c = await this.providerContext(AbortSignal.timeout(10000));
+    if (this.closed) throw Error("Provider is closing");
+    const signal = AbortSignal.timeout(10000), c = await this.providerContext(signal), walletAddress = c.config.owner, scope = rewardScope(c.config);
+    const access = this.providerAccess(c);
+    const current = () => {
+      signal.throwIfAborted(); this.networkAllowed();
+      if (this.closed || rewardScope(c.config) !== scope) throw Error("The reward wallet or service changed while checking rewards");
+      // Read-only access stays usable with the financial wallet locked. The
+      // account/device authorization still has to match after an awaited read.
+      access.authorize(c.config.schedulerUrl);
+    };
+    current();
     const value = await require("./koin-provider-status").readProviderAccount({ config: c.config,
-      access: this.providerAccess(c), fetchImpl: this.service.fetchImpl, signal: AbortSignal.timeout(10000) });
+      access, fetchImpl: this.service.fetchImpl, signal });
+    current();
     if (!Number.isSafeInteger(value.observedAt) || Math.abs(Date.now() - value.observedAt) > 30000 || !Array.isArray(value.payouts) || value.payouts.length > 4096) throw Error("Reward history observation is unavailable or stale");
-    const payouts = value.payouts.filter(p => p.account === c.config.owner).slice(0, 64).map(p => {
-      if (typeof p.epoch !== "string" || !/^(0|[1-9]\d{0,9})$/.test(p.epoch) || typeof p.state !== "string" || !/^[a-z_]{1,40}$/.test(p.state) ||
+    const epochs = new Set(), ids = new Set(), maxAtoms = (1n << 64n) - 1n;
+    const payouts = value.payouts.filter(p => p?.account === walletAddress).map(p => {
+      if (typeof p.epoch !== "string" || !/^(0|[1-9]\d{0,9})$/.test(p.epoch) || !rewardStates.has(p.state) ||
           [p.availability, p.work].some(n => typeof n !== "string" || !/^(0|[1-9]\d{0,19})$/.test(n))) throw Error("Reward history could not be verified");
-      return { epoch: p.epoch, state: p.state, availability: p.availability, work: p.work };
-    });
-    return { observedAt: value.observedAt, lastCycleCheck: Number.isSafeInteger(value.lastCycleCheck) ? value.lastCycleCheck : null, payouts };
+      if (BigInt(p.availability) + BigInt(p.work) > maxAtoms || epochs.has(p.epoch) ||
+          p.id !== undefined && (typeof p.id !== "string" || !/^[a-f0-9]{64}$/.test(p.id) || ids.has(p.id)) ||
+          p.txId !== undefined && p.txId !== null && (typeof p.txId !== "string" || !/^0x1220[a-f0-9]{64}$/.test(p.txId))) throw Error("Reward history could not be verified");
+      epochs.add(p.epoch); if (p.id !== undefined) ids.add(p.id);
+      return { epoch: p.epoch, state: p.state, availability: p.availability, work: p.work,
+        ...(p.id !== undefined ? { id: p.id } : {}), ...(p.txId ? { txId: p.txId } : {}) };
+    }).sort((a, b) => Number(b.epoch) - Number(a.epoch)).slice(0, 64);
+    // The server reports a UTC reward day, not a payment timestamp. Only the
+    // observation time and the last successful processing check are available.
+    return { walletAddress, scope, observedAt: value.observedAt, lastCycleCheck: Number.isSafeInteger(value.lastCycleCheck) &&
+      value.lastCycleCheck >= 0 && value.lastCycleCheck <= value.observedAt + 5000 ? value.lastCycleCheck : null, payouts };
   }
   async tick() {
     if (this.busy || this.closed) return;

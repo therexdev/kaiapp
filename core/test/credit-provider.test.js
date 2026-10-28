@@ -92,6 +92,7 @@ test("public earnings use the selected account without unlocking or changing old
       { account: "another-account", epoch: "20743", state: "paid", availability: "999", work: "1" }] };
   f.args.service.fetchImpl = async () => Response.json(value);
   const result = await f.controller.earnings();
+  assert.equal(result.walletAddress, f.c.config.owner); assert.match(result.scope, /^[a-f0-9]{64}$/);
   assert.deepEqual(result.payouts, [{ epoch: "20742", state: "needs_review", availability: "10000000", work: "0" }]);
   assert.equal(result.lastCycleCheck, null); assert.equal(f.counts.started, 0);
   value = { ...value, observedAt: Date.now() - 31000 };
@@ -99,6 +100,48 @@ test("public earnings use the selected account without unlocking or changing old
   value = { ...value, observedAt: Date.now(), payouts: [{ ...value.payouts[0], epoch: 20742 }] };
   await assert.rejects(f.controller.earnings(), /verified/);
   f.authorized = false; await assert.rejects(f.controller.earnings(), /Account changed/);
+});
+
+test("reward feed exposes bounded receipt identifiers, exact amounts and latest reward days without inventing payment times", async t => {
+  const f = fixture(t); f.unlocked = false;
+  const row = { account: f.c.config.owner, epoch: "20742", state: "paid", availability: "10000000", work: "1",
+    id: "a".repeat(64), txId: "0x1220" + "b".repeat(64), finality: { private: "not renderer metadata" }, reason: "internal reason" };
+  let value = { mode: "mainnet-pilot", mainnetPaymentsEnabled: true, observedAt: Date.now(), lastCycleCheck: Date.now(), payouts: [row] };
+  f.args.service.fetchImpl = async () => Response.json(value);
+  const result = await f.controller.earnings();
+  assert.deepEqual(result.payouts, [{ epoch: row.epoch, state: row.state, availability: row.availability, work: row.work, id: row.id, txId: row.txId }]);
+  assert.equal(result.lastCycleCheck, value.lastCycleCheck);
+  assert.equal(JSON.stringify(result).includes("private"), false); assert.equal(JSON.stringify(result).includes("internal reason"), false);
+  for (const state of ["queued", "signing", "staged", "unknown", "pending", "reversible", "needs_review", "paid", "paid_elsewhere"]) {
+    value.payouts = [{ ...row, state, txId: null }];
+    const current = await f.controller.earnings(); assert.equal(current.payouts[0].state, state); assert.equal("txId" in current.payouts[0], false);
+  }
+  for (const bad of [{ state: "confirmed" }, { id: "invalid" }, { txId: "javascript:alert(1)" }, { availability: "18446744073709551615", work: "1" }]) {
+    value.payouts = [{ ...row, ...bad }]; await assert.rejects(f.controller.earnings(), /verified/);
+  }
+  value.payouts = [row, { ...row, id: "c".repeat(64) }]; await assert.rejects(f.controller.earnings(), /verified/);
+  value.payouts = [row, { ...row, epoch: "20743" }]; await assert.rejects(f.controller.earnings(), /verified/);
+  value.payouts = Array.from({ length: 70 }, (_, i) => ({ account: row.account, epoch: String(20700 + i), state: "paid", availability: "1", work: "0" }));
+  value.lastCycleCheck = value.observedAt + 60000;
+  const latest = await f.controller.earnings();
+  assert.equal(latest.payouts.length, 64); assert.equal(latest.payouts[0].epoch, "20769"); assert.equal(latest.payouts.at(-1).epoch, "20706");
+  assert.equal(latest.lastCycleCheck, null); assert.equal(latest.scope, result.scope); assert.equal(f.counts.started, 0);
+});
+
+test("reward feed discards a delayed read after authorization, privacy or deployment changes without unlocking the wallet", async t => {
+  const f = fixture(t); f.unlocked = false;
+  f.core.account.wallet.signHash = () => { throw Error("Reward feed must not sign with the wallet"); };
+  let privacy = "local-first"; f.core.settings = { get: () => privacy };
+  const value = { mode: "mainnet-pilot", mainnetPaymentsEnabled: true, observedAt: Date.now(), payouts: [] };
+  for (const change of [() => { f.authorized = false; }, () => { privacy = "local-only"; }, () => { f.c.config.schedulerUrl = "https://changed.invalid/scheduler"; }]) {
+    f.authorized = true; privacy = "local-first"; f.c.config.schedulerUrl = "https://fixture.invalid/scheduler";
+    let entered, release;
+    const waiting = new Promise(resolve => { entered = resolve; });
+    f.args.service.fetchImpl = async () => { entered(); await new Promise(resolve => { release = resolve; }); return Response.json(value); };
+    const read = f.controller.earnings(); await waiting; change(); release();
+    await assert.rejects(read, /Account changed|Local-Only|reward wallet or service changed/);
+  }
+  assert.equal(f.core.account.wallet.status().unlocked, false); assert.equal(f.counts.started, 0);
 });
 
 test("provider startup uses an installed approved model when the configured default is absent", async t => {

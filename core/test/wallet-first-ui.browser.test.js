@@ -105,6 +105,7 @@ test("Earn enables a device explicitly, respects Cancel, and stays usable with i
   await page.waitForFunction(() => document.getElementById("product-provider-toggle").getAttribute("aria-checked") === "false");
   assert.equal(await toggle.textContent(), "Start earning"); assert.equal(await toggle.isEnabled(), true, "authorized device can restart while wallet stays locked");
   await page.evaluate(() => { window.providerInfo = { ...window.providerInfo, state: "backend-upgrade-required", deviceAuthorized: false, canAuthorize: false, detail: "The server needs the wallet-first update." }; });
+  await page.locator("#product-provider-advanced > summary").click();
   await reload.click();
   await page.waitForFunction(() => document.getElementById("product-provider-setup").textContent.includes("server needs"));
   assert.equal(await toggle.isDisabled(), true); assert.doesNotMatch(await page.locator("#product-provider-setup").textContent(), /sign in/i);

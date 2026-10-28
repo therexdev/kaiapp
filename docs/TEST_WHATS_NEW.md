@@ -1,3 +1,10 @@
+## Automatic reward activity in Earn
+
+- Replaced the separate earnings summary and Connection cards with one reward activity feed beside the earning control. It loads automatically and refreshes while Earn is open; no Refresh earnings click is needed.
+- Each record shows its reward day, KOIN amount and actual payout status. Pending or unavailable confirmation is never displayed as a completed payment. The last successful records remain visible during a temporary connection failure.
+- Connection, authorization and diagnostic controls are available in a collapsed advanced area below the shared-model controls.
+- This is an app-only update. It does not change payout timing, reward calculations, wallet custody or the server configuration, and needs no additional Vultr command.
+
 ## Automatic free access and fresh model readiness — combined update
 
 **Update Vultr once, then update Koinos AI Test.** Use the

@@ -230,3 +230,42 @@
 .product-v2 .product-payment-progress[aria-busy="false"] .product-payment-spinner::after{content:"";position:absolute;width:6px;height:3px;left:3px;top:3px;border-left:2px solid var(--emerald);border-bottom:2px solid var(--emerald);transform:rotate(-45deg)}
 @keyframes product-payment-spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.product-v2 .product-payment-spinner{animation:none;border-top-color:var(--violet);border-right-color:var(--violet)}}
+
+/* Recorded KOIN rewards stay in view without crowding the earning controls. */
+.product-v2 .product-rewards{display:flex;flex-direction:column;height:450px;min-height:0;overflow:hidden}
+.product-v2 .product-rewards>.product-row{align-items:center;gap:12px}
+.product-v2 .product-rewards h2{font-size:18px;letter-spacing:-.3px}
+.product-v2 .product-rewards .product-reward-intro{margin:10px 0 5px;font-size:12px}
+.product-v2 .product-rewards #product-reward-status{min-height:32px;margin:0 0 12px;line-height:1.6}
+.product-v2 .product-reward-auto{display:inline-flex;align-items:center;gap:6px;flex:none;font-size:10px;color:var(--text-dim);white-space:nowrap}
+.product-v2 .product-reward-auto i{height:6px;width:6px;border-radius:50%;background:#94a3b8}
+.product-v2 .product-reward-auto[data-state="ready"] i{background:#168469}
+.product-v2 .product-reward-auto[data-state="updating"] i{background:#155eef}
+.product-v2 .product-reward-auto[data-state="stale"] i{background:#b37a18}
+.product-v2 .product-reward-feed{list-style:none;padding:0 10px 0 0;margin:0;min-height:0;flex:1;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+.product-v2 .product-reward-feed:focus-visible{outline:2px solid var(--violet);outline-offset:3px;border-radius:5px}
+.product-v2 .product-reward-item{padding:18px 0;border-bottom:1px solid var(--border)}
+.product-v2 .product-reward-item:last-child{border-bottom:0}
+.product-v2 .product-reward-main{display:flex;justify-content:space-between;align-items:flex-start;gap:14px}
+.product-v2 .product-reward-day{display:block;font-size:12px;font-weight:600;color:var(--text)}
+.product-v2 .product-reward-period{display:block;font-size:10px;color:var(--text-dim);margin-top:4px}
+.product-v2 .product-reward-amount{font-size:16px;font-weight:650;letter-spacing:-.25px;text-align:right;overflow-wrap:anywhere;min-width:0;color:var(--text)}
+.product-v2 .product-reward-amount small{font-size:10px;color:var(--text-dim);font-weight:550;letter-spacing:0}
+.product-v2 .product-reward-item[data-state="paid"] .product-reward-amount,.product-v2 .product-reward-item[data-state="paid_elsewhere"] .product-reward-amount{color:#168469}
+.product-v2 .product-reward-meta{display:flex;align-items:center;gap:10px;justify-content:space-between;margin-top:12px;flex-wrap:wrap}
+.product-v2 .product-reward-state{font-size:10px;line-height:1.4;font-weight:600;padding:4px 8px;border-radius:6px;background:#edf4ff;color:#155eef;white-space:nowrap}
+.product-v2 .product-reward-state[data-tone="paid"]{background:#e2f6ed;color:#126846}
+.product-v2 .product-reward-state[data-tone="attention"]{background:#fff0dc;color:#865716}
+.product-v2 .product-reward-breakdown{color:var(--text-dim);font-size:9px;line-height:1.5;overflow-wrap:anywhere}
+.product-v2 .product-reward-empty{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:10px;padding:28px 18px;box-sizing:border-box;color:var(--text-dim)}
+.product-v2 .product-reward-empty strong{font-size:14px;font-weight:600;color:var(--text)}
+.product-v2 .product-reward-empty>span:not(.product-reward-empty-mark){font-size:12px;line-height:1.7;max-width:290px}
+.product-v2 .product-reward-empty-mark{display:grid;place-items:center;width:36px;height:36px;margin-bottom:2px;border:1px solid var(--border);border-radius:12px;font-size:22px;color:#168469;background:var(--bg)}
+.product-v2 .product-rewards .product-reward-updated{margin:12px 0 0;overflow-wrap:anywhere;line-height:1.6}
+.product-v2 .product-provider-advanced{padding:0;overflow:hidden}
+.product-v2 .product-provider-advanced>summary{cursor:pointer;padding:18px 22px;font-size:12px;font-weight:600;color:var(--text-dim)}
+.product-v2 .product-provider-advanced>summary:focus-visible{outline:2px solid var(--violet);outline-offset:-4px;border-radius:12px}
+.product-v2 .product-provider-advanced-content{padding:0 22px 22px}
+.product-v2 .product-provider-advanced[open]>summary{margin-bottom:4px}
+@media(max-width:800px){.product-v2 .product-rewards{height:420px}.product-v2 .product-reward-amount{font-size:17px}}
+@media(max-width:520px){.product-v2 .product-rewards{height:410px}.product-v2 .product-rewards h2{font-size:16px}.product-v2 .product-reward-amount{font-size:14px}.product-v2 .product-reward-main{gap:10px}.product-v2 .product-provider-advanced>summary{padding:16px}.product-v2 .product-provider-advanced-content{padding:0 16px 16px}}
