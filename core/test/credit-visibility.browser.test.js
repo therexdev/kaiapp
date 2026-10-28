@@ -19,10 +19,10 @@ test("credits load on open, explain inactive service, retry existing USD account
         if (window.holdCreditRead) await new Promise(resolve => { window.finishCreditRead = resolve; });
         if (window.creditScenario === "inactive") throw Error("Error invoking remote method 'koin:test-payments': Error: " + reason);
         if (window.creditScenario === "offline") throw Error("Connection unavailable");
-        const legacy = window.creditScenario === "legacy", zero = window.creditScenario === "zero", guest = window.creditScenario === "guest";
+        const legacy = window.creditScenario === "legacy", zero = window.creditScenario === "zero", guest = window.creditScenario === "guest", fractional = window.creditScenario === "fractional";
         return { product: legacy ? "prepaid-v1" : "prepaid-usd-v1", owner: guest ? "free-installation" : "fixture-account", ...(guest ? { accessKind: "device-free" } : {}), credits: {
-          version: zero ? "2" : "1", unit: legacy ? "legacy-KOIN-1e-8" : "USD-1e-8", available: zero ? "0" : guest ? "25000000" : "125000000",
-          purchased: { available: zero || guest ? "0" : "100000000" }, free: { state: "available", available: zero ? "0" : "25000000", resetAt: Date.now() + 3600000 },
+          version: zero ? "2" : "1", unit: legacy ? "legacy-KOIN-1e-8" : "USD-1e-8", available: zero ? "0" : guest ? "25000000" : fractional ? "200750000" : "125000000",
+          purchased: { available: zero || guest ? "0" : fractional ? "200000000" : "100000000" }, free: { state: "available", available: zero ? "0" : fractional ? "750000" : "25000000", resetAt: Date.now() + 3600000 },
         }, purchases: [], usage: [] };
       }
       if (action === "provider-public-info") return { state: "unavailable", detail: reason };
@@ -47,6 +47,19 @@ test("credits load on open, explain inactive service, retry existing USD account
   });
   for (const width of [1440, 780]) {
     await page.setViewportSize({ width, height: 980 });
+    await page.evaluate(async () => { window.creditScenario = "fractional"; await window.KaiCredits.refresh(); });
+    assert.equal(await total.textContent(), "2,007.5");
+    assert.equal(await page.locator(".product-sidebar-credits [data-credit-breakdown]").textContent(), "7.5 free · 2,000 purchased");
+    const textFits = await page.evaluate(() => {
+      const card = document.querySelector(".product-sidebar-credits"), style = getComputedStyle(card), box = card.getBoundingClientRect();
+      const left = box.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft);
+      const right = box.right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight);
+      return [...card.querySelectorAll("strong [data-credit-total], strong small")].every(node => {
+        const bounds = node.getBoundingClientRect(); return bounds.left >= left - .5 && bounds.right <= right + .5;
+      });
+    });
+    assert.equal(textFits, true, `the fractional balance and credits suffix fit inside the card at ${width}px`);
+    await page.evaluate(async () => { window.creditScenario = "ready"; await window.KaiCredits.refresh(); });
     const before = await geometry();
     await page.evaluate(() => {
       window.creditTextMutations = 0;

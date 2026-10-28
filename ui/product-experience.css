@@ -309,3 +309,5 @@
 .product-v2 #view-earn .dot.pulse,.product-v2 #view-earn .product-live-dot,.product-v2 #status-pane .dot.pulse{animation:none}
 .product-v2 .product-sidebar-credits>strong{min-height:1.25em;white-space:nowrap}
 .product-v2 .product-sidebar-credits [data-credit-breakdown]{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;height:28px;min-height:28px;max-height:28px;line-height:14px;font-size:10px;margin:4px 0}
+/* Keep a fractional balance and its unit inside the compact sidebar card. */
+@media(max-width:800px){.product-v2 .product-sidebar-credits>strong{font-size:23px;min-height:33.75px}.product-v2 .product-sidebar-credits>strong small{font-size:11px}}
