@@ -3,9 +3,15 @@ const test = require("node:test"), assert = require("node:assert/strict"), fs = 
 const { Signer } = require("koilib"), { AccountService } = require("../lib/account"), Protocol = require("../lib/wallet-credit-account");
 const { isProtectedStorage } = require("../lib/protected-storage");
 const config = require("../lib/koin-network/credit-service.json").config;
+// Every account/service request in this file belongs to its explicit fixture.
+// A public service becoming available must never change a unit-test result.
+test.beforeEach(t => {
+  const network = t.mock.method(globalThis, "fetch", async () => { throw Error("Public network access is forbidden in wallet-credit fixtures"); });
+  t.after(() => assert.equal(network.mock.callCount(), 0, "all credit transports must use the fixture instead of global fetch"));
+});
 function fixture(t, { basicText = false } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kai-wallet-credit-")); t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const signer = Signer.fromSeed("wallet-credit-desktop-fixture"), state = { unlocked: true, privacy: "online", signed: 0, challenged: 0, verified: 0, revoked: 0, accountId: "existing-account", token: "wc_" + crypto.randomBytes(32).toString("base64url"), tamper: null, challenge: null };
+  const signer = Signer.fromSeed("wallet-credit-desktop-fixture"), state = { unlocked: true, privacy: "online", signed: 0, challenged: 0, verified: 0, revoked: 0, deviceFreeRequests: 0, accountId: "existing-account", token: "wc_" + crypto.randomBytes(32).toString("base64url"), tamper: null, challenge: null };
   const wallet = { address: signer.getAddress(), status: () => ({ address: wallet.address, unlocked: state.unlocked }), signHash: async hash => { state.signed++; return Buffer.from(await signer.signHash(hash)).toString("base64"); } };
   const storage = { isEncryptionAvailable: () => true, getSelectedStorageBackend: () => basicText ? "basic_text" : "gnome_libsecret", encryptString: value => Buffer.from(value).map(b => b ^ 72), decryptString: bytes => bytes.map(b => b ^ 72).toString() };
   const accountView = () => ({ id: state.accountId, scope: "wallet-credits", freeOnly: state.challenge?.freeOnly || false, wallets: [{ address: wallet.address }] });
@@ -13,6 +19,12 @@ function fixture(t, { basicText = false } = {}) {
     assert.equal(new URL(url).origin, new URL(config.schedulerUrl).origin); assert.equal(init.redirect, "error");
     const route = new URL(url).pathname, body = init.body && JSON.parse(init.body);
     const pin = Protocol.pin(config, new URL(config.schedulerUrl).origin);
+    // This fixture models the older wallet-only service. Automatic free access
+    // has separate signed HTTP tests and must not contact the live deployment.
+    if (route.startsWith("/auth/device-free/")) {
+      state.deviceFreeRequests++; assert.equal(route, "/auth/device-free/capabilities");
+      return Response.json({ ok: false, error: "Automatic free access is not enabled" }, { status: 404 });
+    }
     if (route.endsWith("/capabilities")) return Response.json({ ok: true, capabilities: { walletCredits: 1, freeOnlySessions: 1, scope: "wallet-credits", ...pin, challengeTtlMs: 300000, sessionTtlMs: 2592000000 } });
     if (route.endsWith("/challenge")) {
       state.challenged++; const now = Date.now();
@@ -95,7 +107,7 @@ test("Buy preserves unreadable saved credentials before review or proof even whe
     const saved = fs.readFileSync(f.account.file), signed = f.state.signed, challenged = f.state.challenged;
     let reviews = 0;
     const window = { isDestroyed: () => false, isVisible: () => true, isMinimized: () => false };
-    const service = new CreditService({ dataDir: f.dir, account: f.account, storage: f.storage,
+    const service = new CreditService({ dataDir: f.dir, account: f.account, storage: f.storage, fetchImpl: f.options.fetchImpl,
       service: require("../lib/koin-network/credit-service.json"), dialog: { showMessageBox: async () => { reviews++; return { response: 1 }; } } });
     t.after(() => service.dispose());
     assert.equal(isProtectedStorage(f.storage), true); assert.equal(f.account._token(), null);
@@ -143,16 +155,34 @@ test("unsupported backend and lost protected-store writes preserve saved credent
   assert.deepEqual(fs.readFileSync(f.account.file), original);
 });
 
-test("native credit connection exposes precise storage/privacy state and cancellation cannot authorize", async t => {
+test("older backend exposes precise wallet storage/privacy state and cancellation cannot authorize", async t => {
   const f = fixture(t, { basicText: true }), { CreditService } = require("../../electron/credit-service");
   let dialogs = 0;
-  const service = new CreditService({ dataDir: f.dir, account: f.account, storage: f.storage, service: require("../lib/koin-network/credit-service.json"),
+  const service = new CreditService({ dataDir: f.dir, account: f.account, storage: f.storage, fetchImpl: f.options.fetchImpl, service: require("../lib/koin-network/credit-service.json"),
     dialog: { showMessageBox: async (_window, options) => { dialogs++; assert.match(options.detail, /free credits only/); assert.equal(options.defaultId, 0); return { response: 0 }; } } });
-  const status = await service.walletInfo(); assert.equal(status.state, "secure-storage-required"); assert.equal(status.canConnect, true); assert.equal(status.connected, false);
+  t.after(() => service.dispose());
+  const status = await service.walletInfo(); assert.equal(f.state.deviceFreeRequests, 1); assert.equal(status.state, "secure-storage-required"); assert.equal(status.canConnect, true); assert.equal(status.connected, false);
   const window = { isDestroyed: () => false, isVisible: () => true, isMinimized: () => false };
   assert.equal((await service.connectWallet(window, { sessionOnly: true })).state, "cancelled"); assert.equal(dialogs, 1); assert.equal(f.state.signed, 0);
   f.state.privacy = "local-only"; f.account.fetchImpl = () => { throw Error("Unexpected network egress"); };
-  assert.equal((await service.walletInfo()).state, "online-required"); service.dispose();
+  assert.equal((await service.walletInfo()).state, "online-required"); assert.equal(f.state.deviceFreeRequests, 1);
+});
+
+test("automatic free access can be ready without protected wallet storage but cannot authorize a paid connection", async t => {
+  const f = fixture(t, { basicText: true }), { CreditService } = require("../../electron/credit-service");
+  let freeReads = 0;
+  const deviceFreeAccount = { creditAuthorization: async () => { freeReads++; return { deviceFree: true, scope: "device-free", freeOnly: true }; }, dispose() {} };
+  const service = new CreditService({ dataDir: f.dir, account: f.account, storage: f.storage, fetchImpl: f.options.fetchImpl,
+    service: require("../lib/koin-network/credit-service.json"), deviceFreeAccount });
+  t.after(() => service.dispose());
+  const status = await service.walletInfo();
+  assert.equal(status.state, "free-ready"); assert.equal(status.freeAccess, true); assert.equal(status.secureStorage.available, false);
+  assert.equal(status.connected, false); assert.equal(status.canConnect, false); assert.equal(freeReads, 1);
+  const window = { isDestroyed: () => false, isVisible: () => true, isMinimized: () => false };
+  assert.equal((await service.preparePurchase(window)).state, "secure-storage-required", "a free identity does not supply financial credential storage");
+  assert.equal(f.state.signed, 0); assert.equal(f.state.challenged, 0); assert.equal(f.state.verified, 0); assert.equal(fs.existsSync(f.account.file), false);
+  f.state.privacy = "local-only";
+  assert.equal((await service.walletInfo()).state, "online-required"); assert.equal(freeReads, 1, "privacy blocks even automatic free access");
 });
 
 test("temporary access cannot overwrite a latent protected connection for another account", async t => {
