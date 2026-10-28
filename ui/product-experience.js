@@ -76,7 +76,7 @@
   oldEarn.insertAdjacentHTML("beforeend", '<p id="product-legacy-error" class="error" role="status" hidden></p>');
   $("view-earn").insertAdjacentHTML("afterbegin", `<div class="product-earn">${head("Share your AI. Earn KOIN.", "Contribute this computer’s spare AI capacity to the network.")}<div class="product-two"><section class="product-panel product-provider"><div class="product-row"><span>Share AI capacity</span><button id="product-provider-toggle" aria-describedby="product-provider-start-hint product-provider-readiness" disabled role="switch" aria-checked="false" aria-label="Share AI capacity">Start earning</button></div><p id="product-provider-start-hint" class="product-fine">Click the button to start earning.</p><div class="product-provider-state"><span class="product-live-dot"></span><h2 id="product-provider-label">OFFLINE</h2><p id="product-provider-detail">Sharing is off. Turn it on when you’re ready.</p></div><div class="product-divider"></div><strong id="product-provider-model">Model not confirmed</strong><p id="product-provider-readiness" class="product-fine">Waiting for current model and network confirmation.</p></section><section id="product-provider-rewards" class="product-panel product-rewards" aria-labelledby="product-reward-title"><div class="product-row"><h2 id="product-reward-title">Reward activity</h2><span id="product-reward-auto" class="product-reward-auto" data-state="waiting"><i aria-hidden="true"></i><span>Auto updates</span></span></div><p class="product-reward-intro">Your KOIN rewards, as they are recorded and paid.</p><p id="product-reward-status" class="product-fine" role="status" aria-live="polite">Reward history loads automatically when you open Earn.</p><ol id="product-provider-earnings" class="product-reward-feed" aria-label="Reward activity" tabindex="0"><li class="product-reward-empty"><strong>Your rewards will appear here</strong><span>Recorded rewards and payment updates are shown automatically.</span></li></ol><p id="product-reward-updated" class="product-fine product-reward-updated">KOIN rewards are separate from chat credits.</p></section></div></div>`);
   $("product-provider-readiness").insertAdjacentHTML("afterend", '<button id="product-provider-models-open" hidden>Choose shared models</button>');
-  $("view-earn").querySelector(".product-earn").insertAdjacentHTML("beforeend", `<section id="product-provider-models" class="product-panel product-provider-models" hidden><h2>Models you share</h2><label class="product-share-all"><input type="checkbox" id="product-provider-share-all" checked /> <span>Share all compatible installed models</span></label><p class="product-fine">Models load as needed. Each model must pass its network check and be approved before it can earn from paid work.</p><p id="product-provider-model-summary" role="status"></p><div id="product-provider-model-list"></div><p id="product-provider-selection-status" class="product-fine" role="status" hidden></p><div id="product-provider-selection-actions" class="product-actions" hidden><button id="product-provider-models-apply" class="primary">Apply selection</button><button id="product-provider-models-reset">Cancel changes</button></div></section>`);
+  $("view-earn").querySelector(".product-earn").insertAdjacentHTML("beforeend", `<section id="product-provider-models" class="product-panel product-provider-models" hidden><h2>Models you share</h2><label class="product-share-all"><span>Share all compatible installed models</span><input type="checkbox" id="product-provider-share-all" class="product-switch-input" role="switch" checked /></label><p class="product-fine">Models load as needed. Each model must pass its network check and be approved before it can earn from paid work.</p><p id="product-provider-model-summary" role="status"></p><div id="product-provider-model-list"></div><p id="product-provider-selection-status" class="product-fine" role="status" hidden></p><div id="product-provider-selection-actions" class="product-actions" hidden><button id="product-provider-models-apply" class="primary">Apply selection</button><button id="product-provider-models-reset">Cancel changes</button></div></section>`);
   $("product-provider-models").insertAdjacentHTML("afterend", `<details id="product-provider-advanced" class="product-panel product-provider-advanced"><summary>Connection and diagnostics</summary><div class="product-provider-advanced-content"><details id="product-provider-options"><summary>Models and diagnostics</summary><div id="product-provider-model-choice"><label for="product-provider-model-pick">Startup model</label><select id="product-provider-model-pick" disabled aria-describedby="product-provider-model-help"><option value="">Checking models…</option></select><p id="product-provider-model-help" class="product-fine">Sharing prepares installed models automatically. This optional choice only changes the startup model.</p></div><div id="product-provider-check"><h3 data-check-model>Local model check</h3><p data-check-detail role="status">Check the model currently running locally. No account or credits needed.</p><progress data-check-progress aria-label="Local model check progress" hidden></progress><p data-check-summary class="product-fine"></p><div class="product-actions"><button data-check-start data-check-action="start" class="primary">Check this computer</button><button data-check-cancel data-check-action="cancel" hidden>Cancel check</button><button data-check-copy data-check-action="copy" hidden>Copy report</button><button data-check-save data-check-action="save" hidden>Save report</button></div><p data-check-export class="product-fine" role="status"></p><p class="product-fine">This local check is diagnostic only. The network check runs automatically while earning is on.</p></div></details><div class="product-divider"></div><p id="product-provider-setup" role="status">Start earning to prepare the installed models and connect.</p><p id="product-provider-refresh" class="product-fine" role="status" hidden></p><div class="product-actions"><button id="product-provider-reload" data-product-action="provider-reload">Reload setup</button><button id="product-provider-revoke" data-product-action="provider-revoke" hidden>Remove device authorization</button><button id="product-provider-download" data-product-action="provider-download" hidden>Download approved model</button><button id="product-provider-cancel" data-product-action="provider-cancel" hidden>Cancel setup</button><button data-product-action="payment-wallet">Reward wallet</button></div></div></details>`);
   $("product-provider-setup").insertAdjacentHTML("afterend", '<p id="product-provider-authorization" class="product-fine" hidden></p><p id="product-provider-action-notice" role="status" hidden></p>');
   $("product-provider-detail").insertAdjacentHTML("afterend", '<p id="product-provider-qualification" role="status" hidden></p>');
@@ -85,21 +85,24 @@
   oldOnboarding.insertAdjacentHTML("afterbegin", '<button data-product-action="first-back">← Back to choices</button>');
   onboarding.insertAdjacentHTML("afterbegin", `<div class="product-first">${emblem}<h1>Start with what you want to do.</h1><p>Use the network with free credits when available, or run AI on this computer.<br>You’re in control of where your work happens.</p><div class="product-two"><section class="product-panel"><h2>Try network AI</h2><p>Connect your wallet to check your daily free credits. No email or password account is required. Existing account sign-in remains available.</p><button class="primary" data-product-action="start-free">Start free →</button></section><section class="product-panel"><h2>Use this computer</h2><p>Run a model locally. We’ll check your computer and help you choose a good fit. No credits needed.</p><button data-product-action="setup-local">Set up local AI →</button></section></div><p id="product-first-status" role="status">Free-credit availability depends on the network’s published policy.</p><button data-product-action="signin">Your account</button></div>`);
   let filter = "all", network, networkError = "", networkPending = false, quote, quoteRevision = 0, approving = false, quoting = false;
+  let creditHistoryMarkup;
   function paintCredits(state) {
     const display = window.KaiCreditPresentation(state), { usd, stale } = display;
-    document.querySelectorAll("[data-credit-total]").forEach(node => { node.textContent = display.total; node.title = display.status; });
-    document.querySelectorAll("[data-credit-breakdown]").forEach(node => { node.textContent = display.breakdown; });
-    document.querySelectorAll("[data-credit-status]").forEach(node => { node.textContent = node.closest(".product-sidebar-credits") ? display.compactStatus : display.status; node.title = display.status; node.hidden = !display.status; });
-    document.querySelectorAll("[data-credit-freshness]").forEach(node => { node.textContent = display.detail; });
-    document.querySelectorAll("[data-credit-refresh]").forEach(node => { node.disabled = display.refreshing; node.textContent = display.refreshing ? "Checking…" : state.status === "unavailable" ? "Retry" : "Refresh"; });
+    const text = (node, value) => { if (node.textContent !== value) node.textContent = value; };
+    document.querySelectorAll("[data-credit-total]").forEach(node => { text(node, display.total); if (node.title !== display.status) node.title = display.status; });
+    document.querySelectorAll("[data-credit-breakdown]").forEach(node => { text(node, display.breakdown); });
+    document.querySelectorAll("[data-credit-status]").forEach(node => { text(node, (node.closest(".product-sidebar-credits") ? display.compactStatus : display.status) || "Updates automatically"); if (node.title !== display.status) node.title = display.status; });
+    document.querySelectorAll("[data-credit-freshness]").forEach(node => { text(node, display.detail); });
+    document.querySelectorAll("[data-credit-refresh]").forEach(node => { node.disabled = display.refreshing; node.hidden = state.status !== "unavailable"; });
     document.querySelectorAll("[data-credit-help]").forEach(node => { node.hidden = usd && !stale || state.status === "loading"; });
     const cancelled = new Set((purchaseInfo.cancelledPurchases || []).map(p => p.txId));
     const isCancelled = p => p.state !== "confirmed" && cancelled.has(p.id);
     const rows = usd ? [...state.snapshot.usage.map(u => ({ kind: "usage", title: `Chat · ${u.model}`, at: u.at, status: "Delivered", amount: "−" + credits(u.credits) })), ...state.snapshot.purchases.map(p => ({ kind: "purchase", title: "Purchased credits", txId: /^0x1220[a-f0-9]{64}$/.test(p.id || "") ? p.id : null, at: p.confirmedAt || p.createdAt, status: isCancelled(p) ? "Cancelled · no purchase" : p.state === "confirmed" ? "Added to balance" : p.state, amount: isCancelled(p) ? "0" : p.state === "confirmed" ? "+" + credits(p.credits || p.amount) : "Pending" }))].sort((a, b) => b.at - a.at).filter(r => filter === "all" || filter === r.kind) : [];
-    $("product-credit-history").innerHTML = rows.length ? rows.map(r => `<tr><td>${esc(r.title)}${r.txId ? `<small class="product-payment-transaction">Transaction: ${esc(r.txId)}</small>` : ""}</td><td>${esc(new Date(r.at).toLocaleString())}</td><td>${esc(r.status)}</td><td>${esc(r.amount)}</td></tr>`).join("") : `<tr><td colspan="4">${usd && !stale ? "No activity yet." : "No verified activity loaded."}</td></tr>`;
+    const historyMarkup = rows.length ? rows.map(r => `<tr><td>${esc(r.title)}${r.txId ? `<small class="product-payment-transaction">Transaction: ${esc(r.txId)}</small>` : ""}</td><td>${esc(new Date(r.at).toLocaleString())}</td><td>${esc(r.status)}</td><td>${esc(r.amount)}</td></tr>`).join("") : `<tr><td colspan="4">${usd ? "No activity yet." : "No verified activity loaded."}</td></tr>`;
+    if (historyMarkup !== creditHistoryMarkup) { $("product-credit-history").innerHTML = historyMarkup; creditHistoryMarkup = historyMarkup; }
     const pending = state.snapshot?.purchases?.filter(p => p.state === "pending" && !isCancelled(p)) || [];
     $("product-pending-purchases").textContent = pending.length ? `${pending.length} purchase${pending.length === 1 ? " is" : "s are"} not yet confirmed. You can keep using existing credits.` : "";
-    $("product-recovery-purchase").textContent = pending.length ? "Your purchase has not been confirmed. Check the saved payment details on Buy credits before retrying." : !usd || stale ? "Purchase status is unavailable. Refresh your account before starting or retrying a payment." : "No pending purchase in the last verified account snapshot. Refresh your account before starting another payment.";
+    $("product-recovery-purchase").textContent = pending.length ? "Your purchase has not been confirmed. Check the saved payment details on Buy credits before retrying." : !usd || stale ? "Purchase status is unavailable. Your account will update automatically when the connection returns." : "No pending purchase in the last verified account snapshot. Your account updates automatically.";
   }
   let publicProvider = false;
   function paintProvider() {
@@ -795,7 +798,7 @@
   document.addEventListener("visibilitychange", rewardsVisibility);
   for (const name of ["kai-account-signed-out", "kai-credit-identity-changed"]) window.addEventListener(name, resetRewards);
   const providerCheck = window.KaiProviderCheckUI.create({ root: $("product-provider-check"), bridge: window.kaiProviderCheckBridge });
-  let providerBusy = false, providerInfoPending = false, providerExpiry, providerManualRefresh = false, providerGeneration = 0, providerReadRevision = 0, providerActionRevision = 0;
+  let providerBusy = false, providerInfoPending = false, providerExpiry, providerRefreshTimer, providerViewActive = false, providerManualRefresh = false, providerGeneration = 0, providerReadRevision = 0, providerActionRevision = 0;
   let providerSetup = null;
   let providerModelInfo = null, providerModelStatus = null, providerSelectionDraft = null, providerSelectionSaved = null, providerSelectionNotice = "", providerModelsStale = true;
   const selectionKey = selection => JSON.stringify([selection.mode, [...selection.models].sort()]);
@@ -863,6 +866,7 @@
       d.at >= 0 && d.at <= Date.now() + 5000 && Date.now() - d.at <= 86400000);
     return d ? `Last local check error (${new Date(d.at).toLocaleTimeString()}): ${messages[d.code]}` : "";
   }
+  function providerModelText(node, value) { if (node.textContent !== value) node.textContent = value; }
   function paintProviderModels() {
     const info = providerModelInfo; if (!info?.selection || !providerSelectionDraft) return;
     const models = providerModelRows(), selected = selectedProviderModels(info.selection, models), draft = selectedProviderModels(providerSelectionDraft, models);
@@ -870,15 +874,19 @@
     const dirty = selectionKey(providerSelectionDraft) !== selectionKey(info.selection);
     const ready = !providerModelsStale && !providerBusy && info.running ? models.filter(model => model.compatible && selected.has(model.id) && offered.has(model.id) && states.get(model.id)?.state === "online").length : 0;
     const chosen = models.filter(model => model.compatible && selected.has(model.id)).length;
-    $("product-provider-share-all").checked = providerSelectionDraft.mode === "all";
-    $("product-provider-share-all").disabled = providerBusy;
-    $("product-provider-model-summary").textContent = info.enabled
+    const all = $("product-provider-share-all"), allChecked = providerSelectionDraft.mode === "all";
+    if (all.checked !== allChecked) all.checked = allChecked;
+    if (all.disabled !== providerBusy) all.disabled = providerBusy;
+    providerModelText($("product-provider-model-summary"), info.enabled
       ? `${chosen} selected · ${ready} ready for paid work${!ready ? ". No selected model is currently confirmed ready." : "."}`
-      : `${chosen} selected. Earning is off.`;
-    $("product-provider-model").textContent = info.selection.mode === "all" ? `All compatible installed models (${chosen})` : `${chosen} model${chosen === 1 ? "" : "s"} selected`;
-    if (!providerBusy && !providerModelsStale) $("product-provider-readiness").textContent = !info.enabled ? "Earning is off. Your model selection is saved." : ready ? `${ready} of ${chosen} selected models ready for paid work.` : "No selected model is ready for paid work yet. The network checks each selected model automatically.";
-    const active = document.activeElement?.dataset.providerSharedModel;
-    $("product-provider-model-list").innerHTML = models.map(model => {
+      : `${chosen} selected. Earning is off.`);
+    providerModelText($("product-provider-model"), info.selection.mode === "all" ? `All compatible installed models (${chosen})` : `${chosen} model${chosen === 1 ? "" : "s"} selected`);
+    if (!providerBusy && !providerModelsStale) providerModelText($("product-provider-readiness"), !info.enabled ? "Earning is off. Your model selection is saved." : ready ? `${ready} of ${chosen} selected models ready for paid work.` : "No selected model is ready for paid work yet. The network checks each selected model automatically.");
+    const list = $("product-provider-model-list"), existing = new Map([...list.querySelectorAll("[data-shared-model]")].map(node => [node.dataset.sharedModel, node]));
+    const wanted = new Set(models.map(model => model.id));
+    for (const [id, node] of existing) if (!wanted.has(id)) node.remove();
+    if (models.length) list.querySelector(".product-provider-model-empty")?.remove();
+    models.forEach((model, index) => {
       const row = states.get(model.id); let label, detail = "", state = "off";
       if (!model.compatible) { label = "Not compatible"; detail = model.reason || "This installed model cannot be offered to this network."; state = "blocked"; }
       else if (dirty && draft.has(model.id) !== selected.has(model.id)) { label = draft.has(model.id) ? "Will share after Apply" : "Will stop sharing after Apply"; state = "checking"; }
@@ -898,11 +906,33 @@
       if (!dirty && !providerBusy && !providerModelsStale && info.enabled && info.running && selected.has(model.id) && offered.has(model.id) && row?.state !== "online") {
         detail = [detail, localProviderDetail(info, model.id)].filter(Boolean).join(" ");
       }
-      return `<div class="product-provider-model-row" data-shared-model="${esc(model.id)}"><label><input type="checkbox" data-provider-shared-model="${esc(model.id)}" ${draft.has(model.id) && model.compatible ? "checked" : ""} ${providerBusy || !model.compatible ? "disabled" : ""} /><span>${esc(model.label || model.id)}</span></label><div><span class="product-model-status" data-state="${state}">${esc(label)}</span>${detail ? `<small>${esc(detail)}</small>` : ""}</div></div>`;
-    }).join("") || '<p class="product-fine">No compatible installed models found.</p>';
-    if (active) $("product-provider-model-list").querySelector(`[data-provider-shared-model="${CSS.escape(active)}"]`)?.focus({ preventScroll: true });
+      let node = existing.get(model.id);
+      if (!node) {
+        node = document.createElement("div"); node.className = "product-provider-model-row"; node.dataset.sharedModel = model.id;
+        node.innerHTML = '<label class="product-provider-model-name"></label><div class="product-provider-model-readiness"><span class="product-model-status"></span><small class="product-provider-model-detail" hidden></small></div><input type="checkbox" role="switch" class="product-switch-input" />';
+        const input = node.querySelector("input"), name = node.querySelector("label"), status = node.querySelector(".product-model-status");
+        input.id = "product-provider-share-" + model.id; input.dataset.providerSharedModel = model.id;
+        name.htmlFor = input.id; status.id = input.id + "-status"; input.setAttribute("aria-describedby", status.id);
+      }
+      const name = node.querySelector("label"), input = node.querySelector("input"), status = node.querySelector(".product-model-status"), description = node.querySelector("small");
+      providerModelText(name, model.label || model.id);
+      const accessibleName = "Share " + (model.label || model.id);
+      if (input.getAttribute("aria-label") !== accessibleName) input.setAttribute("aria-label", accessibleName);
+      const checked = draft.has(model.id) && model.compatible, disabled = providerBusy || !model.compatible;
+      if (input.checked !== checked) input.checked = checked;
+      if (input.disabled !== disabled) input.disabled = disabled;
+      if (status.dataset.state !== state) status.dataset.state = state;
+      providerModelText(status, label); providerModelText(description, detail);
+      if (description.hidden !== !detail) description.hidden = !detail;
+      // Keep unchanged controls mounted and focused through background polls.
+      if (list.children[index] !== node) list.insertBefore(node, list.children[index] || null);
+    });
+    if (!models.length && !list.querySelector(".product-provider-model-empty")) {
+      const empty = document.createElement("p"); empty.className = "product-fine product-provider-model-empty";
+      empty.textContent = "No compatible installed models found."; list.appendChild(empty);
+    }
     const notice = $("product-provider-selection-status");
-    notice.textContent = providerBusy ? "Finishing current work before updating the shared models. Stop earning remains available." : providerSelectionNotice || (dirty ? "Changes are not applied yet. Choose at least one model, then Apply selection." : "");
+    providerModelText(notice, providerBusy ? "Finishing current work before updating the shared models. Stop earning remains available." : providerSelectionNotice || (dirty ? "Changes are not applied yet. Choose at least one model, then Apply selection." : ""));
     notice.hidden = !notice.textContent;
     $("product-provider-selection-actions").hidden = !dirty;
     $("product-provider-models-apply").disabled = providerBusy || !models.some(model => model.compatible && draft.has(model.id));
@@ -938,43 +968,61 @@
       })]);
     } finally { clearTimeout(timer); }
   }
+  const providerVisible = () => !document.hidden && !$("view-earn").hidden;
+  const providerText = (id, value) => {
+    const node = $(id), text = String(value ?? "");
+    if (node.textContent !== text) node.textContent = text;
+  };
+  function scheduleProviderRefresh(delay = 15000) {
+    clearTimeout(providerRefreshTimer);
+    if (providerVisible()) providerRefreshTimer = setTimeout(() => refreshPublicProvider(), delay);
+  }
+  function providerVisibility() {
+    const active = providerVisible();
+    if (active === providerViewActive) return;
+    providerViewActive = active; clearTimeout(providerRefreshTimer);
+    if (active) refreshPublicProvider();
+  }
   async function refreshPublicProvider(manual = false) {
     const reload = $("product-provider-reload"), notice = $("product-provider-refresh");
     if (manual) {
-      providerManualRefresh = true; notice.hidden = false; notice.textContent = "Checking wallet, device authorization and model setup…";
+      providerManualRefresh = true; notice.hidden = false; providerText("product-provider-refresh", "Checking wallet, device authorization and model setup…");
+      providerText("product-provider-reload", "Checking setup…"); reload.setAttribute("aria-busy", "true");
     }
-    if (providerInfoPending) return;
+    if (providerInfoPending || providerBusy && !manual) return;
+    clearTimeout(providerRefreshTimer);
     if (!window.kaiKoinTestBridge) {
       notice.hidden = false; notice.textContent = "Open the desktop app to check provider setup.";
-      providerManualRefresh = false; return;
+      providerManualRefresh = false; providerText("product-provider-reload", "Reload setup"); reload.removeAttribute("aria-busy"); return;
     }
     const generation = providerGeneration, revision = providerReadRevision;
     const current = () => generation === providerGeneration && revision === providerReadRevision;
-    providerInfoPending = true; reload.textContent = "Checking setup…"; reload.setAttribute("aria-busy", "true");
-    let failed = false;
+    providerInfoPending = true;
+    let failed = false, refreshDelay = 15000;
     try {
       const info = await providerRead("provider-public-info"); if (!current()) return; publicProvider = true; providerSetup = info; acceptProviderModels(info);
       const on = info.enabled === true, toggle = $("product-provider-toggle");
-      toggle.textContent = on ? "Stop earning" : "Start earning"; toggle.setAttribute("aria-checked", String(on)); $("product-provider-start-hint").hidden = on;
+      providerText("product-provider-toggle", on ? "Stop earning" : "Start earning"); toggle.setAttribute("aria-checked", String(on)); $("product-provider-start-hint").hidden = on;
       const enrollment = !info.deviceAuthorized && info.canAuthorize === true && ["authorization-required", "authorization-expired", "authorization-revoked", "secure-storage-required", "wallet-required"].includes(info.state);
       const walletSetup = info.walletReady === false || enrollment && info.walletLocked === true;
       toggle.dataset.action = on ? "stop" : walletSetup ? "wallet" : enrollment ? "authorize" : "start";
-      if (!on && walletSetup) toggle.textContent = info.walletReady === false ? "Set up earning" : "Unlock to enable earning";
-      else if (!on && enrollment) toggle.textContent = info.secureStorage?.available === false ? "Enable for this session" : "Enable earning";
+      if (!on && walletSetup) providerText("product-provider-toggle", info.walletReady === false ? "Set up earning" : "Unlock to enable earning");
+      else if (!on && enrollment) providerText("product-provider-toggle", info.secureStorage?.available === false ? "Enable for this session" : "Enable earning");
       toggle.disabled = on ? false : providerBusy || !(info.state === "ready" || walletSetup || enrollment);
       $("product-provider-revoke").hidden = info.deviceAuthorized !== true;
       $("product-provider-revoke").disabled = providerBusy;
       const authorization = $("product-provider-authorization");
       authorization.hidden = info.deviceAuthorized !== true;
-      authorization.textContent = info.sessionOnly ? "This device is enabled for this session. Enable earning again after closing the app." : info.expiresAt ? `Device authorized until ${new Date(info.expiresAt).toLocaleString()}.` : "This device is authorized to earn.";
-      $("product-provider-model").textContent = Array.isArray(info.offeredModels) && info.offeredModels.length ? "Installed: " + (info.models || []).filter(m => info.offeredModels.includes(m.id)).map(m => m.label || m.id).join(" · ") : info.model?.label || "Checking installed models";
+      providerText("product-provider-authorization", info.sessionOnly ? "This device is enabled for this session. Enable earning again after closing the app." : info.expiresAt ? `Device authorized until ${new Date(info.expiresAt).toLocaleString()}.` : "This device is authorized to earn.");
+      if (!providerModelInfo) providerText("product-provider-model", Array.isArray(info.offeredModels) && info.offeredModels.length ? "Installed: " + (info.models || []).filter(m => info.offeredModels.includes(m.id)).map(m => m.label || m.id).join(" · ") : info.model?.label || "Checking installed models");
       $("product-provider-model-choice").hidden = info.automatic === true;
       const choices = info.models || (info.model ? [info.model] : []), picker = $("product-provider-model-pick");
-      picker.innerHTML = `${info.model ? "" : '<option value="">Choose a provider model</option>'}` + choices.map(m => `<option value="${esc(m.id)}">${esc(m.label || m.id)}${m.installed ? "" : " · download required"}</option>`).join("");
+      const options = `${info.model ? "" : '<option value="">Choose a provider model</option>'}` + choices.map(m => `<option value="${esc(m.id)}">${esc(m.label || m.id)}${m.installed ? "" : " · download required"}</option>`).join("");
+      if (picker.innerHTML !== options) picker.innerHTML = options;
       picker.value = info.model?.id || "";
       picker.disabled = on || providerBusy || !choices.length || !["ready", "model-required", "download-required"].includes(info.state);
       const setup = info.running && !info.blocked ? "Sharing is on. Installed supported models load automatically when needed." : providerMessage(info.blocked || info.detail);
-      $("product-provider-setup").textContent = setup + (info.model && !info.running ? ` Required memory: ${info.model.requiredRamGb} GB.${!info.model.installed && Number.isFinite(info.model.bytes) ? " Download: " + (info.model.bytes / 1e9).toFixed(2) + " GB." : ""}` : "") + (info.progress ? ` ${info.progress.pct}% downloaded.` : "");
+      providerText("product-provider-setup", setup + (info.model && !info.running ? ` Required memory: ${info.model.requiredRamGb} GB.${!info.model.installed && Number.isFinite(info.model.bytes) ? " Download: " + (info.model.bytes / 1e9).toFixed(2) + " GB." : ""}` : "") + (info.progress ? ` ${info.progress.pct}% downloaded.` : ""));
       $("product-provider-download").hidden = info.state !== "download-required";
       $("product-provider-download").disabled = providerBusy;
       $("product-provider-cancel").hidden = !providerBusy;
@@ -987,24 +1035,31 @@
       status = selectedProviderStatus(info, status);
       clearTimeout(providerExpiry);
       const paint = value => {
-        $("product-provider-label").textContent = value.label; $("product-provider-label").dataset.state = value.state;
-        $("product-provider-detail").textContent = value.detail + (value.state === "online" && info.deviceAuthorized && info.walletLocked ? " Wallet locked — earning continues." : "");
+        providerText("product-provider-label", value.label);
+        if ($("product-provider-label").dataset.state !== value.state) $("product-provider-label").dataset.state = value.state;
+        providerText("product-provider-detail", value.detail + (value.state === "online" && info.deviceAuthorized && info.walletLocked ? " Wallet locked — earning continues." : ""));
         const progress = $("product-provider-qualification"), q = value.qualification;
-        progress.hidden = !q; progress.textContent = "";
-        if (q) {
-          const model = info.models?.find(m => m.id === value.model)?.label || value.model;
-          progress.textContent = qualificationDetail(q, model);
-        }
-        $("product-provider-readiness").textContent = value.state === "online" ? "Model ready · qualification current · fresh network confirmation" : q
+        const model = q && (info.models?.find(m => m.id === value.model)?.label || value.model);
+        providerText("product-provider-qualification", q ? qualificationDetail(q, model) : ""); progress.hidden = !q;
+        // The shared-model summary owns this line when present. Avoid briefly
+        // replacing it with a different sentence during each background read.
+        if (!providerModelInfo || providerModelsStale) providerText("product-provider-readiness", value.state === "online" ? "Model ready · qualification current · fresh network confirmation" : q
           ? "The local check is diagnostic. Paid work needs a passing network check."
-          : "Readiness is not confirmed. " + value.detail;
+          : "Readiness is not confirmed. " + value.detail);
       };
       paint(status); paintProviderModels();
       const expiries = [status.validUntil, ...currentProviderRows().map(row => row.validUntil)].filter(Number.isSafeInteger);
-      if (expiries.length) providerExpiry = setTimeout(() => {
-        providerModelsStale = true; paintProviderModels();
-        paint({ state: "stale", label: "CHECKING CONNECTION", detail: "Network confirmation has expired. Refreshing eligibility…" });
-      }, Math.max(0, Math.min(...expiries) - Date.now()));
+      if (expiries.length) {
+        const remaining = Math.min(...expiries) - Date.now();
+        // Read before the evidence expires, leaving time for network/IPC work.
+        // Expiry remains a hard boundary even while a refresh is in flight.
+        refreshDelay = Math.max(1000, Math.min(10000, remaining - 5000));
+        providerExpiry = setTimeout(() => {
+          if (!current()) return;
+          providerModelsStale = true; paintProviderModels();
+          paint({ state: "stale", label: "CONNECTION UNCONFIRMED", detail: "Waiting for a fresh network confirmation. Reconnecting automatically." });
+        }, Math.max(0, remaining));
+      }
     } catch (e) {
       if (!current()) return;
       providerModelsStale = true; paintProviderModels();
@@ -1018,22 +1073,26 @@
       $("product-provider-download").hidden = true;
     } finally {
       if (!current()) return;
-      providerInfoPending = false; reload.textContent = "Reload setup"; reload.removeAttribute("aria-busy");
+      providerInfoPending = false; providerText("product-provider-reload", "Reload setup"); reload.removeAttribute("aria-busy");
       if (providerManualRefresh) {
         notice.hidden = false;
         notice.textContent = failed ? "Setup check failed. You can retry with Reload setup." : "Setup checked at " + new Date().toLocaleTimeString() + ".";
       }
-      providerManualRefresh = false;
+      providerManualRefresh = false; scheduleProviderRefresh(refreshDelay);
     }
   }
   async function providerAction(action, input) {
     if (providerBusy && action !== "stop") return;
-    if (action !== "stop") providerBusy = true;
+    providerBusy = true;
     const actionNotice = $("product-provider-action-notice"); actionNotice.hidden = true; actionNotice.textContent = "";
     const generation = providerGeneration, operation = ++providerActionRevision;
     const current = () => generation === providerGeneration && operation === providerActionRevision;
-    providerReadRevision++; providerInfoPending = false;
-    if (action === "models") { providerModelsStale = true; providerModelStatus = null; clearTimeout(providerExpiry); $("product-provider-label").textContent = "UPDATING SHARING"; $("product-provider-label").dataset.state = "checking"; $("product-provider-readiness").textContent = "Model readiness will refresh after the selection is applied."; $("product-provider-qualification").hidden = true; }
+    providerReadRevision++; providerInfoPending = false; clearTimeout(providerRefreshTimer); clearTimeout(providerExpiry);
+    providerModelsStale = true; providerModelStatus = null;
+    const actionLabel = action === "stop" ? "STOPPING" : action === "start" ? "STARTING" : action === "download" ? "DOWNLOADING MODEL"
+      : ["authorize", "revoke"].includes(action) ? "UPDATING ACCESS" : "UPDATING SHARING";
+    providerText("product-provider-label", actionLabel); $("product-provider-label").dataset.state = "checking";
+    providerText("product-provider-readiness", "Network readiness will refresh when this change finishes."); $("product-provider-qualification").hidden = true;
     paintProviderModels();
     $("product-provider-cancel").hidden = false; $("product-provider-download").disabled = true;
     $("product-provider-model-pick").disabled = true;
@@ -1052,13 +1111,13 @@
     finally { if (current()) { providerBusy = false; providerReadRevision++; providerInfoPending = false; await refreshPublicProvider(); paintProviderModels(); } }
   }
   for (const name of ["kai-account-signed-out", "kai-credit-identity-changed"]) window.addEventListener(name, () => {
-    providerGeneration++; providerReadRevision++; providerActionRevision++; clearTimeout(providerExpiry); providerInfoPending = providerBusy = false;
+    providerGeneration++; providerReadRevision++; providerActionRevision++; clearTimeout(providerExpiry); clearTimeout(providerRefreshTimer); providerInfoPending = providerBusy = false;
     providerModelInfo = providerModelStatus = providerSelectionDraft = providerSelectionSaved = null; providerModelsStale = true; providerSelectionNotice = "";
     $("product-provider-models").hidden = true; $("product-provider-models-open").hidden = true; $("product-provider-model-list").replaceChildren();
     $("product-provider-label").textContent = "CHECKING ACCOUNT"; $("product-provider-label").dataset.state = "checking";
     $("product-provider-model").textContent = "Checking installed models"; $("product-provider-readiness").textContent = "Waiting for current account and network confirmation.";
     $("product-provider-toggle").disabled = true; $("product-provider-qualification").hidden = true;
-    if (!$("view-earn").hidden) refreshPublicProvider();
+    if (providerVisible()) refreshPublicProvider();
   });
   $("product-provider-toggle").addEventListener("click", () => {
     const toggle = $("product-provider-toggle"), action = toggle.getAttribute("aria-checked") === "true" ? "stop" : toggle.dataset.action || "start";
@@ -1067,13 +1126,15 @@
   });
   $("product-provider-model-pick").addEventListener("change", event => providerAction("model", event.target.value));
   for (const host of [document.querySelector(".product-sidebar-credits"), document.querySelector("#view-credits .product-panel")]) {
-    host.querySelector("[data-credit-breakdown]").insertAdjacentHTML("afterend", '<p data-credit-status role="status"></p><div class="product-credit-actions"><button type="button" class="product-text-button" data-credit-refresh>Refresh</button><button type="button" class="product-text-button" data-credit-help data-product-action="legacy" hidden>Account help</button></div>');
+    host.querySelector("[data-credit-breakdown]").insertAdjacentHTML("afterend", '<div class="product-credit-state"><p data-credit-status role="status"></p><div class="product-credit-actions"><button type="button" class="product-text-button" data-credit-refresh hidden>Retry</button><button type="button" class="product-text-button" data-credit-help data-product-action="legacy" hidden>Account help</button></div></div>');
   }
   document.addEventListener("click", event => { if (event.target.closest("[data-credit-refresh]")) window.KaiCredits.refresh(); });
   window.KaiCredits?.subscribe(paintCredits);
   new MutationObserver(paintProvider).observe($("koin-test-payments"), { subtree: true, attributes: true, childList: true, characterData: true }); paintProvider();
   window.KaiProduct = { render(view) { if (["credits", "buy-credits", "recovery"].includes(view)) window.KaiCredits?.refresh(); if (view === "buy-credits") { refreshPurchases().then(() => schedulePreview(0)); refreshModelPricing(); } else { if (connectingPurchase) $("product-purchase-stop").click(); clearTimeout(previewTimer); previewRevision++; } if (view === "network-overview") refreshNetwork(); if (view === "earn") { providerCheck.refresh(); refreshPublicProvider(); } rewardsVisibility(); } };
   rewardsVisibility();
-  setInterval(() => { if (document.hidden) return; if (!$("view-network-overview").hidden) refreshNetwork(); if (!$("view-earn").hidden) { providerCheck.refresh(); refreshPublicProvider(); } }, 15000);
+  new MutationObserver(providerVisibility).observe($("view-earn"), { attributes: true, attributeFilter: ["hidden"] });
+  document.addEventListener("visibilitychange", providerVisibility); providerVisibility();
+  setInterval(() => { if (document.hidden) return; if (!$("view-network-overview").hidden) refreshNetwork(); if (!$("view-earn").hidden) providerCheck.refresh(); }, 15000);
   setInterval(() => { if (document.hidden) return; paintPaymentProgress(); paintNetwork(); paintCredits(window.KaiCredits.get()); if (quote && !approving && !quoting && Date.now() >= quote.expiresAt) { invalidateQuote("The price expired. Refreshing automatically…"); schedulePreview(0); } }, 1000);
 })();

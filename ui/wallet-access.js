@@ -16,7 +16,8 @@
     $("product-wallet-access-address").textContent = info?.address ? `Wallet: ${info.address}` : "";
     $("product-wallet-access-session-note").hidden = true;
     const needsWallet = ["wallet-required", "wallet-unlock-required"].includes(info?.state);
-    primary.textContent = busy ? "Connecting…" : freeAccess ? "Refresh credits" : info?.state === "wallet-required" ? "Set up wallet" : info?.state === "wallet-unlock-required" ? "Unlock wallet" : upgrade ? "Save wallet connection" : connected ? "Refresh credits" : "Connect wallet";
+    primary.hidden = freeAccess || connected && !upgrade;
+    primary.textContent = busy ? "Connecting…" : info?.state === "wallet-required" ? "Set up wallet" : info?.state === "wallet-unlock-required" ? "Unlock wallet" : upgrade ? "Save wallet connection" : "Connect wallet";
     primary.disabled = busy || !!pending || (!freeAccess && (!connected || upgrade) && !needsWallet && (info?.canConnect !== true || info?.secureStorage?.available !== true));
     session.hidden = freeAccess || connected || info?.canConnect !== true || info?.secureStorage?.available === true;
     panel.querySelector('[data-product-action="signin"]').hidden = !info || freeAccess || connected;

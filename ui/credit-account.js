@@ -32,14 +32,14 @@
     const stale = !!s && (state.status !== "ready" || now - snapshot.receivedAt > 30000);
     const loading = state.status === "loading", usd = snapshot?.product === "prepaid-usd-v1" && s?.unit === "USD-1e-8";
     const reset = Number(s?.free?.resetAt), resetText = Number.isFinite(reset) && reset > 0 ? ` Free credits reset ${new Date(reset).toLocaleString()}.` : "";
-    const status = usd ? stale ? "Showing your last verified balance. Refresh to check current credits." : "" : s ? "Your earlier balance is in Account help. It is separate from USD credits." : loading ? "Loading your free and purchased credits." : state.error || "Your credit balance could not be loaded. Try again.";
-    const compactStatus = !status ? "" : usd ? "Last verified balance. Refresh to update." : s ? "Earlier balance: Account help."
+    const status = usd ? stale ? "Showing your last verified balance. Updates resume automatically when the connection is available." : "" : s ? "Your earlier balance is in Account help. It is separate from USD credits." : loading ? "Loading your free and purchased credits." : state.error || "Your credit balance could not be loaded. Try again.";
+    const compactStatus = !status ? "" : usd ? "Last verified balance · reconnecting" : s ? "Earlier balance: Account help."
       : loading ? "Checking your credit account…" : /not activated|activation is pending/i.test(status) ? "Credit service not activated yet."
       : /earlier KOIN account/i.test(status) ? "Earlier balance: Account help."
       : /Open the desktop app/i.test(status) ? "Open desktop to check your credits." : /connect.*wallet/i.test(status) ? "Wallet connection needed." : /sign in/i.test(status) ? "Credit connection needed." : "Could not refresh. Retry or view details.";
     return {
       usd, stale, total: usd ? credits(s.available) : loading ? "…" : "—",
-      breakdown: usd ? `${s.free.state === "unavailable" ? "Free allowance unavailable" : s.free.state === "ineligible" ? "Free allowance not eligible" : credits(s.free.available) + " free"}${snapshot.deviceFree ? snapshot.paidAccessLocked ? " · purchased balance not connected" : "" : ` · ${credits(s.purchased.available)} purchased`}${stale ? " · last known" : ""}`
+      breakdown: usd ? `${s.free.state === "unavailable" ? "Free allowance unavailable" : s.free.state === "ineligible" ? "Free allowance not eligible" : credits(s.free.available) + " free"}${snapshot.deviceFree ? snapshot.paidAccessLocked ? " · purchased balance not connected" : "" : ` · ${credits(s.purchased.available)} purchased`}`
         : s ? "Earlier KOIN-based account" : loading ? "Checking credits…" : "Balance unavailable",
       status, compactStatus,
       detail: usd ? `Checked ${new Date(snapshot.receivedAt).toLocaleString()}.${resetText}${stale && state.error ? " " + state.error : ""}` : "",
@@ -73,7 +73,10 @@
   window.addEventListener("kai-credit-identity-changed", () => { window.KaiCredits.clear(); window.KaiCredits.refresh(); });
   window.addEventListener("kai-network-account-changed", () => window.KaiCredits.refresh());
   document.addEventListener("visibilitychange", () => { if (!document.hidden) window.KaiCredits.refresh(); });
-  setInterval(() => { if (!document.hidden) window.KaiCredits.refresh(); }, 30000);
+  // Refresh before the 30-second freshness boundary so a normal background
+  // read does not briefly relabel the balance as stale. Errors and overdue
+  // reads still retain the last balance with an explicit stale status.
+  setInterval(() => { if (!document.hidden) window.KaiCredits.refresh(); }, 15000);
   // Read existing USD deployments too: public activation is not evidence that
   // an older, already-connected account has no purchased credits.
   window.KaiCredits.refresh();

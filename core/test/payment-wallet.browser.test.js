@@ -66,12 +66,16 @@ test("wallet shows native balances then on-chain history, preserves locked reads
     await page.screenshot({ path: path.join(process.env.KAI_WALLET_QA_DIR, "wallet-mobile-history.png"), animations: "disabled" });
     await page.setViewportSize({ width: 1280, height: 900 });
   }
-  await page.locator("#payment-wallet-history-refresh").click();
+  assert.equal(await page.locator("#btn-wallet-balances").isVisible(), false, "healthy balances refresh automatically");
+  assert.equal(await page.locator("#payment-wallet-history-refresh").isVisible(), false, "healthy history needs no refresh control");
+  await page.evaluate(() => KaiPaymentWallet.refresh(false, true));
   await page.waitForFunction(() => document.getElementById("payment-wallet-history-status").textContent.startsWith("On-chain"));
-  state.historyError = true; await page.locator("#payment-wallet-history-refresh").click();
+  state.historyError = true; await page.evaluate(() => KaiPaymentWallet.refresh(false, true));
   await page.waitForFunction(() => document.getElementById("payment-wallet-history-status").textContent.includes("previously loaded"));
   assert.equal(await page.locator("#payment-wallet-history-rows tr").count(), 2);
   assert.doesNotMatch(await page.locator("#payment-wallet-history-status").textContent(), /No transactions/);
+  assert.equal(await page.locator("#payment-wallet-history-refresh").textContent(), "Try again");
+  assert.equal(await page.locator("#payment-wallet-history-refresh").isVisible(), true, "failed reads retain a direct recovery action");
   state.historyError = false;
   let releaseOld; state.holdHistory = () => new Promise(resolve => { releaseOld = resolve; });
   await page.locator("#payment-wallet-history-refresh").click();
@@ -84,7 +88,7 @@ test("wallet shows native balances then on-chain history, preserves locked reads
   assert.equal(await page.locator("#payment-wallet-history-rows tr").count(), 1);
   assert.equal(await page.locator("#payment-wallet-history-rows").textContent().then(s => s.includes(hash(1))), false);
   assert.equal(await page.inputValue("#wallet-address"), B);
-  state.rows = []; await page.locator("#payment-wallet-history-refresh").click();
+  state.rows = []; await page.evaluate(() => KaiPaymentWallet.refresh(false, true));
   await page.waitForFunction(() => document.getElementById("payment-wallet-history-status").textContent.startsWith("No transactions"));
   await page.setViewportSize({ width: 480, height: 820 });
   assert.equal(await page.locator("#view-payment-wallet").evaluate(el => el.scrollWidth <= el.clientWidth), true);
@@ -141,9 +145,24 @@ test("wallet import stays open through polling and refuses an existing wallet; o
   assert.equal(calls.filter(c => c.channel === "wallet:history").length, before, "automatic balance refresh leaves the older history page intact");
   assert.equal(await page.locator("#payment-wallet-history-rows tr").count(), 3);
   assert.equal(await page.locator("#payment-wallet-koin").textContent(), "10");
+  assert.equal(await page.locator("#payment-wallet-history-refresh").textContent(), "Back to latest");
   await page.locator("#payment-wallet-history-refresh").click();
   await page.waitForFunction(() => document.getElementById("payment-wallet-history-rows").children.length === 1);
+  assert.equal(await page.locator("#payment-wallet-history-refresh").isVisible(), false);
   assert.match(await page.locator("#payment-wallet-history-rows").textContent(), new RegExp(hash(4)));
+  state.nextCursor = "fixture-older-again"; await page.evaluate(() => KaiPaymentWallet.refresh());
+  state.rows = [entry(5)]; state.nextCursor = "fixture-even-older";
+  await page.locator("#payment-wallet-history-more").click();
+  await page.waitForFunction(() => document.getElementById("payment-wallet-history-rows").children.length === 2);
+  state.historyError = true; await page.locator("#payment-wallet-history-more").click();
+  await page.waitForFunction(() => document.getElementById("payment-wallet-history-refresh").textContent === "Try again");
+  const failedHistoryReads = calls.filter(c => c.channel === "wallet:history").length;
+  await page.evaluate(() => KaiPaymentWallet.refresh(false, true));
+  assert.equal(calls.filter(c => c.channel === "wallet:history").length, failedHistoryReads);
+  assert.equal(await page.locator("#payment-wallet-history-refresh").textContent(), "Try again", "a successful balance poll cannot clear an unretried history failure");
+  assert.match(await page.locator("#payment-wallet-history-status").textContent(), /previously loaded/);
+  state.historyError = false; await page.locator("#payment-wallet-history-refresh").click();
+  await page.waitForFunction(() => document.getElementById("payment-wallet-history-refresh").hidden);
   state.exists = false; state.unlocked = false; state.address = null; await page.evaluate(() => renderEarn());
   await page.locator("#earn-setup").waitFor({ state: "visible" });
   assert.equal(await page.locator("#payment-wallet-account").isVisible(), false);
@@ -162,5 +181,30 @@ test("wallet import stays open through polling and refuses an existing wallet; o
   assert.equal(await page.inputValue("#payment-wallet-import-key"), "");
   assert.equal(await page.inputValue("#payment-wallet-import-pass"), "");
   assert.equal(calls.filter(c => c.channel === "wallet:import").length, 2);
+  assert.deepEqual(errors, []);
+});
+
+// A background read may be slow without making existing data blink or stealing
+// keyboard focus. The same rows survive identical replies and unrelated updates.
+test("wallet background updates preserve visible history, row identity and focused links", { skip: !fs.existsSync(CHROMIUM), timeout: 60000 }, async t => {
+  const { page, state, errors } = await fixture(t);
+  await page.waitForFunction(() => document.getElementById("payment-wallet-history-rows").children.length === 2);
+  await page.locator("#payment-wallet-history-rows tr").first().locator("a").focus();
+  const original = await page.locator("#payment-wallet-history-status").textContent();
+  await page.evaluate(() => { window.originalHistoryRows = [...document.getElementById("payment-wallet-history-rows").children]; window.originalHistoryFocus = document.activeElement; });
+  let finish; state.holdHistory = () => new Promise(resolve => { finish = resolve; });
+  await page.evaluate(() => { void KaiPaymentWallet.refresh(false, true); });
+  while (!finish) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(await page.locator("#payment-wallet-history-status").textContent(), original, "a routine update keeps the last status visible");
+  assert.equal(await page.locator("#payment-wallet-history-refresh").isVisible(), false);
+  assert.equal(await page.locator("#payment-wallet-history-rows tr").count(), 2);
+  state.holdHistory = null; finish();
+  await page.evaluate(() => KaiPaymentWallet.refresh(false, true));
+  assert.equal(await page.evaluate(() => [...document.getElementById("payment-wallet-history-rows").children].every((row, i) => row === window.originalHistoryRows[i])), true);
+  assert.equal(await page.evaluate(() => document.activeElement === window.originalHistoryFocus), true);
+  state.rows[1].status = "confirmed"; await page.evaluate(() => KaiPaymentWallet.refresh(false, true));
+  assert.equal(await page.evaluate(() => document.getElementById("payment-wallet-history-rows").firstElementChild === window.originalHistoryRows[0]), true);
+  assert.equal(await page.evaluate(() => document.activeElement === window.originalHistoryFocus), true);
+  assert.equal(await page.locator("#payment-wallet-history-rows tr").nth(1).locator("td").last().textContent(), "Confirmed");
   assert.deepEqual(errors, []);
 });

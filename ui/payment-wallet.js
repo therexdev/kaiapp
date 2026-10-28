@@ -14,9 +14,9 @@
   const send = document.createElement("button"); send.id = "payment-wallet-open-send"; send.type = "button"; send.textContent = "Send"; send.disabled = true;
   lock.className = ""; lock.textContent = "Lock"; lock.hidden = true; actions.append(send, lock); page.querySelector(".product-head").append(actions);
   const account = document.createElement("section"); account.id = "payment-wallet-account"; account.hidden = true;
-  account.innerHTML = '<section class="payment-wallet-card"><div class="payment-wallet-row"><div><h2>Your address</h2><p id="payment-wallet-network" class="hint">Share this address to receive KOIN or VHP.</p></div><span id="payment-wallet-lock-state" class="payment-wallet-badge"></span></div><div id="payment-wallet-receive" class="payment-wallet-row"></div><p id="payment-wallet-address-note" class="hint" role="status"></p></section><div id="payment-wallet-metrics"></div><p id="payment-wallet-balance-note" class="hint" role="status"></p><section class="payment-wallet-card payment-wallet-history"><div class="payment-wallet-row"><h2>Transaction history</h2><button id="payment-wallet-history-refresh" type="button">Refresh</button></div><p id="payment-wallet-history-status" class="hint" role="status">Loading transaction history…</p><div class="payment-wallet-table"><table><thead><tr><th>Activity</th><th>Amount</th><th>When</th><th>Status</th></tr></thead><tbody id="payment-wallet-history-rows"></tbody></table></div><button id="payment-wallet-history-more" type="button" hidden>Load older transactions</button></section>';
+  account.innerHTML = '<section class="payment-wallet-card"><div class="payment-wallet-row"><div><h2>Your address</h2><p id="payment-wallet-network" class="hint">Share this address to receive KOIN or VHP.</p></div><span id="payment-wallet-lock-state" class="payment-wallet-badge"></span></div><div id="payment-wallet-receive" class="payment-wallet-row"></div><p id="payment-wallet-address-note" class="hint" role="status"></p></section><div id="payment-wallet-metrics"></div><p id="payment-wallet-balance-note" class="hint" role="status"></p><section class="payment-wallet-card payment-wallet-history"><div class="payment-wallet-row"><h2>Transaction history</h2><button id="payment-wallet-history-refresh" type="button" hidden>Try again</button></div><p id="payment-wallet-history-status" class="hint" role="status">Loading transaction history…</p><div class="payment-wallet-table"><table><thead><tr><th>Activity</th><th>Amount</th><th>When</th><th>Status</th></tr></thead><tbody id="payment-wallet-history-rows"></tbody></table></div><button id="payment-wallet-history-more" type="button" hidden>Load older transactions</button></section>';
   ready.before(account);
-  copy.textContent = "Copy"; refreshButton.textContent = "Refresh balances";
+  copy.textContent = "Copy"; refreshButton.hidden = true;
   const explorer = document.createElement("a"); explorer.id = "payment-wallet-explorer"; explorer.textContent = "Explorer ↗"; explorer.target = "_blank"; explorer.rel = "noopener noreferrer"; explorer.hidden = true;
   $("payment-wallet-receive").append(address, copy, explorer);
   balances.className = "payment-wallet-stats";
@@ -56,7 +56,7 @@
     finally { button.disabled = false; }
   });
 
-  let wallet = null, context = null, rows = [], cursor = null, pending = null, generation = 0, timer = null, historyObserved = null, historyExpanded = false;
+  let wallet = null, context = null, rows = [], cursor = null, pending = null, generation = 0, timer = null, historyObserved = null, historyExpanded = false, refreshProblem = false;
   const visible = () => !page.hidden && !document.hidden;
   const addressPattern = /^[1-9A-HJ-NP-Za-km-z]{25,40}$/;
   const hashPattern = /^0x1220[a-f0-9]{64}$/;
@@ -75,11 +75,13 @@
   function paintActions() {
     lock.hidden = !wallet?.unlocked; send.disabled = !wallet?.unlocked || !fresh() || !$("earn-wif").hidden;
     $("payment-wallet-lock-state").textContent = wallet?.unlocked ? "Unlocked" : "Locked";
-    $("payment-wallet-history-refresh").disabled = !!pending; refreshButton.disabled = !!pending;
+    const retry = $("payment-wallet-history-refresh");
+    retry.hidden = !refreshProblem && !historyExpanded; retry.disabled = !!pending;
+    retry.textContent = refreshProblem ? "Try again" : "Back to latest";
     $("payment-wallet-history-more").disabled = !!pending;
   }
   function clear(resetSecrets = true) {
-    context = null; rows = []; cursor = null; historyObserved = null; historyExpanded = false;
+    context = null; rows = []; cursor = null; historyObserved = null; historyExpanded = false; refreshProblem = false;
     for (const id of ["koin", "vhp", "mana"]) $("payment-wallet-" + id).textContent = "—";
     $("payment-wallet-history-rows").replaceChildren(); $("payment-wallet-history-more").hidden = true;
     $("payment-wallet-balance-note").textContent = "Checking balances…";
@@ -105,8 +107,12 @@
     return result.data;
   }
   function paintHistory() {
-    const host = $("payment-wallet-history-rows"); host.replaceChildren();
+    const host = $("payment-wallet-history-rows"), existing = new Map([...host.children].map(row => [row.dataset.key, row])), next = [];
+    const focused = document.activeElement?.closest("tr")?.dataset.key, focusedLink = document.activeElement?.getAttribute("href");
     for (const entry of rows) {
+      const key = entry.kind + ":" + entry.id, signature = JSON.stringify(entry);
+      const previous = existing.get(key);
+      if (previous?.dataset.signature === signature) { next.push(previous); continue; }
       const tr = document.createElement("tr"), activity = document.createElement("td"), value = document.createElement("td"), when = document.createElement("td"), status = document.createElement("td");
       const title = document.createElement("strong"); title.textContent = entry.label; activity.append(title);
       const ref = document.createElement("small"); ref.textContent = entry.kind === "block" ? "Block " + (entry.height || "") : entry.id;
@@ -118,7 +124,15 @@
       if (!entry.changes.length) value.textContent = "—";
       when.textContent = entry.timestamp == null ? "Time unavailable" : new Date(entry.timestamp).toLocaleString();
       status.textContent = ({ confirmed: "Confirmed", confirming: "Confirming", failed: "Failed" })[entry.status]; status.dataset.status = entry.status;
-      tr.append(activity, value, when, status); host.append(tr);
+      tr.dataset.key = key; tr.dataset.signature = signature;
+      tr.append(activity, value, when, status); next.push(tr);
+    }
+    const retained = new Set(next);
+    for (const row of [...host.children]) if (!retained.has(row)) row.remove();
+    next.forEach((row, index) => { if (host.children[index] !== row) host.insertBefore(row, host.children[index] || null); });
+    if (focused && focusedLink && document.activeElement === document.body) {
+      const row = next.find(row => row.dataset.key === focused);
+      [...(row?.querySelectorAll("a") || [])].find(link => link.getAttribute("href") === focusedLink)?.focus({ preventScroll: true });
     }
     $("payment-wallet-history-more").hidden = !cursor;
   }
@@ -135,9 +149,9 @@
     if (!visible() || !wallet?.address) return;
     if (pending) return pending.promise;
     const version = ++generation, expectedAddress = wallet.address, controller = new AbortController();
-    const task = pending = { controller, promise: null }, deadline = setTimeout(() => controller.abort(Error("Wallet refresh timed out. Try Refresh again.")), 20000);
+    const task = pending = { controller, promise: null }, deadline = setTimeout(() => controller.abort(Error("Wallet update timed out. Updates retry automatically.")), 20000);
     clearTimeout(timer); paintActions();
-    if (!automatic || !historyExpanded) $("payment-wallet-history-status").textContent = older ? "Loading older transactions…" : rows.length ? "Refreshing transaction history…" : "Loading transaction history…";
+    if (older || !historyObserved) $("payment-wallet-history-status").textContent = older ? "Loading older transactions…" : "Loading transaction history…";
     const valid = () => version === generation && wallet?.address === expectedAddress && visible();
     task.promise = (async () => {
       try {
@@ -155,14 +169,15 @@
           if (!explorer.hidden) explorer.href = "https://koinosblocks.com/address/" + result.address; else explorer.removeAttribute("href");
           paintActions();
         }
-        if (automatic && historyExpanded) return; // Keep the page being read until Refresh or a new visit.
+        if (automatic && historyExpanded) return; // Keep older history and any history error until Back to latest or a new visit.
         const result = await read("wallet:history", older ? { cursor } : {}, controller.signal); if (!valid()) return;
         const history = checkedHistory(result);
         rows = older ? [...new Map([...rows, ...history.rows].map(row => [row.kind + ":" + row.id, row])).values()] : history.rows;
-        cursor = history.nextCursor; historyObserved = history.observedAt; historyExpanded = older; paintHistory();
+        cursor = history.nextCursor; historyObserved = history.observedAt; historyExpanded = older; refreshProblem = false; paintHistory();
         $("payment-wallet-history-status").textContent = rows.length ? "On-chain activity · checked " + new Date(historyObserved).toLocaleTimeString() + ". Confirming transactions can still change." : cursor ? "No transfers in this page. Load older transactions to continue." : "No transactions were found for this wallet on this network.";
       } catch (error) {
         if (!valid()) return;
+        refreshProblem = true;
         const note = errorText(controller.signal.aborted ? controller.signal.reason : error);
         if (!context || !fresh()) $("payment-wallet-balance-note").textContent = "Balances unavailable. " + note;
         $("payment-wallet-history-status").textContent = (rows.length ? "Could not refresh. Showing previously loaded history" + (historyObserved ? " from " + new Date(historyObserved).toLocaleTimeString() : "") + ". " : "Transaction history unavailable. ") + note;

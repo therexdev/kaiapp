@@ -78,7 +78,8 @@ test("temporary Pi access can save its wallet connection after protected storage
   assert.equal(await page.evaluate(() => window.walletInfo.sessionOnly), true);
   assert.match(await page.locator("#product-wallet-access-detail").textContent(), /cancelled/);
   await page.evaluate(() => { window.cancelConnection = false; }); await connect.click();
-  await page.waitForFunction(() => document.getElementById("product-wallet-access-connect").textContent === "Refresh credits");
+  await page.waitForFunction(() => document.getElementById("product-wallet-access-connect").hidden === true);
+  assert.equal(await page.locator("#product-wallet-access-connect").isVisible(), false, "connected credits update automatically without a redundant refresh button");
   assert.deepEqual(await page.evaluate(() => window.calls.filter(x => x.action === "wallet-connect").map(x => x.input)),
     [{ sessionOnly: true }, { sessionOnly: false }, { sessionOnly: false }]);
   assert.equal(await page.locator("#product-wallet-access-session-note").isVisible(), false);

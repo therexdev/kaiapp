@@ -1,3 +1,11 @@
+## Smoother controls and background updates
+
+- Model sharing uses polished, keyboard-accessible switches. The credit-priority preference and existing Settings switches use the same styling, with clear focus and reduced-motion support.
+- Credit balances and earning readiness refresh before their freshness deadlines. Unchanged reads keep the same text, model rows, focus and layout; actual lost connections and expired readiness remain visible.
+- Removed routine Refresh actions from credits, connected wallet access, wallet history, workflow runs, Agent Jobs and automatically updated Brain panels. Retry remains available after errors, and wallet history offers Back to latest when browsing older transactions.
+- The sidebar reserves space for status and recovery actions so background reads do not move Buy credits or navigation. Wallet history retains its rows and focus during automatic updates.
+- This update includes the automatic reward feed below and requires only an app update. No additional Vultr command is needed.
+
 ## Automatic reward activity in Earn
 
 - Replaced the separate earnings summary and Connection cards with one reward activity feed beside the earning control. It loads automatically and refreshes while Earn is open; no Refresh earnings click is needed.

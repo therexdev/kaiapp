@@ -38,12 +38,46 @@ test("credits load on open, explain inactive service, retry existing USD account
   await page.evaluate(() => { window.creditScenario = "ready"; }); await refresh.click();
   await page.waitForFunction(() => document.querySelector(".product-sidebar-credits [data-credit-total]").textContent === "1,250");
   assert.match(await page.locator(".product-sidebar-credits [data-credit-breakdown]").textContent(), /250 free.*1,000 purchased/);
+  assert.equal(await refresh.isVisible(), false, "healthy credits update automatically without a Refresh button");
+  await page.clock.pauseAt(new Date());
+  const geometry = () => page.evaluate(() => {
+    const box = document.querySelector(".product-sidebar-credits").getBoundingClientRect();
+    const buy = document.querySelector('.product-sidebar-credits [data-product-view="buy-credits"]').getBoundingClientRect();
+    return [box.height, buy.top, buy.height, document.getElementById("nav").getBoundingClientRect().top];
+  });
+  for (const width of [1440, 780]) {
+    await page.setViewportSize({ width, height: 980 });
+    const before = await geometry();
+    await page.evaluate(() => {
+      window.creditTextMutations = 0;
+      window.creditObserver?.disconnect();
+      window.creditObserver = new MutationObserver(records => { window.creditTextMutations += records.length; });
+      window.creditObserver.observe(document.querySelector(".product-sidebar-credits"), { childList: true, characterData: true, subtree: true });
+      window.savedHistoryRow = document.querySelector("#product-credit-history tr");
+      window.holdCreditRead = true; window.finishCreditRead = null;
+    });
+    await page.clock.runFor(15001);
+    await page.waitForFunction(() => !!window.finishCreditRead);
+    await page.clock.runFor(4000);
+    assert.equal(await total.textContent(), "1,250");
+    assert.equal(await status.textContent(), "Updates automatically", "a normal in-flight poll does not show Checking or stale text");
+    assert.equal(await page.evaluate(() => window.creditTextMutations), 0, "unchanged balance text nodes are not replaced every second");
+    assert.equal(await page.evaluate(() => window.savedHistoryRow === document.querySelector("#product-credit-history tr")), true);
+    assert.deepEqual(await geometry(), before, `a background read preserves sidebar layout at ${width}px`);
+    await page.evaluate(() => { window.holdCreditRead = false; window.finishCreditRead(); });
+    await page.waitForFunction(() => !window.KaiCredits.get().refreshing);
+    assert.deepEqual(await geometry(), before, "completing the read does not move Buy credits or navigation");
+  }
+  await page.evaluate(() => window.creditObserver.disconnect());
   // The public service is still inactive in this fixture; an existing connected
   // USD deployment must nevertheless remain readable without changing setup.
   assert.equal(await page.evaluate(() => KaiNetwork.info.activation), "unavailable");
-  await page.evaluate(() => { window.creditScenario = "offline"; }); await refresh.click();
+  const readyGeometry = await geometry();
+  await page.evaluate(async () => { window.creditScenario = "offline"; await window.KaiCredits.refresh(); });
   await page.waitForFunction(() => document.querySelector(".product-sidebar-credits [data-credit-status]").textContent.includes("Last verified"));
   assert.equal(await total.textContent(), "1,250");
+  assert.equal(await refresh.isVisible(), true, "Retry remains available after an actual failure");
+  assert.deepEqual(await geometry(), readyGeometry, "stale status and Retry use reserved space instead of shifting the sidebar");
   await page.evaluate(() => { window.creditScenario = "zero"; }); await refresh.click();
   await page.waitForFunction(() => document.querySelector(".product-sidebar-credits [data-credit-total]").textContent === "0");
   assert.match(await page.locator(".product-sidebar-credits [data-credit-breakdown]").textContent(), /0 free.*0 purchased/);
@@ -55,7 +89,7 @@ test("credits load on open, explain inactive service, retry existing USD account
   await page.waitForFunction(() => document.querySelector(".product-sidebar-credits [data-credit-total]").textContent === "250");
   assert.match(await page.locator(".product-sidebar-credits [data-credit-breakdown]").textContent(), /^250 free$/);
   assert.equal(await page.evaluate(() => window.KaiCredits.get().snapshot.owner), "free-installation");
-  await page.evaluate(() => { window.KaiCredits.clear(); document.getElementById("koin-available").textContent = "0.10000000"; window.creditScenario = "legacy"; }); await refresh.click();
+  await page.evaluate(async () => { window.KaiCredits.clear(); document.getElementById("koin-available").textContent = "0.10000000"; window.creditScenario = "legacy"; await window.KaiCredits.refresh(); });
   await page.waitForFunction(() => document.querySelector(".product-sidebar-credits [data-credit-status]").textContent.includes("Earlier balance"));
   assert.equal(await total.textContent(), "—"); assert.equal(await page.locator("#koin-available").textContent(), "0.10000000");
   await page.locator(".product-sidebar-credits [data-credit-help]").click();

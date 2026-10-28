@@ -47,6 +47,22 @@ test("opening and retrying the account reports loading without inventing a zero 
   assert.equal(store.get().refreshing, false); assert.equal(store.get().status, "ready");
 });
 
+test("background credit reads stay quiet while fresh but never extend the last verified balance deadline", async () => {
+  const { creditPresentation } = require("../../ui/credit-account");
+  let resolve;
+  const store = createCreditState({ read: () => new Promise(done => { resolve = done; }), clock: () => 1000 });
+  store.accept(value("1"));
+  const before = creditPresentation(store.get(), 1000), pending = store.refresh();
+  await Promise.resolve();
+  const inFlight = creditPresentation(store.get(), 20000);
+  assert.equal(inFlight.total, before.total); assert.equal(inFlight.breakdown, before.breakdown);
+  assert.equal(inFlight.status, ""); assert.equal(inFlight.stale, false);
+  const overdue = creditPresentation(store.get(), 31001);
+  assert.equal(overdue.stale, true); assert.match(overdue.status, /last verified/);
+  assert.equal(overdue.total, before.total); assert.equal(overdue.breakdown, before.breakdown);
+  resolve(value("1")); await pending;
+});
+
 test("credit presentation distinguishes zero, unavailable, stale and earlier KOIN accounts", async () => {
   const { creditPresentation, credits } = require("../../ui/credit-account");
   const store = createCreditState({ read: async () => { throw Error("Error invoking remote method 'koin:test-payments': Error: Service not activated"); }, clock: () => 1000 });
