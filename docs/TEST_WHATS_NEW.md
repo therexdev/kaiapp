@@ -1,3 +1,9 @@
+## Stable free-credit availability and compact balances
+
+- Free-credit checks now have an independent server refresh, so slow payment or reward processing no longer makes the allowance disappear. Requires the [server update](FREE_CREDIT_STABILITY_RELEASE.md).
+- Removed redundant “Updates automatically” labels from balances and reward activity.
+- Tightened the sidebar balance card, with status and recovery controls shown only when needed. Background updates remain enabled.
+
 ## Daily KOIN earnings and rewards awaiting payment
 
 - Above Reward activity, Earn shows estimated availability earned so far in the current UTC reward day and a separate total awaiting review or automatic payment, with availability/work breakdowns.

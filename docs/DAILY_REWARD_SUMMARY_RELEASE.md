@@ -1,5 +1,7 @@
 # Daily KOIN earnings above the reward feed
 
+For new installations, use the [combined free-credit stability update](FREE_CREDIT_STABILITY_RELEASE.md), which includes these reward summaries.
+
 Update the existing prepaid service once, then install the matching Koinos AI
 Test app. The app shows estimated availability accumulated during the current
 UTC reward day and a separate total awaiting review or automatic payment.
