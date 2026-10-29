@@ -60,6 +60,10 @@ test("credits load on open, explain inactive service, retry existing USD account
     });
     assert.equal(textFits, true, `the fractional balance and credits suffix fit inside the card at ${width}px`);
     await page.evaluate(async () => { window.creditScenario = "ready"; await window.KaiCredits.refresh(); });
+    if (process.env.KAI_CREDIT_QA_DIR) {
+      fs.mkdirSync(process.env.KAI_CREDIT_QA_DIR, { recursive: true });
+      await page.locator(".product-sidebar-credits").screenshot({ path: path.join(process.env.KAI_CREDIT_QA_DIR, `balance-${width}.png`) });
+    }
     const before = await geometry();
     await page.evaluate(() => {
       window.creditTextMutations = 0;
@@ -73,7 +77,10 @@ test("credits load on open, explain inactive service, retry existing USD account
     await page.waitForFunction(() => !!window.finishCreditRead);
     await page.clock.runFor(4000);
     assert.equal(await total.textContent(), "1,250");
-    assert.equal(await status.textContent(), "Updates automatically", "a normal in-flight poll does not show Checking or stale text");
+    assert.equal(await status.textContent(), "", "a normal in-flight poll needs no status label");
+    assert.equal(await status.isVisible(), false);
+    assert.equal(await page.locator(".product-sidebar-credits .product-credit-state").isVisible(), false);
+    assert.ok((await geometry())[0] < 170, "healthy balance card has no reserved status gap");
     assert.equal(await page.evaluate(() => window.creditTextMutations), 0, "unchanged balance text nodes are not replaced every second");
     assert.equal(await page.evaluate(() => window.savedHistoryRow === document.querySelector("#product-credit-history tr")), true);
     assert.deepEqual(await geometry(), before, `a background read preserves sidebar layout at ${width}px`);
@@ -90,7 +97,7 @@ test("credits load on open, explain inactive service, retry existing USD account
   await page.waitForFunction(() => document.querySelector(".product-sidebar-credits [data-credit-status]").textContent.includes("Last verified"));
   assert.equal(await total.textContent(), "1,250");
   assert.equal(await refresh.isVisible(), true, "Retry remains available after an actual failure");
-  assert.deepEqual(await geometry(), readyGeometry, "stale status and Retry use reserved space instead of shifting the sidebar");
+  assert.ok((await geometry())[0] > readyGeometry[0], "real failures reveal compact recovery controls only when needed");
   await page.evaluate(() => { window.creditScenario = "zero"; }); await refresh.click();
   await page.waitForFunction(() => document.querySelector(".product-sidebar-credits [data-credit-total]").textContent === "0");
   assert.match(await page.locator(".product-sidebar-credits [data-credit-breakdown]").textContent(), /0 free.*0 purchased/);

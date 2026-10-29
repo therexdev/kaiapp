@@ -306,11 +306,11 @@
 .product-v2 .product-model-status[data-state="checking"]{background:#edf4ff;color:#3268b9}
 .product-v2 .product-model-status[data-state="blocked"]{background:#fff3e1;color:#8d621d}
 .product-v2 .product-provider-model-detail[hidden]{display:none}
-.product-v2 .product-credit-state{min-height:54px;display:flex;flex-direction:column;gap:3px}
-.product-v2 .product-credit-state>[data-credit-status]{margin:0;line-height:1.5;min-height:30px;font-size:10px}
+.product-v2 .product-credit-state{display:flex;flex-direction:column;gap:3px;margin:4px 0}
+.product-v2 .product-credit-state>[data-credit-status]{margin:0;line-height:1.5;font-size:10px}
 .product-v2 .product-credit-state>.product-credit-actions{min-height:20px;margin:0;align-items:center;gap:13px}
-.product-v2 .product-sidebar-credits .product-credit-state{height:54px;min-height:54px;flex:none}
-.product-v2 .product-sidebar-credits .product-credit-state>[data-credit-status]{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;height:30px;min-height:30px;max-height:30px;font-size:10px;line-height:15px;margin:0}
+.product-v2 .product-sidebar-credits .product-credit-state{flex:none}
+.product-v2 .product-sidebar-credits .product-credit-state>[data-credit-status]{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;max-height:30px;font-size:10px;line-height:15px;margin:0}
 .product-v2 .product-sidebar-credits [data-credit-total],.product-v2 #sidebar-wallet .wallet-usd,.product-v2 #sidebar-wallet .wallet-amount{font-variant-numeric:tabular-nums}
 @media(max-width:650px){.product-v2 .product-provider-model-row{grid-template-columns:minmax(0,1fr) 44px;gap:0 14px;padding:12px 0}.product-v2 .product-provider-model-row>label.product-provider-model-name{grid-column:1;grid-row:1;min-height:26px}.product-v2 .product-provider-model-row>.product-provider-model-readiness{grid-column:1;grid-row:2;padding-left:0;margin-top:4px}.product-v2 .product-provider-model-row>.product-switch-input{grid-column:2;grid-row:1 / 3;align-self:center}.product-v2 .product-share-all{font-size:12px}}
 @media(prefers-reduced-motion:reduce){.product-v2 input.product-switch-input,.product-v2 input.product-switch-input::before,.product-v2 .switch-track,.product-v2 .switch-thumb{transition:none}}
@@ -319,3 +319,5 @@
 .product-v2 .product-sidebar-credits [data-credit-breakdown]{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;height:28px;min-height:28px;max-height:28px;line-height:14px;font-size:10px;margin:4px 0}
 /* Keep a fractional balance and its unit inside the compact sidebar card. */
 @media(max-width:800px){.product-v2 .product-sidebar-credits>strong{font-size:23px;min-height:33.75px}.product-v2 .product-sidebar-credits>strong small{font-size:11px}}
+
+.product-v2 .product-credit-state[hidden],.product-v2 .product-credit-state [hidden],.product-v2 #product-reward-auto[hidden],.product-v2 #product-reward-status[hidden]{display:none}
