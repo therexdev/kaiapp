@@ -1526,7 +1526,7 @@ renderCodeSwitch();
 let earnTimer = null;
 let walletUiEpoch = 0;
 function resetWalletUiSecrets() {
-  walletUiEpoch++; walletSendArmed = null;
+  walletUiEpoch++; walletSendArmed = null; window.KaiLegacyDrop?.clear();
   for (const id of ["earn-pass", "earn-pass2", "earn-unlock-pass", "earn-reveal-pass", "earn-restore-wif", "earn-restore-pass", "earn-restore-pass2", "wallet-send-pass", "payment-wallet-import-key", "payment-wallet-import-pass", "payment-wallet-import-confirm", "product-purchase-unlock-pass"]) if ($(id)) $(id).value = "";
   $("earn-wif-value").textContent = ""; $("earn-wif").hidden = true; $("earn-reveal-row").hidden = true;
   walletMsg("");
@@ -1534,15 +1534,20 @@ function resetWalletUiSecrets() {
 window.KaiWalletPrivacy = { reset: resetWalletUiSecrets, get version() { return walletUiEpoch; } };
 
 async function renderEarn() {
+  const walletEpoch = walletUiEpoch;
   clearTimeout(earnTimer);
   let s;
   try {
     s = await coreGet("/core/earn");
   } catch {
+    if (walletEpoch !== walletUiEpoch) return;
+    window.KaiLegacyDrop?.clear();
     earnErr("Core unreachable");
     return;
   }
+  if (walletEpoch !== walletUiEpoch) return;
   window.KaiPaymentWallet?.observe(s.wallet);
+  window.KaiLegacyDrop?.observe(s);
   const wifShowing = !$("earn-wif").hidden;
   $("earn-setup").hidden = s.wallet.exists && !wifShowing;
   $("earn-unlock").hidden = !s.wallet.exists || s.wallet.unlocked;
