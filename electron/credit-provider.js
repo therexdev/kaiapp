@@ -327,10 +327,17 @@ class CreditProvider {
       return { epoch: p.epoch, state: p.state, availability: p.availability, work: p.work,
         ...(p.id !== undefined ? { id: p.id } : {}), ...(p.txId ? { txId: p.txId } : {}) };
     }).sort((a, b) => Number(b.epoch) - Number(a.epoch)).slice(0, 64);
-    // The server reports a UTC reward day, not a payment timestamp. Only the
-    // observation time and the last successful processing check are available.
+    // Older servers still provide payout history. Missing or invalid new
+    // summary data must never become a fabricated zero balance.
+    let summary = null;
+    try {
+      if (Array.isArray(value.rewardSummaries) && value.rewardSummaries.length <= 64) {
+        const matches = value.rewardSummaries.filter(s => s?.account === walletAddress);
+        if (matches.length === 1) summary = require("../ui/reward-summary").validate(matches[0], walletAddress, value.observedAt, payouts);
+      }
+    } catch {}
     return { walletAddress, scope, observedAt: value.observedAt, lastCycleCheck: Number.isSafeInteger(value.lastCycleCheck) &&
-      value.lastCycleCheck >= 0 && value.lastCycleCheck <= value.observedAt + 5000 ? value.lastCycleCheck : null, payouts };
+      value.lastCycleCheck >= 0 && value.lastCycleCheck <= value.observedAt + 5000 ? value.lastCycleCheck : null, payouts, summary };
   }
   async tick() {
     if (this.busy || this.closed) return;

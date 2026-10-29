@@ -705,7 +705,9 @@
   });
   // Public, read-only reward history. A page visit never signs or claims a payout.
   const rewardView = $("view-earn"), rewardList = $("product-provider-earnings");
+  $("product-reward-status").insertAdjacentHTML("beforebegin", `<div id="product-reward-summary" class="product-reward-summary"><section aria-labelledby="product-reward-today-label"><h3 id="product-reward-today-label">Today’s availability</h3><strong id="product-reward-today">—</strong><span class="product-reward-summary-label">Estimated KOIN · UTC reward day</span><p id="product-reward-today-detail">Waiting for verified availability totals.</p></section><section aria-labelledby="product-reward-pending-label"><h3 id="product-reward-pending-label">Awaiting payment</h3><strong id="product-reward-pending">—</strong><span class="product-reward-summary-label">KOIN · review and payment processing</span><p id="product-reward-pending-detail">Waiting for reward confirmation.</p></section></div><p id="product-reward-schedule" class="product-fine">Rewards close daily at midnight UTC, followed by at least 24 hours of review. Payments are automatic after finalization.</p>`);
   const rewardStates = {
+    awaiting_review: ["Awaiting review", "pending"], reviewing: ["In 24-hour review", "pending"], finalizing: ["Finalizing reward", "pending"],
     queued: ["Queued", "pending"], signing: ["Preparing payment", "pending"], staged: ["Ready to submit", "pending"],
     unknown: ["Checking payment", "pending"], pending: ["Payment pending", "pending"], reversible: ["Awaiting finality", "pending"],
     needs_review: ["Needs attention", "attention"], paid: ["Paid", "paid"], paid_elsewhere: ["Paid", "paid"]
@@ -724,11 +726,16 @@
     rewardList.scrollTop = 0;
     $("product-reward-updated").textContent = "KOIN rewards are separate from chat credits.";
     $("product-reward-updated").removeAttribute("title");
+    $("product-reward-today").textContent = $("product-reward-pending").textContent = "—";
+    $("product-reward-today-detail").textContent = "Waiting for verified availability totals.";
+    $("product-reward-pending-detail").textContent = "Waiting for reward confirmation.";
+    $("product-reward-schedule").textContent = "Rewards close daily at midnight UTC, followed by at least 24 hours of review. Payments are automatic after finalization.";
     rewardStatus("Checking the current reward wallet…", "waiting");
     if (rewardsVisible()) refreshRewards();
   }
   function paintRewards(value) {
-    const sorted = [...value.payouts].sort((a, b) => Number(BigInt(b.epoch) - BigInt(a.epoch)));
+    paintRewardSummary(value);
+    const sorted = [...value.payouts, ...(value.summary?.pending || [])].sort((a, b) => Number(BigInt(b.epoch) - BigInt(a.epoch)));
     const markup = sorted.length ? sorted.map(row => {
       const [status, tone] = rewardStates[row.state], date = new Date(Number(row.epoch) * 86400000);
       const day = Number.isFinite(date.getTime()) ? date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }) : `Reward day ${row.epoch}`;
@@ -751,6 +758,26 @@
     const processingFresh = Number.isSafeInteger(value.lastCycleCheck) && value.lastCycleCheck <= Date.now() + 5000 && Date.now() - value.lastCycleCheck <= 60000;
     rewardStatus(processingFresh ? "Updates automatically every 15 seconds." : "History updated. Waiting for a fresh reward-processing check.", "ready");
   }
+  function paintRewardSummary(value) {
+    const summary = value.summary, current = summary?.current, total = window.KaiRewardSummary.totals(summary, value.payouts);
+    const localTime = at => new Date(at).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" });
+    const fresh = Number.isSafeInteger(value.lastCycleCheck) && value.lastCycleCheck <= Date.now() + 5000 && Date.now() - value.lastCycleCheck <= 60000;
+    $("product-reward-today").textContent = current?.availability != null ? rewardAmount(current.availability) : "—";
+    $("product-reward-today-detail").textContent = current?.availability != null
+      ? `${fresh ? "Verified availability through" : "Last recorded availability through"} ${localTime(current.asOf)}. Estimate may change; completed work is added after daily settlement.`
+      : "Today’s estimate is not available from the reward service yet.";
+    $("product-reward-pending").textContent = summary ? rewardAmount(String(BigInt(total.availability) + BigInt(total.work))) : "—";
+    $("product-reward-pending-detail").textContent = summary
+      ? `Availability ${rewardAmount(total.availability)} · Work ${rewardAmount(total.work)}${total.attention ? " · Some rewards need attention." : total.sending ? " · Automatic payment processing." : total.reviewing ? " · Daily batches awaiting confirmation." : " · No recorded rewards waiting for payment."}`
+      : "The service has not reported all pending batches yet. Recorded payments remain in the feed.";
+    const closesAt = current?.closesAt ?? (Math.floor(value.observedAt / 86400000) + 1) * 86400000;
+    let schedule = `Current reward day closes ${localTime(closesAt)}. At least 24 hours of review follows publication.`;
+    if (Number.isFinite(total.reviewUntil)) schedule += total.reviewUntil > Date.now()
+      ? ` Earliest payment for a reviewing batch: ${localTime(total.reviewUntil)}, after finalization.`
+      : " A batch’s review period has ended; awaiting finalization and automatic payment.";
+    else if (total.sending) schedule += " Finalized rewards are being processed for automatic payment.";
+    $("product-reward-schedule").textContent = schedule;
+  }
   function verifiedRewards(value) {
     if (!value || typeof value.walletAddress !== "string" || !value.walletAddress || value.walletAddress.length > 128 ||
         typeof value.scope !== "string" || !/^[a-f0-9]{64}$/.test(value.scope) || !Number.isSafeInteger(value.observedAt) ||
@@ -758,7 +785,9 @@
         value.payouts.some(row => !row || typeof row.epoch !== "string" || !/^(0|[1-9]\d{0,9})$/.test(row.epoch) ||
           !Object.hasOwn(rewardStates, row.state) || [row.availability, row.work].some(n => typeof n !== "string" || !/^(0|[1-9]\d{0,19})$/.test(n))))
       throw Error("Reward history is unavailable");
-    return value;
+    let summary = null;
+    try { if (value.summary) summary = window.KaiRewardSummary.validate(value.summary, value.walletAddress, value.observedAt, value.payouts); } catch {}
+    return { ...value, summary };
   }
   function rewardUnavailable() {
     rewardStatus(rewardSnapshot ? "Connection interrupted. Showing the last recorded rewards; retrying automatically." : "Reward history is unavailable. Retrying automatically.", "stale");

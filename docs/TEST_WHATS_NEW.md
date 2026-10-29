@@ -1,3 +1,9 @@
+## Daily KOIN earnings and rewards awaiting payment
+
+- Above Reward activity, Earn shows estimated availability earned so far in the current UTC reward day and a separate total awaiting review or automatic payment, with availability/work breakdowns.
+- Signed daily allocations appear during review, before they enter the payment queue. Payment timing uses the reported contract review deadline; no exact send time is promised.
+- Run the [one-time server update](DAILY_REWARD_SUMMARY_RELEASE.md), then update Test. Older services keep their existing payout feed and show estimates as unavailable, never as an invented zero. Reward policy, signing and payment behavior are unchanged.
+
 ## Smoother controls and background updates
 
 - Model sharing uses polished, keyboard-accessible switches. The credit-priority preference and existing Settings switches use the same styling, with clear focus and reduced-motion support.
