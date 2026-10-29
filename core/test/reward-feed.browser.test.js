@@ -29,7 +29,7 @@ async function fixture(t, rows = []) {
       if (action === "provider-public-earnings") {
         window.rewardCalls.push({ at: Date.now(), scope: window.rewardScope });
         const value = { walletAddress: window.rewardOwner, scope: window.rewardScope, observedAt: Date.now(),
-          lastCycleCheck: window.rewardCycleFresh ? Date.now() : null, payouts: structuredClone(window.rewardRows) };
+          lastCycleCheck: window.rewardCycleFresh ? Date.now() : null, payouts: structuredClone(window.rewardRows), summary: structuredClone(window.rewardSummary || null) };
         const failed = window.rewardError;
         if (window.holdReward) await new Promise(resolve => { window.finishReward = resolve; });
         if (failed) throw Error("fixture transport lost; private diagnostic must not appear");
@@ -48,6 +48,43 @@ async function fixture(t, rows = []) {
 }
 const payout = (epoch, state, availability = "10000000", work = "2500000") => ({ epoch, state, availability, work });
 const advance = (page, ms = 15001) => page.clock.runFor(ms);
+
+test("daily availability and confirming totals update above the feed without counting paid rewards twice", { skip: !fs.existsSync(CHROMIUM), timeout: 60000 }, async t => {
+  const { page, panel } = await fixture(t);
+  assert.equal(await page.locator("#product-reward-today").textContent(), "—", "older service must not invent a zero");
+  await page.evaluate(() => {
+    const day = Math.floor(Date.now() / 86400000);
+    window.rewardSummary = { schema: 1, account: window.rewardOwner, current: { epoch: String(day), closesAt: (day + 1) * 86400000, availability: "123456789", asOf: Date.now() - 60000 },
+      pending: [{ epoch: String(day - 1), availability: "30000000", work: "10000000", state: "reviewing", reviewUntil: (day + 1) * 86400000 + 120000 }] };
+    window.rewardRows = [{ epoch: String(day - 2), availability: "20000000", work: "1", state: "pending" },
+      { epoch: String(day - 3), availability: "900000000", work: "0", state: "paid" }];
+  });
+  await advance(page);
+  await page.waitForFunction(() => document.getElementById("product-reward-today").textContent === "1.23456789");
+  assert.equal(await page.locator("#product-reward-pending").textContent(), "0.60000001");
+  assert.match(await page.locator("#product-reward-pending-detail").textContent(), /Availability 0.50000000 · Work 0.10000001/);
+  assert.match(await page.locator("#product-reward-schedule").textContent(), /Earliest payment/);
+  assert.equal(await page.locator('.product-reward-item[data-state="reviewing"]').count(), 1);
+  await page.evaluate(() => { const r = window.rewardSummary.pending.pop(); window.rewardRows.push({ epoch: r.epoch, availability: r.availability, work: r.work, state: "paid" }); });
+  await advance(page);
+  await page.waitForFunction(() => document.getElementById("product-reward-pending").textContent === "0.20000001");
+  assert.equal(await page.locator('.product-reward-item[data-state="reviewing"]').count(), 0);
+  await page.evaluate(() => { window.rewardError = true; }); await advance(page);
+  assert.equal(await page.locator("#product-reward-today").textContent(), "1.23456789");
+  assert.match(await panel.textContent(), /last recorded rewards/);
+  if (process.env.KAI_REWARD_QA_DIR) {
+    await page.evaluate(() => { window.rewardError = false; }); await advance(page, 30001);
+    fs.mkdirSync(process.env.KAI_REWARD_QA_DIR, { recursive: true });
+    await page.locator("#view-earn").evaluate(node => { node.scrollTop = 0; });
+    await page.screenshot({ path: path.join(process.env.KAI_REWARD_QA_DIR, "daily-rewards-1280.png"), animations: "disabled" });
+    await page.setViewportSize({ width: 780, height: 700 }); await panel.scrollIntoViewIfNeeded();
+    assert.equal(await page.locator("#view-earn").evaluate(node => node.scrollWidth <= node.clientWidth), true);
+    await page.screenshot({ path: path.join(process.env.KAI_REWARD_QA_DIR, "daily-rewards-780.png"), animations: "disabled" });
+  }
+  await page.evaluate(() => { window.holdReward = true; window.dispatchEvent(new Event("kai-credit-identity-changed")); });
+  assert.equal(await page.locator("#product-reward-today").textContent(), "—");
+  assert.equal(await page.locator("#product-reward-pending").textContent(), "—");
+});
 
 test("Earn reward feed loads and updates without clicks, preserves exact amounts and reward-day meaning, and replaces the old cards", { skip: !fs.existsSync(CHROMIUM), timeout: 60000 }, async t => {
   const f = await fixture(t, [payout("20749", "paid"), payout("20751", "pending", "123456789", "1"), payout("20750", "needs_review", "0", "5000000")]);

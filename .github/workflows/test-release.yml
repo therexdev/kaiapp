@@ -14,7 +14,7 @@ permissions:
 
 env:
   # Exact backend revision included in the server-first update directions.
-  KAI_WALLET_BACKEND_COMMIT: 4f108fedf9f0e35d33635989d38b5c8c3aa9fa3c
+  KAI_WALLET_BACKEND_COMMIT: 5b954887162376fc03abecbbd92f1b1d603d232e
 
 jobs:
   verify:
@@ -56,6 +56,7 @@ jobs:
       - name: Verify purchase, provider and paid reply together
         run: |
           npm ci --ignore-scripts --prefix verification-backend
+          (cd verification-backend && node --test scripts/probe-koin-reward-summary.js scripts/probe-koin-reward-cycle.js scripts/probe-koin-epoch-completeness.js deploy/koin-mainnet/update-reward-summary.test.js)
           (cd verification-backend && node --test scripts/probe-wallet-credit-auth.js scripts/probe-wallet-credit-router.js scripts/probe-koin-provider-devices.js scripts/probe-koin-model-catalog.js scripts/probe-catalog-qualification.js scripts/probe-koin-on-demand-readiness.js scripts/probe-koin-qualification-preparation.js scripts/probe-koin-multi-model-readiness.js scripts/probe-koin-qualification-scheduling.js scripts/probe-koin-model-readiness.js scripts/probe-koin-device-free-auth.js scripts/probe-koin-device-free-router.js scripts/probe-koin-credit-priority.js scripts/probe-koin-purchase-journal.js scripts/probe-purchase-quotes-http.js deploy/koin-mainnet/update-wallet-access.test.js deploy/koin-mainnet/update-purchase-quotes.test.js deploy/koin-mainnet/update-provider-qualification.test.js deploy/koin-mainnet/update-model-readiness.test.js)
           node scripts/verify-credit-flow.js verification-backend
           node scripts/verify-provider-qualification.js verification-backend

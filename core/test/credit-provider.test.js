@@ -144,6 +144,20 @@ test("reward feed discards a delayed read after authorization, privacy or deploy
   assert.equal(f.core.account.wallet.status().unlocked, false); assert.equal(f.counts.started, 0);
 });
 
+test("daily summary is scoped to the reward wallet and invalid summary data preserves the payout feed", async t => {
+  const f = fixture(t); f.unlocked = false;
+  const now = Date.now(), day = Math.floor(now / 86400000);
+  const summary = { schema: 1, account: f.c.config.owner, current: { epoch: String(day), closesAt: (day + 1) * 86400000, availability: "42", asOf: now }, pending: [] };
+  const value = { mode: "mainnet-pilot", mainnetPaymentsEnabled: true, observedAt: now,
+    payouts: [{ account: f.c.config.owner, epoch: String(day - 2), state: "paid", availability: "100", work: "0" }],
+    rewardSummaries: [{ ...summary, account: "another-wallet" }, summary] };
+  f.args.service.fetchImpl = async () => Response.json(value);
+  assert.deepEqual((await f.controller.earnings()).summary, summary);
+  summary.current.availability = "-1";
+  const invalid = await f.controller.earnings(); assert.equal(invalid.summary, null); assert.equal(invalid.payouts.length, 1);
+  assert.equal(f.core.account.wallet.status().unlocked, false); assert.equal(f.counts.started, 0);
+});
+
 test("provider startup uses an installed approved model when the configured default is absent", async t => {
   const f = fixture(t), modelHash = P.hash("large model");
   f.tariffs.push({ model: "large", modelHash });
