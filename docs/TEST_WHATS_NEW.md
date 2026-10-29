@@ -1,3 +1,9 @@
+## Testnet KAI and expected KOIN drop
+
+- Added two small, right-aligned lines beside Reward activity: Wallet KAI and KOIN Drop.
+- Uses the current wallet’s existing testnet KAI balance and estimates 1 KOIN per 5 KAI. Hover to see the rate and snapshot caveat. Missing balances display a dash.
+- Reads work with the wallet locked and follow the existing refresh and network-privacy settings. This is an estimate, with no claim or transfer action.
+
 ## Stable free-credit availability and compact balances
 
 - Free-credit checks now have an independent server refresh, so slow payment or reward processing no longer makes the allowance disappear. Requires the [server update](FREE_CREDIT_STABILITY_RELEASE.md).

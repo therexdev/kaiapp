@@ -128,15 +128,17 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent, cre
     const url = settings.get("earn.schedulerUrl", DEFAULT_SCHEDULER_URL);
     const address = wallet.address;
     if (!url || !address) return null;
-    if (Date.now() - earningsCache.at < 30000) return earningsCache.data;
+    const key = `${url}|${address}`;
+    if (earningsCache.key === key && Date.now() - earningsCache.at < 30000) return earningsCache.data;
     let data = null;
     try {
       const r = await fetch(`${url.replace(/\/$/, "")}/balance?address=${encodeURIComponent(address)}`, {
         signal: AbortSignal.timeout(4000),
       });
       const j = await r.json();
-      if (j.ok) {
+      if (r.ok && j.ok && j.address === address) {
         data = {
+          address,
           kai: j.kai,
           koinShadow: j.koinShadow === true,
           pendingReceipts: j.pendingReceipts ?? 0,
@@ -156,7 +158,8 @@ async function createCore({ dataDir, port, llamaBin, sessionSecret, onEvent, cre
     if (data === null) data = { error: "Balance temporarily unavailable — retrying" };
     // Successes cache for the full 30s; a failed read retries in ~3s so one
     // slow moment doesn't blank the balance row for half a minute.
-    earningsCache = { at: !data.error ? Date.now() : Date.now() - 27000, data };
+    if (wallet.address !== address || settings.get("earn.schedulerUrl", DEFAULT_SCHEDULER_URL) !== url) return null;
+    earningsCache = { key, at: !data.error ? Date.now() : Date.now() - 27000, data };
     return data;
   };
   const { inactiveStatus, shadowStatus } = require("./lib/koin-network/status");

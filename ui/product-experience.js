@@ -709,6 +709,13 @@
     if (action === "local") { go("chat"); $("src-pick").value = "local"; $("src-pick").dispatchEvent(new Event("change")); }
   });
   // Public, read-only reward history. A page visit never signs or claims a payout.
+  const rewardHeader = document.createElement("div"); rewardHeader.className = "product-reward-heading";
+  $("product-reward-title").closest(".product-row").before(rewardHeader);
+  const rewardHeadingCopy = document.createElement("div"); rewardHeadingCopy.className = "product-reward-heading-copy";
+  rewardHeader.append(rewardHeadingCopy);
+  rewardHeadingCopy.append($("product-reward-title").closest(".product-row"), document.querySelector(".product-reward-intro"));
+  rewardHeader.insertAdjacentHTML("beforeend", '<div id="product-legacy-drop" class="product-legacy-drop" aria-label="Testnet KAI and estimated KOIN drop"><span>Wallet KAI: <b data-legacy-drop="kai">—</b></span><span>KOIN Drop: <b data-legacy-drop="koin">—</b></span></div>');
+  window.KaiLegacyDrop?.paint();
   const rewardView = $("view-earn"), rewardList = $("product-provider-earnings");
   $("product-reward-status").insertAdjacentHTML("beforebegin", `<div id="product-reward-summary" class="product-reward-summary"><section aria-labelledby="product-reward-today-label"><h3 id="product-reward-today-label">Today’s availability</h3><strong id="product-reward-today">—</strong><span class="product-reward-summary-label">Estimated KOIN · UTC reward day</span><p id="product-reward-today-detail">Waiting for verified availability totals.</p></section><section aria-labelledby="product-reward-pending-label"><h3 id="product-reward-pending-label">Awaiting payment</h3><strong id="product-reward-pending">—</strong><span class="product-reward-summary-label">KOIN · review and payment processing</span><p id="product-reward-pending-detail">Waiting for reward confirmation.</p></section></div><p id="product-reward-schedule" class="product-fine">Rewards close daily at midnight UTC, followed by at least 24 hours of review. Payments are automatic after finalization.</p>`);
   const rewardStates = {

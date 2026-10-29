@@ -110,7 +110,7 @@ test("SMTP refuses a plaintext server before sending credentials or email", asyn
 
 test("viewing earnings in Local-Only with earning stopped sends no scheduler request", async t => {
   let requests = 0;
-  const base = await server(t, (_req, res) => { requests++; res.end(JSON.stringify({ ok: true, kai: "7" })); });
+  const base = await server(t, (req, res) => { requests++; res.end(JSON.stringify({ ok: true, address: new URL(req.url, "http://fixture").searchParams.get("address"), kai: "7" })); });
   const { createCore } = require("../server");
   const core = await createCore({ dataDir: temp(t), port: 0, onEvent() {} });
   t.after(() => core.stop());
@@ -129,4 +129,24 @@ test("viewing earnings in Local-Only with earning stopped sends no scheduler req
   core.remote = { stop() { stopped = true; } };
   await core.stop();
   assert.equal(stopped, true, "Core shutdown stops remote polling");
+});
+
+test("legacy KAI balances are scoped to the wallet and reject mismatched responses", async t => {
+  let requests = 0, wrong = false;
+  const base = await server(t, (req, res) => {
+    requests++; const address = new URL(req.url, "http://fixture").searchParams.get("address");
+    res.end(JSON.stringify({ ok: true, address: wrong ? "different-wallet" : address, kai: String(requests * 5) }));
+  });
+  const core = await require("../server").createCore({ dataDir: temp(t), port: 0, onEvent() {} }); t.after(() => core.stop());
+  core.settings.set("network.privacyMode", "local-first"); core.settings.set("earn.schedulerUrl", base);
+  const a = core.gateway.earn.createWallet({ password: "fixture password 123" });
+  const first = (await core.gateway.earn.status()).earnings;
+  assert.equal(first.address, a.address); assert.equal(first.kai, "5");
+  assert.equal((await core.gateway.earn.status()).earnings.kai, "5"); assert.equal(requests, 1);
+  const signer = Signer.fromSeed("different-drop-wallet");
+  core.gateway.earn.restoreWallet({ wif: signer.getPrivateKey("wif"), password: "fixture password 123" });
+  const next = (await core.gateway.earn.status()).earnings;
+  assert.equal(next.address, signer.getAddress()); assert.equal(next.kai, "10");
+  wrong = true; core.settings.set("earn.schedulerUrl", base + "/changed");
+  assert.match((await core.gateway.earn.status()).earnings.error, /unavailable/);
 });

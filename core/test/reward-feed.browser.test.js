@@ -39,7 +39,7 @@ async function fixture(t, rows = []) {
     } };
   }, { owner: A, rows });
   await page.route("**/core/models", route => route.fulfill({ json: { aliases: [{ alias: "koinos-smart", label: "Koinos Smart", status: "ready" }], runtime: { runtime: { running: false }, activeAlias: null } } }));
-  await page.route("**/core/earn", route => route.fulfill({ json: { wallet: { exists: true, unlocked: false, address: A }, worker: { running: true } } }));
+  await page.route("**/core/earn", route => route.fulfill({ json: { wallet: { exists: true, unlocked: false, address: A }, worker: { running: true }, earnings: { address: A, kai: "12345.67890123" } } }));
   await page.goto(`http://127.0.0.1:${await core.start()}`);
   await navClick(page, '#nav [data-view="earn"]');
   await page.waitForFunction(() => window.rewardCalls.length > 0);
@@ -51,6 +51,10 @@ const advance = (page, ms = 15001) => page.clock.runFor(ms);
 
 test("daily availability and confirming totals update above the feed without counting paid rewards twice", { skip: !fs.existsSync(CHROMIUM), timeout: 60000 }, async t => {
   const { page, panel } = await fixture(t);
+  await page.waitForFunction(() => document.querySelector('[data-legacy-drop="kai"]').textContent === "12,345.67890123");
+  assert.equal(await page.locator('[data-legacy-drop="koin"]').textContent(), "2,469.13578024");
+  assert.match(await page.locator("#product-legacy-drop").getAttribute("title"), /1 KOIN per 5/);
+  assert.equal(await page.locator("#product-legacy-drop").evaluate(node => getComputedStyle(node).textAlign), "right");
   assert.equal(await page.locator("#product-reward-today").textContent(), "—", "older service must not invent a zero");
   await page.evaluate(() => {
     const day = Math.floor(Date.now() / 86400000);
@@ -84,6 +88,7 @@ test("daily availability and confirming totals update above the feed without cou
   await page.evaluate(() => { window.holdReward = true; window.dispatchEvent(new Event("kai-credit-identity-changed")); });
   assert.equal(await page.locator("#product-reward-today").textContent(), "—");
   assert.equal(await page.locator("#product-reward-pending").textContent(), "—");
+  assert.equal(await page.locator('[data-legacy-drop="kai"]').textContent(), "—");
 });
 
 test("Earn reward feed loads and updates without clicks, preserves exact amounts and reward-day meaning, and replaces the old cards", { skip: !fs.existsSync(CHROMIUM), timeout: 60000 }, async t => {
