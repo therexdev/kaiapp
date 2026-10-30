@@ -243,12 +243,28 @@ async function main() {
         await Promise.race([
           (async () => {
             checkpoint("Disposing native fixture resources...");
-            const state = await app.evaluate(async () => globalThis.__shutdownFixture?.());
-            if (state) assert.deepEqual(state, { windows: 0, listening: false });
+            fs.writeFileSync(path.join(dir, "shutdown.request"), "shutdown");
+            const report = path.join(dir, "shutdown.json");
+            let previousStage;
+            for (;;) {
+              if (fs.existsSync(report)) {
+                const result = JSON.parse(fs.readFileSync(report, "utf8"));
+                if (result.stage !== previousStage) {
+                  previousStage = result.stage;
+                  checkpoint("Native fixture cleanup: " + result.stage);
+                }
+                if (result.error) throw new Error(result.error);
+                if (result.stage === "complete") {
+                  assert.deepEqual(result.state, { windows: 0, listening: false });
+                  break;
+                }
+              }
+              await new Promise(resolve => setTimeout(resolve, 100));
+            }
             checkpoint("Fixture resources disposed; waiting for Electron exit...");
             await app.close();
           })(),
-          new Promise((_, reject) => { shutdownTimer = setTimeout(() => reject(new Error("Native companion fixture did not close within 20 seconds")), 20000); }),
+          new Promise((_, reject) => { shutdownTimer = setTimeout(() => reject(new Error("Native companion fixture did not close within 20 seconds. Last checkpoint: " + lastCheckpoint)), 20000); }),
         ]);
         checkpoint("PASS: native companion fixture closed its windows, server and Electron process.");
       }
