@@ -64,21 +64,26 @@ app.whenReady().then(async () => {
   globalThis.__kaiMain = main; globalThis.__kaiController = controller;
   await main.loadURL(fixture.origin + "/main-fixture");
   let disposed = false, serverClosed;
-  function dispose() {
+  function dispose(progress = () => {}) {
     if (disposed) return serverClosed;
     disposed = true; shuttingDown = true;
-    companionIPC.dispose(); providerIPC.dispose(); controller.dispose();
+    progress("companion services"); companionIPC.dispose();
+    progress("provider services"); providerIPC.dispose();
+    progress("companion window"); controller.dispose();
+    progress("HTTP server");
     serverClosed = fixture.close();
     return serverClosed;
   }
   // Dispose the fixture before Playwright asks Electron to quit. In particular,
   // no renderer may keep polling a server being closed inside before-quit.
-  globalThis.__shutdownFixture = async () => {
-    const closing = dispose();
+  const stopShutdown = require("./native-shutdown").installShutdown(dir, async progress => {
+    const closing = dispose(progress);
+    progress("remaining windows");
     for (const window of BrowserWindow.getAllWindows()) window.destroy();
+    progress("waiting for HTTP server close");
     await closing;
     return { windows: BrowserWindow.getAllWindows().length, listening: fixture.server.listening };
-  };
-  app.once("before-quit", dispose);
+  });
+  app.once("before-quit", () => { stopShutdown(); dispose(); });
 });
 app.on("window-all-closed", () => { if (!shuttingDown) app.quit(); });
