@@ -194,6 +194,8 @@ and the normal Master app suite. The app remains master.8.
 
 ## Distribution
 
+Version `0.54.9-master.11` freezes accounting while paused and adds **Reset Stats**.
+
 Koinos Node → Distribution includes VHP-restoring reburn, extra compounding,
 overlapping AI/producing/both pools, weighted or equal allocation, minimum VHP,
 trusted AI roster, daily UTC settlement, named percentage recipients, minimum
@@ -204,7 +206,31 @@ It is OFF by default. Saving settings requires the wallet password; passwords
 are not persisted. Authorization is tied to the local wallet and network.
 External producer custody cannot run automatic payouts. Reward returns and
 Distribution are mutually exclusive. Disabled Distribution blocks manual and
-timer execution. Pause distribution needs no password and retains queued payouts.
+timer execution. Pause distribution needs no password and freezes distribution
+accounting at the last completed check, including rewards and VHP to reburn.
+It retains previously tracked amounts and queued payouts. Mining while disabled
+is never added later: the first complete history read after enabling establishes
+a new baseline, skipping the whole paused interval, including time offline or
+waiting for RPC history to catch up. Dashboard lifetime mining statistics remain
+independent and can keep increasing. Ordinary enabled app restarts still resume
+their saved accounting.
+
+**Reset Stats** opens an in-app confirmation, pauses distribution, and clears the
+selected wallet/network's cycle rewards, VHP consumed, profit, reburn queue,
+payout queue, pool and recipient carry, participation credits, and local cycle
+and transaction history. All distribution amounts display zero immediately,
+including before the next history read. Saved recipients, percentages, wallet
+balances, keys, lifetime mining history, and node operation are preserved.
+Completed blockchain transactions cannot be undone. Enable distribution again
+with the usual wallet-password authorization to start a fresh cycle; existing
+balances and past production are not included. A running distribution operation
+must finish before pause/reset so a pending transaction cannot restore cleared
+accounting or be submitted twice. Reset does not itself submit a transaction.
+
+The pause checkpoint is persisted across restarts. For disabled state created by
+older versions without a VHP checkpoint, the upgrade uses the last tracked
+reward total and the original VHP anchor, rather than importing current lifetime
+totals; Reset Stats is available to explicitly discard any old backlog.
 Public API clients cannot configure or execute distribution.
 
 ## Migration from Free Koinos Node

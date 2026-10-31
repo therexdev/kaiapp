@@ -191,6 +191,24 @@ test("node: an unknown channel is refused rather than silently ignored", async (
   } finally { kn.stop(); }
 });
 
+test("node: Reset Stats requires explicit confirmation, pauses distribution and preserves saved recipients", async () => {
+  const { kn, wallet, dir } = boot();
+  try {
+    await kn.call("distribution:configure", { password: PW, enabled: true, reburnPct: 0,
+      sharePct: { ai: 0, both: 0, producing: 0 }, recipients: [{ address: wallet.address, label: "Saved", pct: 100 }] });
+    await assert.rejects(() => kn.call("distribution:resetStats"), /Confirm Reset Stats/);
+    await assert.rejects(() => kn.call("distribution:resetStats", { confirmed: "true" }), /Confirm Reset Stats/);
+    assert.equal((await kn.call("distribution:status")).config.enabled, true);
+    const reset = await kn.call("distribution:resetStats", { confirmed: true });
+    assert.equal(reset.config.enabled, false);
+    assert.equal(reset.running, false);
+    assert.equal(reset.derived.queue.empty, true);
+    assert.equal(reset.derived.carry, "0");
+    assert.deepEqual(reset.config.recipients, [{ address: wallet.address, label: "Saved", pct: 100 }]);
+    assert.equal((await kn.call("wallet:status")).address, wallet.address);
+  } finally { kn.stop(); fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("node: local machine facts are readable with no network and no Docker", async () => {
   const { kn } = boot();
   try {

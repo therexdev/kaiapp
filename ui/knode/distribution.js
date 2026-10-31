@@ -64,9 +64,11 @@ function renderDistributionView() {
           <label class="field"><span>Wallet password to authorize settings</span><input id="di-password" type="password" autocomplete="current-password"></label>
           <button id="di-save" class="btn primary">Save</button>
           <button id="di-pause" class="btn">Pause distribution</button>
+          <button id="di-reset" class="btn danger" type="button">Reset Stats</button>
           <button id="di-now" class="btn">Check now</button>
           <button id="di-close" class="btn">Distribute now</button>
         </div>
+        <p class="hint">Pausing stops reward tracking, reburn tracking, and payouts. Mining while paused is skipped when you enable distribution again. Reset Stats clears distribution totals, pending reburn, payouts, carried amounts, and local distribution history, and leaves distribution paused. Your saved settings, wallet balances, and node keep their current state.</p>
         <p class="hint">The pools <b>overlap</b>: run a Koinos AI Node and you are in the AI pool, produce blocks with the minimum VHP and you are in the producing pool — do both and you are in all three, paid from each. Each pool's percentage is split between its own members. The reburn is on top of the VHP your blocks consume, which is always restored so your node keeps producing at the same rate.</p>
         <p class="hint">Every time this node collects a block reward, each address is credited with it in every pool it belonged to <b>at that moment</b>, and each pool's share is paid in proportion to those credits. Be qualified for two of three rewards while someone else catches one, and you are paid exactly 2:1. Turn up in the last ten minutes and you earn the last ten minutes. Stake never buys a bigger share — a node with ten times the minimum VHP earns the same as one right at it.</p>
         <p class="hint">Credits are only cleared when a pool is actually paid out, so rewards that roll over still belong to whoever was around when they were earned. Any share below the minimum is skipped and carried rather than sent, because each payout spends mana. A pool nobody was in earns nothing — its percentage simply stays in your wallet.</p>
@@ -157,11 +159,12 @@ function renderDistributionView() {
       await call("distribution:configure", { enabled: false });
       $("#di-enabled").checked = false;
       await refreshDistribution();
-      toast("Distribution paused. Existing payouts remain queued.", "good");
+      toast("Distribution and tracking paused. Existing amounts are kept until you resume or reset stats.", "good");
     } catch (e) { toast(e.message, "bad"); }
   });
   $("#di-now").addEventListener("click", () => onDistributionTick("distribution:runNow", $("#di-now"), "Checking…"));
   $("#di-close").addEventListener("click", onDistributeNow);
+  $("#di-reset").addEventListener("click", onResetDistributionStats);
   patchDistributionView();
 }
 
@@ -250,6 +253,29 @@ function onDistributeNow() {
   });
 }
 
+function onResetDistributionStats() {
+  showModal({
+    title: "Reset distribution stats?",
+    body: `<p>This resets rewards, VHP consumed, profit, queued reburn, queued payouts, carried amounts, and local distribution history to zero.</p>
+      <p>Distribution will stay paused until you enable it again. Your saved recipients and settings are kept. Wallet balances and completed blockchain transactions are unchanged.</p>`,
+    actions: [
+      { label: "Cancel", onClick: (close) => close() },
+      { label: "Reset Stats", class: "danger", onClick: async (close) => {
+        close();
+        const btn = $("#di-reset");
+        busyButton(btn, true, "Resetting…");
+        try {
+          S.distribution = await call("distribution:resetStats", { confirmed: true });
+          $("#di-enabled").checked = false;
+          patchDistributionView();
+          toast("Distribution stats reset to zero. Enable distribution when you are ready to start fresh.", "good");
+        } catch (e) { toast(e.message, "bad"); }
+        finally { busyButton(btn, false); }
+      } },
+    ],
+  });
+}
+
 const DISTRIBUTION_OUTCOME_LABELS = {
   disabled: ["pill", "disabled"],
   "no-wallet": ["pill warn", "no wallet"],
@@ -258,6 +284,8 @@ const DISTRIBUTION_OUTCOME_LABELS = {
   "history-unavailable": ["pill bad", "no history RPC"],
   syncing: ["pill accent", "reading history…"],
   anchored: ["pill accent", "tracking started"],
+  resumed: ["pill accent", "tracking resumed"],
+  reset: ["pill", "stats reset"],
   "re-anchored": ["pill warn", "re-anchored"],
   watching: ["pill accent", "watching network"],
   "cycle-closed": ["pill good", "cycle closed"],
@@ -332,6 +360,7 @@ function patchDistributionView() {
   statusEl.innerHTML = `
     <div class="row spread"><span class="muted">Engine</span>
       <span class="pill ${r.config.enabled ? "good" : "warn"}">${r.config.enabled ? "enabled" : "disabled"}</span></div>
+    ${!r.config.enabled ? `<div class="muted small">Tracking paused. Mining while off will not be added to distribution.</div>` : d?.trackingPaused || !d?.anchored ? `<div class="muted small">Waiting for the first complete reward-history check to start tracking.</div>` : ""}
     <div class="row spread"><span class="muted">Last check</span>
       <span class="small">${last ? `${fmtTime(last.time)} · ` : ""}<span class="${pillClass}">${esc(pillLabel)}</span></span></div>
     ${last?.message ? `<div class="muted small">${esc(last.message)}</div>` : ""}
@@ -345,12 +374,12 @@ function patchDistributionView() {
         ? `<span class="pill">evenly</span>`
         : `<span class="pill accent">by rewards earned</span>`}</span></div>
     <div class="row spread"><span class="muted">Producers seen this cycle</span>
-      <span class="mono">${c ? c.seenCount : "—"}</span></div>
+      <span class="mono">${c ? c.seenCount : "0"}</span></div>
     <div class="row spread"><span class="muted">Reward checks this cycle</span>
-      <span class="mono">${c ? c.ticks ?? 0 : "—"}</span></div>
+      <span class="mono">${c ? c.ticks ?? 0 : "0"}</span></div>
     ${aiActive
       ? `<div class="row spread"><span class="muted">AI nodes seen this cycle</span>
-      <span class="mono">${c ? c.aiSeenCount : "—"}${c?.aiReads ? ` <span class="muted small">(${c.aiReads.ok} ok / ${c.aiReads.failed} failed)</span>` : ""}</span></div>
+      <span class="mono">${c ? c.aiSeenCount : "0"}${c?.aiReads ? ` <span class="muted small">(${c.aiReads.ok} ok / ${c.aiReads.failed} failed)</span>` : ""}</span></div>
     ${!r.config.aiRosterUrl
         ? `<div class="muted small">⚠️ No roster URL set — no one can be verified as running a Koinos AI Node, so cycles will pay nobody and carry over.</div>`
         : c?.aiReads?.accepted === 0 && c?.aiReads?.rejected > 0
@@ -362,11 +391,11 @@ function patchDistributionView() {
               : ""}`
       : ""}
     <div class="row spread"><span class="muted">Rewards this cycle</span>
-      <span class="mono">${c ? fmtSat(c.rewards, 4) : "—"} ${sym()}</span></div>
+      <span class="mono">${fmtSat(c?.rewards ?? "0", 4)} ${sym()}</span></div>
     <div class="row spread"><span class="muted">VHP consumed (to reburn)</span>
-      <span class="mono">${c ? fmtSat(c.vhpConsumed, 4) : "—"} ${sym()}</span></div>
+      <span class="mono">${fmtSat(c?.vhpConsumed ?? "0", 4)} ${sym()}</span></div>
     <div class="row spread"><span class="muted">Profit to carve up</span>
-      <span class="mono">${c ? fmtSat(c.profit, 4) : "—"} ${sym()}</span></div>
+      <span class="mono">${fmtSat(c?.profit ?? "0", 4)} ${sym()}</span></div>
     ${c?.split ? splitRows(c.split, d?.creditCounts) : ""}
     <div class="row spread"><span class="muted">Carried from earlier cycles</span>
       <span class="mono">${d ? fmtSat(d.carry, 4) : "0"} ${sym()}</span></div>

@@ -19,12 +19,14 @@ test("Master Distribution saves recipients, pauses and exposes Node API controls
   t.after(async () => { await browser.close(); await core.stop(); fs.rmSync(dir, { recursive: true, force: true }); });
   const page = await browser.newPage({ viewport: { width: 1180, height: 800 } });
   const errors = []; page.on("pageerror", e => errors.push(e.message));
-  const allowed = new Set(["app:info", "wallet:status", "distribution:status", "distribution:configure", "rewards:status", "masterApi:status", "masterApi:configure", "masterApi:checkHistory"]);
+  const allowed = new Set(["app:info", "wallet:status", "distribution:status", "distribution:configure", "distribution:resetStats", "rewards:status", "masterApi:status", "masterApi:configure", "masterApi:checkHistory"]);
+  let resetCalls = 0;
   await page.route("**/core/koinos/rpc", async route => {
     const { channel, payload } = route.request().postDataJSON();
     let response;
     try {
       if (!allowed.has(channel)) throw new Error("Outside the offline UI fixture");
+      if (channel === "distribution:resetStats") resetCalls++;
       response = { ok: true, data: await node.call(channel, payload) };
     } catch (e) { response = { ok: false, error: e.message }; }
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(response) });
@@ -52,6 +54,21 @@ test("Master Distribution saves recipients, pauses and exposes Node API controls
   await page.reload(); await page.locator("#di-save").waitFor({ state: "attached" });
   await page.evaluate(() => switchView("distribution"));
   assert.equal(await page.inputValue(".di-recipient-address"), address);
+  assert.equal(await page.inputValue(".di-recipient-pct"), "25");
+  await page.click("#di-reset");
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  assert.equal(resetCalls, 0, "cancelling the dialog cannot reset accounting");
+  await page.click("#di-reset");
+  await page.locator(".modal").getByRole("button", { name: "Reset Stats", exact: true }).click();
+  await page.waitForFunction(() => S.distribution?.last?.outcome === "reset");
+  assert.equal(resetCalls, 1);
+  assert.equal(await page.isChecked("#di-enabled"), false);
+  assert.match(await page.locator("#di-status").innerText(), /Tracking paused/);
+  assert.doesNotMatch(await page.locator("#di-status").innerText(), /Rewards this cycle\s+—|VHP consumed \(to reburn\)\s+—/);
+  assert.equal(await page.inputValue(".di-recipient-address"), address);
+  await page.reload(); await page.locator("#di-save").waitFor({ state: "attached" });
+  await page.evaluate(() => switchView("distribution"));
+  assert.equal((await node.call("distribution:status")).derived.queue.empty, true);
   assert.equal(await page.inputValue(".di-recipient-pct"), "25");
   if (process.env.KAI_MASCOT_QA_DIR) {
     fs.mkdirSync(process.env.KAI_MASCOT_QA_DIR, { recursive: true });

@@ -848,6 +848,200 @@ const A = mkAddr("A");
 const B = mkAddr("B");
 const C = mkAddr("C");
 
+function pauseWorld(t) {
+  const totals = { current: { rewards: KOIN(1000), vhpConsumed: KOIN(900), blocks: 100 } };
+  const world = makeWorld({ totals, headers: [], vhp: {},
+    balances: { koin: KOIN(10000), mana: KOIN(10000), vhp: "0" },
+    cfg: { sharePct: { ai: 0, producing: 0, both: 0 }, recipients: [{ address: A, label: "Treasury", pct: 100 }] } });
+  t.after(() => world.engine.stop());
+  return world;
+}
+
+test("pause freezes distribution while shared mining stats keep rising; resume skips the entire gap", async t => {
+  const { engine, totals, calls, state } = pauseWorld(t);
+  await engine.tick();
+  totals.current = { rewards: KOIN(1110), vhpConsumed: KOIN(1000), blocks: 110 };
+  await engine.tick();
+  engine.configure({ enabled: false });
+  const frozen = engine.status().derived;
+  const persisted = structuredClone(state.data);
+  assert.equal(frozen.cycle.rewards, KOIN(110));
+  assert.equal(frozen.cycle.vhpConsumed, KOIN(100));
+  totals.current = { rewards: KOIN(2210), vhpConsumed: KOIN(2000), blocks: 210 };
+  assert.deepEqual(engine.status().derived, frozen, "dashboard mining refresh cannot change paused stats");
+  assert.equal((await engine.tick("manual", { forceClose: true })).last.outcome, "disabled");
+  assert.deepEqual(state.data, persisted, "off ticks cannot update accounting");
+  assert.deepEqual(calls, { burns: [], transfers: [] });
+  engine.configure({ enabled: true });
+  assert.equal(engine.status().derived.cycle.rewards, KOIN(110));
+  assert.equal((await engine.tick()).last.outcome, "resumed");
+  assert.equal(engine.status().derived.cycle.rewards, KOIN(110));
+  assert.equal(engine.status().derived.cycle.vhpConsumed, KOIN(100));
+  totals.current = { rewards: KOIN(2232), vhpConsumed: KOIN(2020), blocks: 212 };
+  const closed = await engine.tick("manual", { forceClose: true });
+  assert.equal(closed.derived.history[0].periodRewards, KOIN(132));
+  assert.equal(closed.derived.history[0].periodVhpConsumed, KOIN(120));
+  assert.deepEqual(calls.burns, [KOIN(120)]);
+  assert.deepEqual(calls.transfers, [{ to: A, amountSat: KOIN(12) }]);
+});
+
+test("resume waits for caught-up history through outages without adding paused mining", async t => {
+  const { engine, totals } = pauseWorld(t);
+  await engine.tick();
+  engine.configure({ enabled: false });
+  totals.current = { rewards: KOIN(5000), vhpConsumed: KOIN(4000), blocks: 500 };
+  engine.configure({ enabled: true });
+  const refresh = engine.stats.refresh;
+  for (const response of [new Error("offline"), { available: false }, { available: true, syncing: true, totals: totals.current }]) {
+    engine.stats.refresh = async () => { if (response instanceof Error) throw response; return response; };
+    await engine.tick();
+    assert.equal(engine.status().derived.trackingPaused, true);
+    assert.equal(engine.status().derived.cycle.vhpConsumed, "0");
+  }
+  engine.stats.refresh = refresh;
+  assert.equal((await engine.tick()).last.outcome, "resumed");
+  assert.equal(engine.status().derived.cycle.rewards, "0");
+  assert.equal(engine.status().derived.cycle.vhpConsumed, "0");
+});
+
+test("Reset Stats clears all distribution accounting, leaves settings and other accounts intact, and starts fresh", async t => {
+  const { engine, totals, state, calls } = pauseWorld(t);
+  await engine.tick();
+  engine.wallet.status = () => ({ exists: true, unlocked: false, address: SELF });
+  totals.current = { rewards: KOIN(1110), vhpConsumed: KOIN(1000), blocks: 110 };
+  await engine.tick("manual", { forceClose: true });
+  const key = `distribution.mainnet.${SELF}`;
+  const st = state.get(key);
+  st.carry = { ai: KOIN(1), both: KOIN(2), producing: KOIN(3) };
+  st.recipientCarry = { [B]: "123" };
+  st.credits = { ai: { [B]: "456" }, both: {}, producing: {} };
+  st.actions = [{ kind: "reburn", amount: KOIN(5), txId: "already-confirmed" }];
+  state.set(`distribution.mainnet.${B}`, structuredClone(st));
+  const config = validateDistributionConfig(engine.config(), engine.chain.isValidAddress);
+  const reset = engine.resetStats();
+  assert.equal(reset.config.enabled, false);
+  assert.equal(reset.running, false);
+  assert.equal(reset.nextRunAt, null);
+  assert.deepEqual(reset.config, { ...config, enabled: false });
+  assert.equal(reset.derived.anchored, false);
+  assert.equal(reset.derived.carry, "0");
+  assert.deepEqual(reset.derived.creditCounts, { both: 0, producing: 0, ai: 0 });
+  assert.deepEqual(reset.derived.queue, { reburnOwed: "0", payouts: [], payoutTotal: "0", empty: true });
+  assert.deepEqual(reset.derived.history, []);
+  assert.deepEqual(reset.derived.actions, []);
+  assert.deepEqual(reset.derived.carryByRecipient, {});
+  assert.equal(state.get(`distribution.mainnet.${B}`).reburnOwed, KOIN(100));
+  assert.equal(totals.current.rewards, KOIN(1110), "lifetime mining history is not erased");
+  totals.current = { rewards: KOIN(9999), vhpConsumed: KOIN(8888), blocks: 999 };
+  await engine.tick("manual", { forceClose: true });
+  engine.configure({ enabled: true });
+  assert.equal((await engine.tick("manual", { forceClose: true })).last.outcome, "anchored");
+  assert.equal(engine.status().derived.cycle.rewards, "0");
+  assert.equal(engine.status().derived.cycle.vhpConsumed, "0");
+  engine.wallet.status = () => ({ exists: true, unlocked: true, address: SELF });
+  totals.current = { rewards: KOIN(10010), vhpConsumed: KOIN(8898), blocks: 1000 };
+  await engine.tick("manual", { forceClose: true });
+  assert.deepEqual(calls.burns, [KOIN(10)]);
+  assert.deepEqual(calls.transfers, [{ to: A, amountSat: KOIN(1) }]);
+});
+
+test("pause preserves the existing queue; only Reset Stats clears unpaid amounts", async t => {
+  const { engine, totals, calls } = pauseWorld(t);
+  await engine.tick();
+  engine.wallet.status = () => ({ exists: true, unlocked: false, address: SELF });
+  totals.current = { rewards: KOIN(1110), vhpConsumed: KOIN(1000), blocks: 110 };
+  await engine.tick("manual", { forceClose: true });
+  engine.configure({ enabled: false });
+  const queue = engine.status().derived.queue;
+  totals.current = { rewards: KOIN(2210), vhpConsumed: KOIN(2000), blocks: 210 };
+  engine.configure({ enabled: true });
+  await engine.tick();
+  assert.deepEqual(engine.status().derived.queue, queue);
+  engine.wallet.status = () => ({ exists: true, unlocked: true, address: SELF });
+  await engine.tick();
+  assert.deepEqual(calls.burns, [KOIN(100)]);
+  assert.deepEqual(calls.transfers, [{ to: A, amountSat: KOIN(10) }]);
+});
+
+test("pause and reset survive process restarts on disk", async t => {
+  const fs = require("fs"), os = require("os"), path = require("path");
+  const { JsonStore } = require("../lib/store");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "distribution-pause-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const world = pauseWorld(t);
+  const settingsFile = path.join(dir, "settings.json"), stateFile = path.join(dir, "state.json");
+  world.engine.settings = new JsonStore(settingsFile, world.settings.data);
+  world.engine.state = new JsonStore(stateFile);
+  await world.engine.tick();
+  world.totals.current = { rewards: KOIN(1110), vhpConsumed: KOIN(1000), blocks: 110 };
+  await world.engine.tick();
+  world.engine.configure({ enabled: false });
+  world.totals.current = { rewards: KOIN(9999), vhpConsumed: KOIN(8888), blocks: 999 };
+  const restart = () => {
+    const engine = new DistributionEngine({ chain: world.engine.chain, wallet: world.engine.wallet,
+      stats: world.engine.stats, settings: new JsonStore(settingsFile), state: new JsonStore(stateFile) });
+    t.after(() => engine.stop());
+    return engine;
+  };
+  const resumed = restart();
+  assert.equal(resumed.status().derived.cycle.vhpConsumed, KOIN(100));
+  resumed.configure({ enabled: true });
+  await resumed.tick();
+  assert.equal(resumed.status().derived.cycle.rewards, KOIN(110));
+  resumed.resetStats();
+  const reset = restart();
+  assert.equal(reset.status().config.enabled, false);
+  assert.equal(reset.status().derived.queue.empty, true);
+  assert.equal(reset.status().derived.carry, "0");
+  assert.equal(reset.status().derived.history.length, 0);
+  reset.configure({ enabled: true });
+  await reset.tick();
+  assert.equal(reset.status().derived.cycle.rewards, "0");
+});
+
+test("reset and pause cannot race an in-flight accounting read or transaction", async t => {
+  const { engine, totals, calls } = pauseWorld(t);
+  let resolveRead;
+  const refresh = engine.stats.refresh;
+  engine.stats.refresh = () => new Promise(resolve => { resolveRead = resolve; });
+  const tick = engine.tick();
+  assert.throws(() => engine.resetStats(), /Wait for the current distribution/);
+  assert.throws(() => engine.configure({ enabled: false }), /Wait for the current distribution/);
+  resolveRead(await refresh());
+  await tick;
+  engine.stats.refresh = refresh;
+  let releaseBurn, burnStarted;
+  const started = new Promise(resolve => { burnStarted = resolve; });
+  engine.chain.burn = () => { burnStarted(); return new Promise(resolve => { releaseBurn = resolve; }); };
+  totals.current = { rewards: KOIN(1110), vhpConsumed: KOIN(1000), blocks: 110 };
+  const paying = engine.tick("manual", { forceClose: true });
+  await started;
+  assert.throws(() => engine.resetStats(), /Wait for the current distribution/);
+  releaseBurn({ txId: "confirmed-burn" });
+  await paying;
+  const reset = engine.resetStats();
+  assert.equal(reset.derived.queue.empty, true);
+  assert.deepEqual(reset.derived.actions, []);
+  assert.deepEqual(calls.transfers, [{ to: A, amountSat: KOIN(10) }]);
+});
+
+test("upgrading legacy disabled state never imports current lifetime stats", async t => {
+  const world = pauseWorld(t);
+  await world.engine.tick();
+  const key = `distribution.mainnet.${SELF}`;
+  const st = world.state.get(key);
+  delete st.observedTotals;
+  delete st.trackingPaused;
+  world.settings.set("distribution.enabled", false);
+  world.totals.current = { rewards: KOIN(9999), vhpConsumed: KOIN(8888), blocks: 999 };
+  const upgraded = new DistributionEngine({ ...world.engine });
+  t.after(() => upgraded.stop());
+  assert.equal(upgraded.status().derived.cycle.rewards, "0");
+  upgraded.configure({ enabled: true });
+  await upgraded.tick();
+  assert.equal(upgraded.status().derived.cycle.vhpConsumed, "0");
+});
+
 test("engine: anchors first, then closes a cycle, reburns, and pays evenly", async () => {
   const totals = { current: { rewards: KOIN(1000), vhpConsumed: KOIN(900), blocks: 100 } };
   const world = makeWorld({

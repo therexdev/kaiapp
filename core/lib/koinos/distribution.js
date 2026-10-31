@@ -624,6 +624,9 @@ class DistributionEngine {
     this._busy = false;
     this.last = null;
     this.nextRunAt = null;
+    // Upgrade an already-disabled installation without reading newer mining
+    // totals into its old cycle. The dashboard's lifetime stats stay separate.
+    if (!this.config().enabled) this._pauseTracking();
   }
 
   config() {
@@ -631,7 +634,11 @@ class DistributionEngine {
   }
 
   configure(patch) {
+    if (this._busy) throw new Error("Wait for the current distribution operation.");
     const cfg = validateDistributionConfig({ ...this.config(), ...patch }, (a) => this.chain.isValidAddress(a));
+    // Mark the gap durably before changing settings. Enabling must also mark
+    // legacy disabled state, so it cannot catch up mining done while off.
+    if (!cfg.enabled || !this.config().enabled) this._pauseTracking();
     this.settings.set("distribution", cfg);
     this.start();
     return cfg;
@@ -659,6 +666,39 @@ class DistributionEngine {
     return `distribution.${networkId}.${address}`;
   }
 
+  _pauseTracking() {
+    for (const [network, accounts] of Object.entries(this.state.get("distribution", {}) || {})) {
+      for (const address of Object.keys(accounts || {})) {
+        const key = this._stateKey(network, address);
+        const st = this._readState(key);
+        if (st.trackingPaused) continue;
+        // Use only the last totals accepted by a distribution check. Other
+        // screens refresh ProducerStats independently, even when we are off.
+        st.pausedTotals = st.observedTotals || (st.anchor ? {
+          rewards: st.lastRewardTotal ?? st.anchor.rewards,
+          vhpConsumed: st.anchor.vhpConsumed,
+        } : null);
+        st.trackingPaused = true;
+        this.state.set(key, st);
+      }
+    }
+  }
+
+  resetStats() {
+    if (this._busy) throw new Error("Wait for the current distribution operation before resetting stats.");
+    const { address } = this.wallet.status();
+    if (!address) throw new Error("Create or select a wallet before resetting distribution stats.");
+    const key = this._stateKey(this.chain.network().id, address);
+    this.configure({ enabled: false });
+    const st = this._readState(key, this.config(), true);
+    st.trackingPaused = true;
+    st.resetAt = Date.now();
+    this.state.set(key, st);
+    this.last = { time: st.resetAt, trigger: "reset", outcome: "reset",
+      message: "Distribution stats and pending amounts reset to zero. Tracking is paused; enable distribution to start fresh." };
+    return this.status();
+  }
+
   // The network read of the live Koinos AI Node roster. Isolated on the class
   // so it is the one seam tests replace — everything else about a cycle stays
   // exercised for real.
@@ -666,8 +706,8 @@ class DistributionEngine {
     return fetchAiRoster(url, { isValidAddress: (a) => this.chain.isValidAddress(a) });
   }
 
-  _readState(key, cfg = this.config()) {
-    const st = this.state.get(key, null) ?? {
+  _readState(key, cfg = this.config(), fresh = false) {
+    const st = (fresh ? null : structuredClone(this.state.get(key, null))) ?? {
       anchor: null,            // { rewards, vhpConsumed } totals at cycle start
       cycleStartedAt: null,
       lastClosedAt: null,
@@ -696,6 +736,9 @@ class DistributionEngine {
       payouts: [],             // [{ address, amountSat }] waiting to be sent
       history: [],             // closed cycles (newest first)
       actions: [],             // executed reburn/payout txs (newest first)
+      observedTotals: null,    // latest lifetime totals accepted while enabled
+      pausedTotals: null,      // frozen checkpoint, never refreshed while off
+      trackingPaused: false,
     };
     st.seen ??= {};
     st.aiSeen ??= {};
@@ -768,6 +811,36 @@ class DistributionEngine {
     const st = this._readState(key);
     const now = Date.now();
 
+    if (st.trackingPaused && st.anchor) {
+      const frozen = st.pausedTotals || st.anchor;
+      // Move the anchor by the entire disabled interval. Preserve amounts
+      // already tracked before pausing, but never credit the paused rewards.
+      if (cmpSats(statsRes.totals.rewards, frozen.rewards) >= 0 &&
+          cmpSats(statsRes.totals.vhpConsumed, frozen.vhpConsumed) >= 0) {
+        st.anchor = {
+          rewards: addSats(st.anchor.rewards, subSats(statsRes.totals.rewards, frozen.rewards)),
+          vhpConsumed: addSats(st.anchor.vhpConsumed, subSats(statsRes.totals.vhpConsumed, frozen.vhpConsumed)),
+        };
+      } else {
+        // A different history source cannot safely be compared to the old one.
+        st.anchor = { rewards: statsRes.totals.rewards, vhpConsumed: statsRes.totals.vhpConsumed };
+      }
+      st.lastRewardTotal = statsRes.totals.rewards;
+      st.observedTotals = { rewards: statsRes.totals.rewards, vhpConsumed: statsRes.totals.vhpConsumed };
+      st.trackingPaused = false;
+      st.pausedTotals = null;
+      st.lastScannedHeight = null;
+      st.seen = {};
+      st.aiSeen = {};
+      st.vhp = {};
+      st.vhpCheckedAt = 0;
+      this.state.set(key, st);
+      return done("resumed", { message: "Distribution tracking resumed. Mining while paused was skipped." });
+    }
+    st.observedTotals = { rewards: statsRes.totals.rewards, vhpConsumed: statsRes.totals.vhpConsumed };
+    st.trackingPaused = false;
+    st.pausedTotals = null;
+
     // First run: anchor the cycle at the current lifetime totals — only
     // production from here forward is distributed.
     if (!st.anchor) {
@@ -796,6 +869,7 @@ class DistributionEngine {
     ) {
       st.anchor = { rewards: statsRes.totals.rewards, vhpConsumed: statsRes.totals.vhpConsumed };
       st.cycleStartedAt = now;
+      st.lastRewardTotal = statsRes.totals.rewards;
       this.state.set(key, st);
       return done("re-anchored", {
         message:
@@ -1195,17 +1269,18 @@ class DistributionEngine {
 
     let derived = null;
     if (st) {
-      // Cycle-so-far figures from the cached stats (no RPC from status()).
-      const cached = this.stats.get(networkId, ws.address);
+      // Distribution displays its own accepted checkpoint. Shared lifetime
+      // stats can continue increasing in other screens while this is paused.
+      const totals = (st.trackingPaused ? st.pausedTotals : st.observedTotals) || st.anchor;
       let cycle = null;
-      if (st.anchor && cached?.totals) {
-        const rewards = subSats(cached.totals.rewards, st.anchor.rewards);
-        const vhpConsumed = subSats(cached.totals.vhpConsumed, st.anchor.vhpConsumed);
+      if (st.anchor && totals) {
+        const rewards = subSats(totals.rewards, st.anchor.rewards);
+        const vhpConsumed = subSats(totals.vhpConsumed, st.anchor.vhpConsumed);
         const r = cmpSats(rewards, "0") > 0 ? rewards : "0";
         const v = cmpSats(vhpConsumed, "0") > 0 ? vhpConsumed : "0";
         cycle = {
           startedAt: st.cycleStartedAt,
-          dueAt: nextCycleClose(st.lastClosedAt ?? st.cycleStartedAt, cfg.payoutHourUtc),
+          dueAt: cfg.enabled && !st.trackingPaused ? nextCycleClose(st.lastClosedAt ?? st.cycleStartedAt, cfg.payoutHourUtc) : null,
           rewards: r,
           vhpConsumed: v,
           profit: cmpSats(r, v) > 0 ? subSats(r, v) : "0",
@@ -1224,6 +1299,7 @@ class DistributionEngine {
       for (const tier of TIERS) creditCounts[tier] = Object.keys(st.credits[tier] ?? {}).length;
       derived = {
         anchored: !!st.anchor,
+        trackingPaused: !cfg.enabled || !!st.trackingPaused,
         cycle,
         carry: [...Object.values(st.carry), ...Object.values(st.recipientCarry)].reduce((a, v) => addSats(a, v), "0"),
         carryByTier: st.carry,

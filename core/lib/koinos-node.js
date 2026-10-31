@@ -639,6 +639,12 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
     });
     handle("distribution:runNow", () => { custody.requireLocal(); return distribution.tick("manual"); });
     handle("distribution:distributeNow", () => { custody.requireLocal(); return distribution.tick("manual", { forceClose: true }); });
+    handle("distribution:resetStats", (input = {}) => {
+      custody.requireLocal();
+      if (rewards._busy) throw new Error("Wait for the current reward/distribution operation.");
+      if (input.confirmed !== true) throw new Error("Confirm Reset Stats to clear distribution accounting and pending amounts.");
+      return distribution.resetStats();
+    });
   }
   if (masterApi) {
     let historyCheck = null;
@@ -940,7 +946,7 @@ function buildChannels({ settings, state, wallet, chain, nodeMgr, setup, rewards
   // Serialize custody/network/node mutations so asynchronous RPC checks cannot
   // authorize a start, rotation or draft against a different producer context.
   let producerMutation = false;
-  for (const name of ["distribution:configure", "distribution:runNow", "distribution:distributeNow", "producer:vaultConnect", "producer:vaultUse", "producer:vaultPrepare", "producer:vaultSend", "producer:vaultDisconnect", "producer:vaultStatus", "producer:configure", "producer:key", "producer:prepare", "producer:broadcast", "producer:register", "settings:update", "node:start", "node:stop", "node:repairServices", "chain:burn", "chain:send", "rewards:runNow", "rewards:configure"]) {
+  for (const name of ["distribution:configure", "distribution:runNow", "distribution:distributeNow", "distribution:resetStats", "producer:vaultConnect", "producer:vaultUse", "producer:vaultPrepare", "producer:vaultSend", "producer:vaultDisconnect", "producer:vaultStatus", "producer:configure", "producer:key", "producer:prepare", "producer:broadcast", "producer:register", "settings:update", "node:start", "node:stop", "node:repairServices", "chain:burn", "chain:send", "rewards:runNow", "rewards:configure"]) {
     const fn = channels.get(name);
     if (!fn) continue;
     channels.set(name, async input => {
